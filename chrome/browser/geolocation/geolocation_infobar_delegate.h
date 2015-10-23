@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "chrome/browser/content_settings/permission_infobar_delegate.h"
+#include "chrome/browser/permissions/permission_infobar_delegate.h"
 
 
 // GeolocationInfoBarDelegates are created by the
@@ -27,7 +27,6 @@ class GeolocationInfoBarDelegate :  public PermissionInfobarDelegate {
   GeolocationInfoBarDelegate(PermissionQueueController* controller,
                              const PermissionRequestID& id,
                              const GURL& requesting_frame,
-                             int contents_unique_id,
                              const std::string& display_languages);
   ~GeolocationInfoBarDelegate() override;
 

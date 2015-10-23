@@ -13,38 +13,24 @@
 
 namespace content {
 
+enum PresentationMessageType {
+  TEXT,
+  ARRAY_BUFFER,
+  BLOB,
+};
+
 // Represents a presentation session message.
 // If this is a text message, |data| is null; otherwise, |message| is null.
 // Empty messages are allowed.
 struct CONTENT_EXPORT PresentationSessionMessage {
  public:
+  explicit PresentationSessionMessage(PresentationMessageType type);
   ~PresentationSessionMessage();
 
-  // Creates string message, which takes the ownership of |message|.
-  static scoped_ptr<PresentationSessionMessage> CreateStringMessage(
-      const std::string& presentation_url,
-      const std::string& presentation_id,
-      scoped_ptr<std::string> message);
-
-  // Creates binary message, which takes the ownership of |data|.
-  static scoped_ptr<PresentationSessionMessage> CreateBinaryMessage(
-      const std::string& presentation_url,
-      const std::string& presentation_id,
-      scoped_ptr<std::vector<uint8_t>> data);
-
   bool is_binary() const;
-  std::string presentation_url;
-  std::string presentation_id;
-  scoped_ptr<std::string> message;
+  const PresentationMessageType type;
+  std::string message;
   scoped_ptr<std::vector<uint8_t>> data;
-
- private:
-  PresentationSessionMessage(const std::string& presentation_url,
-                             const std::string& presentation_id,
-                             scoped_ptr<std::string> message);
-  PresentationSessionMessage(const std::string& presentation_url,
-                             const std::string& presentation_id,
-                             scoped_ptr<std::vector<uint8_t>> data);
 };
 
 }  // namespace content

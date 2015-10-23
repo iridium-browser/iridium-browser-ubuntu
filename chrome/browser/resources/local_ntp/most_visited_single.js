@@ -125,7 +125,7 @@ var countLoad = function() {
 /**
  * Handles postMessages coming from the host page to the iframe.
  * Mostly, it dispatches every command to handleCommand.
- **/
+ */
 var handlePostMessage = function(event) {
   if (event.data instanceof Array) {
     for (var i = 0; i < event.data.length; ++i) {
@@ -141,7 +141,7 @@ var handlePostMessage = function(event) {
  * Handles a single command coming from the host page to the iframe.
  * We try to keep the logic here to a minimum and just dispatch to the relevant
  * functions.
- **/
+ */
 var handleCommand = function(data) {
   var cmd = data.cmd;
 
@@ -230,8 +230,6 @@ var removeAllOldTiles = function() {
  * we are ready to show the new tiles and drop the old ones.
  */
 var showTiles = function() {
-  removeAllOldTiles();
-
   // Store the tiles on the current closure.
   var cur = tiles;
 
@@ -247,6 +245,7 @@ var showTiles = function() {
   if (old) {
     old.removeAttribute('id');
     old.classList.add('mv-tiles-old');
+    old.style.opacity = 0.0;
     cur.addEventListener('webkitTransitionEnd', function(ev) {
       if (ev.target === cur) {
         removeAllOldTiles();
@@ -278,9 +277,13 @@ var addTile = function(args) {
   if (args.rid) {
     var data = chrome.embeddedSearch.searchBox.getMostVisitedItemData(args.rid);
     data.tid = data.rid;
-    data.thumbnailUrls = [data.thumbnailUrl];
-    data.faviconUrl = 'chrome-search://favicon/size/16@' +
-        window.devicePixelRatio + 'x/' + data.renderViewId + '/' + data.tid;
+    if (!data.thumbnailUrls) {
+      data.thumbnailUrls = [data.thumbnailUrl];
+    }
+    if (!data.faviconUrl) {
+      data.faviconUrl = 'chrome-search://favicon/size/16@' +
+          window.devicePixelRatio + 'x/' + data.renderViewId + '/' + data.tid;
+    }
     tiles.appendChild(renderTile(data));
     logEvent(LOG_TYPE.NTP_CLIENT_SIDE_SUGGESTION);
   } else if (args.id) {
@@ -338,16 +341,99 @@ var renderTile = function(data) {
 
   tile.href = data.url;
   tile.title = data.title;
+  if (data.pingUrl) {
+    tile.addEventListener('click', function(ev) {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(data.pingUrl);
+      } else {
+        // if sendBeacon is not enabled, we fallback to "a ping".
+        var a = document.createElement('a');
+        a.href = '#';
+        a.ping = data.pingUrl;
+        a.click();
+      }
+    });
+  }
+  // For local suggestions, we use navigateContentWindow instead of the default
+  // action, since it includes support for file:// urls.
+  if (data.rid) {
+    tile.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      var disp = chrome.embeddedSearch.newTabPage.getDispositionFromClick(
+        ev.button == 1,  // MIDDLE BUTTON
+        ev.altKey, ev.ctrlKey, ev.metaKey, ev.shiftKey);
+
+      window.chrome.embeddedSearch.newTabPage.navigateContentWindow(this.href,
+                                                                    disp);
+    });
+  }
+
   tile.addEventListener('keydown', function(event) {
     if (event.keyCode == 46 /* DELETE */ ||
         event.keyCode == 8 /* BACKSPACE */) {
       event.preventDefault();
       event.stopPropagation();
-      blacklistTile(tile);
+      blacklistTile(this);
     } else if (event.keyCode == 13 /* ENTER */ ||
                event.keyCode == 32 /* SPACE */) {
       event.preventDefault();
-      tile.click();
+      this.click();
+    } else if (event.keyCode >= 37 && event.keyCode <= 40 /* ARROWS */) {
+      var tiles = document.querySelectorAll('#mv-tiles .mv-tile');
+      var nextTile = null;
+      // Use the location of the tile to find the next one in the
+      // appropriate direction.
+      // For LEFT and UP we keep iterating until we find the last element
+      // that fulfills the conditions.
+      // For RIGHT and DOWN we accept the first element that works.
+      if (event.keyCode == 37 /* LEFT */) {
+        for (var i = 0; i < tiles.length; i++) {
+          var tile = tiles[i];
+          if (tile.offsetTop == this.offsetTop &&
+              tile.offsetLeft < this.offsetLeft) {
+            if (!nextTile || tile.offsetLeft > nextTile.offsetLeft) {
+              nextTile = tile;
+            }
+          }
+        }
+      }
+      if (event.keyCode == 38 /* UP */) {
+        for (var i = 0; i < tiles.length; i++) {
+          var tile = tiles[i];
+          if (tile.offsetTop < this.offsetTop &&
+              tile.offsetLeft == this.offsetLeft) {
+            if (!nextTile || tile.offsetTop > nextTile.offsetTop) {
+              nextTile = tile;
+            }
+          }
+        }
+      }
+      if (event.keyCode == 39 /* RIGHT */) {
+        for (var i = 0; i < tiles.length; i++) {
+          var tile = tiles[i];
+          if (tile.offsetTop == this.offsetTop &&
+              tile.offsetLeft > this.offsetLeft) {
+            if (!nextTile || tile.offsetLeft < nextTile.offsetLeft) {
+              nextTile = tile;
+            }
+          }
+        }
+      }
+      if (event.keyCode == 40 /* DOWN */) {
+        for (var i = 0; i < tiles.length; i++) {
+          var tile = tiles[i];
+          if (tile.offsetTop > this.offsetTop &&
+              tile.offsetLeft == this.offsetLeft) {
+            if (!nextTile || tile.offsetTop < nextTile.offsetTop) {
+              nextTile = tile;
+            }
+          }
+        }
+      }
+
+      if (nextTile) {
+        nextTile.focus();
+      }
     }
   });
   // TODO(fserb): remove this or at least change to mouseenter.

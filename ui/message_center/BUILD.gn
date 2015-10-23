@@ -11,6 +11,7 @@ component("message_center") {
     "//base",
     "//base:i18n",
     "//base/third_party/dynamic_annotations",
+    "//components/url_formatter",
     "//skia",
     "//ui/accessibility",
     "//ui/base",
@@ -23,8 +24,12 @@ component("message_center") {
     "//url",
   ]
 
-  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+  configs += [
+    "//build/config:precompiled_headers",
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    "//build/config/compiler:no_size_t_to_int_warning",
+  ]
 
   defines = [ "MESSAGE_CENTER_IMPLEMENTATION" ]
 
@@ -196,6 +201,7 @@ test("message_center_unittests") {
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/gl",
+    "//ui/gl:test_support",
     "//ui/resources",
     "//ui/resources:ui_test_pak",
     "//url",

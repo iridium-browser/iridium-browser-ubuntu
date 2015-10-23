@@ -11,7 +11,7 @@ import com.google.ipc.invalidation.external.client.types.ObjectId;
 import com.google.protos.ipc.invalidation.Types;
 
 import org.chromium.base.CollectionUtil;
-import org.chromium.sync.internal_api.pub.base.ModelType;
+import org.chromium.sync.ModelTypeHelper;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -59,18 +59,12 @@ public class InvalidationIntentProtocol {
      * Create an Intent that will start the invalidation listener service and
      * register for the specified types.
      */
-    public static Intent createRegisterIntent(Account account,
-                                              boolean allTypes, Set<ModelType> types) {
+    public static Intent createRegisterIntent(Account account, Set<Integer> types) {
         Intent registerIntent = new Intent(ACTION_REGISTER);
-        String[] selectedTypesArray;
-        if (allTypes) {
-            selectedTypesArray = new String[]{ModelType.ALL_TYPES_TYPE};
-        } else {
-            selectedTypesArray = new String[types.size()];
-            int pos = 0;
-            for (ModelType type : types) {
-                selectedTypesArray[pos++] = type.name();
-            }
+        String[] selectedTypesArray = new String[types.size()];
+        int pos = 0;
+        for (Integer type : types) {
+            selectedTypesArray[pos++] = ModelTypeHelper.toNotificationType(type);
         }
         registerIntent.putStringArrayListExtra(EXTRA_REGISTERED_TYPES,
                 CollectionUtil.newArrayList(selectedTypesArray));

@@ -9,24 +9,54 @@
 
 namespace media_router {
 
-MediaRoute::MediaRoute(const MediaRouteId& media_route_id,
+MediaRoute::MediaRoute(const MediaRoute::Id& media_route_id,
                        const MediaSource& media_source,
                        const MediaSink& media_sink,
                        const std::string& description,
-                       bool is_local)
+                       bool is_local,
+                       const std::string& custom_controller_path)
     : media_route_id_(media_route_id),
       media_source_(media_source),
       media_sink_(media_sink),
       description_(description),
       is_local_(is_local),
-      state_(MEDIA_ROUTE_STATE_NEW) {
-}
+      custom_controller_path_(custom_controller_path) {}
 
 MediaRoute::~MediaRoute() {
 }
 
 bool MediaRoute::Equals(const MediaRoute& other) const {
   return media_route_id_ == other.media_route_id_;
+}
+
+MediaRouteIdToPresentationSessionMapping::
+    MediaRouteIdToPresentationSessionMapping() {
+}
+
+MediaRouteIdToPresentationSessionMapping::
+    ~MediaRouteIdToPresentationSessionMapping() {
+}
+
+void MediaRouteIdToPresentationSessionMapping::Add(
+    const MediaRoute::Id& route_id,
+    const content::PresentationSessionInfo& session_info) {
+  route_id_to_presentation_.insert(std::make_pair(route_id, session_info));
+}
+
+void MediaRouteIdToPresentationSessionMapping::Remove(
+    const MediaRoute::Id& route_id) {
+  route_id_to_presentation_.erase(route_id);
+}
+
+void MediaRouteIdToPresentationSessionMapping::Clear() {
+  route_id_to_presentation_.clear();
+}
+
+const content::PresentationSessionInfo*
+MediaRouteIdToPresentationSessionMapping::Get(
+    const MediaRoute::Id& route_id) const {
+  auto it = route_id_to_presentation_.find(route_id);
+  return it == route_id_to_presentation_.end() ? nullptr : &it->second;
 }
 
 }  // namespace media_router

@@ -17,7 +17,6 @@
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/common/api/cast_channel.h"
 
-class GURL;
 class CastChannelAPITest;
 
 namespace content {
@@ -32,13 +31,13 @@ namespace extensions {
 
 struct Event;
 
-namespace core_api {
+namespace api {
 namespace cast_channel {
 class Logger;
 }  // namespace cast_channel
-}  // namespace core_api
+}  // namespace api
 
-namespace cast_channel = core_api::cast_channel;
+namespace cast_channel = api::cast_channel;
 
 class CastChannelAPI : public BrowserContextKeyedAPI,
                        public base::SupportsWeakPtr<CastChannelAPI> {
@@ -101,6 +100,9 @@ class CastChannelAsyncApiFunction : public AsyncApiFunction {
   CastChannelAsyncApiFunction();
 
  protected:
+  typedef ApiResourceManager<cast_channel::CastSocket>::ApiResourceData
+      SocketData;
+
   ~CastChannelAsyncApiFunction() override;
 
   // AsyncApiFunction:
@@ -136,8 +138,8 @@ class CastChannelAsyncApiFunction : public AsyncApiFunction {
   // Sets the function result from |channel_info|.
   void SetResultFromChannelInfo(const cast_channel::ChannelInfo& channel_info);
 
-  // The API resource manager for CastSockets.
-  ApiResourceManager<cast_channel::CastSocket>* manager_;
+  // The collection of CastSocket API resources.
+  scoped_refptr<SocketData> sockets_;
 };
 
 class CastChannelOpenFunction : public CastChannelAsyncApiFunction {
@@ -168,7 +170,7 @@ class CastChannelOpenFunction : public CastChannelAsyncApiFunction {
    public:
     CastMessageHandler(const EventDispatchCallback& ui_dispatch_cb,
                        cast_channel::CastSocket* socket,
-                       scoped_refptr<core_api::cast_channel::Logger> logger);
+                       scoped_refptr<api::cast_channel::Logger> logger);
     ~CastMessageHandler() override;
 
     // CastTransport::Delegate implementation.
@@ -183,16 +185,10 @@ class CastChannelOpenFunction : public CastChannelAsyncApiFunction {
     EventDispatchCallback const ui_dispatch_cb_;
     cast_channel::CastSocket* const socket_;
     // Logger object for reporting error details.
-    scoped_refptr<core_api::cast_channel::Logger> logger_;
+    scoped_refptr<api::cast_channel::Logger> logger_;
 
     DISALLOW_COPY_AND_ASSIGN(CastMessageHandler);
   };
-
-  // Parses the cast:// or casts:// |url|, fills |connect_info| with the
-  // corresponding details, and returns true. Returns false if |url| is not a
-  // valid Cast URL.
-  static bool ParseChannelUrl(const GURL& url,
-                              cast_channel::ConnectInfo* connect_info);
 
   // Validates that |connect_info| represents a valid IP end point and returns a
   // new IPEndPoint if so.  Otherwise returns nullptr.
@@ -205,13 +201,11 @@ class CastChannelOpenFunction : public CastChannelAsyncApiFunction {
   // The id of the newly opened socket.
   int new_channel_id_;
   CastChannelAPI* api_;
-  scoped_ptr<cast_channel::ConnectInfo> connect_info_;
   scoped_ptr<net::IPEndPoint> ip_endpoint_;
   cast_channel::ChannelAuthType channel_auth_;
   base::TimeDelta liveness_timeout_;
   base::TimeDelta ping_interval_;
 
-  FRIEND_TEST_ALL_PREFIXES(CastChannelOpenFunctionTest, TestParseChannelUrl);
   FRIEND_TEST_ALL_PREFIXES(CastChannelOpenFunctionTest, TestParseConnectInfo);
   DISALLOW_COPY_AND_ASSIGN(CastChannelOpenFunction);
 };

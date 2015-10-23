@@ -10,7 +10,7 @@
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_browser_main.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
@@ -23,7 +23,9 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/notifications/extension_welcome_notification_factory.h"
+#include "chrome/browser/notifications/notification_permission_context_factory.h"
+#include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/plugins/plugin_prefs_factory.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
@@ -42,6 +44,7 @@
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
+#include "chrome/browser/signin/account_fetcher_service_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -54,12 +57,13 @@
 #include "chrome/browser/ui/tabs/pinned_tab_service_factory.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/web_data_service_factory.h"
 
 #if defined(ENABLE_EXTENSIONS)
 #include "apps/browser_context_keyed_service_factories.h"
 #include "chrome/browser/apps/ephemeral_app_service_factory.h"
 #include "chrome/browser/apps/shortcut_manager_factory.h"
+#include "chrome/browser/extensions/api/networking_private/networking_private_ui_delegate_factory_impl.h"
 #include "chrome/browser/extensions/api/networking_private/networking_private_verify_delegate_factory_impl.h"
 #include "chrome/browser/extensions/browser_context_keyed_service_factories.h"
 #include "chrome/browser/extensions/extension_management.h"
@@ -110,6 +114,15 @@
 
 #if defined(OS_ANDROID) || defined(OS_CHROMEOS)
 #include "chrome/browser/media/protected_media_identifier_permission_context_factory.h"
+#endif
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS) && !defined(OS_CHROMEOS)
+#include "chrome/browser/signin/cross_device_promo_factory.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/printer_detector/printer_detector_factory.h"
+#include "chrome/browser/extensions/api/platform_keys/verify_trust_api.h"
 #endif
 
 #if !defined(OS_ANDROID)
@@ -166,6 +179,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 
   AboutSigninInternalsFactory::GetInstance();
   AccountTrackerServiceFactory::GetInstance();
+  AccountFetcherServiceFactory::GetInstance();
   autofill::PersonalDataManagerFactory::GetInstance();
 #if !defined(OS_ANDROID)
   AutomaticProfileResetterFactory::GetInstance();
@@ -185,16 +199,27 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if defined(ENABLE_PRINT_PREVIEW)
   CloudPrintProxyServiceFactory::GetInstance();
 #endif
-  CookieSettings::Factory::GetInstance();
-#if defined(ENABLE_NOTIFICATIONS)
-  DesktopNotificationServiceFactory::GetInstance();
+  CookieSettingsFactory::GetInstance();
+#if !defined(OS_ANDROID) && !defined(OS_IOS) && !defined(OS_CHROMEOS)
+  CrossDevicePromoFactory::GetInstance();
 #endif
+#if defined(ENABLE_NOTIFICATIONS)
+#if defined(ENABLE_EXTENSIONS)
+  ExtensionWelcomeNotificationFactory::GetInstance();
+#endif
+  NotificationPermissionContextFactory::GetInstance();
+  NotifierStateTrackerFactory::GetInstance();
+#endif  // defined(ENABLE_NOTIFICATIONS)
   dom_distiller::DomDistillerServiceFactory::GetInstance();
   domain_reliability::DomainReliabilityServiceFactory::GetInstance();
   DownloadServiceFactory::GetInstance();
 #if defined(ENABLE_EXTENSIONS)
   EasyUnlockServiceFactory::GetInstance();
   EnhancedBookmarkKeyServiceFactory::GetInstance();
+#endif
+#if defined(OS_CHROMEOS)
+  chromeos::PrinterDetectorFactory::GetInstance();
+  extensions::VerifyTrustAPI::GetFactoryInstance();
 #endif
   FaviconServiceFactory::GetInstance();
   FindBarStateFactory::GetInstance();
@@ -220,7 +245,9 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   chromeos::ManagerPasswordServiceFactory::GetInstance();
 #endif
   SupervisedUserServiceFactory::GetInstance();
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
   SupervisedUserSyncServiceFactory::GetInstance();
+#endif
 #endif
 #if defined(ENABLE_EXTENSIONS)
 #if defined(OS_CHROMEOS) || defined(OS_WIN) || defined(OS_MACOSX)
@@ -230,6 +257,11 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::NetworkingPrivateDelegateFactory::GetInstance()
       ->SetVerifyDelegateFactory(
           networking_private_verify_delegate_factory.Pass());
+  scoped_ptr<extensions::NetworkingPrivateUIDelegateFactoryImpl>
+      networking_private_ui_delegate_factory(
+          new extensions::NetworkingPrivateUIDelegateFactoryImpl);
+  extensions::NetworkingPrivateDelegateFactory::GetInstance()
+      ->SetUIDelegateFactory(networking_private_ui_delegate_factory.Pass());
 #endif
 #endif
 #if !defined(OS_ANDROID)

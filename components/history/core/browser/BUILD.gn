@@ -17,9 +17,9 @@ static_library("browser") {
     "expire_history_backend.h",
     "history_backend.cc",
     "history_backend.h",
+    "history_backend_client.h",
     "history_backend_notifier.h",
     "history_backend_observer.h",
-    "history_client.cc",
     "history_client.h",
     "history_constants.cc",
     "history_constants.h",
@@ -80,6 +80,10 @@ static_library("browser") {
     "web_history_service.h",
   ]
 
+  public_deps = [
+    "//skia",
+  ]
+
   deps = [
     "//base",
     "//base:i18n",
@@ -89,9 +93,9 @@ static_library("browser") {
     "//components/keyed_service/core",
     "//components/query_parser",
     "//components/signin/core/browser",
+    "//components/url_formatter",
     "//google_apis",
     "//net",
-    "//skia",
     "//sql",
     "//sync",
     "//third_party/sqlite",
@@ -123,4 +127,45 @@ static_library("browser") {
   }
 
   configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "expire_history_backend_unittest.cc",
+    "history_backend_db_unittest.cc",
+    "history_backend_unittest.cc",
+    "history_database_unittest.cc",
+    "history_querying_unittest.cc",
+    "history_service_unittest.cc",
+    "history_types_unittest.cc",
+    "thumbnail_database_unittest.cc",
+    "top_sites_cache_unittest.cc",
+    "top_sites_database_unittest.cc",
+    "top_sites_impl_unittest.cc",
+    "typed_url_syncable_service_unittest.cc",
+    "url_database_unittest.cc",
+    "url_utils_unittest.cc",
+    "visit_database_unittest.cc",
+    "visit_filter_unittest.cc",
+    "visit_tracker_unittest.cc",
+  ]
+  deps = [
+    ":browser",
+    "//base",
+    "//base:prefs_test_support",
+    "//base/test:test_support",
+    "//components/favicon_base",
+    "//components/history/core/common",
+    "//components/history/core/test",
+    "//sql",
+    "//sql:test_support",
+    "//sync:test_support_sync_api",
+    "//testing/gtest",
+    "//ui/gfx:gfx",
+    "//url",
+  ]
+  if (is_android) {
+    sources += [ "android/android_history_types_unittest.cc" ]
+  }
 }

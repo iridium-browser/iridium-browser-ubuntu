@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/thread_task_runner_handle.h"
@@ -20,6 +19,7 @@ namespace update_client {
 
 UpdateContext::UpdateContext(
     const scoped_refptr<Configurator>& config,
+    bool is_foreground,
     const std::vector<std::string>& ids,
     const UpdateClient::CrxDataCallback& crx_data_callback,
     const UpdateEngine::NotifyObserversCallback& notify_observers_callback,
@@ -28,6 +28,7 @@ UpdateContext::UpdateContext(
     CrxDownloader::Factory crx_downloader_factory,
     PingManager* ping_manager)
     : config(config),
+      is_foreground(is_foreground),
       ids(ids),
       crx_data_callback(crx_data_callback),
       notify_observers_callback(notify_observers_callback),
@@ -93,14 +94,16 @@ bool UpdateEngine::GetUpdateState(const std::string& id,
 }
 
 void UpdateEngine::Update(
+    bool is_foreground,
     const std::vector<std::string>& ids,
     const UpdateClient::CrxDataCallback& crx_data_callback,
     const CompletionCallback& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   scoped_ptr<UpdateContext> update_context(new UpdateContext(
-      config_, ids, crx_data_callback, notify_observers_callback_, callback,
-      update_checker_factory_, crx_downloader_factory_, ping_manager_));
+      config_, is_foreground, ids, crx_data_callback,
+      notify_observers_callback_, callback, update_checker_factory_,
+      crx_downloader_factory_, ping_manager_));
 
   CrxUpdateItem update_item;
   scoped_ptr<ActionUpdateCheck> update_check_action(new ActionUpdateCheck(

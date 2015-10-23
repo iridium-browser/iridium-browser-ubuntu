@@ -69,22 +69,13 @@ public abstract class ChromeSwitches {
     /** Enable Contextual Search. */
     public static final String ENABLE_CONTEXTUAL_SEARCH = "enable-contextual-search";
 
-    /** Disable Contextual Search first-run flow, for testing. Not exposed to user. */
-    public static final String DISABLE_CONTEXTUAL_SEARCH_PROMO_FOR_TESTING =
-            "disable-contextual-search-promo-for-testing";
-
     /** Enable Contextual Search for instrumentation testing. Not exposed to user. */
     public static final String ENABLE_CONTEXTUAL_SEARCH_FOR_TESTING =
             "enable-contextual-search-for-testing";
 
-    /**
-     * Enable hosted mode so that hosted activity can be launched.
-     */
-    public static final String ENABLE_HOSTED_MODE = "enable-hosted-mode";
-
-    // TODO(ianwen): remove this after rolling.
-    @Deprecated
-    public static final String ENABLE_EMBEDDED_MODE = "enable-hosted-mode";
+    /** Enable new Website Settings UI, which does not have controls for editing settings */
+    public static final String DISABLE_READ_ONLY_WEBSITE_SETTINGS_POPUP =
+            "disable-read-only-website-settings-popup";
 
     // How many thumbnails should we allow in the cache (per tab stack)?
     public static final String THUMBNAILS = "thumbnails";
@@ -92,6 +83,11 @@ public abstract class ChromeSwitches {
     // How many "approximated" thumbnails should we allow in the cache
     // (per tab stack)?  These take very low memory but have poor quality.
     public static final String APPROXIMATION_THUMBNAILS = "approximation-thumbnails";
+
+    /**
+     * Disable bottom infobar-like Reader Mode panel.
+     */
+    public static final String DISABLE_READER_MODE_BOTTOM_BAR = "disable-reader-mode-bottom-bar";
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
     // Native Switches
@@ -141,6 +137,58 @@ public abstract class ChromeSwitches {
      */
     public static final String USE_FAKE_DEVICE_FOR_MEDIA_STREAM =
             "use-fake-device-for-media-stream";
+
+    /**
+     * Disables the new icon-centric NTP design.
+     * Native switch - switches::kDisableIconNtp
+     */
+    public static final String DISABLE_ICON_NTP = "disable-icon-ntp";
+
+    /**
+     * Enables the new icon-centric NTP design.
+     * Native switch - switches::kEnableIconNtp
+     */
+    public static final String ENABLE_ICON_NTP = "enable-icon-ntp";
+
+    /**
+     * Enable Reader Mode button.
+     * Native switch - switches::kEnableReaderModeToolbarIcon
+     */
+    public static final String ENABLE_READER_MODE_BUTTON = "enable-reader-mode-toolbar-icon";
+
+    /**
+     * Disable domain reliability
+     * Native switch - switches::kDisableDomainReliability
+     */
+    public static final String DISABLE_DOMAIN_RELIABILITY = "disable-domain-reliability";
+
+    /**
+     * Enable use of Android's built-in spellchecker.
+     * Native switch - switches::kEnableAndroidSpellChecker
+     */
+    public static final String ENABLE_ANDROID_SPELLCHECKER = "enable-android-spellchecker";
+
+    /**
+     * Enable the menu trimming that removes "Bookmarks" and "Recent tabs" menu items.
+     */
+    public static final String ENABLE_MENU_TRIMMING = "enable-menu-trimming";
+
+    /**
+     * Disable speculative TCP/IP preconnection.
+     * Native switch - switches::kDisablePreconnect
+     */
+    public static final String DISABLE_PRECONNECT = "disable-preconnect";
+
+    /**
+     * Specifies Android phone page loading progress bar animation.
+     * Native switch - switches::kProgressBarAnimation
+     */
+    public static final String PROGRESS_BAR_ANIMATION = "progress-bar-animation";
+
+    /**
+     * Enable offline pages.
+     */
+    public static final String ENABLE_OFFLINE_PAGES = "enable-offline-pages";
 
     // Prevent instantiation.
     private ChromeSwitches() {}

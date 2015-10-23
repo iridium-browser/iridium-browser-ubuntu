@@ -7,7 +7,10 @@ package org.chromium.chrome.browser;
 import android.graphics.Rect;
 import android.graphics.RectF;
 
-import org.chromium.base.CalledByNative;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.blink_public.platform.WebDisplayMode;
+import org.chromium.chrome.browser.findinpage.FindMatchRectsDetails;
+import org.chromium.chrome.browser.findinpage.FindNotificationDetails;
 import org.chromium.components.web_contents_delegate_android.WebContentsDelegateAndroid;
 import org.chromium.content_public.browser.WebContents;
 
@@ -21,8 +24,9 @@ public class ChromeWebContentsDelegateAndroid extends WebContentsDelegateAndroid
 
     private FindResultListener mFindResultListener;
 
-
     private FindMatchRectsListener mFindMatchRectsListener = null;
+
+    private int mDisplayMode = WebDisplayMode.Browser;
 
     /**
      * Listener to be notified when a find result is received.
@@ -36,6 +40,19 @@ public class ChromeWebContentsDelegateAndroid extends WebContentsDelegateAndroid
      */
     public interface FindMatchRectsListener {
         public void onFindMatchRects(FindMatchRectsDetails result);
+    }
+
+    /**
+     * Sets the current display mode which can be queried using media queries.
+     * @param displayMode A value from {@link org.chromium.blink_public.platform.WebDisplayMode}.
+     */
+    public void setDisplayMode(int displayMode) {
+        mDisplayMode = displayMode;
+    }
+
+    @CalledByNative
+    private int getDisplayMode() {
+        return mDisplayMode;
     }
 
     @CalledByNative
@@ -60,6 +77,11 @@ public class ChromeWebContentsDelegateAndroid extends WebContentsDelegateAndroid
     /** Register to receive the results of requestFindMatchRects calls. */
     public void setFindMatchRectsListener(FindMatchRectsListener listener) {
         mFindMatchRectsListener = listener;
+    }
+
+    @CalledByNative
+    public boolean shouldResumeRequestsForCreatedWindow() {
+        return true;
     }
 
     @CalledByNative

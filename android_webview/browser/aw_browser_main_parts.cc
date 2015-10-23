@@ -8,13 +8,18 @@
 #include "android_webview/browser/aw_dev_tools_discovery_provider.h"
 #include "android_webview/browser/aw_media_client_android.h"
 #include "android_webview/browser/aw_result_codes.h"
+#include "android_webview/browser/deferred_gpu_command_service.h"
 #include "android_webview/common/aw_resource.h"
-#include "android_webview/native/public/aw_assets.h"
+#include "android_webview/common/aw_switches.h"
+#include "base/android/apk_assets.h"
 #include "base/android/build_info.h"
 #include "base/android/locale_utils.h"
 #include "base/android/memory_pressure_listener_android.h"
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
+#include "content/public/browser/android/synchronous_compositor.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
@@ -26,7 +31,9 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/resource/resource_bundle_android.h"
 #include "ui/base/ui_base_paths.h"
+#include "ui/gl/gl_surface.h"
 
 namespace android_webview {
 
@@ -49,47 +56,26 @@ void AwBrowserMainParts::PreEarlyInitialization() {
 }
 
 int AwBrowserMainParts::PreCreateThreads() {
-  int pak_fd = 0;
-  int64 pak_off = 0;
-  int64 pak_len = 0;
-
-  // TODO(primiano, mkosiba): GetApplicationLocale requires a ResourceBundle
-  // instance to be present to work correctly so we call this (knowing it will
-  // fail) just to create the ResourceBundle instance. We should refactor
-  // ResourceBundle/GetApplicationLocale to not require an instance to be
-  // initialized.
-  ui::ResourceBundle::InitSharedInstanceWithLocale(
+  ui::SetLocalePaksStoredInApk(true);
+  std::string locale = ui::ResourceBundle::InitSharedInstanceWithLocale(
       base::android::GetDefaultLocale(),
       NULL,
       ui::ResourceBundle::DO_NOT_LOAD_COMMON_RESOURCES);
-  std::string locale = l10n_util::GetApplicationLocale(std::string()) + ".pak";
-  if (AwAssets::OpenAsset(locale, &pak_fd, &pak_off, &pak_len)) {
-    ui::ResourceBundle::CleanupSharedInstance();
-    ui::ResourceBundle::InitSharedInstanceWithPakFileRegion(
-        base::File(pak_fd), base::MemoryMappedFile::Region(pak_off, pak_len));
-  } else {
-    LOG(WARNING) << "Failed to load " << locale << ".pak from the apk too. "
-                    "Bringing up WebView without any locale";
+  if (locale.empty()) {
+    LOG(WARNING) << "Failed to load locale .pak from the apk. "
+        "Bringing up WebView without any locale";
   }
 
   // Try to directly mmap the webviewchromium.pak from the apk. Fall back to
   // load from file, using PATH_SERVICE, otherwise.
-  if (AwAssets::OpenAsset("webviewchromium.pak", &pak_fd, &pak_off, &pak_len)) {
-    ui::ResourceBundle::GetSharedInstance().AddDataPackFromFileRegion(
-        base::File(pak_fd),
-        base::MemoryMappedFile::Region(pak_off, pak_len),
-        ui::SCALE_FACTOR_NONE);
-  } else {
-    base::FilePath pak_path;
-    PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &pak_path);
-    LOG(WARNING) << "Cannot load webviewchromium.pak assets from the apk. "
-                    "Falling back loading it from " << pak_path.MaybeAsASCII();
-    ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-        pak_path.AppendASCII("webviewchromium.pak"), ui::SCALE_FACTOR_NONE);
-  }
+  base::FilePath pak_file_path;
+  PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &pak_file_path);
+  pak_file_path = pak_file_path.AppendASCII("webviewchromium.pak");
+  ui::LoadMainAndroidPackFile("assets/webviewchromium.pak", pak_file_path);
 
   base::android::MemoryPressureListenerAndroid::RegisterSystemCallback(
       base::android::AttachCurrentThread());
+  DeferredGpuCommandService::SetInstance();
 
   return content::RESULT_CODE_NORMAL_EXIT;
 }
@@ -101,6 +87,15 @@ void AwBrowserMainParts::PreMainMessageLoopRun() {
 
   media::SetMediaClientAndroid(
       new AwMediaClientAndroid(AwResource::GetConfigKeySystemUuidMapping()));
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUseIpcCommandBuffer)) {
+    content::SynchronousCompositor::SetUseIpcCommandBuffer();
+  } else {
+    gfx::GLSurface::InitializeOneOff();
+  }
+
+  content::RenderFrameHost::AllowInjectingJavaScriptForAndroidWebView();
 
   // This is needed for WebView Classic backwards compatibility
   // See crbug.com/298495

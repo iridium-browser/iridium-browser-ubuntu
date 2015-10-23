@@ -13,7 +13,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/supports_user_data.h"
 #include "components/history/core/browser/android/android_cache_database.h"
 #include "components/history/core/browser/android/android_history_types.h"
@@ -24,8 +23,8 @@ namespace history {
 class AndroidProviderBackend;
 class AndroidURLsSQLHandler;
 class HistoryBackend;
+class HistoryBackendClient;
 class HistoryBackendNotifier;
-class HistoryClient;
 class HistoryDatabase;
 class ThumbnailDatabase;
 
@@ -48,7 +47,7 @@ class AndroidProviderBackend : public base::SupportsUserData::Data {
   AndroidProviderBackend(const base::FilePath& cache_db_name,
                          HistoryDatabase* history_db,
                          ThumbnailDatabase* thumbnail_db,
-                         HistoryClient* history_client,
+                         HistoryBackendClient* backend_client,
                          HistoryBackendNotifier* notifier);
 
   ~AndroidProviderBackend() override;
@@ -339,7 +338,7 @@ class AndroidProviderBackend : public base::SupportsUserData::Data {
 
   ThumbnailDatabase* thumbnail_db_;
 
-  HistoryClient* history_client_;
+  HistoryBackendClient* backend_client_;
 
   // Whether AndroidProviderBackend has been initialized.
   bool initialized_;

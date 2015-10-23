@@ -41,13 +41,18 @@
 #include "crypto/nss_util.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_switches.h"
-#include "sandbox/linux/services/libc_urandom_override.h"
+#include "sandbox/linux/services/credentials.h"
+#include "sandbox/linux/services/namespace_sandbox.h"
 
 #if defined(OS_NACL_NONSFI)
 #include "native_client/src/public/nonsfi/irt_exception_handling.h"
 #else
 #include <link.h>
 #include "components/nacl/loader/nonsfi/irt_exception_handling.h"
+#endif
+
+#if !defined(USE_OPENSSL)
+#include "sandbox/linux/services/libc_urandom_override.h"
 #endif
 
 namespace {
@@ -121,17 +126,11 @@ void BecomeNaClLoader(base::ScopedFD browser_fd,
   nacl::nonsfi::NonSfiListener listener;
   listener.Listen();
 #else
-  // TODO(hidehiko): Drop Non-SFI supporting from nacl_helper after the
-  // nacl_helper_nonsfi switching is done.
-  if (uses_nonsfi_mode) {
-    nacl::nonsfi::NonSfiListener listener;
-    listener.Listen();
-  } else {
-    NaClListener listener;
-    listener.set_prereserved_sandbox_size(system_info.prereserved_sandbox_size);
-    listener.set_number_of_cores(system_info.number_of_cores);
-    listener.Listen();
-  }
+  CHECK(!uses_nonsfi_mode);
+  NaClListener listener;
+  listener.set_prereserved_sandbox_size(system_info.prereserved_sandbox_size);
+  listener.set_number_of_cores(system_info.number_of_cores);
+  listener.Listen();
 #endif
   _exit(0);
 }
@@ -169,8 +168,8 @@ void ChildNaClLoaderInit(ScopedVector<base::ScopedFD> child_fds,
 bool HandleForkRequest(ScopedVector<base::ScopedFD> child_fds,
                        const NaClLoaderSystemInfo& system_info,
                        nacl::NaClSandbox* nacl_sandbox,
-                       PickleIterator* input_iter,
-                       Pickle* output_pickle) {
+                       base::PickleIterator* input_iter,
+                       base::Pickle* output_pickle) {
   bool uses_nonsfi_mode;
   if (!input_iter->ReadBool(&uses_nonsfi_mode)) {
     LOG(ERROR) << "Could not read uses_nonsfi_mode status";
@@ -190,12 +189,28 @@ bool HandleForkRequest(ScopedVector<base::ScopedFD> child_fds,
   }
 
   VLOG(1) << "nacl_helper: forking";
-  pid_t child_pid = fork();
+  pid_t child_pid;
+  if (sandbox::NamespaceSandbox::InNewUserNamespace()) {
+    child_pid = sandbox::NamespaceSandbox::ForkInNewPidNamespace(
+        /*drop_capabilities_in_child=*/true);
+  } else {
+    child_pid = sandbox::Credentials::ForkAndDropCapabilitiesInChild();
+  }
+
   if (child_pid < 0) {
     PLOG(ERROR) << "*** fork() failed.";
   }
 
   if (child_pid == 0) {
+    // Install termiantion signal handlers for nonsfi NaCl. The SFI NaCl runtime
+    // will install signal handlers for SIGINT, SIGTERM, etc. so we do not need
+    // to install termination signal handlers ourselves (in fact, it will crash
+    // if signal handlers for these are present).
+    if (uses_nonsfi_mode && getpid() == 1) {
+      // Note that nonsfi NaCl may override some of these signal handlers, which
+      // is fine.
+      sandbox::NamespaceSandbox::InstallDefaultTerminationSignalHandlers();
+    }
     ChildNaClLoaderInit(child_fds.Pass(),
                         system_info,
                         uses_nonsfi_mode,
@@ -215,8 +230,8 @@ bool HandleForkRequest(ScopedVector<base::ScopedFD> child_fds,
   return true;
 }
 
-bool HandleGetTerminationStatusRequest(PickleIterator* input_iter,
-                                       Pickle* output_pickle) {
+bool HandleGetTerminationStatusRequest(base::PickleIterator* input_iter,
+                                       base::Pickle* output_pickle) {
   pid_t child_to_wait;
   if (!input_iter->ReadInt(&child_to_wait)) {
     LOG(ERROR) << "Could not read pid to wait for";
@@ -253,8 +268,8 @@ bool HonorRequestAndReply(int reply_fd,
                           ScopedVector<base::ScopedFD> attached_fds,
                           const NaClLoaderSystemInfo& system_info,
                           nacl::NaClSandbox* nacl_sandbox,
-                          PickleIterator* input_iter) {
-  Pickle write_pickle;
+                          base::PickleIterator* input_iter) {
+  base::Pickle write_pickle;
   bool have_to_reply = false;
   // Commands must write anything to send back to |write_pickle|.
   switch (command_type) {
@@ -276,8 +291,8 @@ bool HonorRequestAndReply(int reply_fd,
   if (!have_to_reply)
     return false;
   const std::vector<int> empty;  // We never send file descriptors back.
-  if (!UnixDomainSocket::SendMsg(reply_fd, write_pickle.data(),
-                                 write_pickle.size(), empty)) {
+  if (!base::UnixDomainSocket::SendMsg(reply_fd, write_pickle.data(),
+                                       write_pickle.size(), empty)) {
     LOG(ERROR) << "*** send() to zygote failed";
     return false;
   }
@@ -291,7 +306,7 @@ bool HandleZygoteRequest(int zygote_ipc_fd,
                          nacl::NaClSandbox* nacl_sandbox) {
   ScopedVector<base::ScopedFD> fds;
   char buf[kNaClMaxIPCMessageLength];
-  const ssize_t msglen = UnixDomainSocket::RecvMsg(zygote_ipc_fd,
+  const ssize_t msglen = base::UnixDomainSocket::RecvMsg(zygote_ipc_fd,
       &buf, sizeof(buf), &fds);
   // If the Zygote has started handling requests, we should be sandboxed via
   // the setuid sandbox.
@@ -309,8 +324,8 @@ bool HandleZygoteRequest(int zygote_ipc_fd,
     return false;
   }
 
-  Pickle read_pickle(buf, msglen);
-  PickleIterator read_iter(read_pickle);
+  base::Pickle read_pickle(buf, msglen);
+  base::PickleIterator read_iter(read_pickle);
   int command_type;
   if (!read_iter.ReadInt(&command_type)) {
     LOG(ERROR) << "Unable to read command from Zygote";
@@ -425,11 +440,10 @@ int main(int argc, char* argv[]) {
   base::AtExitManager exit_manager;
   base::RandUint64();  // acquire /dev/urandom fd before sandbox is raised
 
-#if !defined(OS_NACL_NONSFI)
   // NSS is only needed for SFI NaCl.
+#if !defined(OS_NACL_NONSFI) && !defined(USE_OPENSSL)
   // Allows NSS to fopen() /dev/urandom.
   sandbox::InitLibcUrandomOverrides();
-#if defined(USE_NSS_CERTS)
   // Configure NSS for use inside the NaCl process.
   // The fork check has not caused problems for NaCl, but this appears to be
   // best practice (see other places LoadNSSLibraries is called.)
@@ -441,8 +455,7 @@ int main(int argc, char* argv[]) {
   // Load shared libraries before sandbox is raised.
   // NSS is needed to perform hashing for validation caching.
   crypto::LoadNSSLibraries();
-#endif  // defined(USE_NSS_CERTS)
-#endif  // defined(OS_NACL_NONSFI)
+#endif  // !defined(OS_NACL_NONSFI) && !defined(USE_OPENSSL)
   const NaClLoaderSystemInfo system_info = {
 #if !defined(OS_NACL_NONSFI)
     // These are not used by nacl_helper_nonsfi.
@@ -468,9 +481,9 @@ int main(int argc, char* argv[]) {
 
   const std::vector<int> empty;
   // Send the zygote a message to let it know we are ready to help
-  if (!UnixDomainSocket::SendMsg(kNaClZygoteDescriptor,
-                                 kNaClHelperStartupAck,
-                                 sizeof(kNaClHelperStartupAck), empty)) {
+  if (!base::UnixDomainSocket::SendMsg(kNaClZygoteDescriptor,
+                                       kNaClHelperStartupAck,
+                                       sizeof(kNaClHelperStartupAck), empty)) {
     LOG(ERROR) << "*** send() to zygote failed";
   }
 

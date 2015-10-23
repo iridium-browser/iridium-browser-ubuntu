@@ -30,11 +30,15 @@
 .elements-disclosure li.parent::before {
     -webkit-user-select: none;
     -webkit-mask-image: url(Images/toolbarButtonGlyphs.png);
-    -webkit-mask-size: 320px 144px;
+    -webkit-mask-size: 352px 168px;
     content: "a";
     color: transparent;
     text-shadow: none;
     margin-right: 1px;
+}
+
+.elements-disclosure li.always-parent::before {
+    visibility: hidden;
 }
 
 @media (-webkit-min-device-pixel-ratio: 1.5) {
@@ -71,7 +75,7 @@
 
 .elements-disclosure li.selected .selection {
     display: block;
-    background-color: rgb(212, 212, 212);
+    background-color: #dadada;
 }
 
 .elements-disclosure ol {
@@ -207,11 +211,11 @@ button, input, select {
 
 .elements-gutter-decoration {
     position: absolute;
-    left: 1px;
+    left: 2px;
     margin-top: 2px;
-    height: 8px;
-    width: 8px;
-    border-radius: 4px;
+    height: 9px;
+    width: 9px;
+    border-radius: 5px;
     border: 1px solid orange;
     background-color: orange;
 }
@@ -299,4 +303,20 @@ ol:hover > li > .elements-tree-shortcut-link {
 .elements-tree-shortcut-link {
     color: rgb(87, 87, 87);
     display: none;
+}
+
+ol:focus li.selected .webkit-html-tag {
+    color: #a5a5a5;
+}
+
+ol:focus li.selected .webkit-html-tag-name,
+ol:focus li.selected .webkit-html-close-tag-name,
+ol:focus li.selected .webkit-html-attribute-value,
+ol:focus li.selected .webkit-html-external-link,
+ol:focus li.selected .webkit-html-resource-link {
+    color: white;
+}
+
+ol:focus li.selected .webkit-html-attribute-name {
+    color: #ccc;
 }

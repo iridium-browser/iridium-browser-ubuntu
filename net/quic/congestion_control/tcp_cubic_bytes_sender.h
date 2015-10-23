@@ -39,7 +39,7 @@ class NET_EXPORT_PRIVATE TcpCubicBytesSender : public SendAlgorithmInterface {
   // Start implementation of SendAlgorithmInterface.
   void SetFromConfig(const QuicConfig& config,
                      Perspective perspective) override;
-  bool ResumeConnectionState(
+  void ResumeConnectionState(
       const CachedNetworkParameters& cached_network_params,
       bool max_bandwidth_resumption) override;
   void SetNumEmulatedConnections(int num_connections) override;
@@ -60,7 +60,6 @@ class NET_EXPORT_PRIVATE TcpCubicBytesSender : public SendAlgorithmInterface {
       HasRetransmittableData has_retransmittable_data) const override;
   QuicBandwidth PacingRate() const override;
   QuicBandwidth BandwidthEstimate() const override;
-  bool HasReliableBandwidthEstimate() const override;
   QuicTime::Delta RetransmissionDelay() const override;
   QuicByteCount GetCongestionWindow() const override;
   bool InSlowStart() const override;

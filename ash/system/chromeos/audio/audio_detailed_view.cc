@@ -38,6 +38,9 @@ base::string16 GetAudioDeviceName(const chromeos::AudioDevice& device) {
       return l10n_util::GetStringFUTF16(
           IDS_ASH_STATUS_TRAY_AUDIO_HDMI_DEVICE,
           base::UTF8ToUTF16(device.display_name));
+    case chromeos::AUDIO_TYPE_MIC:
+      return l10n_util::GetStringUTF16(
+          IDS_ASH_STATUS_TRAY_AUDIO_MIC_JACK_DEVICE);
     default:
       return base::UTF8ToUTF16(device.display_name);
   }
@@ -117,10 +120,7 @@ void AudioDetailedView::UpdateAudioDevices() {
   CrasAudioHandler::Get()->GetAudioDevices(&devices);
   for (size_t i = 0; i < devices.size(); ++i) {
     // Don't display keyboard mic or aokr type.
-    if (devices[i].type == chromeos::AUDIO_TYPE_KEYBOARD_MIC ||
-        devices[i].type == chromeos::AUDIO_TYPE_AOKR ||
-        devices[i].type == chromeos::AUDIO_TYPE_POST_MIX_LOOPBACK ||
-        devices[i].type == chromeos::AUDIO_TYPE_POST_DSP_LOOPBACK)
+    if (!devices[i].is_for_simple_usage())
       continue;
     if (devices[i].is_input)
       input_devices_.push_back(devices[i]);

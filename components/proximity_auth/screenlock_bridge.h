@@ -8,19 +8,14 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
 
-namespace content {
-class BrowserContext;
-}  // namespace content
-
 namespace proximity_auth {
-
-class ProximityAuthClient;
 
 // ScreenlockBridge brings together the screenLockPrivate API and underlying
 // support. On ChromeOS, it delegates calls to the ScreenLocker. On other
@@ -29,10 +24,6 @@ class ProximityAuthClient;
 // used solely for the lock screen anymore.
 class ScreenlockBridge {
  public:
-  // |client| is not owned and must outlive this object.
-  explicit ScreenlockBridge(ProximityAuthClient* client);
-  ~ScreenlockBridge();
-
   // User pod icons supported by lock screen / signin screen UI.
   enum UserPodCustomIcon {
     USER_POD_CUSTOM_ICON_NONE,
@@ -161,12 +152,16 @@ class ScreenlockBridge {
     virtual ~Observer() {}
   };
 
+  static ScreenlockBridge* Get();
+
   void SetLockHandler(LockHandler* lock_handler);
   void SetFocusedUser(const std::string& user_id);
 
   bool IsLocked() const;
-  void Lock(content::BrowserContext* browser_context);
-  void Unlock(content::BrowserContext* browser_context);
+  void Lock();
+
+  // Unlocks the screen for the authenticated user with the given |user_email|.
+  void Unlock(const std::string& user_email);
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -176,11 +171,17 @@ class ScreenlockBridge {
   std::string focused_user_id() const { return focused_user_id_; }
 
  private:
-  ProximityAuthClient* client_;  // Not owned. Must outlive this object.
-  LockHandler* lock_handler_;    // Not owned
+  friend struct base::DefaultLazyInstanceTraits<ScreenlockBridge>;
+  friend struct base::DefaultDeleter<ScreenlockBridge>;
+
+  ScreenlockBridge();
+  ~ScreenlockBridge();
+
+  LockHandler* lock_handler_;  // Not owned
+
   // The last focused user's id.
   std::string focused_user_id_;
-  ObserverList<Observer, true> observers_;
+  base::ObserverList<Observer, true> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenlockBridge);
 };

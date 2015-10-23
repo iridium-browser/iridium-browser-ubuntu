@@ -141,7 +141,7 @@ SourceBuffer* MediaSource::addSourceBuffer(const String& type, ExceptionState& e
 
     // 5. Create a new SourceBuffer object and associated resources.
     ContentType contentType(type);
-    Vector<String> codecs = contentType.codecs();
+    String codecs = contentType.parameter("codecs");
     OwnPtr<WebSourceBuffer> webSourceBuffer = createWebSourceBuffer(contentType.type(), codecs, exceptionState);
 
     if (!webSourceBuffer) {
@@ -156,6 +156,7 @@ SourceBuffer* MediaSource::addSourceBuffer(const String& type, ExceptionState& e
     m_sourceBuffers->add(buffer);
 
     // 7. Return the new object to the caller.
+    WTF_LOG(Media, "MediaSource::addSourceBuffer(%s) %p -> %p", type.ascii().data(), this, buffer);
     return buffer;
 }
 
@@ -263,27 +264,12 @@ ExecutionContext* MediaSource::executionContext() const
     return ActiveDOMObject::executionContext();
 }
 
-void MediaSource::clearWeakMembers(Visitor* visitor)
-{
-#if ENABLE(OILPAN)
-    // Oilpan: If the MediaSource survived, but its attached media
-    // element did not, signal the element that it can safely
-    // notify its MediaSource during finalization by calling close().
-    if (m_attachedElement && !visitor->isHeapObjectAlive(m_attachedElement)) {
-        m_attachedElement->setCloseMediaSourceWhenFinalizing();
-        m_attachedElement.clear();
-    }
-#endif
-}
-
 DEFINE_TRACE(MediaSource)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_asyncEventQueue);
-#endif
+    visitor->trace(m_attachedElement);
     visitor->trace(m_sourceBuffers);
     visitor->trace(m_activeSourceBuffers);
-    visitor->template registerWeakMembers<MediaSource, &MediaSource::clearWeakMembers>(this);
     RefCountedGarbageCollectedEventTargetWithInlineData<MediaSource>::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }
@@ -315,11 +301,11 @@ double MediaSource::duration() const
     return isClosed() ? std::numeric_limits<float>::quiet_NaN() : m_webMediaSource->duration();
 }
 
-PassRefPtrWillBeRawPtr<TimeRanges> MediaSource::buffered() const
+TimeRanges* MediaSource::buffered() const
 {
     // Implements MediaSource algorithm for HTMLMediaElement.buffered.
     // https://dvcs.w3.org/hg/html-media/raw-file/default/media-source/media-source.html#htmlmediaelement-extensions
-    WillBeHeapVector<RefPtrWillBeMember<TimeRanges>> ranges(m_activeSourceBuffers->length());
+    HeapVector<Member<TimeRanges>> ranges(m_activeSourceBuffers->length());
     for (size_t i = 0; i < m_activeSourceBuffers->length(); ++i)
         ranges[i] = m_activeSourceBuffers->item(i)->buffered(ASSERT_NO_EXCEPTION);
 
@@ -341,7 +327,7 @@ PassRefPtrWillBeRawPtr<TimeRanges> MediaSource::buffered() const
         return TimeRanges::create();
 
     // 4. Let intersection ranges equal a TimeRange object containing a single range from 0 to highest end time.
-    RefPtrWillBeRawPtr<TimeRanges> intersectionRanges = TimeRanges::create(0, highestEndTime);
+    TimeRanges* intersectionRanges = TimeRanges::create(0, highestEndTime);
 
     // 5. For each SourceBuffer object in activeSourceBuffers run the following steps:
     bool ended = readyState() == endedKeyword();
@@ -358,10 +344,10 @@ PassRefPtrWillBeRawPtr<TimeRanges> MediaSource::buffered() const
         intersectionRanges->intersectWith(sourceRanges);
     }
 
-    return intersectionRanges.release();
+    return intersectionRanges;
 }
 
-PassRefPtrWillBeRawPtr<TimeRanges> MediaSource::seekable() const
+TimeRanges* MediaSource::seekable() const
 {
     // Implements MediaSource algorithm for HTMLMediaElement.seekable.
     // https://dvcs.w3.org/hg/html-media/raw-file/default/media-source/media-source.html#htmlmediaelement-extensions
@@ -373,7 +359,7 @@ PassRefPtrWillBeRawPtr<TimeRanges> MediaSource::seekable() const
 
     // If duration equals positive Infinity:
     if (sourceDuration == std::numeric_limits<double>::infinity()) {
-        RefPtrWillBeRawPtr<TimeRanges> buffered = m_attachedElement->buffered();
+        TimeRanges* buffered = m_attachedElement->buffered();
 
         // 1. If the HTMLMediaElement.buffered attribute returns an empty TimeRanges object, then
         // return an empty TimeRanges object and abort these steps.
@@ -530,6 +516,11 @@ void MediaSource::setSourceBufferActive(SourceBuffer* sourceBuffer)
     m_activeSourceBuffers->insert(insertPosition, sourceBuffer);
 }
 
+HTMLMediaElement* MediaSource::mediaElement() const
+{
+    return m_attachedElement.get();
+}
+
 bool MediaSource::isClosed() const
 {
     return readyState() == closedKeyword();
@@ -576,7 +567,7 @@ void MediaSource::stop()
     m_webMediaSource.clear();
 }
 
-PassOwnPtr<WebSourceBuffer> MediaSource::createWebSourceBuffer(const String& type, const Vector<String>& codecs, ExceptionState& exceptionState)
+PassOwnPtr<WebSourceBuffer> MediaSource::createWebSourceBuffer(const String& type, const String& codecs, ExceptionState& exceptionState)
 {
     WebSourceBuffer* webSourceBuffer = 0;
 

@@ -3,9 +3,10 @@
 // found in the LICENSE file.
 
 #include "base/values.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/test/test_browser_thread.h"
@@ -311,8 +312,8 @@ TEST_F(ExtensionSpecialStoragePolicyTest, OverlappingApps) {
 
 TEST_F(ExtensionSpecialStoragePolicyTest, HasSessionOnlyOrigins) {
   TestingProfile profile;
-  CookieSettings* cookie_settings =
-      CookieSettings::Factory::GetForProfile(&profile).get();
+  content_settings::CookieSettings* cookie_settings =
+      CookieSettingsFactory::GetForProfile(&profile).get();
   policy_ = new ExtensionSpecialStoragePolicy(cookie_settings);
 
   EXPECT_FALSE(policy_->HasSessionOnlyOrigins());
@@ -339,6 +340,25 @@ TEST_F(ExtensionSpecialStoragePolicyTest, HasSessionOnlyOrigins) {
                                       ContentSettingsPattern::Wildcard());
 
   EXPECT_FALSE(policy_->HasSessionOnlyOrigins());
+}
+
+TEST_F(ExtensionSpecialStoragePolicyTest, IsStorageDurableTest) {
+  TestingProfile profile;
+  content_settings::CookieSettings* cookie_settings =
+      CookieSettingsFactory::GetForProfile(&profile).get();
+  policy_ = new ExtensionSpecialStoragePolicy(cookie_settings);
+  const GURL kHttpUrl("http://foo.com");
+
+  EXPECT_FALSE(policy_->IsStorageDurable(kHttpUrl));
+
+  HostContentSettingsMap* content_settings_map =
+      profile.GetHostContentSettingsMap();
+  content_settings_map->SetContentSetting(
+      ContentSettingsPattern::FromString("foo.com"),
+      ContentSettingsPattern::Wildcard(), CONTENT_SETTINGS_TYPE_DURABLE_STORAGE,
+      std::string(), CONTENT_SETTING_ALLOW);
+
+  EXPECT_TRUE(policy_->IsStorageDurable(kHttpUrl));
 }
 
 TEST_F(ExtensionSpecialStoragePolicyTest, NotificationTest) {

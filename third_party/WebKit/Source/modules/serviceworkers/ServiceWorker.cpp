@@ -35,10 +35,11 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/MessagePort.h"
 #include "core/events/Event.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "modules/EventTargetModules.h"
 #include "public/platform/WebMessagePortChannel.h"
-#include "public/platform/WebServiceWorkerState.h"
 #include "public/platform/WebString.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerState.h"
 
 namespace blink {
 
@@ -47,10 +48,10 @@ const AtomicString& ServiceWorker::interfaceName() const
     return EventTargetNames::ServiceWorker;
 }
 
-void ServiceWorker::postMessage(ExecutionContext*, PassRefPtr<SerializedScriptValue> message, const MessagePortArray* ports, ExceptionState& exceptionState)
+void ServiceWorker::postMessage(ExecutionContext* context, PassRefPtr<SerializedScriptValue> message, const MessagePortArray* ports, ExceptionState& exceptionState)
 {
     // Disentangle the port in preparation for sending it to the remote context.
-    OwnPtr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(ports, exceptionState);
+    OwnPtr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(context, ports, exceptionState);
     if (exceptionState.hadException())
         return;
     if (m_outerWorker->state() == WebServiceWorkerStateRedundant) {
@@ -58,14 +59,12 @@ void ServiceWorker::postMessage(ExecutionContext*, PassRefPtr<SerializedScriptVa
         return;
     }
 
+    if (message->containsTransferableArrayBuffer())
+        context->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "ServiceWorker cannot send an ArrayBuffer as a transferable object yet. See http://crbug.com/511119"));
+
     WebString messageString = message->toWireString();
     OwnPtr<WebMessagePortChannelArray> webChannels = MessagePort::toWebMessagePortChannelArray(channels.release());
     m_outerWorker->postMessage(messageString, webChannels.leakPtr());
-}
-
-void ServiceWorker::terminate(ExceptionState& exceptionState)
-{
-    exceptionState.throwDOMException(InvalidAccessError, "Not supported.");
 }
 
 void ServiceWorker::internalsTerminate()
@@ -106,13 +105,9 @@ String ServiceWorker::state() const
     }
 }
 
-PassRefPtrWillBeRawPtr<ServiceWorker> ServiceWorker::from(ExecutionContext* executionContext, WebType* worker)
+ServiceWorker* ServiceWorker::from(ExecutionContext* executionContext, WebServiceWorker* worker)
 {
-    if (!worker)
-        return nullptr;
-
-    RefPtrWillBeRawPtr<ServiceWorker> serviceWorker = getOrCreate(executionContext, worker);
-    return serviceWorker.release();
+    return getOrCreate(executionContext, worker);
 }
 
 bool ServiceWorker::hasPendingActivity() const
@@ -129,7 +124,7 @@ void ServiceWorker::stop()
     m_wasStopped = true;
 }
 
-PassRefPtrWillBeRawPtr<ServiceWorker> ServiceWorker::getOrCreate(ExecutionContext* executionContext, WebType* outerWorker)
+ServiceWorker* ServiceWorker::getOrCreate(ExecutionContext* executionContext, WebServiceWorker* outerWorker)
 {
     if (!outerWorker)
         return nullptr;
@@ -140,9 +135,9 @@ PassRefPtrWillBeRawPtr<ServiceWorker> ServiceWorker::getOrCreate(ExecutionContex
         return existingServiceWorker;
     }
 
-    RefPtrWillBeRawPtr<ServiceWorker> worker = adoptRefWillBeNoop(new ServiceWorker(executionContext, adoptPtr(outerWorker)));
+    ServiceWorker* worker = new ServiceWorker(executionContext, adoptPtr(outerWorker));
     worker->suspendIfNeeded();
-    return worker.release();
+    return worker;
 }
 
 ServiceWorker::ServiceWorker(ExecutionContext* executionContext, PassOwnPtr<WebServiceWorker> worker)
@@ -150,33 +145,12 @@ ServiceWorker::ServiceWorker(ExecutionContext* executionContext, PassOwnPtr<WebS
     , m_outerWorker(worker)
     , m_wasStopped(false)
 {
-#if ENABLE(OILPAN)
-    ThreadState::current()->registerPreFinalizer(*this);
-#endif
     ASSERT(m_outerWorker);
     m_outerWorker->setProxy(this);
 }
 
 ServiceWorker::~ServiceWorker()
 {
-#if ENABLE(OILPAN)
-    ASSERT(!m_outerWorker);
-#endif
-}
-
-void ServiceWorker::dispose()
-{
-    // With Oilpan enabled, the observable lifetime of a ServiceWorker
-    // must not extend beyond when it has been deemed to be unreachable
-    // by the garbage collector. The embedder must be detached before
-    // it is eventually (lazily) swept, so as to prevent that. Otherwise
-    // the embedder might risk accessing a to-be-finalized object that
-    // is not in a valid state.
-    //
-    // The dispose() method is hooked up to the garbage collector by
-    // way of a "pre finalizer", a method that is run after marking
-    // has completed, but before any sweeping takes place.
-    m_outerWorker.clear();
 }
 
 } // namespace blink

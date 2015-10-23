@@ -137,6 +137,10 @@ OPENSSL_EXPORT int DH_compute_key(uint8_t *out, const BIGNUM *peers_key,
 /* DH_size returns the number of bytes in the DH group's prime. */
 OPENSSL_EXPORT int DH_size(const DH *dh);
 
+/* DH_num_bits returns the minimum number of bits needed to represent the
+ * absolute value of the DH group's prime. */
+OPENSSL_EXPORT unsigned DH_num_bits(const DH *dh);
+
 #define DH_CHECK_P_NOT_PRIME 0x01
 #define DH_CHECK_P_NOT_SAFE_PRIME 0x02
 #define DH_CHECK_UNABLE_TO_CHECK_GENERATOR 0x04
@@ -231,7 +235,7 @@ struct dh_st {
 
   BIGNUM *p;
   BIGNUM *g;
-  BIGNUM *pub_key;  /* g^x */
+  BIGNUM *pub_key;  /* g^x mod p */
   BIGNUM *priv_key; /* x */
 
   /* priv_length contains the length, in bits, of the private value. If zero,
@@ -249,7 +253,7 @@ struct dh_st {
   BIGNUM *counter;
 
   int flags;
-  int references;
+  CRYPTO_refcount_t references;
   CRYPTO_EX_DATA ex_data;
 };
 
@@ -258,10 +262,6 @@ struct dh_st {
 }  /* extern C */
 #endif
 
-#define DH_F_DH_new_method 100
-#define DH_F_compute_key 101
-#define DH_F_generate_key 102
-#define DH_F_generate_parameters 103
 #define DH_R_BAD_GENERATOR 100
 #define DH_R_INVALID_PUBKEY 101
 #define DH_R_MODULUS_TOO_LARGE 102

@@ -11,7 +11,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
-#include "chrome/common/chrome_version_info.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/extensions/api/copresence.h"
 #include "chrome/common/extensions/manifest_handlers/copresence_manifest.h"
 #include "chrome/common/pref_names.h"
@@ -147,10 +147,10 @@ void CopresenceService::HandleMessages(
   }
 
   // Send the messages to the client app.
-  scoped_ptr<Event> event(
-      new Event(OnMessagesReceived::kEventName,
-                OnMessagesReceived::Create(subscription_id, api_messages),
-                browser_context_));
+  scoped_ptr<Event> event(new Event(
+      events::COPRESENCE_ON_MESSAGES_RECEIVED, OnMessagesReceived::kEventName,
+      OnMessagesReceived::Create(subscription_id, api_messages),
+      browser_context_));
   EventRouter::Get(browser_context_)
       ->DispatchEventToExtension(app_id, event.Pass());
   DVLOG(2) << "Passed " << api_messages.size() << " messages to app \""
@@ -160,10 +160,10 @@ void CopresenceService::HandleMessages(
 void CopresenceService::HandleStatusUpdate(
     copresence::CopresenceStatus status) {
   DCHECK_EQ(copresence::AUDIO_FAIL, status);
-  scoped_ptr<Event> event(
-      new Event(OnStatusUpdated::kEventName,
-                OnStatusUpdated::Create(api::copresence::STATUS_AUDIOFAILED),
-                browser_context_));
+  scoped_ptr<Event> event(new Event(
+      events::COPRESENCE_ON_STATUS_UPDATED, OnStatusUpdated::kEventName,
+      OnStatusUpdated::Create(api::copresence::STATUS_AUDIOFAILED),
+      browser_context_));
   EventRouter::Get(browser_context_)->BroadcastEvent(event.Pass());
   DVLOG(2) << "Sent Audio Failed status update.";
 }
@@ -173,7 +173,7 @@ net::URLRequestContextGetter* CopresenceService::GetRequestContext() const {
 }
 
 const std::string CopresenceService::GetPlatformVersionString() const {
-  return chrome::VersionInfo().CreateVersionString();
+  return chrome::GetVersionString();
 }
 
 const std::string

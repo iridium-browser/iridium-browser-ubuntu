@@ -5,6 +5,7 @@
 #include "extensions/browser/api/device_permissions_prompt.h"
 
 #include "base/bind.h"
+#include "base/i18n/message_formatter.h"
 #include "base/scoped_observer.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -24,6 +25,7 @@
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/permission_broker_client.h"
+#include "device/hid/hid_device_info_linux.h"
 #endif  // defined(OS_CHROMEOS)
 
 using device::HidDeviceFilter;
@@ -90,9 +92,8 @@ class UsbDevicePermissionsPrompt : public DevicePermissionsPrompt::Prompt,
   }
 
   base::string16 GetHeading() const override {
-    return l10n_util::GetStringUTF16(
-        multiple() ? IDS_USB_DEVICE_PERMISSIONS_PROMPT_TITLE_MULTIPLE
-                   : IDS_USB_DEVICE_PERMISSIONS_PROMPT_TITLE_SINGLE);
+    return l10n_util::GetSingleOrMultipleStringUTF16(
+        IDS_USB_DEVICE_PERMISSIONS_PROMPT_TITLE, multiple());
   }
 
   void Dismissed() override {
@@ -205,9 +206,8 @@ class HidDevicePermissionsPrompt : public DevicePermissionsPrompt::Prompt,
   }
 
   base::string16 GetHeading() const override {
-    return l10n_util::GetStringUTF16(
-        multiple() ? IDS_HID_DEVICE_PERMISSIONS_PROMPT_TITLE_MULTIPLE
-                   : IDS_HID_DEVICE_PERMISSIONS_PROMPT_TITLE_SINGLE);
+    return l10n_util::GetSingleOrMultipleStringUTF16(
+        IDS_HID_DEVICE_PERMISSIONS_PROMPT_TITLE, multiple());
   }
 
   void Dismissed() override {
@@ -239,8 +239,10 @@ class HidDevicePermissionsPrompt : public DevicePermissionsPrompt::Prompt,
       chromeos::PermissionBrokerClient* client =
           chromeos::DBusThreadManager::Get()->GetPermissionBrokerClient();
       DCHECK(client) << "Could not get permission broker client.";
+      device::HidDeviceInfoLinux* linux_device_info =
+          static_cast<device::HidDeviceInfoLinux*>(device.get());
       client->CheckPathAccess(
-          device->device_id(),
+          linux_device_info->device_node(),
           base::Bind(&HidDevicePermissionsPrompt::AddCheckedDevice, this,
                      base::Passed(&device_info)));
 #else
@@ -305,10 +307,9 @@ void DevicePermissionsPrompt::Prompt::SetObserver(Observer* observer) {
 }
 
 base::string16 DevicePermissionsPrompt::Prompt::GetPromptMessage() const {
-  return l10n_util::GetStringFUTF16(multiple_
-                                        ? IDS_DEVICE_PERMISSIONS_PROMPT_MULTIPLE
-                                        : IDS_DEVICE_PERMISSIONS_PROMPT_SINGLE,
-                                    base::UTF8ToUTF16(extension_->name()));
+  return base::i18n::MessageFormatter::FormatWithNumberedArgs(
+      l10n_util::GetStringUTF16(IDS_DEVICE_PERMISSIONS_PROMPT),
+      multiple_ ? "multiple" : "single", extension_->name());
 }
 
 base::string16 DevicePermissionsPrompt::Prompt::GetDeviceName(
@@ -335,7 +336,7 @@ void DevicePermissionsPrompt::Prompt::AddCheckedDevice(
     scoped_ptr<DeviceInfo> device,
     bool allowed) {
   if (allowed) {
-    devices_.push_back(device.release());
+    devices_.push_back(device.Pass());
     if (observer_) {
       observer_->OnDevicesChanged();
     }

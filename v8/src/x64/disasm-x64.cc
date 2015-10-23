@@ -6,8 +6,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "src/v8.h"
-
 #if V8_TARGET_ARCH_X64
 
 #include "src/base/lazy-instance.h"
@@ -1390,7 +1388,7 @@ int DisassemblerX64::TwoByteOpcodeInstruction(byte* data) {
         AppendToBuffer(",%d", (*current) & 3);
         current += 1;
       } else if (third_byte == 0x16) {
-        get_modrm(*current, &mod, &regop, &rm);
+        get_modrm(*current, &mod, &rm, &regop);
         AppendToBuffer("pextrd ");  // reg/m32, xmm, imm8
         current += PrintRightOperand(current);
         AppendToBuffer(",%s,%d", NameOfXMMRegister(regop), (*current) & 3);

@@ -82,8 +82,7 @@ const int kMIDISysExHostPadding = 4;
 void SetControlSize(NSControl* control, NSControlSize controlSize) {
   CGFloat fontSize = [NSFont systemFontSizeForControlSize:controlSize];
   NSCell* cell = [control cell];
-  NSFont* font = [NSFont fontWithName:[[cell font] fontName] size:fontSize];
-  [cell setFont:font];
+  [cell setFont:[NSFont systemFontOfSize:fontSize]];
   [cell setControlSize:controlSize];
 }
 
@@ -286,6 +285,8 @@ class ContentSettingBubbleWebContentsObserverBridge
     case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
     case CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS:
     case CONTENT_SETTINGS_TYPE_APP_BANNER:
+    case CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT:
+    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
       NOTREACHED();
   }
   if ((self = [super initWithWindowNibPath:nibPath
@@ -326,6 +327,19 @@ class ContentSettingBubbleWebContentsObserverBridge
   // passed in the radio_group and be 1-based, not 0-based.
   const ContentSettingBubbleModel::RadioGroup& radio_group =
       contentSettingBubbleModel_->bubble_content().radio_group;
+
+  // Xcode 5.1 Interface Builder doesn't allow a font property to be set for
+  // NSMatrix. The implementation of GTMUILocalizerAndLayoutTweaker assumes that
+  // the font for each of the cells in a NSMatrix is identical, and is the font
+  // of the NSMatrix. This logic sets the font of NSMatrix to be that of its
+  // cells.
+  NSFont* font = nil;
+  for (NSCell* cell in [allowBlockRadioGroup_ cells]) {
+    if (!font)
+      font = [cell font];
+    DCHECK([font isEqual:[cell font]]);
+  }
+  [allowBlockRadioGroup_ setFont:font];
 
   // Select appropriate radio button.
   [allowBlockRadioGroup_ selectCellWithTag: radio_group.default_item + 1];
@@ -719,7 +733,7 @@ class ContentSettingBubbleWebContentsObserverBridge
   const ContentSettingBubbleModel::BubbleContent& content =
       contentSettingBubbleModel_->bubble_content();
   [manageButton_ setTitle:base::SysUTF8ToNSString(content.manage_link)];
-  [GTMUILocalizerAndLayoutTweaker sizeToFitView:manageButton_];
+  [GTMUILocalizerAndLayoutTweaker sizeToFitView:[manageButton_ superview]];
 
   CGFloat actualWidth = NSWidth([[[self window] contentView] frame]);
   CGFloat requiredWidth = NSMaxX([manageButton_ frame]) + kManageDonePadding +

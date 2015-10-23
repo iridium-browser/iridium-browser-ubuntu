@@ -32,7 +32,11 @@
 #include "platform/graphics/LoggingCanvas.h"
 
 #include "platform/image-encoders/skia/PNGImageEncoder.h"
+#include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkPicture.h"
+#include "third_party/skia/include/core/SkRRect.h"
+#include "third_party/skia/include/core/SkRect.h"
 #include "wtf/HexNumber.h"
 #include "wtf/text/Base64.h"
 #include "wtf/text/TextEncoding.h"
@@ -98,15 +102,6 @@ PassRefPtr<JSONArray> arrayForSkPoints(size_t count, const SkPoint points[])
     for (size_t i = 0; i < count; ++i)
         pointsArrayItem->pushObject(objectForSkPoint(points[i]));
     return pointsArrayItem.release();
-}
-
-PassRefPtr<JSONObject> objectForSkPicture(const SkPicture& picture)
-{
-    const SkIRect bounds = picture.cullRect().roundOut();
-    RefPtr<JSONObject> pictureItem = JSONObject::create();
-    pictureItem->setNumber("width", bounds.width());
-    pictureItem->setNumber("height", bounds.height());
-    return pictureItem.release();
 }
 
 PassRefPtr<JSONObject> objectForRadius(const SkRRect& rrect, SkRRect::Corner corner)
@@ -607,7 +602,7 @@ void LoggingCanvas::onDrawBitmap(const SkBitmap& bitmap, SkScalar left, SkScalar
     this->SkCanvas::onDrawBitmap(bitmap, left, top, paint);
 }
 
-void LoggingCanvas::onDrawBitmapRect(const SkBitmap& bitmap, const SkRect* src, const SkRect& dst, const SkPaint* paint, DrawBitmapRectFlags flags)
+void LoggingCanvas::onDrawBitmapRect(const SkBitmap& bitmap, const SkRect* src, const SkRect& dst, const SkPaint* paint, SrcRectConstraint constraint)
 {
     AutoLogger logger(this);
     RefPtr<JSONObject> params = logger.logItemWithParams("drawBitmapRectToRect");
@@ -617,8 +612,8 @@ void LoggingCanvas::onDrawBitmapRect(const SkBitmap& bitmap, const SkRect* src, 
     params->setObject("dst", objectForSkRect(dst));
     if (paint)
         params->setObject("paint", objectForSkPaint(*paint));
-    params->setNumber("flags", flags);
-    this->SkCanvas::onDrawBitmapRect(bitmap, src, dst, paint, flags);
+    params->setNumber("flags", constraint);
+    this->SkCanvas::onDrawBitmapRect(bitmap, src, dst, paint, constraint);
 }
 
 void LoggingCanvas::onDrawBitmapNine(const SkBitmap& bitmap, const SkIRect& center, const SkRect& dst, const SkPaint* paint)
@@ -645,7 +640,7 @@ void LoggingCanvas::onDrawImage(const SkImage* image, SkScalar left, SkScalar to
     this->SkCanvas::onDrawImage(image, left, top, paint);
 }
 
-void LoggingCanvas::onDrawImageRect(const SkImage* image, const SkRect* src, const SkRect& dst, const SkPaint* paint)
+void LoggingCanvas::onDrawImageRect(const SkImage* image, const SkRect* src, const SkRect& dst, const SkPaint* paint, SrcRectConstraint constraint)
 {
     AutoLogger logger(this);
     RefPtr<JSONObject> params = logger.logItemWithParams("drawImageRect");
@@ -655,7 +650,7 @@ void LoggingCanvas::onDrawImageRect(const SkImage* image, const SkRect* src, con
     params->setObject("dst", objectForSkRect(dst));
     if (paint)
         params->setObject("paint", objectForSkPaint(*paint));
-    this->SkCanvas::onDrawImageRect(image, src, dst, paint);
+    this->SkCanvas::onDrawImageRect(image, src, dst, paint, constraint);
 }
 
 void LoggingCanvas::onDrawSprite(const SkBitmap& bitmap, int left, int top, const SkPaint* paint)
@@ -677,30 +672,6 @@ void LoggingCanvas::onDrawVertices(VertexMode vmode, int vertexCount, const SkPo
     RefPtr<JSONObject> params = logger.logItemWithParams("drawVertices");
     params->setObject("paint", objectForSkPaint(paint));
     this->SkCanvas::onDrawVertices(vmode, vertexCount, vertices, texs, colors, xmode, indices, indexCount, paint);
-}
-
-void LoggingCanvas::beginCommentGroup(const char* description)
-{
-    AutoLogger logger(this);
-    RefPtr<JSONObject> params = logger.logItemWithParams("beginCommentGroup");
-    params->setString("description", description);
-    this->SkCanvas::beginCommentGroup(description);
-}
-
-void LoggingCanvas::addComment(const char* keyword, const char* value)
-{
-    AutoLogger logger(this);
-    RefPtr<JSONObject> params = logger.logItemWithParams("addComment");
-    params->setString("key", keyword);
-    params->setString("value", value);
-    this->SkCanvas::addComment(keyword, value);
-}
-
-void LoggingCanvas::endCommentGroup()
-{
-    AutoLogger logger(this);
-    logger.logItem("endCommentGroup");
-    this->SkCanvas::endCommentGroup();
 }
 
 void LoggingCanvas::onDrawDRRect(const SkRRect& outer, const SkRRect& inner, const SkPaint& paint)
@@ -809,9 +780,7 @@ void LoggingCanvas::onClipRegion(const SkRegion& region, SkRegion::Op op)
 
 void LoggingCanvas::onDrawPicture(const SkPicture* picture, const SkMatrix* matrix, const SkPaint* paint)
 {
-    AutoLogger logger(this);
-    logger.logItemWithParams("drawPicture")->setObject("picture", objectForSkPicture(*picture));
-    this->SkCanvas::onDrawPicture(picture, matrix, paint);
+    this->unrollDrawPicture(picture, matrix, paint, nullptr);
 }
 
 void LoggingCanvas::didSetMatrix(const SkMatrix& matrix)

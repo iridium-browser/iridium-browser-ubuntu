@@ -48,6 +48,8 @@ source_set("sync_core") {
     "engine/apply_control_data_updates.h",
     "engine/backoff_delay_provider.cc",
     "engine/backoff_delay_provider.h",
+    "engine/clear_server_data.cc",
+    "engine/clear_server_data.h",
     "engine/commit.cc",
     "engine/commit.h",
     "engine/commit_contribution.cc",
@@ -142,6 +144,8 @@ source_set("sync_core") {
     "internal_api/debug_info_event_listener.cc",
     "internal_api/debug_info_event_listener.h",
     "internal_api/delete_journal.cc",
+    "internal_api/events/clear_server_data_request_event.cc",
+    "internal_api/events/clear_server_data_response_event.cc",
     "internal_api/events/commit_request_event.cc",
     "internal_api/events/commit_response_event.cc",
     "internal_api/events/configure_get_updates_request_event.cc",
@@ -208,6 +212,8 @@ source_set("sync_core") {
     "internal_api/public/engine/polling_constants.h",
     "internal_api/public/engine/sync_status.cc",
     "internal_api/public/engine/sync_status.h",
+    "internal_api/public/events/clear_server_data_request_event.h",
+    "internal_api/public/events/clear_server_data_response_event.h",
     "internal_api/public/events/commit_request_event.h",
     "internal_api/public/events/commit_response_event.h",
     "internal_api/public/events/configure_get_updates_request_event.h",
@@ -250,7 +256,6 @@ source_set("sync_core") {
     "internal_api/public/user_share.h",
     "internal_api/public/util/experiments.h",
     "internal_api/public/util/immutable.h",
-    "internal_api/public/util/report_unrecoverable_error_function.h",
     "internal_api/public/util/sync_db_util.h",
     "internal_api/public/util/sync_string_conversions.cc",
     "internal_api/public/util/sync_string_conversions.h",
@@ -346,6 +351,7 @@ source_set("sync_core") {
     "syncable/on_disk_directory_backing_store.h",
     "syncable/parent_child_index.cc",
     "syncable/parent_child_index.h",
+    "syncable/proto_value_ptr.h",
     "syncable/scoped_kernel_lock.cc",
     "syncable/scoped_kernel_lock.h",
     "syncable/scoped_parent_child_index_updater.cc",
@@ -400,6 +406,8 @@ source_set("sync_core") {
     "util/time.h",
   ]
 
+  configs += [ "//build/config:precompiled_headers" ]
+
   public_deps = [
     "//sync/internal_api/attachments/proto",
   ]
@@ -416,6 +424,16 @@ source_set("sync_core") {
     "//url",
     "//sync/protocol",
   ]
+
+  if (is_android) {
+    deps += [ "//sync/android:jni_headers" ]
+    sources += [
+      "android/model_type_helper.cc",
+      "android/model_type_helper.h",
+      "android/sync_jni_registrar.cc",
+      "android/sync_jni_registrar.h",
+    ]
+  }
 
   if (is_chromeos) {
     # Required by get_session_name.cc on Chrome OS.
@@ -561,6 +579,15 @@ static_library("test_support_sync_api") {
   ]
 }
 
+# TODO(GYP): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("sync_unit_tests_run") {
+  testonly = true
+  deps = [
+    ":sync_unit_tests",
+  ]
+}
+
 # GYP version: sync/sync_tests.gypi:sync_unit_tests
 test("sync_unit_tests") {
   sources = [
@@ -633,6 +660,7 @@ test("sync_unit_tests") {
     "syncable/model_type_unittest.cc",
     "syncable/nigori_util_unittest.cc",
     "syncable/parent_child_index_unittest.cc",
+    "syncable/proto_value_ptr_unittest.cc",
     "syncable/syncable_enum_conversions_unittest.cc",
     "syncable/syncable_id_unittest.cc",
     "syncable/syncable_unittest.cc",
@@ -643,6 +671,21 @@ test("sync_unit_tests") {
     "util/nigori_unittest.cc",
     "util/protobuf_unittest.cc",
   ]
+
+  configs += [ "//build/config:precompiled_headers" ]
+
+  data = [
+    "//chrome/test/data/sync/",
+    "//net/tools/testserver/",
+    "//third_party/pyftpdlib/",
+    "//third_party/pywebsocket/",
+    "//third_party/tlslite/",
+    "$root_out_dir/pyproto/google/",
+  ]
+
+  if (is_android) {
+    data += [ "$root_out_dir/locales/en-US.pak" ]
+  }
 
   deps = [
     ":test_support_sync_core",
@@ -662,7 +705,12 @@ test("sync_unit_tests") {
     "//testing/gtest",
     "//third_party/leveldatabase",
     "//third_party/protobuf:protobuf_lite",
+    "//third_party/zlib",
   ]
+
+  if (is_android) {
+    isolate_file = "sync_unit_tests.isolate"
+  }
 
   if (is_chromeos) {
     # Required by get_session_name_unittest.cc on Chrome OS.
@@ -684,8 +732,6 @@ static_library("test_support_sync_fake_server") {
     "test/fake_server/bookmark_entity.h",
     "test/fake_server/bookmark_entity_builder.cc",
     "test/fake_server/bookmark_entity_builder.h",
-    "test/fake_server/entity_builder.cc",
-    "test/fake_server/entity_builder.h",
     "test/fake_server/entity_builder_factory.cc",
     "test/fake_server/entity_builder_factory.h",
     "test/fake_server/fake_server.cc",

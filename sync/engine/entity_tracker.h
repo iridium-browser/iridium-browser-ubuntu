@@ -11,10 +11,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "sync/base/sync_export.h"
-#include "sync/internal_api/public/non_blocking_sync_common.h"
 #include "sync/protocol/sync.pb.h"
 
-namespace syncer {
+namespace syncer_v2 {
+struct UpdateResponseData;
 
 // Manages the pending commit and update state for an entity on the sync
 // thread.
@@ -34,12 +34,13 @@ class SYNC_EXPORT EntityTracker {
   ~EntityTracker();
 
   // Initialize a new entity based on an update response.
-  static EntityTracker* FromServerUpdate(const std::string& id_string,
-                                         const std::string& client_tag_hash,
-                                         int64 version);
+  static scoped_ptr<EntityTracker> FromServerUpdate(
+      const std::string& id_string,
+      const std::string& client_tag_hash,
+      int64 version);
 
   // Initialize a new entity based on a commit request.
-  static EntityTracker* FromCommitRequest(
+  static scoped_ptr<EntityTracker> FromCommitRequest(
       const std::string& id_string,
       const std::string& client_tag_hash,
       int64 sequence_number,

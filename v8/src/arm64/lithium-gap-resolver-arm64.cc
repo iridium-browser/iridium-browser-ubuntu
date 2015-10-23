@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
-
 #include "src/arm64/delayed-masm-arm64-inl.h"
 #include "src/arm64/lithium-codegen-arm64.h"
 #include "src/arm64/lithium-gap-resolver-arm64.h"
@@ -292,4 +290,5 @@ void LGapResolver::EmitMove(int index) {
   moves_[index].Eliminate();
 }
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

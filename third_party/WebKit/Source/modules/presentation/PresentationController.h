@@ -8,6 +8,7 @@
 #include "core/frame/LocalFrameLifecycleObserver.h"
 #include "modules/ModulesExport.h"
 #include "modules/presentation/Presentation.h"
+#include "modules/presentation/PresentationRequest.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/modules/presentation/WebPresentationClient.h"
@@ -16,6 +17,7 @@
 namespace blink {
 
 class LocalFrame;
+class WebPresentationAvailabilityCallback;
 class WebPresentationSessionClient;
 enum class WebPresentationSessionState;
 
@@ -29,7 +31,7 @@ class MODULES_EXPORT PresentationController final
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(PresentationController);
     WTF_MAKE_NONCOPYABLE(PresentationController);
 public:
-    virtual ~PresentationController();
+    ~PresentationController() override;
 
     static PassOwnPtrWillBeRawPtr<PresentationController> create(LocalFrame&, WebPresentationClient*);
 
@@ -38,46 +40,55 @@ public:
 
     static void provideTo(LocalFrame&, WebPresentationClient*);
 
+    WebPresentationClient* client();
+
     // Implementation of HeapSupplement.
     DECLARE_VIRTUAL_TRACE();
 
     // Implementation of WebPresentationController.
-    virtual void didChangeAvailability(bool available) override;
-    virtual bool isAvailableChangeWatched() const override;
-    virtual void didStartDefaultSession(WebPresentationSessionClient*) override;
-    virtual void didChangeSessionState(WebPresentationSessionClient*, WebPresentationSessionState) override;
-    virtual void didReceiveSessionTextMessage(WebPresentationSessionClient*, const WebString&) override;
+    void didStartDefaultSession(WebPresentationSessionClient*) override;
+    void didChangeSessionState(WebPresentationSessionClient*, WebPresentationSessionState) override;
+    void didReceiveSessionTextMessage(WebPresentationSessionClient*, const WebString&) override;
+    void didReceiveSessionBinaryMessage(WebPresentationSessionClient*, const uint8_t* data, size_t length) override;
 
-    // Called when the first listener was added to or the last listener was removed from the
-    // |availablechange| event.
-    void updateAvailableChangeWatched(bool watched);
-
-    // Called when the frame wants to start a new presentation.
-    void startSession(const String& presentationUrl, const String& presentationId, WebPresentationSessionClientCallbacks*);
-
-    // Called when the frame wants to join an existing presentation.
-    void joinSession(const String& presentationUrl, const String& presentationId, WebPresentationSessionClientCallbacks*);
-
-    // Called when the frame wants to send String message to an existing presentation.
-    void send(const String& presentationUrl, const String& presentationId, const String& message);
-
-    // Called when the frame wants to send ArrayBuffer/View data to an existing presentation.
-    void send(const String& presentationUrl, const String& presentationId, const uint8_t* data, size_t length);
-
-    // Called when the frame wants to close an existing presentation.
-    void closeSession(const String& url, const String& presentationId);
-
-    // Connects the |Presentation| object with this controller.
+    // Called by the Presentation object to advertize itself to the controller.
+    // The Presentation object is kept as a WeakMember in order to avoid keeping
+    // it alive when it is no longer in the tree.
     void setPresentation(Presentation*);
+
+    // Called by the Presentation object when the default request is updated
+    // in order to notify the client about the change of default presentation
+    // url.
+    void setDefaultRequestUrl(const KURL&);
+
+    // Handling of running sessions.
+    void registerSession(PresentationSession*);
 
 private:
     PresentationController(LocalFrame&, WebPresentationClient*);
 
     // Implementation of LocalFrameLifecycleObserver.
-    virtual void willDetachFrameHost() override;
+    void willDetachFrameHost() override;
 
+    // Return the session associated with the given |sessionClient| or null if
+    // it doesn't exist.
+    PresentationSession* findSession(WebPresentationSessionClient*);
+
+    // The WebPresentationClient which allows communicating with the embedder.
+    // It is not owned by the PresentationController but the controller will
+    // set it to null when the LocalFrame will be detached at which point the
+    // client can't be used.
     WebPresentationClient* m_client;
-    PersistentWillBeMember<Presentation> m_presentation;
+
+    // Default PresentationRequest used by the embedder.
+    // PersistentWillBeMember<PresentationRequest> m_defaultRequest;
+    WeakMember<Presentation> m_presentation;
+
+    // The presentation sessions associated with that frame.
+    // TODO(mlamouri): the PresentationController will keep any created session
+    // alive until the frame is detached. These should be weak ptr so that the
+    // session can be GC'd.
+    PersistentHeapHashSetWillBeHeapHashSet<Member<PresentationSession>> m_sessions;
 };
 
 } // namespace blink

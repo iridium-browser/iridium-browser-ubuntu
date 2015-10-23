@@ -9,15 +9,16 @@
 #include "base/path_service.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/test_runner/test_preferences.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/web_preferences.h"
 #include "content/shell/common/shell_switches.h"
-#include "content/shell/common/test_runner/test_preferences.h"
 
 namespace content {
 
-void ExportLayoutTestSpecificPreferences(const TestPreferences& from,
-                                         WebPreferences* to) {
+void ExportLayoutTestSpecificPreferences(
+    const test_runner::TestPreferences& from,
+    WebPreferences* to) {
   to->allow_universal_access_from_file_urls =
       from.allow_universal_access_from_file_urls;
   to->dom_paste_enabled = from.dom_paste_allowed;
@@ -125,10 +126,9 @@ std::vector<std::string> GetSideloadFontFiles() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kRegisterFontFiles)) {
-    base::SplitString(
+    files = base::SplitString(
         command_line.GetSwitchValueASCII(switches::kRegisterFontFiles),
-        ';',
-        &files);
+        ";", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   }
   return files;
 }

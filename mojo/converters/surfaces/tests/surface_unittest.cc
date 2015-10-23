@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "cc/quads/debug_border_draw_quad.h"
 #include "cc/quads/render_pass.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/surface_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
+#include "cc/resources/resource_provider.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
@@ -110,18 +112,11 @@ TEST_F(SurfaceLibQuadTest, TextureQuad) {
   float vertex_opacity[4] = {0.1f, 0.5f, 0.4f, 0.8f};
   bool y_flipped = false;
   bool nearest_neighbor = false;
-  texture_quad->SetAll(sqs,
-                       rect,
-                       opaque_rect,
-                       visible_rect,
-                       needs_blending,
-                       resource_id,
-                       premultiplied_alpha,
-                       uv_top_left,
-                       uv_bottom_right,
-                       background_color,
-                       vertex_opacity,
-                       y_flipped,
+  bool allow_overlay = false;
+  texture_quad->SetAll(sqs, rect, opaque_rect, visible_rect, needs_blending,
+                       resource_id, gfx::Size(), allow_overlay,
+                       premultiplied_alpha, uv_top_left, uv_bottom_right,
+                       background_color, vertex_opacity, y_flipped,
                        nearest_neighbor);
 
   QuadPtr mojo_quad = Quad::From<cc::DrawQuad>(*texture_quad);
@@ -150,7 +145,7 @@ TEST_F(SurfaceLibQuadTest, TextureQuadEmptyVertexOpacity) {
   PassPtr mojo_pass = Pass::New();
   mojo_pass->id = RenderPassId::New();
   mojo_pass->id->layer_id = 1;
-  mojo_pass->id->index = 1;
+  mojo_pass->id->index = 1u;
   mojo_pass->quads.push_back(mojo_texture_quad.Pass());
   SharedQuadStatePtr mojo_sqs = SharedQuadState::New();
   mojo_pass->shared_quad_states.push_back(mojo_sqs.Pass());
@@ -169,7 +164,7 @@ TEST_F(SurfaceLibQuadTest, TextureQuadEmptyBackgroundColor) {
   PassPtr mojo_pass = Pass::New();
   mojo_pass->id = RenderPassId::New();
   mojo_pass->id->layer_id = 1;
-  mojo_pass->id->index = 1;
+  mojo_pass->id->index = 1u;
   mojo_pass->quads.push_back(mojo_texture_quad.Pass());
   SharedQuadStatePtr mojo_sqs = SharedQuadState::New();
   mojo_pass->shared_quad_states.push_back(mojo_sqs.Pass());
@@ -179,10 +174,10 @@ TEST_F(SurfaceLibQuadTest, TextureQuadEmptyBackgroundColor) {
 }
 
 TEST(SurfaceLibTest, SharedQuadState) {
-  gfx::Transform content_to_target_transform;
-  content_to_target_transform.Scale3d(0.3f, 0.7f, 0.9f);
-  gfx::Size content_bounds(57, 39);
-  gfx::Rect visible_content_rect(3, 7, 28, 42);
+  gfx::Transform quad_to_target_transform;
+  quad_to_target_transform.Scale3d(0.3f, 0.7f, 0.9f);
+  gfx::Size quad_layer_bounds(57, 39);
+  gfx::Rect visible_quad_layer_rect(3, 7, 28, 42);
   gfx::Rect clip_rect(9, 12, 21, 31);
   bool is_clipped = true;
   float opacity = 0.65f;
@@ -190,21 +185,17 @@ TEST(SurfaceLibTest, SharedQuadState) {
   ::SkXfermode::Mode blend_mode = ::SkXfermode::kSrcOver_Mode;
   scoped_ptr<cc::RenderPass> pass = cc::RenderPass::Create();
   cc::SharedQuadState* sqs = pass->CreateAndAppendSharedQuadState();
-  sqs->SetAll(content_to_target_transform,
-              content_bounds,
-              visible_content_rect,
-              clip_rect,
-              is_clipped,
-              opacity,
-              blend_mode,
-              sorting_context_id);
+  sqs->SetAll(quad_to_target_transform, quad_layer_bounds,
+              visible_quad_layer_rect, clip_rect, is_clipped, opacity,
+              blend_mode, sorting_context_id);
 
   SharedQuadStatePtr mojo_sqs = SharedQuadState::From(*sqs);
   ASSERT_FALSE(mojo_sqs.is_null());
-  EXPECT_EQ(Transform::From(content_to_target_transform),
-            mojo_sqs->content_to_target_transform);
-  EXPECT_EQ(Size::From(content_bounds), mojo_sqs->content_bounds);
-  EXPECT_EQ(Rect::From(visible_content_rect), mojo_sqs->visible_content_rect);
+  EXPECT_EQ(Transform::From(quad_to_target_transform),
+            mojo_sqs->quad_to_target_transform);
+  EXPECT_EQ(Size::From(quad_layer_bounds), mojo_sqs->quad_layer_bounds);
+  EXPECT_EQ(Rect::From(visible_quad_layer_rect),
+            mojo_sqs->visible_quad_layer_rect);
   EXPECT_EQ(Rect::From(clip_rect), mojo_sqs->clip_rect);
   EXPECT_EQ(is_clipped, mojo_sqs->is_clipped);
   EXPECT_EQ(opacity, mojo_sqs->opacity);
@@ -225,24 +216,19 @@ TEST(SurfaceLibTest, RenderPass) {
                transform_to_root_target,
                has_transparent_background);
 
-  gfx::Transform content_to_target_transform;
-  content_to_target_transform.Scale3d(0.3f, 0.7f, 0.9f);
-  gfx::Size content_bounds(57, 39);
-  gfx::Rect visible_content_rect(3, 7, 28, 42);
+  gfx::Transform quad_to_target_transform;
+  quad_to_target_transform.Scale3d(0.3f, 0.7f, 0.9f);
+  gfx::Size quad_layer_bounds(57, 39);
+  gfx::Rect visible_quad_layer_rect(3, 7, 28, 42);
   gfx::Rect clip_rect(9, 12, 21, 31);
   bool is_clipped = true;
   float opacity = 0.65f;
   int sorting_context_id = 13;
   ::SkXfermode::Mode blend_mode = ::SkXfermode::kSrcOver_Mode;
   cc::SharedQuadState* sqs = pass->CreateAndAppendSharedQuadState();
-  sqs->SetAll(content_to_target_transform,
-              content_bounds,
-              visible_content_rect,
-              clip_rect,
-              is_clipped,
-              opacity,
-              blend_mode,
-              sorting_context_id);
+  sqs->SetAll(quad_to_target_transform, quad_layer_bounds,
+              visible_quad_layer_rect, clip_rect, is_clipped, opacity,
+              blend_mode, sorting_context_id);
 
   gfx::Rect rect(5, 7, 13, 19);
   gfx::Rect opaque_rect(rect);
@@ -277,23 +263,16 @@ TEST(SurfaceLibTest, RenderPass) {
   float vertex_opacity[4] = {0.1f, 0.5f, 0.4f, 0.8f};
   bool y_flipped = false;
   bool nearest_neighbor = false;
-  texture_quad->SetAll(sqs,
-                       rect,
-                       opaque_rect,
-                       visible_rect,
-                       needs_blending,
-                       resource_id,
-                       premultiplied_alpha,
-                       uv_top_left,
-                       uv_bottom_right,
-                       background_color,
-                       vertex_opacity,
-                       y_flipped,
+  bool allow_overlay = false;
+  texture_quad->SetAll(sqs, rect, opaque_rect, visible_rect, needs_blending,
+                       resource_id, gfx::Size(), allow_overlay,
+                       premultiplied_alpha, uv_top_left, uv_bottom_right,
+                       background_color, vertex_opacity, y_flipped,
                        nearest_neighbor);
 
   PassPtr mojo_pass = Pass::From(*pass);
   ASSERT_FALSE(mojo_pass.is_null());
-  EXPECT_EQ(6, mojo_pass->id->index);
+  EXPECT_EQ(6u, mojo_pass->id->index);
   EXPECT_EQ(Rect::From(output_rect), mojo_pass->output_rect);
   EXPECT_EQ(Rect::From(damage_rect), mojo_pass->damage_rect);
   EXPECT_EQ(Transform::From(transform_to_root_target),
@@ -319,10 +298,9 @@ TEST(SurfaceLibTest, RenderPass) {
 
   cc::SharedQuadState* round_trip_sqs =
       round_trip_pass->shared_quad_state_list.front();
-  EXPECT_EQ(content_to_target_transform,
-            round_trip_sqs->content_to_target_transform);
-  EXPECT_EQ(content_bounds, round_trip_sqs->content_bounds);
-  EXPECT_EQ(visible_content_rect, round_trip_sqs->visible_content_rect);
+  EXPECT_EQ(quad_to_target_transform, round_trip_sqs->quad_to_target_transform);
+  EXPECT_EQ(quad_layer_bounds, round_trip_sqs->quad_layer_bounds);
+  EXPECT_EQ(visible_quad_layer_rect, round_trip_sqs->visible_quad_layer_rect);
   EXPECT_EQ(clip_rect, round_trip_sqs->clip_rect);
   EXPECT_EQ(is_clipped, round_trip_sqs->is_clipped);
   EXPECT_EQ(opacity, round_trip_sqs->opacity);
@@ -353,7 +331,7 @@ TEST(SurfaceLibTest, RenderPass) {
   ASSERT_EQ(cc::DrawQuad::TEXTURE_CONTENT, round_trip_quad->material);
   const cc::TextureDrawQuad* round_trip_texture_quad =
       cc::TextureDrawQuad::MaterialCast(round_trip_quad);
-  EXPECT_EQ(resource_id, round_trip_texture_quad->resource_id);
+  EXPECT_EQ(resource_id, round_trip_texture_quad->resource_id());
   EXPECT_EQ(premultiplied_alpha, round_trip_texture_quad->premultiplied_alpha);
   EXPECT_EQ(uv_top_left, round_trip_texture_quad->uv_top_left);
   EXPECT_EQ(uv_bottom_right, round_trip_texture_quad->uv_bottom_right);
@@ -465,6 +443,33 @@ TEST(SurfaceLibTest, ReturnedResource) {
   EXPECT_EQ(sync_point, round_trip_resource.sync_point);
   EXPECT_EQ(count, round_trip_resource.count);
   EXPECT_EQ(lost, round_trip_resource.lost);
+}
+
+TEST_F(SurfaceLibQuadTest, DebugBorderQuad) {
+  cc::DebugBorderDrawQuad* debug_border_quad =
+      pass->CreateAndAppendDrawQuad<cc::DebugBorderDrawQuad>();
+  const SkColor arbitrary_color = SK_ColorGREEN;
+  const int width = 3;
+  debug_border_quad->SetAll(sqs,
+                            rect,
+                            opaque_rect,
+                            visible_rect,
+                            needs_blending,
+                            arbitrary_color,
+                            width);
+
+  QuadPtr mojo_quad = Quad::From<cc::DrawQuad>(*debug_border_quad);
+  ASSERT_FALSE(mojo_quad.is_null());
+  EXPECT_EQ(MATERIAL_DEBUG_BORDER, mojo_quad->material);
+  EXPECT_EQ(Rect::From(rect), mojo_quad->rect);
+  EXPECT_EQ(Rect::From(opaque_rect), mojo_quad->opaque_rect);
+  EXPECT_EQ(Rect::From(visible_rect), mojo_quad->visible_rect);
+  EXPECT_EQ(needs_blending, mojo_quad->needs_blending);
+  ASSERT_TRUE(mojo_quad->debug_border_quad_state);
+  DebugBorderQuadStatePtr& mojo_debug_border_state =
+      mojo_quad->debug_border_quad_state;
+  EXPECT_EQ(Color::From(arbitrary_color), mojo_debug_border_state->color);
+  EXPECT_EQ(width, mojo_debug_border_state->width);
 }
 
 }  // namespace

@@ -199,7 +199,9 @@ void NaClLogAddressSpaceLayout(struct NaClApp *nap) {
   NaClLog(2, "nap->bundle_size        = 0x%x\n", nap->bundle_size);
 }
 
-
+/*
+ * Expects that "nap->mu" lock is already held.
+ */
 NaClErrorCode NaClAppLoadFileAslr(struct NaClDesc *ndp,
                                   struct NaClApp *nap,
                                   enum NaClAslrMode aslr_mode) {
@@ -459,6 +461,10 @@ NaClErrorCode NaClAppLoadFileDynamically(
   }
   nap->user_entry_pt = nap->initial_entry_pt;
   nap->initial_entry_pt = NaClElfImageGetEntryPoint(image);
+  if (!NaClAddrIsValidIrtEntryPt(nap, nap->initial_entry_pt)) {
+    ret = LOAD_BAD_ENTRY;
+    goto done;
+  }
 
  done:
   NaClElfImageDelete(image);
@@ -472,6 +478,15 @@ int NaClAddrIsValidEntryPt(struct NaClApp *nap,
   }
 
   return addr < nap->static_text_end;
+}
+
+int NaClAddrIsValidIrtEntryPt(struct NaClApp *nap,
+                              uintptr_t      addr) {
+  if (0 != (addr & (nap->bundle_size - 1))) {
+    return 0;
+  }
+
+  return addr < nap->dynamic_text_end;
 }
 
 int NaClReportExitStatus(struct NaClApp *nap, int exit_status) {
@@ -657,7 +672,7 @@ int NaClCreateMainThread(struct NaClApp     *nap,
   for (i = 0; i < argc; ++i) {
     *p++ = (uint32_t) NaClSysToUser(nap, (uintptr_t) strp);
     NaClLog(2, "copying arg %d  %p -> %p\n",
-            i, argv[i], strp);
+            i, (void *) argv[i], (void *) strp);
     strcpy(strp, argv[i]);
     strp += argv_len[i];
   }
@@ -666,7 +681,7 @@ int NaClCreateMainThread(struct NaClApp     *nap,
   for (i = 0; i < envc; ++i) {
     *p++ = (uint32_t) NaClSysToUser(nap, (uintptr_t) strp);
     NaClLog(2, "copying env %d  %p -> %p\n",
-            i, envv[i], strp);
+            i, (void *) envv[i], (void *) strp);
     strcpy(strp, envv[i]);
     strp += envv_len[i];
   }

@@ -16,8 +16,8 @@
 #include "cc/test/animation_test_common.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
+#include "cc/test/fake_resource_provider.h"
 #include "cc/test/geometry_test_utils.h"
-#include "cc/test/render_pass_test_common.h"
 #include "cc/test/render_pass_test_utils.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -36,13 +36,8 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
     CHECK(output_surface_->BindToClient(&output_surface_client_));
 
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-    resource_provider_ = ResourceProvider::Create(output_surface_.get(),
-                                                  shared_bitmap_manager_.get(),
-                                                  NULL,
-                                                  NULL,
-                                                  0,
-                                                  false,
-                                                  1);
+    resource_provider_ = FakeResourceProvider::Create(
+        output_surface_.get(), shared_bitmap_manager_.get());
     renderer_ = SoftwareRenderer::Create(
         this, &settings_, output_surface_.get(), resource_provider());
   }
@@ -104,7 +99,7 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
   InitializeRenderer(make_scoped_ptr(new SoftwareOutputDevice));
 
   RenderPassId root_render_pass_id = RenderPassId(1, 1);
-  scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
+  scoped_ptr<RenderPass> root_render_pass = RenderPass::Create();
   root_render_pass->SetNew(
       root_render_pass_id, outer_rect, outer_rect, gfx::Transform());
   SharedQuadState* shared_quad_state =
@@ -134,8 +129,8 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
   gfx::Rect device_viewport_rect(outer_size);
   scoped_ptr<SkBitmap> output =
       DrawAndCopyOutput(&list, device_scale_factor, device_viewport_rect);
-  EXPECT_EQ(outer_rect.width(), output->info().fWidth);
-  EXPECT_EQ(outer_rect.height(), output->info().fHeight);
+  EXPECT_EQ(outer_rect.width(), output->info().width());
+  EXPECT_EQ(outer_rect.height(), output->info().height());
 
   EXPECT_EQ(SK_ColorYELLOW, output->getColor(0, 0));
   EXPECT_EQ(SK_ColorYELLOW,
@@ -153,14 +148,12 @@ TEST_F(SoftwareRendererTest, TileQuad) {
   gfx::Rect inner_rect(gfx::Point(1, 1), inner_size);
   InitializeRenderer(make_scoped_ptr(new SoftwareOutputDevice));
 
-  ResourceProvider::ResourceId resource_yellow =
-      resource_provider()->CreateResource(
-          outer_size, GL_CLAMP_TO_EDGE,
-          ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
-  ResourceProvider::ResourceId resource_cyan =
-      resource_provider()->CreateResource(
-          inner_size, GL_CLAMP_TO_EDGE,
-          ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
+  ResourceId resource_yellow = resource_provider()->CreateResource(
+      outer_size, GL_CLAMP_TO_EDGE, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
+      RGBA_8888);
+  ResourceId resource_cyan = resource_provider()->CreateResource(
+      inner_size, GL_CLAMP_TO_EDGE, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
+      RGBA_8888);
 
   SkBitmap yellow_tile;
   yellow_tile.allocN32Pixels(outer_size.width(), outer_size.height());
@@ -179,7 +172,7 @@ TEST_F(SoftwareRendererTest, TileQuad) {
   gfx::Rect root_rect = outer_rect;
 
   RenderPassId root_render_pass_id = RenderPassId(1, 1);
-  scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
+  scoped_ptr<RenderPass> root_render_pass = RenderPass::Create();
   root_render_pass->SetNew(
       root_render_pass_id, root_rect, root_rect, gfx::Transform());
   SharedQuadState* shared_quad_state =
@@ -222,8 +215,8 @@ TEST_F(SoftwareRendererTest, TileQuad) {
   gfx::Rect device_viewport_rect(outer_size);
   scoped_ptr<SkBitmap> output =
       DrawAndCopyOutput(&list, device_scale_factor, device_viewport_rect);
-  EXPECT_EQ(outer_rect.width(), output->info().fWidth);
-  EXPECT_EQ(outer_rect.height(), output->info().fHeight);
+  EXPECT_EQ(outer_rect.width(), output->info().width());
+  EXPECT_EQ(outer_rect.height(), output->info().height());
 
   EXPECT_EQ(SK_ColorYELLOW, output->getColor(0, 0));
   EXPECT_EQ(SK_ColorYELLOW,
@@ -240,10 +233,9 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
   visible_rect.Inset(1, 2, 3, 4);
   InitializeRenderer(make_scoped_ptr(new SoftwareOutputDevice));
 
-  ResourceProvider::ResourceId resource_cyan =
-      resource_provider()->CreateResource(
-          tile_size, GL_CLAMP_TO_EDGE, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
-          RGBA_8888);
+  ResourceId resource_cyan = resource_provider()->CreateResource(
+      tile_size, GL_CLAMP_TO_EDGE, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
+      RGBA_8888);
 
   SkBitmap cyan_tile;  // The lowest five rows are yellow.
   cyan_tile.allocN32Pixels(tile_size.width(), tile_size.height());
@@ -259,7 +251,7 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
   gfx::Rect root_rect(tile_size);
 
   RenderPassId root_render_pass_id = RenderPassId(1, 1);
-  scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
+  scoped_ptr<RenderPass> root_render_pass = RenderPass::Create();
   root_render_pass->SetNew(
       root_render_pass_id, root_rect, root_rect, gfx::Transform());
   SharedQuadState* shared_quad_state =
@@ -292,8 +284,8 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
   gfx::Rect device_viewport_rect(tile_size);
   scoped_ptr<SkBitmap> output =
       DrawAndCopyOutput(&list, device_scale_factor, device_viewport_rect);
-  EXPECT_EQ(tile_rect.width(), output->info().fWidth);
-  EXPECT_EQ(tile_rect.height(), output->info().fHeight);
+  EXPECT_EQ(tile_rect.width(), output->info().width());
+  EXPECT_EQ(tile_rect.height(), output->info().height());
 
   // Check portion of tile not in visible rect isn't drawn.
   const unsigned int kTransparent = SK_ColorTRANSPARENT;
@@ -326,7 +318,7 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
 
   // Draw a fullscreen green quad in a first frame.
   RenderPassId root_clear_pass_id(1, 0);
-  TestRenderPass* root_clear_pass = AddRenderPass(
+  RenderPass* root_clear_pass = AddRenderPass(
       &list, root_clear_pass_id, device_viewport_rect, gfx::Transform());
   AddQuad(root_clear_pass, device_viewport_rect, SK_ColorGREEN);
 
@@ -334,8 +326,8 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
 
   scoped_ptr<SkBitmap> output =
       DrawAndCopyOutput(&list, device_scale_factor, device_viewport_rect);
-  EXPECT_EQ(device_viewport_rect.width(), output->info().fWidth);
-  EXPECT_EQ(device_viewport_rect.height(), output->info().fHeight);
+  EXPECT_EQ(device_viewport_rect.width(), output->info().width());
+  EXPECT_EQ(device_viewport_rect.height(), output->info().height());
 
   EXPECT_EQ(SK_ColorGREEN, output->getColor(0, 0));
   EXPECT_EQ(SK_ColorGREEN,
@@ -349,15 +341,15 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
   gfx::Rect smaller_rect(20, 20, 60, 60);
 
   RenderPassId root_smaller_pass_id(2, 0);
-  TestRenderPass* root_smaller_pass = AddRenderPass(
+  RenderPass* root_smaller_pass = AddRenderPass(
       &list, root_smaller_pass_id, device_viewport_rect, gfx::Transform());
   AddQuad(root_smaller_pass, smaller_rect, SK_ColorMAGENTA);
 
   renderer()->DecideRenderPassAllocationsForFrame(list);
 
   output = DrawAndCopyOutput(&list, device_scale_factor, device_viewport_rect);
-  EXPECT_EQ(device_viewport_rect.width(), output->info().fWidth);
-  EXPECT_EQ(device_viewport_rect.height(), output->info().fHeight);
+  EXPECT_EQ(device_viewport_rect.width(), output->info().width());
+  EXPECT_EQ(device_viewport_rect.height(), output->info().height());
 
   // If we didn't clear, the borders should still be green.
   EXPECT_EQ(SK_ColorGREEN, output->getColor(0, 0));
@@ -382,13 +374,13 @@ TEST_F(SoftwareRendererTest, RenderPassVisibleRect) {
   // Pass drawn as inner quad is magenta.
   gfx::Rect smaller_rect(20, 20, 60, 60);
   RenderPassId smaller_pass_id(2, 1);
-  TestRenderPass* smaller_pass =
+  RenderPass* smaller_pass =
       AddRenderPass(&list, smaller_pass_id, smaller_rect, gfx::Transform());
   AddQuad(smaller_pass, smaller_rect, SK_ColorMAGENTA);
 
   // Root pass is green.
   RenderPassId root_clear_pass_id(1, 0);
-  TestRenderPass* root_clear_pass = AddRenderPass(
+  RenderPass* root_clear_pass = AddRenderPass(
       &list, root_clear_pass_id, device_viewport_rect, gfx::Transform());
   AddRenderPassQuad(root_clear_pass, smaller_pass);
   AddQuad(root_clear_pass, device_viewport_rect, SK_ColorGREEN);
@@ -401,8 +393,8 @@ TEST_F(SoftwareRendererTest, RenderPassVisibleRect) {
 
   scoped_ptr<SkBitmap> output =
       DrawAndCopyOutput(&list, device_scale_factor, device_viewport_rect);
-  EXPECT_EQ(device_viewport_rect.width(), output->info().fWidth);
-  EXPECT_EQ(device_viewport_rect.height(), output->info().fHeight);
+  EXPECT_EQ(device_viewport_rect.width(), output->info().width());
+  EXPECT_EQ(device_viewport_rect.height(), output->info().height());
 
   EXPECT_EQ(SK_ColorGREEN, output->getColor(0, 0));
   EXPECT_EQ(SK_ColorGREEN,

@@ -11,6 +11,8 @@
 #include "ui/message_center/views/message_view.h"
 #include "ui/views/view_targeter_delegate.h"
 
+class GURL;
+
 namespace views {
 class ProgressBar;
 }
@@ -23,6 +25,7 @@ class MessageCenterController;
 class NotificationButton;
 class NotificationView;
 class PaddedButton;
+class ProportionalImageView;
 
 // View that displays all current types of notification (web, basic, image, and
 // list). Future notification types may be handled by other classes, in which
@@ -72,7 +75,10 @@ class MESSAGE_CENTER_EXPORT NotificationView
 
  private:
   FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, CreateOrUpdateTest);
+  FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, FormatContextMessageTest);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, TestLineLimits);
+  FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, TestIconSizing);
+  FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, TestImageSizing);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, UpdateButtonsStateTest);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, UpdateButtonCountTest);
 
@@ -96,6 +102,12 @@ class MESSAGE_CENTER_EXPORT NotificationView
   int GetMessageLineLimit(int title_lines, int width) const;
   int GetMessageHeight(int width, int limit) const;
 
+  // Formats the context message to be displayed based on |context|
+  // so it shows as much information as possible
+  // given the space available in the ContextMessage section of the
+  // notification.
+  base::string16 FormatContextMessage(const Notification& notification) const;
+
   MessageCenterController* controller_;  // Weak, lives longer then views.
 
   // Describes whether the view should display a hand pointer or not.
@@ -107,9 +119,10 @@ class MESSAGE_CENTER_EXPORT NotificationView
   BoundedLabel* message_view_;
   BoundedLabel* context_message_view_;
   std::vector<views::View*> item_views_;
-  views::View* icon_view_;
+  ProportionalImageView* icon_view_;
   views::View* bottom_view_;
-  views::View* image_view_;
+  views::View* image_container_;
+  ProportionalImageView* image_view_;
   views::ProgressBar* progress_bar_view_;
   std::vector<NotificationButton*> action_buttons_;
   std::vector<views::View*> separators_;

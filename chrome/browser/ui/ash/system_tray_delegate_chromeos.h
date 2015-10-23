@@ -23,12 +23,13 @@
 #include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/settings/shutdown_policy_handler.h"
+#include "chrome/browser/chromeos/system/system_clock.h"
+#include "chrome/browser/chromeos/system/system_clock_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/supervised_user/supervised_user_service_observer.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/dbus/session_manager_client.h"
-#include "chromeos/login/login_state.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_observer.h"
@@ -55,7 +56,6 @@ class SystemTrayDelegateChromeOS
       public SessionManagerClient::Observer,
       public content::NotificationObserver,
       public input_method::InputMethodManager::Observer,
-      public chromeos::LoginState::Observer,
       public chromeos::CrasAudioHandler::AudioObserver,
       public device::BluetoothAdapter::Observer,
       public policy::CloudPolicyStore::Observer,
@@ -64,7 +64,8 @@ class SystemTrayDelegateChromeOS
       public extensions::AppWindowRegistry::Observer,
       public user_manager::UserManager::UserSessionStateObserver,
       public SupervisedUserServiceObserver,
-      public ShutdownPolicyHandler::Delegate  {
+      public ShutdownPolicyHandler::Delegate,
+      public system::SystemClockObserver {
  public:
   SystemTrayDelegateChromeOS();
 
@@ -93,7 +94,6 @@ class SystemTrayDelegateChromeOS
   void ShowDateSettings() override;
   void ShowSetTimeDialog() override;
   void ShowNetworkSettingsForGuid(const std::string& guid) override;
-  void ShowBluetoothSettings() override;
   void ShowDisplaySettings() override;
   void ShowChromeSlow() override;
   bool ShouldShowDisplayNotification() override;
@@ -125,6 +125,7 @@ class SystemTrayDelegateChromeOS
   bool GetBluetoothEnabled() override;
   bool GetBluetoothDiscovering() override;
   void ChangeProxySettings() override;
+  ash::CastConfigDelegate* GetCastConfigDelegate() const override;
   ash::NetworkingConfigDelegate* GetNetworkingConfigDelegate() const override;
   ash::VolumeControlDelegate* GetVolumeControlDelegate() const override;
   void SetVolumeControlDelegate(
@@ -157,10 +158,10 @@ class SystemTrayDelegateChromeOS
   // browser tests need to call ShouldUse24HourClock().
   bool GetShouldUse24HourClockForTesting() const;
 
+  // chromeos::system::SystemClockObserver implementation.
+  void OnSystemClockChanged(system::SystemClock*) override;
+
  private:
-  // Should be the same as CrosSettings::ObserverSubscription.
-  typedef base::CallbackList<void(void)>::Subscription
-      CrosSettingsObserverSubscription;
 
   ash::SystemTray* GetPrimarySystemTray();
 
@@ -171,8 +172,6 @@ class SystemTrayDelegateChromeOS
   bool UnsetProfile(Profile* profile);
 
   bool ShouldUse24HourClock() const;
-
-  void UpdateClockType();
 
   void UpdateShowLogoutButtonInTray();
 
@@ -189,9 +188,6 @@ class SystemTrayDelegateChromeOS
   // Notify observers if the current user has no more open browser or app
   // windows.
   void NotifyIfLastWindowClosed();
-
-  // LoginState::Observer overrides.
-  void LoggedInStateChanged() override;
 
   // Overridden from SessionManagerClient::Observer.
   void ScreenIsLocked() override;
@@ -222,7 +218,7 @@ class SystemTrayDelegateChromeOS
 
   // Overridden from CrasAudioHandler::AudioObserver.
   void OnOutputNodeVolumeChanged(uint64_t node_id, int volume) override;
-  void OnOutputMuteChanged(bool mute_on) override;
+  void OnOutputMuteChanged(bool mute_on, bool system_adjust) override;
   void OnInputNodeGainChanged(uint64_t node_id, int gain) override;
   void OnInputMuteChanged(bool mute_on) override;
   void OnAudioNodesChanged() override;
@@ -292,9 +288,9 @@ class SystemTrayDelegateChromeOS
 
   scoped_refptr<device::BluetoothAdapter> bluetooth_adapter_;
   scoped_ptr<device::BluetoothDiscoverySession> bluetooth_discovery_session_;
+  scoped_ptr<ash::CastConfigDelegate> cast_config_delegate_;
   scoped_ptr<ash::NetworkingConfigDelegate> networking_config_delegate_;
   scoped_ptr<ash::VolumeControlDelegate> volume_control_delegate_;
-  scoped_ptr<CrosSettingsObserverSubscription> device_settings_observer_;
   scoped_ptr<AccessibilityStatusSubscription> accessibility_subscription_;
   base::ScopedPtrHashMap<std::string,
                          scoped_ptr<ash::tray::UserAccountsDelegate>>
@@ -302,10 +298,10 @@ class SystemTrayDelegateChromeOS
   scoped_ptr<ShutdownPolicyHandler> shutdown_policy_handler_;
   scoped_ptr<ash::VPNDelegate> vpn_delegate_;
 
-  ObserverList<ash::CustodianInfoTrayObserver>
+  base::ObserverList<ash::CustodianInfoTrayObserver>
       custodian_info_changed_observers_;
 
-  ObserverList<ash::ShutdownPolicyObserver> shutdown_policy_observers_;
+  base::ObserverList<ash::ShutdownPolicyObserver> shutdown_policy_observers_;
 
   base::WeakPtrFactory<SystemTrayDelegateChromeOS> weak_ptr_factory_;
 

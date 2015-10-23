@@ -23,8 +23,6 @@
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/tab_restore_service_delegate.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/browser/sync/glue/synced_session.h"
-#include "chrome/browser/sync/open_tabs_ui_delegate.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -32,12 +30,14 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
+#include "components/sync_driver/glue/synced_session.h"
+#include "components/sync_driver/open_tabs_ui_delegate.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/error_utils.h"
-#include "net/base/net_util.h"
 #include "ui/base/layout.h"
 
 namespace extensions {
@@ -59,8 +59,8 @@ const char kRestoreInIncognitoError[] =
 
 // Comparator function for use with std::sort that will sort sessions by
 // descending modified_time (i.e., most recent first).
-bool SortSessionsByRecency(const browser_sync::SyncedSession* s1,
-                           const browser_sync::SyncedSession* s2) {
+bool SortSessionsByRecency(const sync_driver::SyncedSession* s1,
+                           const sync_driver::SyncedSession* s2) {
   return s1->modified_time > s2->modified_time;
 }
 
@@ -93,8 +93,8 @@ scoped_ptr<tabs::Tab> CreateTabModelHelper(
   } else {
     const std::string languages =
         profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
-    tab_struct->title.reset(
-        new std::string(base::UTF16ToUTF8(net::FormatUrl(url, languages))));
+    tab_struct->title.reset(new std::string(
+        base::UTF16ToUTF8(url_formatter::FormatUrl(url, languages))));
   }
   tab_struct->index = index;
   tab_struct->pinned = pinned;
@@ -267,7 +267,7 @@ scoped_ptr<windows::Window> SessionsGetDevicesFunction::CreateWindowModel(
       continue;
     const sessions::SerializedNavigationEntry& current_navigation =
         tab->navigations.at(tab->normalized_navigation_index());
-    if (chrome::IsNTPURL(current_navigation.virtual_url(), GetProfile())) {
+    if (search::IsNTPURL(current_navigation.virtual_url(), GetProfile())) {
       continue;
     }
     tabs_in_window.push_back(tab);
@@ -344,7 +344,7 @@ SessionsGetDevicesFunction::CreateSessionModel(
 }
 
 scoped_ptr<api::sessions::Device> SessionsGetDevicesFunction::CreateDeviceModel(
-    const browser_sync::SyncedSession* session) {
+    const sync_driver::SyncedSession* session) {
   int max_results = api::sessions::MAX_SESSION_RESULTS;
   // Already validated in RunAsync().
   scoped_ptr<GetDevices::Params> params(GetDevices::Params::Create(*args_));
@@ -355,9 +355,11 @@ scoped_ptr<api::sessions::Device> SessionsGetDevicesFunction::CreateDeviceModel(
   device_struct->info = session->session_name;
   device_struct->device_name = session->session_name;
 
-  for (browser_sync::SyncedSession::SyncedWindowMap::const_iterator it =
-       session->windows.begin(); it != session->windows.end() &&
-       static_cast<int>(device_struct->sessions.size()) < max_results; ++it) {
+  for (sync_driver::SyncedSession::SyncedWindowMap::const_iterator it =
+           session->windows.begin();
+       it != session->windows.end() &&
+           static_cast<int>(device_struct->sessions.size()) < max_results;
+       ++it) {
     scoped_ptr<api::sessions::Session> session_model(CreateSessionModel(
         *it->second, session->session_tag));
     if (session_model)
@@ -377,9 +379,8 @@ bool SessionsGetDevicesFunction::RunSync() {
     return true;
   }
 
-  browser_sync::OpenTabsUIDelegate* open_tabs =
-      service->GetOpenTabsUIDelegate();
-  std::vector<const browser_sync::SyncedSession*> sessions;
+  sync_driver::OpenTabsUIDelegate* open_tabs = service->GetOpenTabsUIDelegate();
+  std::vector<const sync_driver::SyncedSession*> sessions;
   if (!(open_tabs && open_tabs->GetAllForeignSessions(&sessions))) {
     results_ = GetDevices::Results::Create(
         std::vector<linked_ptr<api::sessions::Device> >());
@@ -423,7 +424,9 @@ void SessionsRestoreFunction::SetResultRestoredTab(
 
 bool SessionsRestoreFunction::SetResultRestoredWindow(int window_id) {
   WindowController* controller = NULL;
-  if (!windows_util::GetWindowFromWindowID(this, window_id, &controller)) {
+  if (!windows_util::GetWindowFromWindowID(
+          this, window_id, WindowController::GetDefaultWindowFilter(),
+          &controller)) {
     // error_ is set by GetWindowFromWindowId function call.
     return false;
   }
@@ -522,8 +525,7 @@ bool SessionsRestoreFunction::RestoreForeignSession(const SessionId& session_id,
     SetError(kSessionSyncError);
     return false;
   }
-  browser_sync::OpenTabsUIDelegate* open_tabs =
-      service->GetOpenTabsUIDelegate();
+  sync_driver::OpenTabsUIDelegate* open_tabs = service->GetOpenTabsUIDelegate();
   if (!open_tabs) {
     SetError(kSessionSyncError);
     return false;
@@ -620,7 +622,8 @@ void SessionsEventRouter::TabRestoreServiceChanged(
     TabRestoreService* service) {
   scoped_ptr<base::ListValue> args(new base::ListValue());
   EventRouter::Get(profile_)->BroadcastEvent(make_scoped_ptr(
-      new Event(api::sessions::OnChanged::kEventName, args.Pass())));
+      new Event(events::SESSIONS_ON_CHANGED,
+                api::sessions::OnChanged::kEventName, args.Pass())));
 }
 
 void SessionsEventRouter::TabRestoreServiceDestroyed(

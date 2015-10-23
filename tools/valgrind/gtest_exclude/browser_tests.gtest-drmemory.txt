@@ -31,12 +31,35 @@ ExtensionLoadingTest.UpgradeAfterNavigatingFromOverriddenNewTabPage
 ClipboardApiTest.HostedAppNoPermission
 
 # http://crbug.com/475172
-BasicExtensionSettingsWebUITest.testUninstall 
+BasicExtensionSettingsWebUITest.testUninstall
 
 # https://crbug.com/480721
 OutOfProcessProxyResolverBrowserTest.Verify
 
-# https://crbug.com/484910
-PasswordAutofillAgentTest.ClearPreviewWithInlineAutocompletedUsername
-PasswordAutofillAgentTest.InlineAutocomplete
-PasswordAutofillAgentTest.RememberLastNonEmptyUsernameAndPasswordOnSubmit_UserCleared
+# https://crbug.com/501106
+CrElementsBrowserTest.CrElementsTest
+
+# https://crbug.com/504192
+NaClBrowserTestGLibc.ExitStatus0
+NaClBrowserTestGLibc.ExitStatusNeg2
+NaClBrowserTestGLibc.PPAPIPPBInstance
+NaClBrowserTestGLibc.PPAPIPPPInstance
+NaClBrowserTestGLibc.SimpleLoad
+NaClBrowserTestGLibc.SuccessfulLoadUMA
+
+# https://crbug.com/512140
+PluginPowerSaverBrowserTest.BackgroundTabPlugins
+
+# https://crbug.com/504885
+# The test takes too long.
+SmartSessionRestoreMRUTest.PRE_CorrectLoadingOrder
+SmartSessionRestoreMRUTest.CorrectLoadingOrder
+
+# https://crbug.com/516368
+PushMessagingBrowserTest.PushEventSuccess
+
+# https://crbug.com/519039
+AppViewTest.KillGuestCommunicatingWithWrongAppView
+
+# https://crbug.com/519087
+ExtensionTabsTest.GetAllWindowsAllTypes

@@ -41,9 +41,14 @@ public:
     LineClampValue lineClamps;
     DraggableRegionMode draggableRegions;
 
-    void* dataRefs[8];
+    void* dataRefs[9];
     void* ownPtrs[4];
+#if ENABLE(OILPAN)
+    Persistent<void*> persistentHandles[2];
+    void* refPtrs[2];
+#else
     void* refPtrs[4];
+#endif
 
     FillLayer fillLayers;
     NinePieceImage ninePieces;
@@ -98,7 +103,6 @@ StyleRareNonInheritedData::StyleRareNonInheritedData()
     , marginBeforeCollapse(MCOLLAPSE)
     , marginAfterCollapse(MCOLLAPSE)
     , m_appearance(ComputedStyle::initialAppearance())
-    , m_textCombine(ComputedStyle::initialTextCombine())
     , m_textDecorationStyle(ComputedStyle::initialTextDecorationStyle())
     , m_wrapFlow(ComputedStyle::initialWrapFlow())
     , m_wrapThrough(ComputedStyle::initialWrapThrough())
@@ -113,7 +117,7 @@ StyleRareNonInheritedData::StyleRareNonInheritedData()
     , m_objectFit(ComputedStyle::initialObjectFit())
     , m_isolation(ComputedStyle::initialIsolation())
     , m_scrollBehavior(ComputedStyle::initialScrollBehavior())
-    , m_scrollBlocksOn(ComputedStyle::initialScrollBlocksOn())
+    , m_scrollSnapType(ComputedStyle::initialScrollSnapType())
     , m_requiresAcceleratedCompositingForExternalReasons(false)
     , m_hasInlineTransform(false)
     , m_resize(ComputedStyle::initialResize())
@@ -140,6 +144,7 @@ StyleRareNonInheritedData::StyleRareNonInheritedData(const StyleRareNonInherited
     , m_filter(o.m_filter)
     , m_grid(o.m_grid)
     , m_gridItem(o.m_gridItem)
+    , m_scrollSnap(o.m_scrollSnap)
     , m_content(o.m_content ? o.m_content->clone() : nullptr)
     , m_counterDirectives(o.m_counterDirectives ? clone(*o.m_counterDirectives) : nullptr)
     , m_animations(o.m_animations ? CSSAnimationData::create(*o.m_animations) : nullptr)
@@ -174,7 +179,6 @@ StyleRareNonInheritedData::StyleRareNonInheritedData(const StyleRareNonInherited
     , marginBeforeCollapse(o.marginBeforeCollapse)
     , marginAfterCollapse(o.marginAfterCollapse)
     , m_appearance(o.m_appearance)
-    , m_textCombine(o.m_textCombine)
     , m_textDecorationStyle(o.m_textDecorationStyle)
     , m_wrapFlow(o.m_wrapFlow)
     , m_wrapThrough(o.m_wrapThrough)
@@ -189,7 +193,7 @@ StyleRareNonInheritedData::StyleRareNonInheritedData(const StyleRareNonInherited
     , m_objectFit(o.m_objectFit)
     , m_isolation(o.m_isolation)
     , m_scrollBehavior(o.m_scrollBehavior)
-    , m_scrollBlocksOn(o.m_scrollBlocksOn)
+    , m_scrollSnapType(o.m_scrollSnapType)
     , m_requiresAcceleratedCompositingForExternalReasons(o.m_requiresAcceleratedCompositingForExternalReasons)
     , m_hasInlineTransform(o.m_hasInlineTransform)
     , m_resize(o.m_resize)
@@ -222,6 +226,7 @@ bool StyleRareNonInheritedData::operator==(const StyleRareNonInheritedData& o) c
         && m_filter == o.m_filter
         && m_grid == o.m_grid
         && m_gridItem == o.m_gridItem
+        && m_scrollSnap == o.m_scrollSnap
         && contentDataEquivalent(o)
         && counterDataEquivalent(o)
         && shadowDataEquivalent(o)
@@ -257,7 +262,6 @@ bool StyleRareNonInheritedData::operator==(const StyleRareNonInheritedData& o) c
         && marginBeforeCollapse == o.marginBeforeCollapse
         && marginAfterCollapse == o.marginAfterCollapse
         && m_appearance == o.m_appearance
-        && m_textCombine == o.m_textCombine
         && m_textDecorationStyle == o.m_textDecorationStyle
         && m_wrapFlow == o.m_wrapFlow
         && m_wrapThrough == o.m_wrapThrough
@@ -269,7 +273,7 @@ bool StyleRareNonInheritedData::operator==(const StyleRareNonInheritedData& o) c
         && m_objectFit == o.m_objectFit
         && m_isolation == o.m_isolation
         && m_scrollBehavior == o.m_scrollBehavior
-        && m_scrollBlocksOn == o.m_scrollBlocksOn
+        && m_scrollSnapType == o.m_scrollSnapType
         && m_requiresAcceleratedCompositingForExternalReasons == o.m_requiresAcceleratedCompositingForExternalReasons
         && m_hasInlineTransform == o.m_hasInlineTransform
         && m_resize == o.m_resize

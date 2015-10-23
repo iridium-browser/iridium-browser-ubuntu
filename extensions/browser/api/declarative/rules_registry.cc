@@ -12,33 +12,43 @@
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/api/declarative/rules_cache_delegate.h"
+#include "extensions/browser/extension_error.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/state_store.h"
+#include "extensions/common/api/declarative/declarative_manifest_data.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extensions_client.h"
+#include "extensions/common/manifest_constants.h"
+
+namespace extensions {
 
 namespace {
 
 const char kSuccess[] = "";
 const char kDuplicateRuleId[] = "Duplicate rule ID: %s";
+const char kErrorCannotRemoveManifestRules[] =
+    "Rules declared in the 'event_rules' manifest field cannot be removed";
 
 scoped_ptr<base::Value> RulesToValue(
-    const std::vector<linked_ptr<extensions::RulesRegistry::Rule> >& rules) {
+    const std::vector<linked_ptr<api::events::Rule>>& rules) {
   scoped_ptr<base::ListValue> list(new base::ListValue());
   for (size_t i = 0; i < rules.size(); ++i)
     list->Append(rules[i]->ToValue().release());
   return list.Pass();
 }
 
-std::vector<linked_ptr<extensions::RulesRegistry::Rule> > RulesFromValue(
+std::vector<linked_ptr<api::events::Rule>> RulesFromValue(
     const base::Value* value) {
-  std::vector<linked_ptr<extensions::RulesRegistry::Rule> > rules;
+  std::vector<linked_ptr<api::events::Rule>> rules;
 
   const base::ListValue* list = NULL;
   if (!value || !value->GetAsList(&list))
@@ -49,9 +59,8 @@ std::vector<linked_ptr<extensions::RulesRegistry::Rule> > RulesFromValue(
     const base::DictionaryValue* dict = NULL;
     if (!list->GetDictionary(i, &dict))
       continue;
-    linked_ptr<extensions::RulesRegistry::Rule> rule(
-        new extensions::RulesRegistry::Rule());
-    if (extensions::RulesRegistry::Rule::Populate(*dict, rule.get()))
+    linked_ptr<api::events::Rule> rule(new api::events::Rule());
+    if (api::events::Rule::Populate(*dict, rule.get()))
       rules.push_back(rule);
   }
 
@@ -64,8 +73,6 @@ std::string ToId(int identifier) {
 
 }  // namespace
 
-
-namespace extensions {
 
 // RulesRegistry
 
@@ -90,17 +97,20 @@ RulesRegistry::RulesRegistry(content::BrowserContext* browser_context,
 
 std::string RulesRegistry::AddRulesNoFill(
     const std::string& extension_id,
-    const std::vector<linked_ptr<Rule> >& rules) {
+    const std::vector<linked_ptr<api::events::Rule>>& rules,
+    RulesDictionary* out) {
   DCHECK_CURRENTLY_ON(owner_thread());
 
   // Verify that all rule IDs are new.
-  for (std::vector<linked_ptr<Rule> >::const_iterator i =
-      rules.begin(); i != rules.end(); ++i) {
+  for (std::vector<linked_ptr<api::events::Rule>>::const_iterator i =
+           rules.begin();
+       i != rules.end(); ++i) {
     const RuleId& rule_id = *((*i)->id);
     // Every rule should have a priority assigned.
     DCHECK((*i)->priority);
     RulesDictionaryKey key(extension_id, rule_id);
-    if (rules_.find(key) != rules_.end())
+    if (rules_.find(key) != rules_.end() ||
+        manifest_rules_.find(key) != manifest_rules_.end())
       return base::StringPrintf(kDuplicateRuleId, rule_id.c_str());
   }
 
@@ -110,11 +120,12 @@ std::string RulesRegistry::AddRulesNoFill(
     return error;
 
   // Commit all rules into |rules_| on success.
-  for (std::vector<linked_ptr<Rule> >::const_iterator i =
-      rules.begin(); i != rules.end(); ++i) {
+  for (std::vector<linked_ptr<api::events::Rule>>::const_iterator i =
+           rules.begin();
+       i != rules.end(); ++i) {
     const RuleId& rule_id = *((*i)->id);
     RulesDictionaryKey key(extension_id, rule_id);
-    rules_[key] = *i;
+    (*out)[key] = *i;
   }
 
   MaybeProcessChangedRules(extension_id);
@@ -123,7 +134,14 @@ std::string RulesRegistry::AddRulesNoFill(
 
 std::string RulesRegistry::AddRules(
     const std::string& extension_id,
-    const std::vector<linked_ptr<Rule> >& rules) {
+    const std::vector<linked_ptr<api::events::Rule>>& rules) {
+  return AddRulesInternal(extension_id, rules, &rules_);
+}
+
+std::string RulesRegistry::AddRulesInternal(
+    const std::string& extension_id,
+    const std::vector<linked_ptr<api::events::Rule>>& rules,
+    RulesDictionary* out) {
   DCHECK_CURRENTLY_ON(owner_thread());
 
   std::string error = CheckAndFillInOptionalRules(extension_id, rules);
@@ -131,13 +149,21 @@ std::string RulesRegistry::AddRules(
     return error;
   FillInOptionalPriorities(rules);
 
-  return AddRulesNoFill(extension_id, rules);
+  return AddRulesNoFill(extension_id, rules, out);
 }
 
 std::string RulesRegistry::RemoveRules(
     const std::string& extension_id,
     const std::vector<std::string>& rule_identifiers) {
   DCHECK_CURRENTLY_ON(owner_thread());
+
+  // Check if any of the rules are non-removable.
+  for (RuleId rule_id : rule_identifiers) {
+    RulesDictionaryKey lookup_key(extension_id, rule_id);
+    RulesDictionary::iterator itr = manifest_rules_.find(lookup_key);
+    if (itr != manifest_rules_.end())
+      return kErrorCannotRemoveManifestRules;
+  }
 
   std::string error = RemoveRulesImpl(extension_id, rule_identifiers);
 
@@ -157,13 +183,15 @@ std::string RulesRegistry::RemoveRules(
 }
 
 std::string RulesRegistry::RemoveAllRules(const std::string& extension_id) {
-  std::string result = RulesRegistry::RemoveAllRulesNoStoreUpdate(extension_id);
+  std::string result =
+      RulesRegistry::RemoveAllRulesNoStoreUpdate(extension_id, false);
   MaybeProcessChangedRules(extension_id);  // Now update the prefs and store.
   return result;
 }
 
 std::string RulesRegistry::RemoveAllRulesNoStoreUpdate(
-    const std::string& extension_id) {
+    const std::string& extension_id,
+    bool remove_manifest_rules) {
   DCHECK_CURRENTLY_ON(owner_thread());
 
   std::string error = RemoveAllRulesImpl(extension_id);
@@ -171,13 +199,17 @@ std::string RulesRegistry::RemoveAllRulesNoStoreUpdate(
   if (!error.empty())
     return error;
 
-  for (RulesDictionary::const_iterator i = rules_.begin();
-      i != rules_.end();) {
-    const RulesDictionaryKey& key = i->first;
-    ++i;
-    if (key.first == extension_id)
-      rules_.erase(key);
-  }
+  auto remove_rules = [&extension_id](RulesDictionary& dictionary) {
+    for (auto it = dictionary.begin(); it != dictionary.end();) {
+      if (it->first.first == extension_id)
+        dictionary.erase(it++);
+      else
+        ++it;
+    }
+  };
+  remove_rules(rules_);
+  if (remove_manifest_rules)
+    remove_rules(manifest_rules_);
 
   RemoveAllUsedRuleIdentifiers(extension_id);
   return kSuccess;
@@ -185,50 +217,71 @@ std::string RulesRegistry::RemoveAllRulesNoStoreUpdate(
 
 void RulesRegistry::GetRules(const std::string& extension_id,
                              const std::vector<std::string>& rule_identifiers,
-                             std::vector<linked_ptr<Rule> >* out) {
+                             std::vector<linked_ptr<api::events::Rule>>* out) {
   DCHECK_CURRENTLY_ON(owner_thread());
 
-  for (std::vector<std::string>::const_iterator i = rule_identifiers.begin();
-      i != rule_identifiers.end(); ++i) {
-    RulesDictionaryKey lookup_key(extension_id, *i);
+  for (const auto& i : rule_identifiers) {
+    RulesDictionaryKey lookup_key(extension_id, i);
     RulesDictionary::iterator entry = rules_.find(lookup_key);
     if (entry != rules_.end())
+      out->push_back(entry->second);
+    entry = manifest_rules_.find(lookup_key);
+    if (entry != manifest_rules_.end())
       out->push_back(entry->second);
   }
 }
 
-void RulesRegistry::GetAllRules(const std::string& extension_id,
-                                std::vector<linked_ptr<Rule> >* out) {
-  DCHECK_CURRENTLY_ON(owner_thread());
-  for (RulesDictionary::const_iterator i = rules_.begin();
-      i != rules_.end(); ++i) {
-    const RulesDictionaryKey& key = i->first;
+void RulesRegistry::GetRules(const std::string& extension_id,
+                             RulesDictionary& rules,
+                             std::vector<linked_ptr<api::events::Rule>>* out) {
+  for (const auto& i : rules) {
+    const RulesDictionaryKey& key = i.first;
     if (key.first == extension_id)
-      out->push_back(i->second);
+      out->push_back(i.second);
   }
 }
 
-void RulesRegistry::OnExtensionUnloaded(const std::string& extension_id) {
+void RulesRegistry::GetAllRules(
+    const std::string& extension_id,
+    std::vector<linked_ptr<api::events::Rule>>* out) {
   DCHECK_CURRENTLY_ON(owner_thread());
-  std::string error = RemoveAllRulesImpl(extension_id);
-  if (!error.empty())
-    LOG(ERROR) << error;
+  GetRules(extension_id, manifest_rules_, out);
+  GetRules(extension_id, rules_, out);
 }
 
-void RulesRegistry::OnExtensionUninstalled(const std::string& extension_id) {
+void RulesRegistry::OnExtensionUnloaded(const Extension* extension) {
   DCHECK_CURRENTLY_ON(owner_thread());
-  std::string error = RemoveAllRulesNoStoreUpdate(extension_id);
+  std::string error = RemoveAllRulesImpl(extension->id());
   if (!error.empty())
-    LOG(ERROR) << error;
+    ReportInternalError(extension->id(), error);
 }
 
-void RulesRegistry::OnExtensionLoaded(const std::string& extension_id) {
+void RulesRegistry::OnExtensionUninstalled(const Extension* extension) {
   DCHECK_CURRENTLY_ON(owner_thread());
-  std::vector<linked_ptr<Rule> > rules;
-  GetAllRules(extension_id, &rules);
-  std::string error = AddRulesImpl(extension_id, rules);
+  std::string error = RemoveAllRulesNoStoreUpdate(extension->id(), true);
   if (!error.empty())
-    LOG(ERROR) << error;
+    ReportInternalError(extension->id(), error);
+}
+
+void RulesRegistry::OnExtensionLoaded(const Extension* extension) {
+  DCHECK_CURRENTLY_ON(owner_thread());
+  std::vector<linked_ptr<api::events::Rule>> rules;
+  GetAllRules(extension->id(), &rules);
+  DeclarativeManifestData* declarative_data =
+      DeclarativeManifestData::Get(extension);
+  if (declarative_data) {
+    std::vector<linked_ptr<api::events::Rule>>& manifest_rules =
+        declarative_data->RulesForEvent(event_name_);
+    if (manifest_rules.size()) {
+      std::string error =
+          AddRulesInternal(extension->id(), manifest_rules, &manifest_rules_);
+      if (!error.empty())
+        ReportInternalError(extension->id(), error);
+    }
+  }
+  std::string error = AddRulesImpl(extension->id(), rules);
+  if (!error.empty())
+    ReportInternalError(extension->id(), error);
 }
 
 size_t RulesRegistry::GetNumberOfUsedRuleIdentifiersForTesting() const {
@@ -249,7 +302,18 @@ void RulesRegistry::DeserializeAndAddRules(
     scoped_ptr<base::Value> rules) {
   DCHECK_CURRENTLY_ON(owner_thread());
 
-  AddRulesNoFill(extension_id, RulesFromValue(rules.get()));
+  std::string error =
+      AddRulesNoFill(extension_id, RulesFromValue(rules.get()), &rules_);
+  if (!error.empty())
+    ReportInternalError(extension_id, error);
+}
+
+void RulesRegistry::ReportInternalError(const std::string& extension_id,
+                                        const std::string& error) {
+  scoped_ptr<ExtensionError> error_instance(new InternalError(
+      extension_id, base::ASCIIToUTF16(error), logging::LOG_ERROR));
+  ExtensionsBrowserClient::Get()->ReportError(browser_context_,
+                                              error_instance.Pass());
 }
 
 RulesRegistry::~RulesRegistry() {
@@ -272,15 +336,12 @@ void RulesRegistry::ProcessChangedRules(const std::string& extension_id) {
   DCHECK(ContainsKey(process_changed_rules_requested_, extension_id));
   process_changed_rules_requested_[extension_id] = NOT_SCHEDULED_FOR_PROCESSING;
 
-  std::vector<linked_ptr<Rule> > new_rules;
-  GetAllRules(extension_id, &new_rules);
+  std::vector<linked_ptr<api::events::Rule>> new_rules;
+  GetRules(extension_id, rules_, &new_rules);
   content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&RulesCacheDelegate::WriteToStorage,
-                 cache_delegate_,
-                 extension_id,
-                 base::Passed(RulesToValue(new_rules))));
+      content::BrowserThread::UI, FROM_HERE,
+      base::Bind(&RulesCacheDelegate::WriteToStorage, cache_delegate_,
+                 extension_id, base::Passed(RulesToValue(new_rules))));
 }
 
 void RulesRegistry::MaybeProcessChangedRules(const std::string& extension_id) {
@@ -318,16 +379,16 @@ std::string RulesRegistry::GenerateUniqueId(const std::string& extension_id) {
 
 std::string RulesRegistry::CheckAndFillInOptionalRules(
     const std::string& extension_id,
-    const std::vector<linked_ptr<Rule> >& rules) {
+    const std::vector<linked_ptr<api::events::Rule>>& rules) {
   // IDs we have inserted, in case we need to rollback this operation.
   std::vector<std::string> rollback_log;
 
   // First we insert all rules with existing identifier, so that generated
   // identifiers cannot collide with identifiers passed by the caller.
-  for (std::vector<linked_ptr<Rule> >::const_iterator i = rules.begin();
-       i != rules.end();
-       ++i) {
-    Rule* rule = i->get();
+  for (std::vector<linked_ptr<api::events::Rule>>::const_iterator i =
+           rules.begin();
+       i != rules.end(); ++i) {
+    api::events::Rule* rule = i->get();
     if (rule->id.get()) {
       std::string id = *(rule->id);
       if (!IsUniqueId(extension_id, id)) {
@@ -339,10 +400,10 @@ std::string RulesRegistry::CheckAndFillInOptionalRules(
   }
   // Now we generate IDs in case they were not specified in the rules. This
   // cannot fail so we do not need to keep track of a rollback log.
-  for (std::vector<linked_ptr<Rule> >::const_iterator i = rules.begin();
-       i != rules.end();
-       ++i) {
-    Rule* rule = i->get();
+  for (std::vector<linked_ptr<api::events::Rule>>::const_iterator i =
+           rules.begin();
+       i != rules.end(); ++i) {
+    api::events::Rule* rule = i->get();
     if (!rule->id.get()) {
       rule->id.reset(new std::string(GenerateUniqueId(extension_id)));
       used_rule_identifiers_[extension_id].insert(*(rule->id));
@@ -352,8 +413,8 @@ std::string RulesRegistry::CheckAndFillInOptionalRules(
 }
 
 void RulesRegistry::FillInOptionalPriorities(
-    const std::vector<linked_ptr<Rule> >& rules) {
-  std::vector<linked_ptr<Rule> >::const_iterator i;
+    const std::vector<linked_ptr<api::events::Rule>>& rules) {
+  std::vector<linked_ptr<api::events::Rule>>::const_iterator i;
   for (i = rules.begin(); i != rules.end(); ++i) {
     if (!(*i)->priority.get())
       (*i)->priority.reset(new int(DEFAULT_PRIORITY));

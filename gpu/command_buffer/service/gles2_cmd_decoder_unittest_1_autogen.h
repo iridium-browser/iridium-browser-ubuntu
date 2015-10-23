@@ -709,8 +709,9 @@ TEST_P(GLES2DecoderTest1, DeleteTexturesImmediateInvalidArgs) {
 }
 
 TEST_P(GLES2DecoderTest1, DeleteTransformFeedbacksImmediateValidArgs) {
-  EXPECT_CALL(*gl_, DeleteTransformFeedbacks(
-                        1, Pointee(kServiceTransformFeedbackId))).Times(1);
+  EXPECT_CALL(*gl_,
+              DeleteTransformFeedbacks(1, Pointee(kServiceTransformFeedbackId)))
+      .Times(1);
   cmds::DeleteTransformFeedbacksImmediate& cmd =
       *GetImmediateAs<cmds::DeleteTransformFeedbacksImmediate>();
   SpecializedSetup<cmds::DeleteTransformFeedbacksImmediate, 0>(true);
@@ -1215,6 +1216,23 @@ TEST_P(GLES2DecoderTest1, GetBooleanvInvalidArgs1_1) {
   EXPECT_EQ(0u, result->size);
 }
 
+TEST_P(GLES2DecoderTest1, GetBufferParameteri64vValidArgs) {
+  SpecializedSetup<cmds::GetBufferParameteri64v, 0>(true);
+  typedef cmds::GetBufferParameteri64v::Result Result;
+  Result* result = static_cast<Result*>(shared_memory_address_);
+  result->size = 0;
+  cmds::GetBufferParameteri64v cmd;
+  cmd.Init(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, shared_memory_id_,
+           shared_memory_offset_);
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(decoder_->GetGLES2Util()->GLGetNumValuesReturned(GL_BUFFER_SIZE),
+            result->GetNumResults());
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  decoder_->set_unsafe_es3_apis_enabled(false);
+  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
+}
+
 TEST_P(GLES2DecoderTest1, GetBufferParameterivValidArgs) {
   SpecializedSetup<cmds::GetBufferParameteriv, 0>(true);
   typedef cmds::GetBufferParameteriv::Result Result;
@@ -1552,31 +1570,7 @@ TEST_P(GLES2DecoderTest1, GetIntegervInvalidArgs1_1) {
   EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
   EXPECT_EQ(0u, result->size);
 }
-
-TEST_P(GLES2DecoderTest1, GetInternalformativValidArgs) {
-  EXPECT_CALL(*gl_, GetError())
-      .WillOnce(Return(GL_NO_ERROR))
-      .WillOnce(Return(GL_NO_ERROR))
-      .RetiresOnSaturation();
-  SpecializedSetup<cmds::GetInternalformativ, 0>(true);
-  typedef cmds::GetInternalformativ::Result Result;
-  Result* result = static_cast<Result*>(shared_memory_address_);
-  EXPECT_CALL(
-      *gl_, GetInternalformativ(GL_RENDERBUFFER, GL_RGBA4, GL_NUM_SAMPLE_COUNTS,
-                                4, result->GetData()));
-  result->size = 0;
-  cmds::GetInternalformativ cmd;
-  cmd.Init(GL_RENDERBUFFER, GL_RGBA4, GL_NUM_SAMPLE_COUNTS, 4,
-           shared_memory_id_, shared_memory_offset_);
-  decoder_->set_unsafe_es3_apis_enabled(true);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(
-      decoder_->GetGLES2Util()->GLGetNumValuesReturned(GL_NUM_SAMPLE_COUNTS),
-      result->GetNumResults());
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
-}
+// TODO(gman): GetInternalformativ
 
 TEST_P(GLES2DecoderTest1, GetProgramivValidArgs) {
   SpecializedSetup<cmds::GetProgramiv, 0>(true);
@@ -1629,29 +1623,5 @@ TEST_P(GLES2DecoderTest1, GetProgramivInvalidArgs2_1) {
            kInvalidSharedMemoryOffset);
   EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
   EXPECT_EQ(0u, result->size);
-}
-
-TEST_P(GLES2DecoderTest1, GetProgramInfoLogValidArgs) {
-  const char* kInfo = "hello";
-  const uint32_t kBucketId = 123;
-  SpecializedSetup<cmds::GetProgramInfoLog, 0>(true);
-
-  cmds::GetProgramInfoLog cmd;
-  cmd.Init(client_program_id_, kBucketId);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  CommonDecoder::Bucket* bucket = decoder_->GetBucket(kBucketId);
-  ASSERT_TRUE(bucket != NULL);
-  EXPECT_EQ(strlen(kInfo) + 1, bucket->size());
-  EXPECT_EQ(0,
-            memcmp(bucket->GetData(0, bucket->size()), kInfo, bucket->size()));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-}
-
-TEST_P(GLES2DecoderTest1, GetProgramInfoLogInvalidArgs) {
-  const uint32_t kBucketId = 123;
-  cmds::GetProgramInfoLog cmd;
-  cmd.Init(kInvalidClientId, kBucketId);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
 }
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_1_AUTOGEN_H_

@@ -17,6 +17,7 @@
 #include "net/base/net_util.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/chromoting_host_context.h"
+#include "remoting/host/native_messaging/log_message_handler.h"
 #include "remoting/host/native_messaging/native_messaging_pipe.h"
 #include "remoting/host/native_messaging/pipe_messaging_channel.h"
 #include "remoting/host/policy_watcher.h"
@@ -142,9 +143,9 @@ void MockIt2MeHost::RequestNatPolicy() {}
 void MockIt2MeHost::RunSetState(It2MeHostState state) {
   if (!host_context()->network_task_runner()->BelongsToCurrentThread()) {
     host_context()->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&It2MeHost::SetStateForTesting, this, state));
+        FROM_HERE, base::Bind(&It2MeHost::SetStateForTesting, this, state, ""));
   } else {
-    SetStateForTesting(state);
+    SetStateForTesting(state, "");
   }
 }
 
@@ -224,7 +225,7 @@ void It2MeNativeMessagingHostTest::SetUp() {
   host_thread_->Start();
 
   host_task_runner_ = new AutoThreadTaskRunner(
-      host_thread_->message_loop_proxy(),
+      host_thread_->task_runner(),
       base::Bind(&It2MeNativeMessagingHostTest::ExitTest,
                  base::Unretained(this)));
 
@@ -261,37 +262,45 @@ void It2MeNativeMessagingHostTest::TearDown() {
 
 scoped_ptr<base::DictionaryValue>
 It2MeNativeMessagingHostTest::ReadMessageFromOutputPipe() {
-  uint32 length;
-  int read_result = output_read_file_.ReadAtCurrentPos(
-      reinterpret_cast<char*>(&length), sizeof(length));
-  if (read_result != sizeof(length)) {
-    // The output pipe has been closed, return an empty message.
-    return nullptr;
-  }
+  while (true) {
+    uint32 length;
+    int read_result = output_read_file_.ReadAtCurrentPos(
+        reinterpret_cast<char*>(&length), sizeof(length));
+    if (read_result != sizeof(length)) {
+      // The output pipe has been closed, return an empty message.
+      return nullptr;
+    }
 
-  std::string message_json(length, '\0');
-  read_result = output_read_file_.ReadAtCurrentPos(
-      string_as_array(&message_json), length);
-  if (read_result != static_cast<int>(length)) {
-    LOG(ERROR) << "Message size (" << read_result
-               << ") doesn't match the header (" << length << ").";
-    return nullptr;
-  }
+    std::string message_json(length, '\0');
+    read_result = output_read_file_.ReadAtCurrentPos(
+        string_as_array(&message_json), length);
+    if (read_result != static_cast<int>(length)) {
+      LOG(ERROR) << "Message size (" << read_result
+                 << ") doesn't match the header (" << length << ").";
+      return nullptr;
+    }
 
-  scoped_ptr<base::Value> message(base::JSONReader::Read(message_json));
-  if (!message || !message->IsType(base::Value::TYPE_DICTIONARY)) {
-    LOG(ERROR) << "Malformed message:" << message_json;
-    return nullptr;
-  }
+    scoped_ptr<base::Value> message = base::JSONReader::Read(message_json);
+    if (!message || !message->IsType(base::Value::TYPE_DICTIONARY)) {
+      LOG(ERROR) << "Malformed message:" << message_json;
+      return nullptr;
+    }
 
-  return make_scoped_ptr(
-      static_cast<base::DictionaryValue*>(message.release()));
+    scoped_ptr<base::DictionaryValue> result = make_scoped_ptr(
+        static_cast<base::DictionaryValue*>(message.release()));
+    std::string type;
+    // If this is a debug message log, ignore it, otherwise return it.
+    if (!result->GetString("type", &type) ||
+        type != LogMessageHandler::kDebugMessageTypeName) {
+      return result;
+    }
+  }
 }
 
 void It2MeNativeMessagingHostTest::WriteMessageToInputPipe(
     const base::Value& message) {
   std::string message_json;
-  base::JSONWriter::Write(&message, &message_json);
+  base::JSONWriter::Write(message, &message_json);
 
   uint32 length = message_json.length();
   input_write_file_.WriteAtCurrentPos(reinterpret_cast<char*>(&length),
@@ -449,13 +458,13 @@ void It2MeNativeMessagingHostTest::StartHost() {
   pipe_->Start(it2me_host.Pass(), channel.Pass());
 
   // Notify the test that the host has finished starting up.
-  test_message_loop_->message_loop_proxy()->PostTask(
+  test_message_loop_->task_runner()->PostTask(
       FROM_HERE, test_run_loop_->QuitClosure());
 }
 
 void It2MeNativeMessagingHostTest::ExitTest() {
-  if (!test_message_loop_->message_loop_proxy()->RunsTasksOnCurrentThread()) {
-    test_message_loop_->message_loop_proxy()->PostTask(
+  if (!test_message_loop_->task_runner()->RunsTasksOnCurrentThread()) {
+    test_message_loop_->task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&It2MeNativeMessagingHostTest::ExitTest,
                    base::Unretained(this)));
@@ -547,4 +556,3 @@ TEST_F(It2MeNativeMessagingHostTest, InvalidType) {
 }
 
 }  // namespace remoting
-

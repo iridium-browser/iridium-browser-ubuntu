@@ -30,10 +30,6 @@
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/NodeComputedStyle.h"
-#include "core/frame/FrameHost.h"
-#include "core/frame/FrameView.h"
-#include "core/frame/LocalFrame.h"
-#include "core/frame/Settings.h"
 #include "core/html/HTMLOptGroupElement.h"
 #include "core/html/HTMLOptionElement.h"
 #include "core/html/HTMLSelectElement.h"
@@ -41,7 +37,6 @@
 #include "core/layout/LayoutScrollbar.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/layout/LayoutView.h"
-#include "core/page/Chrome.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/text/PlatformLocale.h"
@@ -56,25 +51,16 @@ LayoutMenuList::LayoutMenuList(Element* element)
     , m_buttonText(nullptr)
     , m_innerBlock(nullptr)
     , m_optionsChanged(true)
+    , m_isEmpty(false)
+    , m_hasUpdatedActiveOption(false)
     , m_optionsWidth(0)
     , m_lastActiveIndex(-1)
-    , m_popupIsVisible(false)
-    , m_indexToSelectOnCancel(-1)
 {
     ASSERT(isHTMLSelectElement(element));
 }
 
 LayoutMenuList::~LayoutMenuList()
 {
-    ASSERT(!m_popup);
-}
-
-void LayoutMenuList::destroy()
-{
-    if (m_popup)
-        m_popup->disconnectClient();
-    m_popup = nullptr;
-    LayoutFlexibleBox::destroy();
 }
 
 // FIXME: Instead of this hack we should add a ShadowRoot to <select> with no insertion point
@@ -95,6 +81,14 @@ void LayoutMenuList::createInnerBlock()
     // Create an anonymous block.
     ASSERT(!firstChild());
     m_innerBlock = createAnonymousBlock();
+
+    m_buttonText = new LayoutText(&document(), StringImpl::empty());
+    // We need to set the text explicitly though it was specified in the
+    // constructor because LayoutText doesn't refer to the text
+    // specified in the constructor in a case of re-transforming.
+    m_buttonText->setStyle(mutableStyle());
+    m_innerBlock->addChild(m_buttonText);
+
     adjustInnerStyle();
     LayoutFlexibleBox::addChild(m_innerBlock);
 }
@@ -129,14 +123,13 @@ void LayoutMenuList::adjustInnerStyle()
     }
 }
 
-inline HTMLSelectElement* LayoutMenuList::selectElement() const
+HTMLSelectElement* LayoutMenuList::selectElement() const
 {
     return toHTMLSelectElement(node());
 }
 
 void LayoutMenuList::addChild(LayoutObject* newChild, LayoutObject* beforeChild)
 {
-    createInnerBlock();
     m_innerBlock->addChild(newChild, beforeChild);
     ASSERT(m_innerBlock == firstChild());
 
@@ -158,10 +151,11 @@ void LayoutMenuList::styleDidChange(StyleDifference diff, const ComputedStyle* o
 {
     LayoutBlock::styleDidChange(diff, oldStyle);
 
-    if (m_buttonText)
-        m_buttonText->setStyle(mutableStyle());
-    if (m_innerBlock) // LayoutBlock handled updating the anonymous block's style.
-        adjustInnerStyle();
+    if (!m_innerBlock)
+        createInnerBlock();
+
+    m_buttonText->setStyle(mutableStyle());
+    adjustInnerStyle();
 
     bool fontChanged = !oldStyle || oldStyle->font() != style()->font();
     if (fontChanged)
@@ -210,26 +204,12 @@ void LayoutMenuList::updateFromElement()
         m_optionsChanged = false;
     }
 
-    if (m_popupIsVisible)
-        m_popup->updateFromElement();
-
-    updateText();
-}
-
-void LayoutMenuList::setIndexToSelectOnCancel(int listIndex)
-{
-    m_indexToSelectOnCancel = listIndex;
     updateText();
 }
 
 void LayoutMenuList::updateText()
 {
-    if (m_indexToSelectOnCancel >= 0)
-        setTextFromOption(selectElement()->listToOptionIndex(m_indexToSelectOnCancel));
-    else if (selectElement()->suggestedIndex() >= 0)
-        setTextFromOption(selectElement()->suggestedIndex());
-    else
-        setTextFromOption(selectElement()->selectedIndex());
+    setTextFromOption(selectElement()->optionIndexToBeShown());
 }
 
 void LayoutMenuList::setTextFromOption(int optionIndex)
@@ -241,7 +221,7 @@ void LayoutMenuList::setTextFromOption(int optionIndex)
     String text = emptyString();
     m_optionStyle.clear();
 
-    if (multiple()) {
+    if (selectElement()->multiple()) {
         unsigned selectedCount = 0;
         int firstSelectedIndex = -1;
         for (int i = 0; i < size; ++i) {
@@ -287,40 +267,23 @@ void LayoutMenuList::setTextFromOption(int optionIndex)
 void LayoutMenuList::setText(const String& s)
 {
     if (s.isEmpty()) {
-        if (!m_buttonText || !m_buttonText->isBR()) {
-            // FIXME: We should not modify the structure of the layout tree
-            // during layout. crbug.com/370462
-            DeprecatedDisableModifyLayoutTreeStructureAsserts disabler;
-            if (m_buttonText)
-                m_buttonText->destroy();
-            m_buttonText = new LayoutBR(&document());
-            m_buttonText->setStyle(mutableStyle());
-            addChild(m_buttonText);
-        }
+        // FIXME: This is a hack. We need the select to have the same baseline positioning as
+        // any surrounding text. Wihtout any content, we align the bottom of the select to the bottom
+        // of the text. With content (In this case the faked " ") we correctly align the middle of
+        // the select to the middle of the text. It should be possible to remove this, just set
+        // s.impl() into the text and have things align correctly ...  crbug.com/485982
+        m_isEmpty = true;
+        m_buttonText->setText(StringImpl::create(" ", 1), true);
     } else {
-        if (m_buttonText && !m_buttonText->isBR()) {
-            m_buttonText->setText(s.impl(), true);
-        } else {
-            // FIXME: We should not modify the structure of the layout tree
-            // during layout. crbug.com/370462
-            DeprecatedDisableModifyLayoutTreeStructureAsserts disabler;
-            if (m_buttonText)
-                m_buttonText->destroy();
-            m_buttonText = new LayoutText(&document(), s.impl());
-            m_buttonText->setStyle(mutableStyle());
-            // We need to set the text explicitly though it was specified in the
-            // constructor because LayoutText doesn't refer to the text
-            // specified in the constructor in a case of re-transforming.
-            m_buttonText->setText(s.impl(), true);
-            addChild(m_buttonText);
-        }
-        adjustInnerStyle();
+        m_isEmpty = false;
+        m_buttonText->setText(s.impl(), true);
     }
+    adjustInnerStyle();
 }
 
 String LayoutMenuList::text() const
 {
-    return m_buttonText ? m_buttonText->text() : String();
+    return m_buttonText && !m_isEmpty ? m_buttonText->text() : String();
 }
 
 LayoutRect LayoutMenuList::controlClipRect(const LayoutPoint& additionalOffset) const
@@ -345,78 +308,6 @@ void LayoutMenuList::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, 
         minLogicalWidth = maxLogicalWidth;
 }
 
-void LayoutMenuList::showPopup()
-{
-    if (m_popupIsVisible)
-        return;
-
-    if (document().frameHost()->chrome().hasOpenedPopup())
-        return;
-
-    // Create m_innerBlock here so it ends up as the first child.
-    // This is important because otherwise we might try to create m_innerBlock
-    // inside the showPopup call and it would fail.
-    createInnerBlock();
-    if (!m_popup)
-        m_popup = document().frameHost()->chrome().createPopupMenu(*document().frame(), this);
-    m_popupIsVisible = true;
-
-    FloatQuad quad(localToAbsoluteQuad(FloatQuad(borderBoundingBox())));
-    IntSize size = pixelSnappedIntRect(frameRect()).size();
-    HTMLSelectElement* select = selectElement();
-    m_popup->show(quad, size, select->optionToListIndex(select->selectedIndex()));
-    if (AXObjectCache* cache = document().existingAXObjectCache())
-        cache->didShowMenuListPopup(this);
-
-}
-
-void LayoutMenuList::hidePopup()
-{
-    if (m_popup)
-        m_popup->hide();
-}
-
-void LayoutMenuList::valueChanged(unsigned listIndex, bool fireOnChange)
-{
-    // Check to ensure a page navigation has not occurred while
-    // the popup was up.
-    Document& doc = toElement(node())->document();
-    if (&doc != doc.frame()->document())
-        return;
-
-    setIndexToSelectOnCancel(-1);
-
-    HTMLSelectElement* select = selectElement();
-    select->optionSelectedByUser(select->listToOptionIndex(listIndex), fireOnChange);
-}
-
-void LayoutMenuList::listBoxSelectItem(int listIndex, bool allowMultiplySelections, bool shift, bool fireOnChangeNow)
-{
-    selectElement()->listBoxSelectItem(listIndex, allowMultiplySelections, shift, fireOnChangeNow);
-}
-
-bool LayoutMenuList::multiple() const
-{
-    return selectElement()->multiple();
-}
-
-IntRect LayoutMenuList::elementRectRelativeToViewport() const
-{
-    // We don't use absoluteBoundingBoxRect() because it can return an IntRect
-    // larger the actual size by 1px.
-    return selectElement()->document().view()->contentsToViewport(roundedIntRect(absoluteBoundingBoxFloatRect()));
-}
-
-Element& LayoutMenuList::ownerElement() const
-{
-    return *selectElement();
-}
-
-const ComputedStyle* LayoutMenuList::computedStyleForItem(Element& element) const
-{
-    return element.computedStyle() ? element.computedStyle() : element.ensureComputedStyle();
-}
-
 void LayoutMenuList::didSetSelectedIndex(int listIndex)
 {
     didUpdateActiveOption(selectElement()->listToOptionIndex(listIndex));
@@ -435,127 +326,15 @@ void LayoutMenuList::didUpdateActiveOption(int optionIndex)
     int listIndex = select->optionToListIndex(optionIndex);
     if (listIndex < 0 || listIndex >= static_cast<int>(select->listItems().size()))
         return;
+
+    // We skip sending accessiblity notifications for the very first option, otherwise
+    // we get extra focus and select events that are undesired.
+    if (!m_hasUpdatedActiveOption) {
+        m_hasUpdatedActiveOption = true;
+        return;
+    }
+
     document().existingAXObjectCache()->handleUpdateActiveMenuOption(this, optionIndex);
-}
-
-String LayoutMenuList::itemText(unsigned listIndex) const
-{
-    HTMLSelectElement* select = selectElement();
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems = select->listItems();
-    if (listIndex >= listItems.size())
-        return String();
-
-    String itemString;
-    Element* element = listItems[listIndex];
-    if (isHTMLOptGroupElement(*element))
-        itemString = toHTMLOptGroupElement(*element).groupLabelText();
-    else if (isHTMLOptionElement(*element))
-        itemString = toHTMLOptionElement(*element).textIndentedToRespectGroupLabel();
-
-    applyTextTransform(style(), itemString, ' ');
-    return itemString;
-}
-
-String LayoutMenuList::itemAccessibilityText(unsigned listIndex) const
-{
-    // Allow the accessible name be changed if necessary.
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems = selectElement()->listItems();
-    if (listIndex >= listItems.size())
-        return String();
-    return listItems[listIndex]->fastGetAttribute(aria_labelAttr);
-}
-
-String LayoutMenuList::itemToolTip(unsigned listIndex) const
-{
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems = selectElement()->listItems();
-    if (listIndex >= listItems.size())
-        return String();
-    return listItems[listIndex]->title();
-}
-
-bool LayoutMenuList::itemIsEnabled(unsigned listIndex) const
-{
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems = selectElement()->listItems();
-    if (listIndex >= listItems.size())
-        return false;
-    HTMLElement* element = listItems[listIndex];
-    if (!isHTMLOptionElement(*element))
-        return false;
-
-    bool groupEnabled = true;
-    if (Element* parentElement = element->parentElement()) {
-        if (isHTMLOptGroupElement(*parentElement))
-            groupEnabled = !parentElement->isDisabledFormControl();
-    }
-    if (!groupEnabled)
-        return false;
-
-    return !element->isDisabledFormControl();
-}
-
-PopupMenuStyle LayoutMenuList::itemStyle(unsigned listIndex) const
-{
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems = selectElement()->listItems();
-    if (listIndex >= listItems.size()) {
-        // If we are making an out of bounds access, then we want to use the style
-        // of a different option element (index 0). However, if there isn't an option element
-        // before at index 0, we fall back to the menu's style.
-        if (!listIndex)
-            return menuStyle();
-
-        // Try to retrieve the style of an option element we know exists (index 0).
-        listIndex = 0;
-    }
-    HTMLElement* element = listItems[listIndex];
-
-    Color itemBackgroundColor;
-    bool itemHasCustomBackgroundColor;
-    getItemBackgroundColor(listIndex, itemBackgroundColor, itemHasCustomBackgroundColor);
-
-    const ComputedStyle* style = element->computedStyle() ? element->computedStyle() : element->ensureComputedStyle();
-    return style ? PopupMenuStyle(resolveColor(*style, CSSPropertyColor), itemBackgroundColor, style->font(), style->visibility() == VISIBLE,
-        isHTMLOptionElement(*element) ? toHTMLOptionElement(*element).isDisplayNone() : style->display() == NONE,
-        style->textIndent(), style->direction(), isOverride(style->unicodeBidi()),
-        itemHasCustomBackgroundColor ? PopupMenuStyle::CustomBackgroundColor : PopupMenuStyle::DefaultBackgroundColor) : menuStyle();
-}
-
-void LayoutMenuList::getItemBackgroundColor(unsigned listIndex, Color& itemBackgroundColor, bool& itemHasCustomBackgroundColor) const
-{
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems = selectElement()->listItems();
-    if (listIndex >= listItems.size()) {
-        itemBackgroundColor = resolveColor(CSSPropertyBackgroundColor);
-        itemHasCustomBackgroundColor = false;
-        return;
-    }
-    HTMLElement* element = listItems[listIndex];
-
-    Color backgroundColor;
-    if (const ComputedStyle* style = element->computedStyle())
-        backgroundColor = resolveColor(*style, CSSPropertyBackgroundColor);
-    itemHasCustomBackgroundColor = backgroundColor.alpha();
-    // If the item has an opaque background color, return that.
-    if (!backgroundColor.hasAlpha()) {
-        itemBackgroundColor = backgroundColor;
-        return;
-    }
-
-    // Otherwise, the item's background is overlayed on top of the menu background.
-    backgroundColor = resolveColor(CSSPropertyBackgroundColor).blend(backgroundColor);
-    if (!backgroundColor.hasAlpha()) {
-        itemBackgroundColor = backgroundColor;
-        return;
-    }
-
-    // If the menu background is not opaque, then add an opaque white background behind.
-    itemBackgroundColor = Color(Color::white).blend(backgroundColor);
-}
-
-PopupMenuStyle LayoutMenuList::menuStyle() const
-{
-    const LayoutObject* o = m_innerBlock ? m_innerBlock : this;
-    const ComputedStyle& style = o->styleRef();
-    return PopupMenuStyle(o->resolveColor(CSSPropertyColor), o->resolveColor(CSSPropertyBackgroundColor), style.font(), style.visibility() == VISIBLE,
-        style.display() == NONE, style.textIndent(), style.direction(), isOverride(style.unicodeBidi()));
 }
 
 LayoutUnit LayoutMenuList::clientPaddingLeft() const
@@ -577,56 +356,6 @@ LayoutUnit LayoutMenuList::clientPaddingRight() const
     // If the appearance isn't MenulistPart, then the select is styled (non-native), so
     // we want to return the user specified padding.
     return paddingRight() + m_innerBlock->paddingRight();
-}
-
-int LayoutMenuList::listSize() const
-{
-    return selectElement()->listItems().size();
-}
-
-int LayoutMenuList::selectedIndex() const
-{
-    HTMLSelectElement* select = selectElement();
-    return select->optionToListIndex(select->selectedIndex());
-}
-
-void LayoutMenuList::popupDidHide()
-{
-    m_popupIsVisible = false;
-    if (AXObjectCache* cache = document().existingAXObjectCache())
-        cache->didHideMenuListPopup(this);
-}
-
-void LayoutMenuList::popupDidCancel()
-{
-    if (m_indexToSelectOnCancel >= 0)
-        valueChanged(m_indexToSelectOnCancel);
-}
-
-bool LayoutMenuList::itemIsSeparator(unsigned listIndex) const
-{
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems = selectElement()->listItems();
-    return listIndex < listItems.size() && isHTMLHRElement(*listItems[listIndex]);
-}
-
-bool LayoutMenuList::itemIsLabel(unsigned listIndex) const
-{
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems = selectElement()->listItems();
-    return listIndex < listItems.size() && isHTMLOptGroupElement(*listItems[listIndex]);
-}
-
-bool LayoutMenuList::itemIsSelected(unsigned listIndex) const
-{
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems = selectElement()->listItems();
-    if (listIndex >= listItems.size())
-        return false;
-    HTMLElement* element = listItems[listIndex];
-    return isHTMLOptionElement(*element) && toHTMLOptionElement(*element).selected();
-}
-
-void LayoutMenuList::provisionalSelectionChanged(unsigned listIndex)
-{
-    setIndexToSelectOnCancel(listIndex);
 }
 
 } // namespace blink

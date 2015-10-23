@@ -209,58 +209,58 @@ struct FuzzTraits<base::string16> {
 
 // Specializations for tuples.
 template <>
-struct FuzzTraits<Tuple<>> {
-  static bool Fuzz(Tuple<>* p, Fuzzer* fuzzer) {
+struct FuzzTraits<base::Tuple<>> {
+  static bool Fuzz(base::Tuple<>* p, Fuzzer* fuzzer) {
     return true;
   }
 };
 
 template <class A>
-struct FuzzTraits<Tuple<A>> {
-  static bool Fuzz(Tuple<A>* p, Fuzzer* fuzzer) {
-    return FuzzParam(&get<0>(*p), fuzzer);
+struct FuzzTraits<base::Tuple<A>> {
+  static bool Fuzz(base::Tuple<A>* p, Fuzzer* fuzzer) {
+    return FuzzParam(&base::get<0>(*p), fuzzer);
   }
 };
 
 template <class A, class B>
-struct FuzzTraits<Tuple<A, B>> {
-  static bool Fuzz(Tuple<A, B>* p, Fuzzer* fuzzer) {
+struct FuzzTraits<base::Tuple<A, B>> {
+  static bool Fuzz(base::Tuple<A, B>* p, Fuzzer* fuzzer) {
     return
-        FuzzParam(&get<0>(*p), fuzzer) &&
-        FuzzParam(&get<1>(*p), fuzzer);
+        FuzzParam(&base::get<0>(*p), fuzzer) &&
+        FuzzParam(&base::get<1>(*p), fuzzer);
   }
 };
 
 template <class A, class B, class C>
-struct FuzzTraits<Tuple<A, B, C>> {
-  static bool Fuzz(Tuple<A, B, C>* p, Fuzzer* fuzzer) {
+struct FuzzTraits<base::Tuple<A, B, C>> {
+  static bool Fuzz(base::Tuple<A, B, C>* p, Fuzzer* fuzzer) {
     return
-        FuzzParam(&get<0>(*p), fuzzer) &&
-        FuzzParam(&get<1>(*p), fuzzer) &&
-        FuzzParam(&get<2>(*p), fuzzer);
+        FuzzParam(&base::get<0>(*p), fuzzer) &&
+        FuzzParam(&base::get<1>(*p), fuzzer) &&
+        FuzzParam(&base::get<2>(*p), fuzzer);
   }
 };
 
 template <class A, class B, class C, class D>
-struct FuzzTraits<Tuple<A, B, C, D>> {
-  static bool Fuzz(Tuple<A, B, C, D>* p, Fuzzer* fuzzer) {
+struct FuzzTraits<base::Tuple<A, B, C, D>> {
+  static bool Fuzz(base::Tuple<A, B, C, D>* p, Fuzzer* fuzzer) {
     return
-        FuzzParam(&get<0>(*p), fuzzer) &&
-        FuzzParam(&get<1>(*p), fuzzer) &&
-        FuzzParam(&get<2>(*p), fuzzer) &&
-        FuzzParam(&get<3>(*p), fuzzer);
+        FuzzParam(&base::get<0>(*p), fuzzer) &&
+        FuzzParam(&base::get<1>(*p), fuzzer) &&
+        FuzzParam(&base::get<2>(*p), fuzzer) &&
+        FuzzParam(&base::get<3>(*p), fuzzer);
   }
 };
 
 template <class A, class B, class C, class D, class E>
-struct FuzzTraits<Tuple<A, B, C, D, E>> {
-  static bool Fuzz(Tuple<A, B, C, D, E>* p, Fuzzer* fuzzer) {
+struct FuzzTraits<base::Tuple<A, B, C, D, E>> {
+  static bool Fuzz(base::Tuple<A, B, C, D, E>* p, Fuzzer* fuzzer) {
     return
-        FuzzParam(&get<0>(*p), fuzzer) &&
-        FuzzParam(&get<1>(*p), fuzzer) &&
-        FuzzParam(&get<2>(*p), fuzzer) &&
-        FuzzParam(&get<3>(*p), fuzzer) &&
-        FuzzParam(&get<4>(*p), fuzzer);
+        FuzzParam(&base::get<0>(*p), fuzzer) &&
+        FuzzParam(&base::get<1>(*p), fuzzer) &&
+        FuzzParam(&base::get<2>(*p), fuzzer) &&
+        FuzzParam(&base::get<3>(*p), fuzzer) &&
+        FuzzParam(&base::get<4>(*p), fuzzer);
   }
 };
 
@@ -672,7 +672,7 @@ struct FuzzTraits<cc::CompositorFrame> {
     if (!FuzzParam(&p->metadata, fuzzer))
       return false;
 
-    switch (RandInRange(4)) {
+    switch (RandInRange(3)) {
       case 0: {
         p->delegated_frame_data.reset(new cc::DelegatedFrameData());
         if (!FuzzParam(p->delegated_frame_data.get(), fuzzer))
@@ -682,12 +682,6 @@ struct FuzzTraits<cc::CompositorFrame> {
       case 1: {
         p->gl_frame_data.reset(new cc::GLFrameData());
         if (!FuzzParam(p->gl_frame_data.get(), fuzzer))
-          return false;
-        return true;
-      }
-      case 2: {
-        p->software_frame_data.reset(new cc::SoftwareFrameData());
-        if (!FuzzParam(p->software_frame_data.get(), fuzzer))
           return false;
         return true;
       }
@@ -702,8 +696,6 @@ template <>
 struct FuzzTraits<cc::CompositorFrameAck> {
   static bool Fuzz(cc::CompositorFrameAck* p, Fuzzer* fuzzer) {
     if (!FuzzParam(&p->resources, fuzzer))
-      return false;
-    if (!FuzzParam(&p->last_software_frame_id, fuzzer))
       return false;
 
     if (!p->gl_frame_data)
@@ -783,21 +775,6 @@ struct FuzzTraits<cc::RenderPassList> {
         return false;
       p->push_back(render_pass.Pass());
     }
-    return true;
-  }
-};
-
-template <>
-struct FuzzTraits<cc::SoftwareFrameData> {
-  static bool Fuzz(cc::SoftwareFrameData* p, Fuzzer* fuzzer) {
-    if (!FuzzParam(&p->id, fuzzer))
-      return false;
-    if (!FuzzParam(&p->size, fuzzer))
-      return false;
-    if (!FuzzParam(&p->damage_rect, fuzzer))
-      return false;
-    if (!FuzzParam(&p->bitmap_id, fuzzer))
-      return false;
     return true;
   }
 };
@@ -1764,15 +1741,26 @@ template <>
 struct FuzzTraits<ui::LatencyInfo> {
   static bool Fuzz(ui::LatencyInfo* p, Fuzzer* fuzzer) {
     // TODO(inferno): Add param traits for |latency_components|.
-    p->input_coordinates_size = static_cast<uint32>(
+    int64 trace_id = p->trace_id();
+    bool terminated = p->terminated();
+    uint32 input_coordinates_size = static_cast<uint32>(
         RandInRange(ui::LatencyInfo::kMaxInputCoordinates + 1));
+    ui::LatencyInfo::InputCoordinate
+        input_coordinates[ui::LatencyInfo::kMaxInputCoordinates];
     if (!FuzzParamArray(
-        &p->input_coordinates[0], p->input_coordinates_size, fuzzer))
+        input_coordinates, input_coordinates_size, fuzzer))
       return false;
-    if (!FuzzParam(&p->trace_id, fuzzer))
+    if (!FuzzParam(&trace_id, fuzzer))
       return false;
-    if (!FuzzParam(&p->terminated, fuzzer))
+    if (!FuzzParam(&terminated, fuzzer))
       return false;
+
+    ui::LatencyInfo latency(trace_id, terminated);
+    for (size_t i = 0; i < input_coordinates_size; i++) {
+      latency.AddInputCoordinate(input_coordinates[i]);
+    }
+    *p = latency;
+
     return true;
   }
 };
@@ -1792,10 +1780,21 @@ struct FuzzTraits<ui::LatencyInfo::InputCoordinate> {
 template <>
 struct FuzzTraits<url::Origin> {
   static bool Fuzz(url::Origin* p, Fuzzer* fuzzer) {
-    std::string origin = p->string();
-    if (!FuzzParam(&origin, fuzzer))
-        return false;
-    *p = url::Origin(origin);
+    std::string scheme = p->scheme();
+    std::string host = p->host();
+    uint16 port = p->port();
+    if (!FuzzParam(&scheme, fuzzer))
+      return false;
+    if (!FuzzParam(&host, fuzzer))
+      return false;
+    if (!FuzzParam(&port, fuzzer))
+      return false;
+    *p = url::Origin::UnsafelyCreateOriginWithoutNormalization(scheme, host,
+                                                               port);
+
+    // Force a unique origin 1% of the time:
+    if (RandInRange(100) == 1)
+      *p = url::Origin();
     return true;
   }
 };
@@ -2053,12 +2052,13 @@ struct FuzzTraits<webrtc::MouseCursor> {
 #define MAX_FAKE_ROUTING_ID 15
 
 #define IPC_MEMBERS_IN_0(p)
-#define IPC_MEMBERS_IN_1(p) get<0>(p)
-#define IPC_MEMBERS_IN_2(p) get<0>(p), get<1>(p)
-#define IPC_MEMBERS_IN_3(p) get<0>(p), get<1>(p), get<2>(p)
-#define IPC_MEMBERS_IN_4(p) get<0>(p), get<1>(p), get<2>(p), get<3>(p)
-#define IPC_MEMBERS_IN_5(p) get<0>(p), get<1>(p), get<2>(p), get<3>(p), \
-                            get<4>(p)
+#define IPC_MEMBERS_IN_1(p) base::get<0>(p)
+#define IPC_MEMBERS_IN_2(p) base::get<0>(p), base::get<1>(p)
+#define IPC_MEMBERS_IN_3(p) base::get<0>(p), base::get<1>(p), base::get<2>(p)
+#define IPC_MEMBERS_IN_4(p) base::get<0>(p), base::get<1>(p), base::get<2>(p), \
+                            base::get<3>(p)
+#define IPC_MEMBERS_IN_5(p) base::get<0>(p), base::get<1>(p), base::get<2>(p), \
+                            base::get<3>(p), base::get<4>(p)
 
 #define IPC_MEMBERS_OUT_0()
 #define IPC_MEMBERS_OUT_1() NULL

@@ -13,6 +13,84 @@
 #include "SkImageEncoder.h"
 #include <stdio.h>
 
+size_t GrSurface::WorseCaseSize(const GrSurfaceDesc& desc) {
+    size_t size;
+
+    bool isRenderTarget = SkToBool(desc.fFlags & kRenderTarget_GrSurfaceFlag);
+    if (isRenderTarget) {
+        // We own one color value for each MSAA sample.
+        int colorValuesPerPixel = SkTMax(1, desc.fSampleCnt);
+        if (desc.fSampleCnt) {
+            // Worse case, we own the resolve buffer so that is one more sample per pixel.
+            colorValuesPerPixel += 1;
+        }
+        SkASSERT(kUnknown_GrPixelConfig != desc.fConfig);
+        SkASSERT(!GrPixelConfigIsCompressed(desc.fConfig));
+        size_t colorBytes = GrBytesPerPixel(desc.fConfig);
+        SkASSERT(colorBytes > 0);
+        size = colorValuesPerPixel * desc.fWidth * desc.fHeight * colorBytes;
+    } else {
+        if (GrPixelConfigIsCompressed(desc.fConfig)) {
+            size = GrCompressedFormatDataSize(desc.fConfig, desc.fWidth, desc.fHeight);
+        } else {
+            size = (size_t) desc.fWidth * desc.fHeight * GrBytesPerPixel(desc.fConfig);
+        }
+
+        size += size/3;  // in case we have to mipmap
+    }
+
+    return size;
+}
+
+template<typename T> static bool adjust_params(int surfaceWidth,
+                                               int surfaceHeight,
+                                               size_t bpp,
+                                               int* left, int* top, int* width, int* height,
+                                               T** data,
+                                               size_t* rowBytes) {
+    if (!*rowBytes) {
+        *rowBytes = *width * bpp;
+    }
+
+    SkIRect subRect = SkIRect::MakeXYWH(*left, *top, *width, *height);
+    SkIRect bounds = SkIRect::MakeWH(surfaceWidth, surfaceHeight);
+
+    if (!subRect.intersect(bounds)) {
+        return false;
+    }
+    *data = reinterpret_cast<void*>(reinterpret_cast<intptr_t>(*data) +
+            (subRect.fTop - *top) * *rowBytes + (subRect.fLeft - *left) * bpp);
+
+    *left = subRect.fLeft;
+    *top = subRect.fTop;
+    *width = subRect.width();
+    *height = subRect.height();
+    return true;
+}
+
+bool GrSurfacePriv::AdjustReadPixelParams(int surfaceWidth,
+                                          int surfaceHeight,
+                                          size_t bpp,
+                                          int* left, int* top, int* width, int* height,
+                                          void** data,
+                                          size_t* rowBytes) {
+    return adjust_params<void>(surfaceWidth, surfaceHeight, bpp, left, top, width, height, data,
+                               rowBytes);
+}
+
+bool GrSurfacePriv::AdjustWritePixelParams(int surfaceWidth,
+                                           int surfaceHeight,
+                                           size_t bpp,
+                                           int* left, int* top, int* width, int* height,
+                                           const void** data,
+                                           size_t* rowBytes) {
+    return adjust_params<const void>(surfaceWidth, surfaceHeight, bpp, left, top, width, height,
+                                     data, rowBytes);
+}
+
+
+//////////////////////////////////////////////////////////////////////////////
+
 bool GrSurface::writePixels(int left, int top, int width, int height,
                             GrPixelConfig config, const void* buffer, size_t rowBytes,
                             uint32_t pixelOpsFlags) {
@@ -33,21 +111,17 @@ bool GrSurface::readPixels(int left, int top, int width, int height,
     if (NULL == context) {
         return false;
     }
-    GrRenderTarget* target = this->asRenderTarget();
-    if (target) {
-        return context->readRenderTargetPixels(target, left, top, width, height, config, buffer,
-                                               rowBytes, pixelOpsFlags);
-    }
-    return false;
+    return context->readSurfacePixels(this, left, top, width, height, config, buffer,
+                                      rowBytes, pixelOpsFlags);
 }
 
-SkImageInfo GrSurface::info() const {
+SkImageInfo GrSurface::info(SkAlphaType alphaType) const {
     SkColorType colorType;
     SkColorProfileType profileType;
     if (!GrPixelConfig2ColorAndProfileType(this->config(), &colorType, &profileType)) {
         sk_throw();
     }
-    return SkImageInfo::Make(this->width(), this->height(), colorType, kPremul_SkAlphaType,
+    return SkImageInfo::Make(this->width(), this->height(), colorType, alphaType,
                              profileType);
 }
 
@@ -84,9 +158,9 @@ void GrSurface::flushWrites() {
     }
 }
 
-void GrSurface::prepareForExternalRead() {
+void GrSurface::prepareForExternalIO() {
     if (!this->wasDestroyed()) {
-        this->getContext()->prepareSurfaceForExternalRead(this);
+        this->getContext()->prepareSurfaceForExternalIO(this);
     }
 }
 
@@ -124,4 +198,14 @@ bool GrSurface::hasPendingIO() const {
         return true;
     }
     return false;
+}
+
+void GrSurface::onRelease() {
+    this->invokeReleaseProc();
+    this->INHERITED::onRelease();
+}
+
+void GrSurface::onAbandon() {
+    this->invokeReleaseProc();
+    this->INHERITED::onAbandon();
 }

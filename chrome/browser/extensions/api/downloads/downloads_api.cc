@@ -15,15 +15,18 @@
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/cancelable_task_tracker.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_danger_prompt.h"
@@ -52,6 +55,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -636,7 +640,7 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
     // Ensure that the callback is called within a time limit.
     weak_ptr_factory_.reset(
         new base::WeakPtrFactory<ExtensionDownloadsEventRouterData>(this));
-    base::MessageLoopForUI::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&ExtensionDownloadsEventRouterData::DetermineFilenameTimeout,
                    weak_ptr_factory_->GetWeakPtr()),
@@ -802,7 +806,7 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
     // doesn't keep hogging memory.
     weak_ptr_factory_.reset(
         new base::WeakPtrFactory<ExtensionDownloadsEventRouterData>(this));
-    base::MessageLoopForUI::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&ExtensionDownloadsEventRouterData::ClearPendingDeterminers,
                    weak_ptr_factory_->GetWeakPtr()),
@@ -874,7 +878,8 @@ bool OnDeterminingFilenameWillDispatchCallback(
     ExtensionDownloadsEventRouterData* data,
     content::BrowserContext* context,
     const Extension* extension,
-    base::ListValue* event_args) {
+    Event* event,
+    const base::DictionaryValue* listener_filter) {
   *any_determiners = true;
   base::Time installed =
       ExtensionPrefs::Get(context)->GetInstallTime(extension->id());
@@ -951,9 +956,8 @@ bool DownloadsDownloadFunction::RunAsync() {
 
   scoped_ptr<content::DownloadUrlParameters> download_params(
       new content::DownloadUrlParameters(
-          download_url,
-          render_view_host()->GetProcess()->GetID(),
-          render_view_host()->GetRoutingID(),
+          download_url, render_frame_host()->GetProcess()->GetID(),
+          render_view_host_do_not_use()->GetRoutingID(),
           current_profile->GetResourceContext()));
 
   base::FilePath creator_suggested_filename;
@@ -1244,8 +1248,7 @@ bool DownloadsAcceptDangerFunction::RunAsync() {
 void DownloadsAcceptDangerFunction::PromptOrWait(int download_id, int retries) {
   DownloadItem* download_item =
       GetDownload(GetProfile(), include_incognito(), download_id);
-  content::WebContents* web_contents =
-      dispatcher()->delegate()->GetVisibleWebContents();
+  content::WebContents* web_contents = dispatcher()->GetVisibleWebContents();
   if (InvalidId(download_item, &error_) ||
       Fault(download_item->GetState() != DownloadItem::IN_PROGRESS,
             errors::kNotInProgress, &error_) ||
@@ -1257,10 +1260,9 @@ void DownloadsAcceptDangerFunction::PromptOrWait(int download_id, int retries) {
   bool visible = platform_util::IsVisible(web_contents->GetNativeView());
   if (!visible) {
     if (retries > 0) {
-      base::MessageLoopForUI::current()->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&DownloadsAcceptDangerFunction::PromptOrWait,
-                     this, download_id, retries - 1),
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE, base::Bind(&DownloadsAcceptDangerFunction::PromptOrWait,
+                                this, download_id, retries - 1),
           base::TimeDelta::FromMilliseconds(100));
       return;
     }
@@ -1373,7 +1375,7 @@ bool DownloadsDragFunction::RunAsync() {
   DownloadItem* download_item =
       GetDownload(GetProfile(), include_incognito(), params->download_id);
   content::WebContents* web_contents =
-      dispatcher()->delegate()->GetVisibleWebContents();
+      dispatcher()->GetVisibleWebContents();
   if (InvalidId(download_item, &error_) ||
       Fault(!web_contents, errors::kInvisibleContext, &error_))
     return false;
@@ -1482,7 +1484,7 @@ bool DownloadsGetFileIconFunction::RunAsync() {
   DCHECK(icon_size == 16 || icon_size == 32);
   float scale = 1.0;
   content::WebContents* web_contents =
-      dispatcher()->delegate()->GetVisibleWebContents();
+      dispatcher()->GetVisibleWebContents();
   if (web_contents) {
     scale = ui::GetScaleFactorForNativeView(
         web_contents->GetRenderWidgetHostView()->GetNativeView());
@@ -1591,11 +1593,10 @@ void ExtensionDownloadsEventRouter::OnDeterminingFilename(
   base::DictionaryValue* json = DownloadItemToJSON(
       item, profile_).release();
   json->SetString(kFilenameKey, suggested_path.LossyDisplayName());
-  DispatchEvent(downloads::OnDeterminingFilename::kEventName,
-                false,
+  DispatchEvent(events::DOWNLOADS_ON_DETERMINING_FILENAME,
+                downloads::OnDeterminingFilename::kEventName, false,
                 base::Bind(&OnDeterminingFilenameWillDispatchCallback,
-                           &any_determiners,
-                           data),
+                           &any_determiners, data),
                 json);
   if (!any_determiners) {
     data->ClearPendingDeterminers();
@@ -1756,10 +1757,8 @@ void ExtensionDownloadsEventRouter::OnDownloadCreated(
   }
   scoped_ptr<base::DictionaryValue> json_item(
       DownloadItemToJSON(download_item, profile_));
-  DispatchEvent(downloads::OnCreated::kEventName,
-                true,
-                Event::WillDispatchCallback(),
-                json_item->DeepCopy());
+  DispatchEvent(events::DOWNLOADS_ON_CREATED, downloads::OnCreated::kEventName,
+                true, Event::WillDispatchCallback(), json_item->DeepCopy());
   if (!ExtensionDownloadsEventRouterData::Get(download_item) &&
       (router->HasEventListener(downloads::OnChanged::kEventName) ||
        router->HasEventListener(
@@ -1828,10 +1827,9 @@ void ExtensionDownloadsEventRouter::OnDownloadUpdated(
   // changed. Replace the stored json with the new json.
   data->OnItemUpdated();
   if (changed) {
-    DispatchEvent(downloads::OnChanged::kEventName,
-                  true,
-                  Event::WillDispatchCallback(),
-                  delta.release());
+    DispatchEvent(events::DOWNLOADS_ON_CHANGED,
+                  downloads::OnChanged::kEventName, true,
+                  Event::WillDispatchCallback(), delta.release());
     data->OnChangedFired();
   }
   data->set_json(new_json.Pass());
@@ -1843,13 +1841,13 @@ void ExtensionDownloadsEventRouter::OnDownloadRemoved(
   if (download_item->IsTemporary())
     return;
   DispatchEvent(
-      downloads::OnErased::kEventName,
-      true,
+      events::DOWNLOADS_ON_ERASED, downloads::OnErased::kEventName, true,
       Event::WillDispatchCallback(),
       new base::FundamentalValue(static_cast<int>(download_item->GetId())));
 }
 
 void ExtensionDownloadsEventRouter::DispatchEvent(
+    events::HistogramValue histogram_value,
     const std::string& event_name,
     bool include_incognito,
     const Event::WillDispatchCallback& will_dispatch_callback,
@@ -1860,8 +1858,8 @@ void ExtensionDownloadsEventRouter::DispatchEvent(
   scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(arg);
   std::string json_args;
-  base::JSONWriter::Write(args.get(), &json_args);
-  scoped_ptr<Event> event(new Event(event_name, args.Pass()));
+  base::JSONWriter::Write(*args, &json_args);
+  scoped_ptr<Event> event(new Event(histogram_value, event_name, args.Pass()));
   // The downloads system wants to share on-record events with off-record
   // extension renderers even in incognito_split_mode because that's how
   // chrome://downloads works. The "restrict_to_profile" mechanism does not

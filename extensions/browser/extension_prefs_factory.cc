@@ -28,8 +28,10 @@ ExtensionPrefsFactory* ExtensionPrefsFactory::GetInstance() {
 }
 
 void ExtensionPrefsFactory::SetInstanceForTesting(
-    content::BrowserContext* context, ExtensionPrefs* prefs) {
-  Associate(context, prefs);
+    content::BrowserContext* context,
+    scoped_ptr<ExtensionPrefs> prefs) {
+  Disassociate(context);
+  Associate(context, prefs.Pass());
 }
 
 ExtensionPrefsFactory::ExtensionPrefsFactory()
@@ -47,10 +49,9 @@ KeyedService* ExtensionPrefsFactory::BuildServiceInstanceFor(
   std::vector<ExtensionPrefsObserver*> prefs_observers;
   client->GetEarlyExtensionPrefsObservers(context, &prefs_observers);
   return ExtensionPrefs::Create(
-      client->GetPrefServiceForContext(context),
+      context, client->GetPrefServiceForContext(context),
       context->GetPath().AppendASCII(extensions::kInstallDirectoryName),
       ExtensionPrefValueMapFactory::GetForBrowserContext(context),
-      client->CreateAppSorting().Pass(),
       client->AreExtensionsDisabled(*base::CommandLine::ForCurrentProcess(),
                                     context),
       prefs_observers);

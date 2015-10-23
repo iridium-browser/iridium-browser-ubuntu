@@ -558,6 +558,7 @@ class _BuilderRunBase(object):
   _ATTRS = {}
 
   __slots__ = (
+      'site_config',     # SiteConfig for this run.
       'config',          # BuildConfig for this run.
       'options',         # The cbuildbot options object for this run.
 
@@ -580,7 +581,8 @@ class _BuilderRunBase(object):
       # test = (config build_tests AND option tests)
   )
 
-  def __init__(self, options, multiprocess_manager):
+  def __init__(self, site_config, options, multiprocess_manager):
+    self.site_config = site_config
     self.options = options
 
     # Note that self.config is filled in dynamically by either of the classes
@@ -820,6 +822,10 @@ class _RealBuilderRun(object):
     run_base = self.__getattribute__('_run_base')
     config = self.__getattribute__('_config')
 
+    # TODO(akeshet): This logic seems to have a subtle flaky bug that only
+    # manifests itself when using unit tests with ParallelMock. As a workaround,
+    # we have simply eliminiated ParallelMock from the affected tests. See
+    # crbug.com/470907 for context.
     try:
       # run_base.config should always be None except when accessed through
       # this routine.  Override the value here, then undo later.
@@ -884,15 +890,16 @@ class _RealBuilderRun(object):
 class BuilderRun(_RealBuilderRun):
   """A standard BuilderRun for a top-level build config."""
 
-  def __init__(self, options, build_config, multiprocess_manager):
+  def __init__(self, options, site_config, build_config, multiprocess_manager):
     """Initialize.
 
     Args:
       options: Command line options from this cbuildbot run.
+      site_config: Site config for this cbuildbot run.
       build_config: Build config for this cbuildbot run.
       multiprocess_manager: A multiprocessing.Manager.
     """
-    run_base = _BuilderRunBase(options, multiprocess_manager)
+    run_base = _BuilderRunBase(site_config, options, multiprocess_manager)
     super(BuilderRun, self).__init__(run_base, build_config)
 
 

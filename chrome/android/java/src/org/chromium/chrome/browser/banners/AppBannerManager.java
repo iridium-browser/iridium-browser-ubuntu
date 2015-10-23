@@ -8,13 +8,13 @@ import android.content.Context;
 import android.text.TextUtils;
 
 import org.chromium.base.ApplicationStatus;
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.BookmarkUtils;
-import org.chromium.chrome.browser.EmptyTabObserver;
-import org.chromium.chrome.browser.Tab;
+import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.tab.EmptyTabObserver;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content_public.browser.WebContents;
 
 /**
@@ -39,7 +39,7 @@ public class AppBannerManager extends EmptyTabObserver {
     private static Boolean sIsEnabled;
 
     /** Pointer to the native side AppBannerManager. */
-    private final long mNativePointer;
+    private long mNativePointer;
 
     /** Tab that the AppBannerView/AppBannerManager is owned by. */
     private final Tab mTab;
@@ -51,7 +51,7 @@ public class AppBannerManager extends EmptyTabObserver {
     public static boolean isEnabled() {
         if (sIsEnabled == null) {
             Context context = ApplicationStatus.getApplicationContext();
-            sIsEnabled = nativeIsEnabled() && BookmarkUtils.isAddToHomeIntentSupported(context);
+            sIsEnabled = ShortcutHelper.isAddToHomeIntentSupported(context);
         }
         return sIsEnabled;
     }
@@ -70,8 +70,11 @@ public class AppBannerManager extends EmptyTabObserver {
      * @param tab Tab that the AppBannerManager will be attached to.
      */
     public AppBannerManager(Tab tab, Context context) {
-        int iconSize = context.getResources().getDimensionPixelSize(R.dimen.app_banner_icon_size);
-        mNativePointer = nativeInit(iconSize);
+        int iconSizePx = context.getResources().getDimensionPixelSize(R.dimen.app_banner_icon_size);
+        float density = context.getResources().getDisplayMetrics().density;
+        int iconSizeDp = (int) (iconSizePx / density);
+
+        mNativePointer = nativeInit(iconSizeDp);
         mTab = tab;
         updatePointers();
     }
@@ -92,6 +95,7 @@ public class AppBannerManager extends EmptyTabObserver {
      */
     public void destroy() {
         nativeDestroy(mNativePointer);
+        mNativePointer = 0;
     }
 
     /**
@@ -107,10 +111,15 @@ public class AppBannerManager extends EmptyTabObserver {
      * @param packageName Name of the package that is being advertised.
      */
     @CalledByNative
-    private void fetchAppDetails(String url, String packageName, int iconSize) {
+    private void fetchAppDetails(
+            String url, String packageName, String referrer, int iconSizeInDp) {
         if (sAppDetailsDelegate == null) return;
+
+        Context context = ApplicationStatus.getApplicationContext();
+        int iconSizeInPx = Math.round(
+                context.getResources().getDisplayMetrics().density * iconSizeInDp);
         sAppDetailsDelegate.getAppDetailsAsynchronously(
-                createAppDetailsObserver(), url, packageName, iconSize);
+                createAppDetailsObserver(), url, packageName, referrer, iconSizeInPx);
     }
 
     private AppDetailsDelegate.Observer createAppDetailsObserver() {
@@ -122,7 +131,7 @@ public class AppBannerManager extends EmptyTabObserver {
              */
             @Override
             public void onAppDetailsRetrieved(AppData data) {
-                if (data == null) return;
+                if (data == null || mNativePointer == 0) return;
 
                 String imageUrl = data.imageUrl();
                 if (TextUtils.isEmpty(imageUrl)) return;
@@ -151,13 +160,18 @@ public class AppBannerManager extends EmptyTabObserver {
         nativeDisableSecureSchemeCheckForTesting();
     }
 
+    /** Sets the weights of direct and indirect page navigations for testing. */
+    @VisibleForTesting
+    static void setEngagementWeights(double directEngagement, double indirectEngagement) {
+        nativeSetEngagementWeights(directEngagement, indirectEngagement);
+    }
+
     /** Returns whether a AppBannerDataFetcher is actively retrieving data. */
     @VisibleForTesting
     public boolean isFetcherActiveForTesting() {
         return nativeIsFetcherActive(mNativePointer);
     }
 
-    private static native boolean nativeIsEnabled();
     private native long nativeInit(int iconSize);
     private native void nativeDestroy(long nativeAppBannerManagerAndroid);
     private native void nativeReplaceWebContents(long nativeAppBannerManagerAndroid,
@@ -168,5 +182,7 @@ public class AppBannerManager extends EmptyTabObserver {
     // Testing methods.
     private static native void nativeSetTimeDeltaForTesting(int days);
     private static native void nativeDisableSecureSchemeCheckForTesting();
+    private static native void nativeSetEngagementWeights(double directEngagement,
+            double indirectEngagement);
     private native boolean nativeIsFetcherActive(long nativeAppBannerManagerAndroid);
 }

@@ -14,7 +14,6 @@
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
@@ -22,6 +21,7 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
+#include "components/proxy_config/proxy_prefs.h"
 #include "net/proxy/proxy_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -55,7 +55,6 @@ template <class C>
 void data_reduction_proxy::DataReductionProxySettingsTestBase::ResetSettings(
     bool allowed,
     bool fallback_allowed,
-    bool alt_allowed,
     bool promo_allowed,
     bool holdback) {
   int flags = 0;
@@ -63,8 +62,6 @@ void data_reduction_proxy::DataReductionProxySettingsTestBase::ResetSettings(
     flags |= DataReductionProxyParams::kAllowed;
   if (fallback_allowed)
     flags |= DataReductionProxyParams::kFallbackAllowed;
-  if (alt_allowed)
-    flags |= DataReductionProxyParams::kAlternativeAllowed;
   if (promo_allowed)
     flags |= DataReductionProxyParams::kPromoAllowed;
   if (holdback)
@@ -89,7 +86,6 @@ template void
 data_reduction_proxy::DataReductionProxySettingsTestBase::ResetSettings<
     DataReductionProxyChromeSettings>(bool allowed,
                                        bool fallback_allowed,
-                                       bool alt_allowed,
                                        bool promo_allowed,
                                        bool holdback);
 

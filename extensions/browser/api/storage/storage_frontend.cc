@@ -47,8 +47,9 @@ class DefaultObserver : public SettingsObserver {
     args->Append(base::JSONReader::Read(change_json));
     args->Append(new base::StringValue(settings_namespace::ToString(
         settings_namespace)));
-    scoped_ptr<Event> event(new Event(
-        core_api::storage::OnChanged::kEventName, args.Pass()));
+    scoped_ptr<Event> event(new Event(events::STORAGE_ON_CHANGED,
+                                      api::storage::OnChanged::kEventName,
+                                      args.Pass()));
     EventRouter::Get(browser_context_)
         ->DispatchEventToExtension(extension_id, event.Pass());
   }
@@ -65,10 +66,10 @@ StorageFrontend* StorageFrontend::Get(BrowserContext* context) {
 }
 
 // static
-StorageFrontend* StorageFrontend::CreateForTesting(
+scoped_ptr<StorageFrontend> StorageFrontend::CreateForTesting(
     const scoped_refptr<SettingsStorageFactory>& storage_factory,
     BrowserContext* context) {
-  return new StorageFrontend(storage_factory, context);
+  return make_scoped_ptr(new StorageFrontend(storage_factory, context));
 }
 
 StorageFrontend::StorageFrontend(BrowserContext* context)

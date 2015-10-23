@@ -36,10 +36,11 @@ bool ReadMessage(int fd, std::string* message) {
   CHECK(message);
 
   int result;
-  int32 message_size;
-  // The file containing the metrics do not leave the device so the writer and
+  int32_t message_size;
+  const int32_t message_header_size = sizeof(message_size);
+  // The file containing the metrics does not leave the device so the writer and
   // the reader will always have the same endianness.
-  result = HANDLE_EINTR(read(fd, &message_size, sizeof(message_size)));
+  result = HANDLE_EINTR(read(fd, &message_size, message_header_size));
   if (result < 0) {
     DPLOG(ERROR) << "reading metrics message header";
     return false;
@@ -48,7 +49,7 @@ bool ReadMessage(int fd, std::string* message) {
     // This indicates a normal EOF.
     return false;
   }
-  if (result < static_cast<int>(sizeof(message_size))) {
+  if (result < message_header_size) {
     DLOG(ERROR) << "bad read size " << result << ", expecting "
                 << sizeof(message_size);
     return false;
@@ -68,7 +69,12 @@ bool ReadMessage(int fd, std::string* message) {
     return true;
   }
 
-  message_size -= sizeof(message_size);  // The message size includes itself.
+  if (message_size < message_header_size) {
+    DLOG(ERROR) << "message too short : " << message_size;
+    return false;
+  }
+
+  message_size -= message_header_size;  // The message size includes itself.
   char buffer[SerializationUtils::kMessageMaxLength];
   if (!base::ReadFromFD(fd, buffer, message_size)) {
     DPLOG(ERROR) << "reading metrics message body";
@@ -85,8 +91,9 @@ scoped_ptr<MetricSample> SerializationUtils::ParseSample(
   if (sample.empty())
     return scoped_ptr<MetricSample>();
 
-  std::vector<std::string> parts;
-  base::SplitString(sample, '\0', &parts);
+  std::vector<std::string> parts = base::SplitString(
+      sample, std::string(1, '\0'),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   // We should have two null terminated strings so split should produce
   // three chunks.
   if (parts.size() != 3) {
@@ -97,15 +104,15 @@ scoped_ptr<MetricSample> SerializationUtils::ParseSample(
   const std::string& name = parts[0];
   const std::string& value = parts[1];
 
-  if (LowerCaseEqualsASCII(name, "crash")) {
+  if (base::LowerCaseEqualsASCII(name, "crash")) {
     return MetricSample::CrashSample(value);
-  } else if (LowerCaseEqualsASCII(name, "histogram")) {
+  } else if (base::LowerCaseEqualsASCII(name, "histogram")) {
     return MetricSample::ParseHistogram(value);
-  } else if (LowerCaseEqualsASCII(name, "linearhistogram")) {
+  } else if (base::LowerCaseEqualsASCII(name, "linearhistogram")) {
     return MetricSample::ParseLinearHistogram(value);
-  } else if (LowerCaseEqualsASCII(name, "sparsehistogram")) {
+  } else if (base::LowerCaseEqualsASCII(name, "sparsehistogram")) {
     return MetricSample::ParseSparseHistogram(value);
-  } else if (LowerCaseEqualsASCII(name, "useraction")) {
+  } else if (base::LowerCaseEqualsASCII(name, "useraction")) {
     return MetricSample::UserActionSample(value);
   } else {
     DLOG(ERROR) << "invalid event type: " << name << ", value: " << value;
@@ -152,7 +159,7 @@ void SerializationUtils::ReadAndTruncateMetricsFromFile(
 
     scoped_ptr<MetricSample> sample = ParseSample(message);
     if (sample)
-      metrics->push_back(sample.release());
+      metrics->push_back(sample.Pass());
   }
 
   result = ftruncate(fd.get(), 0);

@@ -4,8 +4,10 @@
 
 #include "sync/syncable/entry_kernel.h"
 
+#include "base/json/string_escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "sync/protocol/proto_value_conversions.h"
+#include "sync/syncable/syncable_columns.h"
 #include "sync/syncable/syncable_enum_conversions.h"
 #include "sync/util/cryptographer.h"
 
@@ -14,7 +16,7 @@ namespace syncable {
 
 EntryKernel::EntryKernel() : dirty_(false) {
   // Everything else should already be default-initialized.
-  for (int i = INT64_FIELDS_BEGIN; i < INT64_FIELDS_END; ++i) {
+  for (int i = 0; i < INT64_FIELDS_COUNT; ++i) {
     int64_fields[i] = 0;
   }
 }
@@ -52,16 +54,16 @@ ModelType EntryKernel::GetServerModelType() const {
 bool EntryKernel::ShouldMaintainPosition() const {
   // We maintain positions for all bookmarks, except those that are
   // server-created top-level folders.
-  return (GetModelTypeFromSpecifics(ref(SPECIFICS)) == syncer::BOOKMARKS)
-      && !(!ref(UNIQUE_SERVER_TAG).empty() && ref(IS_DIR));
+  return TypeSupportsOrdering(GetModelTypeFromSpecifics(ref(SPECIFICS))) &&
+         !(!ref(UNIQUE_SERVER_TAG).empty() && ref(IS_DIR));
 }
 
 bool EntryKernel::ShouldMaintainHierarchy() const {
   // We maintain hierarchy for bookmarks and top-level folders,
   // but no other types.  Note that the Nigori node consists of a single
   // top-level folder, so it's included in this set.
-  return (GetModelTypeFromSpecifics(ref(SPECIFICS)) == syncer::BOOKMARKS)
-      || (!ref(UNIQUE_SERVER_TAG).empty());
+  return TypeSupportsHierarchy(GetModelTypeFromSpecifics(ref(SPECIFICS))) ||
+         (!ref(UNIQUE_SERVER_TAG).empty());
 }
 
 namespace {
@@ -148,7 +150,10 @@ base::DictionaryValue* EntryKernel::ToValue(
     Cryptographer* cryptographer) const {
   base::DictionaryValue* kernel_info = new base::DictionaryValue();
   kernel_info->SetBoolean("isDirty", is_dirty());
-  kernel_info->Set("serverModelType", ModelTypeToValue(GetServerModelType()));
+  ModelType dataType = GetServerModelType();
+  if (!IsRealDataType(dataType))
+    dataType = GetModelType();
+  kernel_info->Set("modelType", ModelTypeToValue(dataType));
 
   // Int64 fields.
   SetFieldValues(*this, kernel_info,
@@ -231,6 +236,55 @@ base::DictionaryValue* EntryKernelMutationToValue(
   dict->Set("original", mutation.original.ToValue(NULL));
   dict->Set("mutated", mutation.mutated.ToValue(NULL));
   return dict;
+}
+
+std::ostream& operator<<(std::ostream& os, const EntryKernel& entry_kernel) {
+  int i;
+  EntryKernel* const kernel = const_cast<EntryKernel*>(&entry_kernel);
+  for (i = BEGIN_FIELDS; i < INT64_FIELDS_END; ++i) {
+    os << g_metas_columns[i].name << ": "
+       << kernel->ref(static_cast<Int64Field>(i)) << ", ";
+  }
+  for (; i < TIME_FIELDS_END; ++i) {
+    os << g_metas_columns[i].name << ": "
+       << GetTimeDebugString(kernel->ref(static_cast<TimeField>(i))) << ", ";
+  }
+  for (; i < ID_FIELDS_END; ++i) {
+    os << g_metas_columns[i].name << ": "
+       << kernel->ref(static_cast<IdField>(i)) << ", ";
+  }
+  os << "Flags: ";
+  for (; i < BIT_FIELDS_END; ++i) {
+    if (kernel->ref(static_cast<BitField>(i)))
+      os << g_metas_columns[i].name << ", ";
+  }
+  for (; i < STRING_FIELDS_END; ++i) {
+    const std::string& field = kernel->ref(static_cast<StringField>(i));
+    os << g_metas_columns[i].name << ": " << field << ", ";
+  }
+  for (; i < PROTO_FIELDS_END; ++i) {
+    std::string escaped_str = base::EscapeBytesAsInvalidJSONString(
+        kernel->ref(static_cast<ProtoField>(i)).SerializeAsString(), false);
+    os << g_metas_columns[i].name << ": " << escaped_str << ", ";
+  }
+  for (; i < UNIQUE_POSITION_FIELDS_END; ++i) {
+    os << g_metas_columns[i].name << ": "
+       << kernel->ref(static_cast<UniquePositionField>(i)).ToDebugString()
+       << ", ";
+  }
+  for (; i < ATTACHMENT_METADATA_FIELDS_END; ++i) {
+    std::string escaped_str = base::EscapeBytesAsInvalidJSONString(
+        kernel->ref(static_cast<AttachmentMetadataField>(i))
+            .SerializeAsString(),
+        false);
+    os << g_metas_columns[i].name << ": " << escaped_str << ", ";
+  }
+  os << "TempFlags: ";
+  for (; i < BIT_TEMPS_END; ++i) {
+    if (kernel->ref(static_cast<BitTemp>(i)))
+      os << "#" << i - BIT_TEMPS_BEGIN << ", ";
+  }
+  return os;
 }
 
 }  // namespace syncer

@@ -21,19 +21,18 @@ remoting.ClientPluginMessage = function() {
   /** @type {string} */
   this.method = '';
 
-  /** @type {Object<string,*>} */
+  /** @type {Object<*>} */
   this.data = {};
 };
 
 /**
  * @param {Element} container The container for the embed element.
- * @param {Array<string>} requiredCapabilities The set of capabilties that the
+ * @param {Array<string>} capabilities The set of capabilties that the
  *     session must support for this application.
  * @constructor
  * @implements {remoting.ClientPlugin}
  */
-remoting.ClientPluginImpl = function(container,
-                                     requiredCapabilities) {
+remoting.ClientPluginImpl = function(container, capabilities) {
   // TODO(kelvinp): Hack to remove all plugin elements as our current code does
   // not handle connection cancellation properly.
   container.innerText = '';
@@ -42,7 +41,7 @@ remoting.ClientPluginImpl = function(container,
   container.appendChild(this.plugin_);
 
   /** @private {Array<string>} */
-  this.requiredCapabilities_ = requiredCapabilities;
+  this.capabilities_ = capabilities;
 
   /** @private {remoting.ClientPlugin.ConnectionEventHandler} */
   this.connectionEventHandler_ = null;
@@ -62,11 +61,6 @@ remoting.ClientPluginImpl = function(container,
   this.pluginApiFeatures_ = [];
   /** @private {number} */
   this.pluginApiMinVersion_ = -1;
-  /**
-   * Capabilities to be used for the next connect request.
-   * @private {!Array<string>}
-   */
-  this.capabilities_ = [];
   /**
    * Capabilities that are negotiated between the client and the host.
    * @private {Array<remoting.ClientSession.Capability>}
@@ -90,10 +84,6 @@ remoting.ClientPluginImpl = function(container,
               /** @type {remoting.ClientPluginMessage} */ (event.data));
         }, false);
 
-  if (remoting.settings.CLIENT_PLUGIN_TYPE == 'native') {
-    window.setTimeout(this.showPluginForClickToPlay_.bind(this), 500);
-  }
-
   /** @private */
   this.hostDesktop_ = new remoting.ClientPlugin.HostDesktopImpl(
       this, this.postMessage_.bind(this));
@@ -105,8 +95,8 @@ remoting.ClientPluginImpl = function(container,
   /** @private {remoting.CredentialsProvider} */
   this.credentials_ = null;
 
-  /** @private {string} */
-  this.keyRemappings_ = '';
+  /** @private {!Object} */
+  this.keyRemappings_ = {};
 };
 
 /**
@@ -117,41 +107,13 @@ remoting.ClientPluginImpl = function(container,
 remoting.ClientPluginImpl.createPluginElement_ = function() {
   var plugin =
       /** @type {HTMLEmbedElement} */ (document.createElement('embed'));
-  if (remoting.settings.CLIENT_PLUGIN_TYPE == 'pnacl') {
-    plugin.src = 'remoting_client_pnacl.nmf';
-    plugin.type = 'application/x-pnacl';
-  } else if (remoting.settings.CLIENT_PLUGIN_TYPE == 'nacl') {
-    plugin.src = 'remoting_client_nacl.nmf';
-    plugin.type = 'application/x-nacl';
-  } else {
-    plugin.src = 'about://none';
-    plugin.type = 'application/vnd.chromium.remoting-viewer';
-  }
+  plugin.src = 'remoting_client_pnacl.nmf';
+  plugin.type = 'application/x-pnacl';
   plugin.width = '0';
   plugin.height = '0';
   plugin.tabIndex = 0;  // Required, otherwise focus() doesn't work.
   return plugin;
 }
-
-/**
- * Chromoting session API version (for this javascript).
- * This is compared with the plugin API version to verify that they are
- * compatible.
- *
- * @const
- * @private
- */
-remoting.ClientPluginImpl.prototype.API_VERSION_ = 6;
-
-/**
- * The oldest API version that we support.
- * This will differ from the |API_VERSION_| if we maintain backward
- * compatibility with older API versions.
- *
- * @const
- * @private
- */
-remoting.ClientPluginImpl.prototype.API_MIN_VERSION_ = 5;
 
 /**
  * @param {remoting.ClientPlugin.ConnectionEventHandler} handler
@@ -230,9 +192,6 @@ remoting.ClientPluginImpl.prototype.handleMessageMethod_ = function(message) {
     if (message.method == 'sendOutgoingIq') {
       handler.onOutgoingIq(base.getStringAttr(message.data, 'iq'));
 
-    } else if (message.method == 'logDebugMessage') {
-      handler.onDebugMessage(base.getStringAttr(message.data, 'message'));
-
     } else if (message.method == 'onConnectionStatus') {
       var stateString = base.getStringAttr(message.data, 'state');
       var state = remoting.ClientSession.State.fromString(stateString);
@@ -243,7 +202,7 @@ remoting.ClientPluginImpl.prototype.handleMessageMethod_ = function(message) {
       // TODO(kelvinp): Fix the client plugin to fire capabilities and the
       // connected event in the same message.
       if (state === remoting.ClientSession.State.CONNECTED) {
-        base.debug.assert(this.hostCapabilities_ === null,
+        console.assert(this.hostCapabilities_ === null,
             'Capabilities should only be set after the session is connected');
         return;
       }
@@ -262,8 +221,8 @@ remoting.ClientPluginImpl.prototype.handleMessageMethod_ = function(message) {
       var capabilityString = base.getStringAttr(message.data, 'capabilities');
       console.log('plugin: setCapabilities: [' + capabilityString + ']');
 
-      base.debug.assert(this.hostCapabilities_ === null,
-                        'setCapabilities() should only be called once');
+      console.assert(this.hostCapabilities_ === null,
+                     'setCapabilities() should only be called once.');
       this.hostCapabilities_ = tokenize(capabilityString);
 
       handler.onConnectionStatusUpdate(
@@ -278,35 +237,6 @@ remoting.ClientPluginImpl.prototype.handleMessageMethod_ = function(message) {
   }
 
   if (message.method == 'hello') {
-    // Resize in case we had to enlarge it to support click-to-play.
-    this.hidePluginForClickToPlay_();
-    this.pluginApiVersion_ = base.getNumberAttr(message.data, 'apiVersion');
-    this.pluginApiMinVersion_ =
-        base.getNumberAttr(message.data, 'apiMinVersion');
-
-    if (this.pluginApiVersion_ >= 7) {
-      this.pluginApiFeatures_ =
-          tokenize(base.getStringAttr(message.data, 'apiFeatures'));
-
-      // Negotiate capabilities.
-      /** @type {!Array<string>} */
-      var supportedCapabilities = [];
-      if ('supportedCapabilities' in message.data) {
-        supportedCapabilities =
-            tokenize(base.getStringAttr(message.data, 'supportedCapabilities'));
-      }
-      // At the moment the webapp does not recognize any of
-      // 'requestedCapabilities' capabilities (so they all should be disabled)
-      // and do not care about any of 'supportedCapabilities' capabilities (so
-      // they all can be enabled).
-      // All the required capabilities (specified by the app) are added to this.
-      this.capabilities_ = supportedCapabilities.concat(
-          this.requiredCapabilities_);
-    } else if (this.pluginApiVersion_ >= 6) {
-      this.pluginApiFeatures_ = ['highQualityScaling', 'injectKeyEvent'];
-    } else {
-      this.pluginApiFeatures_ = ['highQualityScaling'];
-    }
     this.helloReceived_ = true;
     if (this.onInitializedCallback_ != null) {
       this.onInitializedCallback_(true);
@@ -375,7 +305,8 @@ remoting.ClientPluginImpl.prototype.handleMessageMethod_ = function(message) {
     var context =
         /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
     var imageData = context.getImageData(0, 0, width, height);
-    base.debug.assert(srcArrayBuffer instanceof ArrayBuffer);
+    console.assert(srcArrayBuffer instanceof ArrayBuffer,
+                   '|srcArrayBuffer| is not an ArrayBuffer.');
     var src = new Uint8Array(/** @type {ArrayBuffer} */(srcArrayBuffer));
     var dest = imageData.data;
     for (var i = 0; i < /** @type {number} */(dest.length); i += 4) {
@@ -433,33 +364,6 @@ remoting.ClientPluginImpl.prototype.initialize = function(onDone) {
 };
 
 /**
- * @return {boolean} True if the plugin and web-app versions are compatible.
- */
-remoting.ClientPluginImpl.prototype.isSupportedVersion = function() {
-  if (!this.helloReceived_) {
-    console.error(
-        "isSupportedVersion() is called before the plugin is initialized.");
-    return false;
-  }
-  return this.API_VERSION_ >= this.pluginApiMinVersion_ &&
-      this.pluginApiVersion_ >= this.API_MIN_VERSION_;
-};
-
-/**
- * @param {remoting.ClientPlugin.Feature} feature The feature to test for.
- * @return {boolean} True if the plugin supports the named feature.
- */
-remoting.ClientPluginImpl.prototype.hasFeature = function(feature) {
-  if (!this.helloReceived_) {
-    console.error(
-        "hasFeature() is called before the plugin is initialized.");
-    return false;
-  }
-  return this.pluginApiFeatures_.indexOf(feature) > -1;
-};
-
-
-/**
  * @param {remoting.ClientSession.Capability} capability The capability to test
  *     for.
  * @return {boolean} True if the capability has been negotiated between
@@ -468,13 +372,6 @@ remoting.ClientPluginImpl.prototype.hasFeature = function(feature) {
 remoting.ClientPluginImpl.prototype.hasCapability = function(capability) {
   return this.hostCapabilities_ !== null &&
          this.hostCapabilities_.indexOf(capability) > -1;
-};
-
-/**
- * @return {boolean} True if the plugin supports the injectKeyEvent API.
- */
-remoting.ClientPluginImpl.prototype.isInjectKeyEventSupported = function() {
-  return this.pluginApiVersion_ >= 6;
 };
 
 /**
@@ -497,8 +394,21 @@ remoting.ClientPluginImpl.prototype.onIncomingIq = function(iq) {
  * @param {string} localJid Local jid.
  * @param {remoting.CredentialsProvider} credentialsProvider
  */
-remoting.ClientPluginImpl.prototype.connect =
-    function(host, localJid, credentialsProvider) {
+remoting.ClientPluginImpl.prototype.connect = function(host, localJid,
+                                                       credentialsProvider) {
+  remoting.experiments.get().then(this.connectWithExperiments_.bind(
+      this, host, localJid, credentialsProvider));
+};
+
+/**
+ * @param {remoting.Host} host The host to connect to.
+ * @param {string} localJid Local jid.
+ * @param {remoting.CredentialsProvider} credentialsProvider
+ * @param {Array.<string>} experiments List of enabled experiments.
+ * @private
+ */
+remoting.ClientPluginImpl.prototype.connectWithExperiments_ = function(
+    host, localJid, credentialsProvider, experiments) {
   var keyFilter = '';
   if (remoting.platformIsMac()) {
     keyFilter = 'mac';
@@ -506,30 +416,25 @@ remoting.ClientPluginImpl.prototype.connect =
     keyFilter = 'cros';
   }
 
-  // Use PPB_VideoDecoder API only in Chrome 43 and above. It is broken in
-  // previous versions of Chrome, see crbug.com/459103 and crbug.com/463577 .
-  var enableVideoDecodeRenderer =
-      parseInt((remoting.getChromeVersion() || '0').split('.')[0], 10) >= 43;
   this.plugin_.postMessage(JSON.stringify(
       { method: 'delegateLargeCursors', data: {} }));
-  var methods = 'third_party,spake2_pair,spake2_hmac,spake2_plain';
   this.credentials_ = credentialsProvider;
   this.useAsyncPinDialog_();
-  this.plugin_.postMessage(JSON.stringify(
-    { method: 'connect', data: {
-        hostJid: host.jabberId,
-        hostPublicKey: host.publicKey,
-        localJid: localJid,
-        sharedSecret: '',
-        authenticationMethods: methods,
-        authenticationTag: host.hostId,
-        capabilities: this.capabilities_.join(" "),
-        clientPairingId: credentialsProvider.getPairingInfo().clientId,
-        clientPairedSecret: credentialsProvider.getPairingInfo().sharedSecret,
-        keyFilter: keyFilter,
-        enableVideoDecodeRenderer: enableVideoDecodeRenderer
-      }
-    }));
+  this.plugin_.postMessage(JSON.stringify({
+    method: 'connect',
+    data: {
+      hostJid: host.jabberId,
+      hostPublicKey: host.publicKey,
+      localJid: localJid,
+      sharedSecret: '',
+      authenticationTag: host.hostId,
+      capabilities: this.capabilities_.join(" "),
+      clientPairingId: credentialsProvider.getPairingInfo().clientId,
+      clientPairedSecret: credentialsProvider.getPairingInfo().sharedSecret,
+      keyFilter: keyFilter,
+      experiments: experiments.join(" ")
+    }
+  }));
 };
 
 /**
@@ -543,49 +448,34 @@ remoting.ClientPluginImpl.prototype.releaseAllKeys = function() {
 /**
  * Sets and stores the key remapping setting for the current host.
  *
- * @param {string} remappings Comma separated list of key remappings.
+ * @param {!Object} remappings
  */
 remoting.ClientPluginImpl.prototype.setRemapKeys =
     function(remappings) {
   // Cancel any existing remappings and apply the new ones.
   this.applyRemapKeys_(this.keyRemappings_, false);
   this.applyRemapKeys_(remappings, true);
-  this.keyRemappings_ = remappings;
+  this.keyRemappings_ = /** @type {!Object} */ (base.deepCopy(remappings));
 };
 
 /**
  * Applies the configured key remappings to the session, or resets them.
  *
- * @param {string} remapKeys
+ * @param {!Object} remappings
  * @param {boolean} apply True to apply remappings, false to cancel them.
  * @private
  */
 remoting.ClientPluginImpl.prototype.applyRemapKeys_ =
-    function(remapKeys, apply) {
-  if (remapKeys == '') {
-    return;
-  }
-
-  var remappings = remapKeys.split(',');
-  for (var i = 0; i < remappings.length; ++i) {
-    var keyCodes = remappings[i].split('>');
-    if (keyCodes.length != 2) {
-      console.log('bad remapKey: ' + remappings[i]);
-      continue;
-    }
-    var fromKey = parseInt(keyCodes[0], 0);
-    var toKey = parseInt(keyCodes[1], 0);
-    if (!fromKey || !toKey) {
-      console.log('bad remapKey code: ' + remappings[i]);
-      continue;
-    }
+    function(remappings, apply) {
+  for (var i in remappings) {
+    var from = parseInt(i, 10);
+    var to = parseInt(remappings[i], 10);
     if (apply) {
-      console.log('remapKey 0x' + fromKey.toString(16) +
-                  '>0x' + toKey.toString(16));
-      this.remapKey(fromKey, toKey);
+      console.log('remapKey 0x' + from.toString(16) + '>0x' + to.toString(16));
+      this.remapKey(from, to);
     } else {
-      console.log('cancel remapKey 0x' + fromKey.toString(16));
-      this.remapKey(fromKey, fromKey);
+      console.log('cancel remapKey 0x' + from.toString(16));
+      this.remapKey(from, from);
     }
   }
 };
@@ -668,11 +558,19 @@ remoting.ClientPluginImpl.prototype.getPerfStats = function() {
  */
 remoting.ClientPluginImpl.prototype.sendClipboardItem =
     function(mimeType, item) {
-  if (!this.hasFeature(remoting.ClientPlugin.Feature.SEND_CLIPBOARD_ITEM))
-    return;
   this.plugin_.postMessage(JSON.stringify(
       { method: 'sendClipboardItem',
         data: { mimeType: mimeType, item: item }}));
+};
+
+/**
+ * Notifies the plugin whether to send touch events to the host.
+ *
+ * @param {boolean} enable True if touch events should be sent.
+ */
+remoting.ClientPluginImpl.prototype.enableTouchEvents = function(enable) {
+  this.plugin_.postMessage(
+      JSON.stringify({method: 'enableTouchEvents', data: {'enable': enable}}));
 };
 
 /**
@@ -694,13 +592,8 @@ remoting.ClientPluginImpl.prototype.notifyClientResolution =
  */
 remoting.ClientPluginImpl.prototype.pauseVideo =
     function(pause) {
-  if (this.hasFeature(remoting.ClientPlugin.Feature.VIDEO_CONTROL)) {
-    this.plugin_.postMessage(JSON.stringify(
-        { method: 'videoControl', data: { pause: pause }}));
-  } else if (this.hasFeature(remoting.ClientPlugin.Feature.PAUSE_VIDEO)) {
-    this.plugin_.postMessage(JSON.stringify(
-        { method: 'pauseVideo', data: { pause: pause }}));
-  }
+  this.plugin_.postMessage(JSON.stringify(
+      { method: 'videoControl', data: { pause: pause }}));
 };
 
 /**
@@ -710,9 +603,6 @@ remoting.ClientPluginImpl.prototype.pauseVideo =
  */
 remoting.ClientPluginImpl.prototype.pauseAudio =
     function(pause) {
-  if (!this.hasFeature(remoting.ClientPlugin.Feature.PAUSE_AUDIO)) {
-    return;
-  }
   this.plugin_.postMessage(JSON.stringify(
       { method: 'pauseAudio', data: { pause: pause }}));
 };
@@ -724,9 +614,6 @@ remoting.ClientPluginImpl.prototype.pauseAudio =
  */
 remoting.ClientPluginImpl.prototype.setLosslessEncode =
     function(wantLossless) {
-  if (!this.hasFeature(remoting.ClientPlugin.Feature.VIDEO_CONTROL)) {
-    return;
-  }
   this.plugin_.postMessage(JSON.stringify(
       { method: 'videoControl', data: { losslessEncode: wantLossless }}));
 };
@@ -738,9 +625,6 @@ remoting.ClientPluginImpl.prototype.setLosslessEncode =
  */
 remoting.ClientPluginImpl.prototype.setLosslessColor =
     function(wantLossless) {
-  if (!this.hasFeature(remoting.ClientPlugin.Feature.VIDEO_CONTROL)) {
-    return;
-  }
   this.plugin_.postMessage(JSON.stringify(
       { method: 'videoControl', data: { losslessColor: wantLossless }}));
 };
@@ -753,9 +637,6 @@ remoting.ClientPluginImpl.prototype.setLosslessColor =
  */
 remoting.ClientPluginImpl.prototype.onPinFetched_ =
     function(pin) {
-  if (!this.hasFeature(remoting.ClientPlugin.Feature.ASYNC_PIN)) {
-    return;
-  }
   this.plugin_.postMessage(JSON.stringify(
       { method: 'onPinFetched', data: { pin: pin }}));
 };
@@ -766,9 +647,6 @@ remoting.ClientPluginImpl.prototype.onPinFetched_ =
  */
 remoting.ClientPluginImpl.prototype.useAsyncPinDialog_ =
     function() {
-  if (!this.hasFeature(remoting.ClientPlugin.Feature.ASYNC_PIN)) {
-    return;
-  }
   this.plugin_.postMessage(JSON.stringify(
       { method: 'useAsyncPinDialog', data: {} }));
 };
@@ -803,9 +681,6 @@ remoting.ClientPluginImpl.prototype.onThirdPartyTokenFetched_ = function(
  */
 remoting.ClientPluginImpl.prototype.requestPairing =
     function(clientName, onDone) {
-  if (!this.hasFeature(remoting.ClientPlugin.Feature.PINLESS_AUTH)) {
-    return;
-  }
   this.onPairingComplete_ = onDone;
   this.plugin_.postMessage(JSON.stringify(
       { method: 'requestPairing', data: { clientName: clientName } }));
@@ -820,9 +695,6 @@ remoting.ClientPluginImpl.prototype.requestPairing =
  */
 remoting.ClientPluginImpl.prototype.sendClientMessage_ =
     function(type, message) {
-  if (!this.hasFeature(remoting.ClientPlugin.Feature.EXTENSION_MESSAGE)) {
-    return;
-  }
   this.plugin_.postMessage(JSON.stringify(
       { method: 'extensionMessage',
         data: { type: type, data: message } }));
@@ -835,39 +707,6 @@ remoting.ClientPluginImpl.prototype.hostDesktop = function() {
 
 remoting.ClientPluginImpl.prototype.extensions = function() {
   return this.extensions_;
-};
-
-/**
- * If we haven't yet received a "hello" message from the plugin, change its
- * size so that the user can confirm it if click-to-play is enabled, or can
- * see the "this plugin is disabled" message if it is actually disabled.
- * @private
- */
-remoting.ClientPluginImpl.prototype.showPluginForClickToPlay_ = function() {
-  if (!this.helloReceived_) {
-    var width = 200;
-    var height = 200;
-    this.plugin_.style.width = width + 'px';
-    this.plugin_.style.height = height + 'px';
-    // Center the plugin just underneath the "Connnecting..." dialog.
-    var dialog = document.getElementById('client-dialog');
-    var dialogRect = dialog.getBoundingClientRect();
-    this.plugin_.style.top = (dialogRect.bottom + 16) + 'px';
-    this.plugin_.style.left = (window.innerWidth - width) / 2 + 'px';
-    this.plugin_.style.position = 'fixed';
-  }
-};
-
-/**
- * Undo the CSS rules needed to make the plugin clickable for click-to-play.
- * @private
- */
-remoting.ClientPluginImpl.prototype.hidePluginForClickToPlay_ = function() {
-  this.plugin_.style.width = '';
-  this.plugin_.style.height = '';
-  this.plugin_.style.top = '';
-  this.plugin_.style.left = '';
-  this.plugin_.style.position = '';
 };
 
 /**
@@ -890,20 +729,16 @@ remoting.DefaultClientPluginFactory = function() {};
 
 /**
  * @param {Element} container
- * @param {Array<string>} requiredCapabilities
+ * @param {Array<string>} capabilities
  * @return {remoting.ClientPlugin}
  */
 remoting.DefaultClientPluginFactory.prototype.createPlugin =
-    function(container, requiredCapabilities) {
+    function(container, capabilities) {
   return new remoting.ClientPluginImpl(container,
-                                       requiredCapabilities);
+                                       capabilities);
 };
 
 remoting.DefaultClientPluginFactory.prototype.preloadPlugin = function() {
-  if (remoting.settings.CLIENT_PLUGIN_TYPE != 'pnacl') {
-    return;
-  }
-
   var plugin = remoting.ClientPluginImpl.createPluginElement_();
   plugin.addEventListener(
       'loadend', function() { document.body.removeChild(plugin); }, false);

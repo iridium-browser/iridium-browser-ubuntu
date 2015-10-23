@@ -38,13 +38,13 @@
 #include "core/html/HTMLContentElement.h"
 #include "core/html/HTMLImageLoader.h"
 #include "core/html/PluginDocument.h"
+#include "core/input/EventHandler.h"
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutEmbeddedObject.h"
 #include "core/layout/LayoutImage.h"
 #include "core/layout/LayoutPart.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/MixedContentChecker.h"
-#include "core/page/EventHandler.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 #include "core/plugins/PluginPlaceholder.h"
@@ -64,7 +64,6 @@ HTMLPlugInElement::HTMLPlugInElement(const QualifiedName& tagName, Document& doc
     : HTMLFrameOwnerElement(tagName, doc)
     , m_isDelayingLoadEvent(false)
     , m_NPObject(0)
-    , m_isCapturingMouseEvents(false)
     // m_needsWidgetUpdate(!createdByParser) allows HTMLObjectElement to delay
     // widget updates until after all children are parsed. For HTMLEmbedElement
     // this delay is unnecessary, but it is simpler to make both classes share
@@ -248,12 +247,6 @@ void HTMLPlugInElement::detach(const AttachContext& context)
     resetInstance();
     // Clear the widget; will trigger disposal of it with Oilpan.
     setWidget(nullptr);
-
-    if (m_isCapturingMouseEvents) {
-        if (LocalFrame* frame = document().frame())
-            frame->eventHandler().setCapturingMouseEventsNode(nullptr);
-        m_isCapturingMouseEvents = false;
-    }
 
     if (m_NPObject) {
         _NPN_ReleaseObject(m_NPObject);
@@ -477,7 +470,7 @@ bool HTMLPlugInElement::allowedToLoadFrameURL(const String& url)
 {
     KURL completeURL = document().completeURL(url);
     if (contentFrame() && protocolIsJavaScript(completeURL)
-        && !document().securityOrigin()->canAccess(contentDocument()->securityOrigin()))
+        && !document().securityOrigin()->canAccess(contentFrame()->securityContext()->securityOrigin()))
         return false;
     return document().frame()->isURLAllowed(completeURL);
 }
@@ -501,7 +494,7 @@ bool HTMLPlugInElement::requestObject(const String& url, const String& mimeType,
     if (protocolIsJavaScript(url))
         return false;
 
-    KURL completedURL = document().completeURL(url);
+    KURL completedURL = url.isEmpty() ? KURL() : document().completeURL(url);
     if (!pluginIsLoadable(completedURL, mimeType))
         return false;
 
@@ -563,7 +556,8 @@ bool HTMLPlugInElement::loadPlugin(const KURL& url, const String& mimeType, cons
     }
     setPlaceholder(nullptr);
     document().setContainsPlugins();
-    scheduleSVGFilterLayerUpdateHack();
+    // TODO(esprehn): WebPluginContainerImpl::setWebLayer also schedules a compositing update, do we need both?
+    setNeedsCompositingUpdate();
     // Make sure any input event handlers introduced by the plugin are taken into account.
     if (Page* page = document().frame()->page()) {
         if (ScrollingCoordinator* scrollingCoordinator = page->scrollingCoordinator())
@@ -653,7 +647,7 @@ void HTMLPlugInElement::didAddUserAgentShadowRoot(ShadowRoot&)
     userAgentShadowRoot()->appendChild(HTMLContentElement::create(document()));
 }
 
-void HTMLPlugInElement::willAddFirstOpenShadowRoot()
+void HTMLPlugInElement::willAddFirstAuthorShadowRoot()
 {
     lazyReattachIfAttached();
 }
@@ -665,7 +659,7 @@ bool HTMLPlugInElement::hasFallbackContent() const
 
 bool HTMLPlugInElement::useFallbackContent() const
 {
-    return hasOpenShadowRoot();
+    return openShadowRoot();
 }
 
 void HTMLPlugInElement::lazyReattachIfNeeded()

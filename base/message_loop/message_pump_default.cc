@@ -52,8 +52,7 @@ void MessagePumpDefault::Run(Delegate* delegate) {
       event_.Wait();
     } else {
       TimeDelta delay = delayed_work_time_ - TimeTicks::Now();
-      // If the delay is under 1 ms we need to execute the task right away.
-      if (delay.InMilliseconds() >= 1) {
+      if (delay > TimeDelta()) {
         event_.TimedWait(delay);
       } else {
         // It looks like delayed_work_time_ indicates a time in the past, so we

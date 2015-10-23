@@ -26,12 +26,59 @@
 #include "config.h"
 #include "core/fetch/RawResource.h"
 
+#include "core/fetch/FetchRequest.h"
+#include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceClientWalker.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/fetch/ResourceLoader.h"
-#include "platform/SharedBuffer.h"
 
 namespace blink {
+
+ResourcePtr<Resource> RawResource::fetchSynchronously(FetchRequest& request, ResourceFetcher* fetcher)
+{
+    request.mutableResourceRequest().setTimeoutInterval(10);
+    ResourceLoaderOptions options(request.options());
+    options.synchronousPolicy = RequestSynchronously;
+    request.setOptions(options);
+    return fetcher->requestResource(request, RawResourceFactory(Resource::Raw));
+}
+
+ResourcePtr<RawResource> RawResource::fetchImport(FetchRequest& request, ResourceFetcher* fetcher)
+{
+    ASSERT(request.resourceRequest().frameType() == WebURLRequest::FrameTypeNone);
+    request.mutableResourceRequest().setRequestContext(WebURLRequest::RequestContextImport);
+    RawResourceFactory factory(Resource::ImportResource);
+    return toRawResource(fetcher->requestResource(request, RawResourceFactory(Resource::ImportResource)));
+}
+
+ResourcePtr<RawResource> RawResource::fetch(FetchRequest& request, ResourceFetcher* fetcher)
+{
+    ASSERT(request.resourceRequest().frameType() == WebURLRequest::FrameTypeNone);
+    ASSERT(request.resourceRequest().requestContext() != WebURLRequest::RequestContextUnspecified);
+    return toRawResource(fetcher->requestResource(request, RawResourceFactory(Resource::Raw)));
+}
+
+ResourcePtr<RawResource> RawResource::fetchMainResource(FetchRequest& request, ResourceFetcher* fetcher, const SubstituteData& substituteData)
+{
+    ASSERT(request.resourceRequest().frameType() != WebURLRequest::FrameTypeNone);
+    ASSERT(request.resourceRequest().requestContext() == WebURLRequest::RequestContextForm || request.resourceRequest().requestContext() == WebURLRequest::RequestContextFrame || request.resourceRequest().requestContext() == WebURLRequest::RequestContextHyperlink || request.resourceRequest().requestContext() == WebURLRequest::RequestContextIframe || request.resourceRequest().requestContext() == WebURLRequest::RequestContextInternal || request.resourceRequest().requestContext() == WebURLRequest::RequestContextLocation);
+
+    return toRawResource(fetcher->requestResource(request, RawResourceFactory(Resource::MainResource), substituteData));
+}
+
+ResourcePtr<RawResource> RawResource::fetchMedia(FetchRequest& request, ResourceFetcher* fetcher)
+{
+    ASSERT(request.resourceRequest().frameType() == WebURLRequest::FrameTypeNone);
+    ASSERT(request.resourceRequest().requestContext() == WebURLRequest::RequestContextAudio || request.resourceRequest().requestContext() == WebURLRequest::RequestContextVideo);
+    return toRawResource(fetcher->requestResource(request, RawResourceFactory(Resource::Media)));
+}
+
+ResourcePtr<RawResource> RawResource::fetchTextTrack(FetchRequest& request, ResourceFetcher* fetcher)
+{
+    ASSERT(request.resourceRequest().frameType() == WebURLRequest::FrameTypeNone);
+    request.mutableResourceRequest().setRequestContext(WebURLRequest::RequestContextTrack);
+    return toRawResource(fetcher->requestResource(request, RawResourceFactory(Resource::TextTrack)));
+}
 
 RawResource::RawResource(const ResourceRequest& resourceRequest, Type type)
     : Resource(resourceRequest, type)
@@ -129,6 +176,13 @@ void RawResource::didDownloadData(int dataLength)
     ResourceClientWalker<RawResourceClient> w(m_clients);
     while (RawResourceClient* c = w.next())
         c->dataDownloaded(this, dataLength);
+}
+
+void RawResource::reportResourceTimingToClients(const ResourceTimingInfo& info)
+{
+    ResourceClientWalker<RawResourceClient> w(m_clients);
+    while (RawResourceClient* c = w.next())
+        c->didReceiveResourceTiming(this, info);
 }
 
 void RawResource::setDefersLoading(bool defers)

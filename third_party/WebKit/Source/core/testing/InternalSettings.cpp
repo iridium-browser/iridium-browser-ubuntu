@@ -59,6 +59,7 @@ namespace blink {
 InternalSettings::Backup::Backup(Settings* settings)
     : m_originalAuthorShadowDOMForAnyElementEnabled(RuntimeEnabledFeatures::authorShadowDOMForAnyElementEnabled())
     , m_originalCSP(RuntimeEnabledFeatures::experimentalContentSecurityPolicyFeaturesEnabled())
+    , m_originalCSSStickyPositionEnabled(RuntimeEnabledFeatures::cssStickyPositionEnabled())
     , m_originalOverlayScrollbarsEnabled(RuntimeEnabledFeatures::overlayScrollbarsEnabled())
     , m_originalEditingBehavior(settings->editingBehaviorType())
     , m_originalTextAutosizingEnabled(settings->textAutosizingEnabled())
@@ -82,6 +83,7 @@ void InternalSettings::Backup::restoreTo(Settings* settings)
 {
     RuntimeEnabledFeatures::setAuthorShadowDOMForAnyElementEnabled(m_originalAuthorShadowDOMForAnyElementEnabled);
     RuntimeEnabledFeatures::setExperimentalContentSecurityPolicyFeaturesEnabled(m_originalCSP);
+    RuntimeEnabledFeatures::setCSSStickyPositionEnabled(m_originalCSSStickyPositionEnabled);
     RuntimeEnabledFeatures::setOverlayScrollbarsEnabled(m_originalOverlayScrollbarsEnabled);
     settings->setEditingBehaviorType(m_originalEditingBehavior);
     settings->setTextAutosizingEnabled(m_originalTextAutosizingEnabled);
@@ -117,7 +119,7 @@ public:
         : m_internalSettings(InternalSettings::create(page)) { }
     virtual ~InternalSettingsWrapper() { m_internalSettings->hostDestroyed(); }
 #if ENABLE(ASSERT)
-    virtual bool isRefCountedWrapper() const override { return true; }
+    bool isRefCountedWrapper() const override { return true; }
 #endif
     InternalSettings* internalSettings() const { return m_internalSettings.get(); }
 
@@ -180,6 +182,11 @@ void InternalSettings::setMockGestureTapHighlightsEnabled(bool enabled, Exceptio
 void InternalSettings::setAuthorShadowDOMForAnyElementEnabled(bool isEnabled)
 {
     RuntimeEnabledFeatures::setAuthorShadowDOMForAnyElementEnabled(isEnabled);
+}
+
+void InternalSettings::setCSSStickyPositionEnabled(bool enabled)
+{
+    RuntimeEnabledFeatures::setCSSStickyPositionEnabled(enabled);
 }
 
 void InternalSettings::setExperimentalContentSecurityPolicyFeaturesEnabled(bool enabled)
@@ -289,6 +296,23 @@ void InternalSettings::setTextAutosizingWindowSizeOverride(int width, int height
 {
     InternalSettingsGuardForSettings();
     settings()->setTextAutosizingWindowSizeOverride(IntSize(width, height));
+}
+
+void InternalSettings::setTextTrackKindUserPreference(const String& preference, ExceptionState& exceptionState)
+{
+    InternalSettingsGuardForSettings();
+    String token = preference.stripWhiteSpace();
+    TextTrackKindUserPreference userPreference = TextTrackKindUserPreference::Default;
+    if (token == "default")
+        userPreference = TextTrackKindUserPreference::Default;
+    else if (token == "captions")
+        userPreference = TextTrackKindUserPreference::Captions;
+    else if (token == "subtitles")
+        userPreference = TextTrackKindUserPreference::Subtitles;
+    else
+        exceptionState.throwDOMException(SyntaxError, "The user preference for text track kind " + preference + ")' is invalid.");
+
+    settings()->setTextTrackKindUserPreference(userPreference);
 }
 
 void InternalSettings::setMediaTypeOverride(const String& mediaType, ExceptionState& exceptionState)

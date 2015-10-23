@@ -23,11 +23,9 @@
 
 namespace spellcheck {
 
-Feedback::Feedback() {
-}
+Feedback::Feedback() {}
 
-Feedback::~Feedback() {
-}
+Feedback::~Feedback() {}
 
 Misspelling* Feedback::GetMisspelling(uint32 hash) {
   HashMisspellingMap::iterator misspelling_it = misspellings_.find(hash);
@@ -47,11 +45,10 @@ void Feedback::FinalizeRemovedMisspellings(
   HashCollection remaining_hashes(remaining_markers.begin(),
                                   remaining_markers.end());
   std::vector<uint32> removed_hashes =
-      base::STLSetDifference<std::vector<uint32> >(renderer_hashes,
-                                                   remaining_hashes);
+      base::STLSetDifference<std::vector<uint32>>(renderer_hashes,
+                                                  remaining_hashes);
   for (std::vector<uint32>::const_iterator hash_it = removed_hashes.begin();
-       hash_it != removed_hashes.end();
-       ++hash_it) {
+       hash_it != removed_hashes.end(); ++hash_it) {
     HashMisspellingMap::iterator misspelling_it = misspellings_.find(*hash_it);
     if (misspelling_it != misspellings_.end() &&
         !misspelling_it->second.action.IsFinal()) {
@@ -75,8 +72,7 @@ std::vector<Misspelling> Feedback::GetMisspellingsInRenderer(
     return misspellings_in_renderer;
   const HashCollection& renderer_hashes = renderer_it->second;
   for (HashCollection::const_iterator hash_it = renderer_hashes.begin();
-       hash_it != renderer_hashes.end();
-       ++hash_it) {
+       hash_it != renderer_hashes.end(); ++hash_it) {
     HashMisspellingMap::const_iterator misspelling_it =
         misspellings_.find(*hash_it);
     if (misspelling_it != misspellings_.end())
@@ -102,7 +98,7 @@ void Feedback::EraseFinalizedMisspellings(int renderer_process_id) {
     if (!misspelling.action.IsFinal())
       continue;
     renderer_hashes.erase(erasable_hash_it);
-    text_[misspelling.GetMisspelledString()].erase(misspelling.hash);
+    text_[GetMisspelledString(misspelling)].erase(misspelling.hash);
     misspellings_.erase(misspelling_it);
   }
   if (renderer_hashes.empty())
@@ -119,7 +115,7 @@ void Feedback::AddMisspelling(int renderer_process_id,
       misspellings_.find(misspelling.hash);
   if (misspelling_it != misspellings_.end()) {
     const Misspelling& existing_misspelling = misspelling_it->second;
-    text_[existing_misspelling.GetMisspelledString()].erase(misspelling.hash);
+    text_[GetMisspelledString(existing_misspelling)].erase(misspelling.hash);
     for (RendererHashesMap::iterator renderer_it = renderers_.begin();
          renderer_it != renderers_.end();) {
       HashCollection& renderer_hashes = renderer_it->second;
@@ -131,7 +127,7 @@ void Feedback::AddMisspelling(int renderer_process_id,
     }
   }
   misspellings_[misspelling.hash] = misspelling;
-  text_[misspelling.GetMisspelledString()].insert(misspelling.hash);
+  text_[GetMisspelledString(misspelling)].insert(misspelling.hash);
   renderers_[renderer_process_id].insert(misspelling.hash);
 }
 
@@ -142,8 +138,7 @@ bool Feedback::Empty() const {
 std::vector<int> Feedback::GetRendersWithMisspellings() const {
   std::vector<int> renderers_with_misspellings;
   for (RendererHashesMap::const_iterator renderer_it = renderers_.begin();
-       renderer_it != renderers_.end();
-       ++renderer_it) {
+       renderer_it != renderers_.end(); ++renderer_it) {
     if (!renderer_it->second.empty())
       renderers_with_misspellings.push_back(renderer_it->first);
   }
@@ -152,8 +147,7 @@ std::vector<int> Feedback::GetRendersWithMisspellings() const {
 
 void Feedback::FinalizeAllMisspellings() {
   for (HashMisspellingMap::iterator misspelling_it = misspellings_.begin();
-       misspelling_it != misspellings_.end();
-       ++misspelling_it) {
+       misspelling_it != misspellings_.end(); ++misspelling_it) {
     if (!misspelling_it->second.action.IsFinal())
       misspelling_it->second.action.Finalize();
   }
@@ -163,8 +157,7 @@ std::vector<Misspelling> Feedback::GetAllMisspellings() const {
   std::vector<Misspelling> all_misspellings;
   for (HashMisspellingMap::const_iterator misspelling_it =
            misspellings_.begin();
-       misspelling_it != misspellings_.end();
-       ++misspelling_it) {
+       misspelling_it != misspellings_.end(); ++misspelling_it) {
     all_misspellings.push_back(misspelling_it->second);
   }
   return all_misspellings;

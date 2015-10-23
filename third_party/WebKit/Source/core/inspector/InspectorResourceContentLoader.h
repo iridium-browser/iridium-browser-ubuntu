@@ -5,7 +5,9 @@
 #ifndef InspectorResourceContentLoader_h
 #define InspectorResourceContentLoader_h
 
+#include "core/CoreExport.h"
 #include "core/fetch/ResourcePtr.h"
+#include "wtf/Functional.h"
 #include "wtf/HashSet.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/Vector.h"
@@ -14,28 +16,33 @@ namespace blink {
 
 class LocalFrame;
 class Resource;
-class VoidCallback;
 
-class InspectorResourceContentLoader final : public NoBaseWillBeGarbageCollectedFinalized<InspectorResourceContentLoader> {
+class CORE_EXPORT InspectorResourceContentLoader final : public NoBaseWillBeGarbageCollectedFinalized<InspectorResourceContentLoader> {
     WTF_MAKE_NONCOPYABLE(InspectorResourceContentLoader);
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(InspectorResourceContentLoader);
 public:
-    explicit InspectorResourceContentLoader(LocalFrame*);
-    void ensureResourcesContentLoaded(VoidCallback*);
+    static PassOwnPtrWillBeRawPtr<InspectorResourceContentLoader> create(LocalFrame* inspectedFrame)
+    {
+        return adoptPtrWillBeNoop(new InspectorResourceContentLoader(inspectedFrame));
+    }
     ~InspectorResourceContentLoader();
-    DECLARE_TRACE();
     void dispose();
-    bool hasFinished();
-    void stop();
+    DECLARE_TRACE();
+
+    void ensureResourcesContentLoaded(PassOwnPtr<Closure> callback);
+    void didCommitLoadForLocalFrame(LocalFrame*);
 
 private:
     class ResourceClient;
 
+    explicit InspectorResourceContentLoader(LocalFrame*);
     void resourceFinished(ResourceClient*);
     void checkDone();
     void start();
+    void stop();
+    bool hasFinished();
 
-    PersistentHeapVectorWillBeHeapVector<Member<VoidCallback> > m_callbacks;
+    Vector<OwnPtr<Closure>> m_callbacks;
     bool m_allRequestsStarted;
     bool m_started;
     RawPtrWillBeMember<LocalFrame> m_inspectedFrame;

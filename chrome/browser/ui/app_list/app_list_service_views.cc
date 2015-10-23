@@ -30,6 +30,10 @@ void AppListServiceViews::Init(Profile* initial_profile) {
 }
 
 void AppListServiceViews::ShowForProfile(Profile* requested_profile) {
+  // App list profiles should not be off-the-record.
+  DCHECK(!requested_profile->IsOffTheRecord());
+  DCHECK(!requested_profile->IsGuestSession());
+
   ShowForProfileInternal(requested_profile,
                          app_list::AppListModel::INVALID_STATE);
 }

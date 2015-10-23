@@ -67,14 +67,29 @@ class AndroidVideoCapturer::FrameFactory : public cricket::VideoFrameFactory {
 
   void UpdateCapturedFrame(void* frame_data,
                            int length,
+                           int width,
+                           int height,
                            int rotation,
                            int64 time_stamp_in_ns) {
+    // Make sure we don't overwrite the previous frame.
+    CHECK(captured_frame_.data == nullptr);
     captured_frame_.fourcc = static_cast<uint32>(cricket::FOURCC_YV12);
     captured_frame_.data = frame_data;
+    captured_frame_.width = width;
+    captured_frame_.height = height;
     captured_frame_.elapsed_time = rtc::TimeNanos() - start_time_;
     captured_frame_.time_stamp = time_stamp_in_ns;
     captured_frame_.rotation = rotation;
     captured_frame_.data_size = length;
+  }
+
+  void ClearCapturedFrame() const {
+    captured_frame_.data = nullptr;
+    captured_frame_.width = 0;
+    captured_frame_.height = 0;
+    captured_frame_.elapsed_time = 0;
+    captured_frame_.time_stamp = 0;
+    captured_frame_.data_size = 0;
   }
 
   const cricket::CapturedFrame* GetCapturedFrame() const {
@@ -89,10 +104,11 @@ class AndroidVideoCapturer::FrameFactory : public cricket::VideoFrameFactory {
     // |captured_frame_.data| is only guaranteed to be valid during the scope
     // of |AndroidVideoCapturer::OnIncomingFrame_w|.
     // Check that captured_frame is actually our frame.
-    DCHECK(captured_frame == &captured_frame_);
+    CHECK(captured_frame == &captured_frame_);
+    CHECK(captured_frame->data != nullptr);
 
     if (!apply_rotation_ || captured_frame->rotation == kVideoRotation_0) {
-      DCHECK(captured_frame->fourcc == cricket::FOURCC_YV12);
+      CHECK(captured_frame->fourcc == cricket::FOURCC_YV12);
       const uint8_t* y_plane = static_cast<uint8_t*>(captured_frame_.data);
 
       // Android guarantees that the stride is a multiple of 16.
@@ -117,16 +133,17 @@ class AndroidVideoCapturer::FrameFactory : public cricket::VideoFrameFactory {
               rtc::Bind(&AndroidVideoCapturer::FrameFactory::ReturnFrame,
                         delegate_,
                         captured_frame->time_stamp)));
-      return new WebRtcVideoFrame(
+      cricket::VideoFrame* cricket_frame = new WebRtcVideoFrame(
          buffer, captured_frame->elapsed_time,
          captured_frame->time_stamp, captured_frame->GetRotation());
+      // |cricket_frame| is now responsible for returning the frame. Clear
+      // |captured_frame_| so the frame isn't returned twice.
+      ClearCapturedFrame();
+      return cricket_frame;
     }
 
     scoped_ptr<WebRtcVideoFrame> frame(new WebRtcVideoFrame());
     frame->Init(captured_frame, dst_width, dst_height, apply_rotation_);
-    // frame->Init copies the data in |captured_frame| so it is safe to return
-    // the buffer immediately.
-    delegate_->ReturnBuffer(captured_frame->time_stamp);
     return frame.release();
   }
 
@@ -137,7 +154,9 @@ class AndroidVideoCapturer::FrameFactory : public cricket::VideoFrameFactory {
 
  private:
   uint64 start_time_;
-  cricket::CapturedFrame captured_frame_;
+  // |captured_frame_| is mutable as a hacky way to modify it inside
+  // CreateAliasedframe().
+  mutable cricket::CapturedFrame captured_frame_;
   scoped_refptr<AndroidVideoCapturerDelegate> delegate_;
 };
 
@@ -160,7 +179,7 @@ AndroidVideoCapturer::AndroidVideoCapturer(
   std::vector<cricket::VideoFormat> formats;
   for (Json::ArrayIndex i = 0; i < json_values.size(); ++i) {
       const Json::Value& json_value = json_values[i];
-      DCHECK(!json_value["width"].isNull() && !json_value["height"].isNull() &&
+      CHECK(!json_value["width"].isNull() && !json_value["height"].isNull() &&
              !json_value["framerate"].isNull());
       cricket::VideoFormat format(
           json_value["width"].asInt(),
@@ -173,16 +192,16 @@ AndroidVideoCapturer::AndroidVideoCapturer(
 }
 
 AndroidVideoCapturer::~AndroidVideoCapturer() {
-  DCHECK(!running_);
+  CHECK(!running_);
 }
 
 cricket::CaptureState AndroidVideoCapturer::Start(
     const cricket::VideoFormat& capture_format) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!running_);
-
   LOG(LS_INFO) << " AndroidVideoCapturer::Start w = " << capture_format.width
                << " h = " << capture_format.height;
+  CHECK(thread_checker_.CalledOnValidThread());
+  CHECK(!running_);
+
   frame_factory_ = new AndroidVideoCapturer::FrameFactory(
       capture_format.width, capture_format.height, delegate_.get());
   set_frame_factory(frame_factory_);
@@ -197,9 +216,9 @@ cricket::CaptureState AndroidVideoCapturer::Start(
 }
 
 void AndroidVideoCapturer::Stop() {
-  DCHECK(thread_checker_.CalledOnValidThread());
   LOG(LS_INFO) << " AndroidVideoCapturer::Stop ";
-  DCHECK(running_);
+  CHECK(thread_checker_.CalledOnValidThread());
+  CHECK(running_);
   running_ = false;
   SetCaptureFormat(NULL);
 
@@ -209,18 +228,18 @@ void AndroidVideoCapturer::Stop() {
 }
 
 bool AndroidVideoCapturer::IsRunning() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  CHECK(thread_checker_.CalledOnValidThread());
   return running_;
 }
 
 bool AndroidVideoCapturer::GetPreferredFourccs(std::vector<uint32>* fourccs) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  CHECK(thread_checker_.CalledOnValidThread());
   fourccs->push_back(cricket::FOURCC_YV12);
   return true;
 }
 
 void AndroidVideoCapturer::OnCapturerStarted(bool success) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  CHECK(thread_checker_.CalledOnValidThread());
   cricket::CaptureState new_state =
       success ? cricket::CS_RUNNING : cricket::CS_FAILED;
   if (new_state == current_state_)
@@ -235,11 +254,31 @@ void AndroidVideoCapturer::OnCapturerStarted(bool success) {
 
 void AndroidVideoCapturer::OnIncomingFrame(void* frame_data,
                                            int length,
+                                           int width,
+                                           int height,
                                            int rotation,
                                            int64 time_stamp) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  frame_factory_->UpdateCapturedFrame(frame_data, length, rotation, time_stamp);
+  CHECK(thread_checker_.CalledOnValidThread());
+  frame_factory_->UpdateCapturedFrame(frame_data, length, width, height,
+                                      rotation, time_stamp);
   SignalFrameCaptured(this, frame_factory_->GetCapturedFrame());
+  if (frame_factory_->GetCapturedFrame()->data == nullptr) {
+    // Ownership has been passed to a WrappedI420Buffer. Do nothing.
+  } else {
+    // |captured_frame_| has either been copied or dropped, return it
+    // immediately.
+    delegate_->ReturnBuffer(time_stamp);
+    frame_factory_->ClearCapturedFrame();
+  }
+}
+
+void AndroidVideoCapturer::OnOutputFormatRequest(
+    int width, int height, int fps) {
+  CHECK(thread_checker_.CalledOnValidThread());
+  const cricket::VideoFormat& current = video_adapter()->output_format();
+  cricket::VideoFormat format(
+      width, height, cricket::VideoFormat::FpsToInterval(fps), current.fourcc);
+  video_adapter()->OnOutputFormatRequest(format);
 }
 
 }  // namespace webrtc

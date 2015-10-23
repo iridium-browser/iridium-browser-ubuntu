@@ -28,20 +28,26 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef CompositorAnimationsImpl_h
+#define CompositorAnimationsImpl_h
+
 #include "core/CoreExport.h"
 #include "core/animation/EffectModel.h"
 #include "core/animation/KeyframeEffectModel.h"
 #include "core/animation/Timing.h"
 #include "platform/animation/TimingFunction.h"
 #include "public/platform/WebCompositorAnimation.h"
+#include "wtf/Allocator.h"
 
 namespace blink {
 
 class WebCompositorAnimationCurve;
 
 class CORE_EXPORT CompositorAnimationsImpl {
+    STATIC_ONLY(CompositorAnimationsImpl);
 private:
     struct CompositorTiming {
+        DISALLOW_ALLOCATION();
         void assertValid() const
         {
             ASSERT(scaledDuration > 0);
@@ -71,3 +77,5 @@ private:
 };
 
 } // namespace blink
+
+#endif

@@ -63,70 +63,63 @@ def PathToSymDat(filepath):
   return symtag + unipath + strterm
 
 
-def CreateCygwinSymlink(filepath, target):
-  """Create a Cygwin 1.7 style link
+def CreateWin32Link(filepath, targpath, verbose):
+  """Create a link on Win32 if possible
 
-  Generates a Cygwin style symlink by creating a SYSTEM tagged
-  file with the !<link> marker followed by a unicode path.
-  """
-  # If we failed to create a symlink, then just copy it.  We wrap this in a
-  # retry for Windows which often has stale file lock issues.
-  for cnt in range(1,4):
-    try:
-      lnk = open(filepath, 'wb')
-      lnk.write(PathToSymDat(target))
-      lnk.close()
-      break
-    except EnvironmentError:
-      print 'Try %d: Failed open %s -> %s\n' % (cnt, filepath, target)
+  Uses mklink to create a link (hardlink or junction) if possible. On failure,
+  it will assume mklink is unavailible and copy the file instead. Future calls
+  will not attempt to use mklink."""
 
-  # Verify the file was created
-  if not os.path.isfile(filepath):
-    print 'Try %d: Failed create %s -> %s\n' % (cnt, filepath, target)
-    print 'Giving up.'
-    return False
+  targ_is_dir = os.path.isdir(targpath)
 
-  # Now set the system attribute bit so that Cygwin knows it's a link.
-  for cnt in range(1,4):
-    try:
-      attrib_path = os.path.join(os.environ['SYSTEMROOT'], 'System32',
-                                 'attrib.exe')
-      return subprocess.call(['cmd', '/C', attrib_path, '+S',
-                              ToNativePath(filepath)])
-    except EnvironmentError:
-      print 'Try %d: Failed attrib %s -> %s\n' % (cnt, filepath, target)
-  print 'Giving up.'
-  return False
-
-
-def CreateWin32Hardlink(filepath, targpath, try_mklink):
-  """Create a hardlink on Win32 if possible
-
-  Uses mklink to create a hardlink if possible.  On failure, it will
-  assume mklink is unavailible and copy the file instead, returning False
-  to indicate future calls should not attempt to use mklink."""
+  call_mklink = False
+  if targ_is_dir and CreateWin32Link.try_junction:
+    # Creating a link to a directory will fail, but a junction (which is more
+    # like a symlink) will work.
+    mklink_flag = '/J'
+    call_mklink = True
+  elif not targ_is_dir and CreateWin32Link.try_hardlink:
+    mklink_flag = '/H'
+    call_mklink = True
 
   # Assume an error, if subprocess succeeds, then it should return 0
   err = 1
-  if try_mklink:
-    dst_src = ToNativePath(filepath) + ' ' + ToNativePath(targpath)
+  if call_mklink:
     try:
-      err = subprocess.call(['cmd', '/C', 'mklink /H ' + dst_src],
-                            stdout = open(os.devnull, 'wb'))
+      cmd = ['cmd', '/C', 'mklink %s %s %s' % (
+              mklink_flag, ToNativePath(filepath), ToNativePath(targpath))]
+      err = subprocess.call(cmd,
+          stdout = open(os.devnull, 'wb'),
+          stderr = open(os.devnull, 'wb'))
     except EnvironmentError:
-      try_mklink = False
+      if targ_is_dir:
+        CreateWin32Link.try_junction = False
+      else:
+        CreateWin32Link.try_hardlink = False
 
-  # If we failed to create a hardlink, then just copy it.  We wrap this in a
+  # If we failed to create a link, then just copy it.  We wrap this in a
   # retry for Windows which often has stale file lock issues.
-  if err or not os.path.isfile(filepath):
+  if err or not os.path.exists(filepath):
+    if targ_is_dir and verbose:
+      print 'Failed to create junction %s -> %s. Copying instead.\n' % (
+          filepath, targpath)
+
     for cnt in range(1,4):
       try:
-        shutil.copyfile(targpath, filepath)
+        if targ_is_dir:
+          shutil.copytree(targpath, filepath)
+        else:
+          shutil.copyfile(targpath, filepath)
         return False
       except EnvironmentError:
-        print 'Try %d: Failed hardlink %s -> %s\n' % (cnt, filepath, targpath)
-    print 'Giving up.'
-  return try_mklink
+        if verbose:
+          print 'Try %d: Failed hardlink %s -> %s\n' % (cnt, filepath, targpath)
+    if verbose:
+      print 'Giving up.'
+
+CreateWin32Link.try_hardlink = True
+CreateWin32Link.try_junction = True
+
 
 
 def ComputeFileHash(filepath):
@@ -199,10 +192,10 @@ class CygTar(object):
     """Add path filepath to the archive which may be Native style.
 
     Add files individually recursing on directories.  For POSIX we use
-    tarfile.addfile directly on symlinks and hardlinks.  For files, we
-    must check if they are duplicates which we convert to hardlinks
-    or Cygwin style symlinks which we convert form a file to a symlink
-    in the tarfile.  All other files are added as a standard file.
+    tarfile.addfile directly on symlinks and hardlinks.  For files, we must
+    check if they are duplicates which we convert to hardlinks or symlinks
+    which we convert from a file to a symlink in the tarfile.  All other files
+    are added as a standard file.
     """
 
     # At this point tarinfo.name will contain a POSIX style path regardless
@@ -290,13 +283,12 @@ class CygTar(object):
 
   def Extract(self):
     """Extract the tarfile to the current directory."""
-    try_mklink = True
-
     if self.verbose:
       sys.stdout.write('|' + ('-' * 48) + '|\n')
       sys.stdout.flush()
       dots_outputted = 0
 
+    win32_symlinks = {}
     for m in self.tar:
       if self.verbose:
         cnt = self.read_file.tell()
@@ -307,19 +299,44 @@ class CygTar(object):
           sys.stdout.flush()
           dots_outputted = curdots
 
-      # For symlinks in Windows we create Cygwin 1.7 style symlinks since the
-      # toolchain is Cygwin based.  For hardlinks on Windows, we use mklink if
-      # possible to create a hardlink. For all other tar items, or platforms we
-      # go ahead and extract it normally.
-      if m.issym() and sys.platform == 'win32':
-        CreateCygwinSymlink(m.name, m.linkname)
       # For hardlinks in Windows, we try to use mklink, and instead copy on
       # failure.
-      elif m.islnk() and sys.platform == 'win32':
-        try_mklink = CreateWin32Hardlink(m.name, m.linkname, try_mklink)
+      if m.islnk() and sys.platform == 'win32':
+        CreateWin32Link(m.name, m.linkname, self.verbose)
+      # On Windows we treat symlinks as if they were hard links.
+      # Proper Windows symlinks supported by everything can be made with
+      # mklink, but only by an Administrator.  The older toolchains are
+      # built with Cygwin, so they could use Cygwin-style symlinks; but
+      # newer toolchains do not use Cygwin, and nothing else on the system
+      # understands Cygwin-style symlinks, so avoid them.
+      elif m.issym() and sys.platform == 'win32':
+        # For a hard link, the link target (m.linkname) always appears
+        # in the archive before the link itself (m.name), so the links
+        # can just be made on the fly.  However, a symlink might well
+        # appear in the archive before its target file, so there would
+        # not yet be any file to hard-link to.  Hence, we have to collect
+        # all the symlinks and create them in dependency order at the end.
+        linkname = m.linkname
+        if not posixpath.isabs(linkname):
+          linkname = posixpath.join(posixpath.dirname(m.name), linkname)
+        linkname = posixpath.normpath(linkname)
+        win32_symlinks[posixpath.normpath(m.name)] = linkname
       # Otherwise, extract normally.
       else:
         self.tar.extract(m)
+
+    win32_symlinks_left = win32_symlinks.items()
+    while win32_symlinks_left:
+      this_symlink = win32_symlinks_left.pop(0)
+      name, linkname = this_symlink
+      if linkname in win32_symlinks:
+        # The target is itself a symlink not yet created.
+        # Wait for it to come 'round on the guitar.
+        win32_symlinks_left.append(this_symlink)
+      else:
+        del win32_symlinks[name]
+        CreateWin32Link(name, linkname, self.verbose)
+
     if self.verbose:
       sys.stdout.write('\n')
       sys.stdout.flush()

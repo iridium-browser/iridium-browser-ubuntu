@@ -4,10 +4,60 @@
 
 #include "cc/resources/resource_pool.h"
 
+#include <algorithm>
+
+#include "base/format_macros.h"
+#include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
+#include "base/trace_event/memory_dump_manager.h"
 #include "cc/resources/resource_provider.h"
+#include "cc/resources/resource_util.h"
 #include "cc/resources/scoped_resource.h"
 
 namespace cc {
+
+void ResourcePool::PoolResource::OnMemoryDump(
+    base::trace_event::ProcessMemoryDump* pmd,
+    const ResourceProvider* resource_provider,
+    bool is_free) const {
+  // Resource IDs are not process-unique, so log with the ResourceProvider's
+  // unique id.
+  std::string parent_node =
+      base::StringPrintf("cc/resource_memory/resource_provider_%d/resource_%d",
+                         resource_provider->tracing_id(), id());
+
+  std::string dump_name =
+      base::StringPrintf("cc/tile_memory/resource_provider_%d/resource_%d",
+                         resource_provider->tracing_id(), id());
+  base::trace_event::MemoryAllocatorDump* dump =
+      pmd->CreateAllocatorDump(dump_name);
+
+  pmd->AddSuballocation(dump->guid(), parent_node);
+
+  uint64_t total_bytes =
+      ResourceUtil::UncheckedSizeInBytesAligned<size_t>(size(), format());
+  dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  total_bytes);
+
+  if (is_free) {
+    dump->AddScalar("free_size",
+                    base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                    total_bytes);
+  }
+}
+ResourcePool::ResourcePool(ResourceProvider* resource_provider)
+    : resource_provider_(resource_provider),
+      target_(0),
+      max_memory_usage_bytes_(0),
+      max_unused_memory_usage_bytes_(0),
+      max_resource_count_(0),
+      memory_usage_bytes_(0),
+      unused_memory_usage_bytes_(0),
+      resource_count_(0) {
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      this, base::ThreadTaskRunnerHandle::Get());
+}
 
 ResourcePool::ResourcePool(ResourceProvider* resource_provider, GLenum target)
     : resource_provider_(resource_provider),
@@ -17,12 +67,20 @@ ResourcePool::ResourcePool(ResourceProvider* resource_provider, GLenum target)
       max_resource_count_(0),
       memory_usage_bytes_(0),
       unused_memory_usage_bytes_(0),
-      resource_count_(0) {}
+      resource_count_(0) {
+  DCHECK_NE(0u, target);
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      this, base::ThreadTaskRunnerHandle::Get());
+}
 
 ResourcePool::~ResourcePool() {
+  base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
+      this);
+
+  DCHECK_EQ(0u, in_use_resources_.size());
+
   while (!busy_resources_.empty()) {
-    DidFinishUsingResource(busy_resources_.front());
-    busy_resources_.pop_front();
+    DidFinishUsingResource(busy_resources_.take_front());
   }
 
   SetResourceUsageLimits(0, 0, 0);
@@ -32,11 +90,10 @@ ResourcePool::~ResourcePool() {
   DCHECK_EQ(0u, resource_count_);
 }
 
-scoped_ptr<ScopedResource> ResourcePool::AcquireResource(
-    const gfx::Size& size, ResourceFormat format) {
-  for (ResourceList::iterator it = unused_resources_.begin();
-       it != unused_resources_.end();
-       ++it) {
+Resource* ResourcePool::AcquireResource(const gfx::Size& size,
+                                        ResourceFormat format) {
+  for (ResourceDeque::iterator it = unused_resources_.begin();
+       it != unused_resources_.end(); ++it) {
     ScopedResource* resource = *it;
     DCHECK(resource_provider_->CanLockForWrite(resource->id()));
 
@@ -45,22 +102,61 @@ scoped_ptr<ScopedResource> ResourcePool::AcquireResource(
     if (resource->size() != size)
       continue;
 
-    unused_resources_.erase(it);
-    unused_memory_usage_bytes_ -= resource->bytes();
-    return make_scoped_ptr(resource);
+    // Transfer resource to |in_use_resources_|.
+    in_use_resources_.set(resource->id(), unused_resources_.take(it));
+
+    unused_memory_usage_bytes_ -=
+        ResourceUtil::UncheckedSizeInBytes<size_t>(size, format);
+    return resource;
   }
 
-  scoped_ptr<ScopedResource> resource =
-      ScopedResource::Create(resource_provider_);
-  resource->AllocateManaged(size, target_, format);
+  scoped_ptr<PoolResource> pool_resource =
+      PoolResource::Create(resource_provider_);
+  GLenum target =
+      target_ ? target_ : resource_provider_->GetImageTextureTarget(format);
+  pool_resource->AllocateManaged(size, target, format);
 
-  memory_usage_bytes_ += resource->bytes();
+  DCHECK(ResourceUtil::VerifySizeInBytes<size_t>(pool_resource->size(),
+                                                 pool_resource->format()));
+  memory_usage_bytes_ += ResourceUtil::UncheckedSizeInBytes<size_t>(
+      pool_resource->size(), pool_resource->format());
   ++resource_count_;
-  return resource.Pass();
+
+  Resource* resource = pool_resource.get();
+  in_use_resources_.set(resource->id(), pool_resource.Pass());
+  return resource;
 }
 
-void ResourcePool::ReleaseResource(scoped_ptr<ScopedResource> resource) {
-  busy_resources_.push_back(resource.release());
+Resource* ResourcePool::TryAcquireResourceWithContentId(uint64_t content_id) {
+  DCHECK(content_id);
+
+  auto it = std::find_if(unused_resources_.begin(), unused_resources_.end(),
+                         [content_id](const PoolResource* pool_resource) {
+                           return pool_resource->content_id() == content_id;
+                         });
+  if (it == unused_resources_.end())
+    return nullptr;
+
+  Resource* resource = *it;
+  DCHECK(resource_provider_->CanLockForWrite(resource->id()));
+
+  // Transfer resource to |in_use_resources_|.
+  in_use_resources_.set(resource->id(), unused_resources_.take(it));
+
+  unused_memory_usage_bytes_ -= ResourceUtil::UncheckedSizeInBytes<size_t>(
+      resource->size(), resource->format());
+  return resource;
+}
+
+void ResourcePool::ReleaseResource(Resource* resource, uint64_t content_id) {
+  auto it = in_use_resources_.find(resource->id());
+  DCHECK(it != in_use_resources_.end());
+
+  PoolResource* pool_resource = it->second;
+  pool_resource->set_content_id(content_id);
+
+  // Transfer resource to |busy_resources_|.
+  busy_resources_.push_back(in_use_resources_.take_and_erase(it));
 }
 
 void ResourcePool::SetResourceUsageLimits(size_t max_memory_usage_bytes,
@@ -85,12 +181,10 @@ void ResourcePool::ReduceResourceUsage() {
     // can't be locked for write might also not be truly free-able.
     // We can free the resource here but it doesn't mean that the
     // memory is necessarily returned to the OS.
-    ScopedResource* resource = unused_resources_.front();
-    unused_resources_.pop_front();
-    memory_usage_bytes_ -= resource->bytes();
-    unused_memory_usage_bytes_ -= resource->bytes();
-    --resource_count_;
-    delete resource;
+    scoped_ptr<PoolResource> resource = unused_resources_.take_front();
+    unused_memory_usage_bytes_ -= ResourceUtil::UncheckedSizeInBytes<size_t>(
+        resource->size(), resource->format());
+    DeleteResource(resource.Pass());
   }
 }
 
@@ -104,27 +198,47 @@ bool ResourcePool::ResourceUsageTooHigh() {
   return false;
 }
 
-void ResourcePool::CheckBusyResources(bool wait_if_needed) {
-  ResourceList::iterator it = busy_resources_.begin();
+void ResourcePool::DeleteResource(scoped_ptr<PoolResource> resource) {
+  size_t resource_bytes = ResourceUtil::UncheckedSizeInBytes<size_t>(
+      resource->size(), resource->format());
+  memory_usage_bytes_ -= resource_bytes;
+  --resource_count_;
+}
 
-  while (it != busy_resources_.end()) {
-    ScopedResource* resource = *it;
-
-    if (wait_if_needed)
-      resource_provider_->WaitReadLockIfNeeded(resource->id());
+void ResourcePool::CheckBusyResources() {
+  for (size_t i = 0; i < busy_resources_.size();) {
+    ResourceDeque::iterator it(busy_resources_.begin() + i);
+    PoolResource* resource = *it;
 
     if (resource_provider_->CanLockForWrite(resource->id())) {
-      DidFinishUsingResource(resource);
-      it = busy_resources_.erase(it);
+      DidFinishUsingResource(busy_resources_.take(it));
+    } else if (resource_provider_->IsLost(resource->id())) {
+      // Remove lost resources from pool.
+      DeleteResource(busy_resources_.take(it));
     } else {
-      ++it;
+      ++i;
     }
   }
 }
 
-void ResourcePool::DidFinishUsingResource(ScopedResource* resource) {
-  unused_memory_usage_bytes_ += resource->bytes();
-  unused_resources_.push_back(resource);
+void ResourcePool::DidFinishUsingResource(scoped_ptr<PoolResource> resource) {
+  unused_memory_usage_bytes_ += ResourceUtil::UncheckedSizeInBytes<size_t>(
+      resource->size(), resource->format());
+  unused_resources_.push_back(resource.Pass());
+}
+
+bool ResourcePool::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
+                                base::trace_event::ProcessMemoryDump* pmd) {
+  for (const auto& resource : unused_resources_) {
+    resource->OnMemoryDump(pmd, resource_provider_, true /* is_free */);
+  }
+  for (const auto& resource : busy_resources_) {
+    resource->OnMemoryDump(pmd, resource_provider_, false /* is_free */);
+  }
+  for (const auto& entry : in_use_resources_) {
+    entry.second->OnMemoryDump(pmd, resource_provider_, false /* is_free */);
+  }
+  return true;
 }
 
 }  // namespace cc

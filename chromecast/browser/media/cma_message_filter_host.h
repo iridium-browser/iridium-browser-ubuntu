@@ -37,12 +37,20 @@ class VideoDecoderConfig;
 namespace chromecast {
 namespace media {
 
+class MediaPipelineBackend;
+struct MediaPipelineDeviceParams;
 class MediaPipelineHost;
 
 class CmaMessageFilterHost
     : public content::BrowserMessageFilter {
  public:
-  explicit CmaMessageFilterHost(int render_process_id);
+  // Factory method to create a MediaPipelineBackend
+  typedef base::Callback<scoped_ptr<MediaPipelineBackend>(
+      const MediaPipelineDeviceParams&)> CreateDeviceComponentsCB;
+
+  CmaMessageFilterHost(
+      int render_process_id,
+      const CreateDeviceComponentsCB& create_device_components_cb);
 
   // content::BrowserMessageFilter implementation.
   void OnChannelClosing() override;
@@ -71,9 +79,10 @@ class CmaMessageFilterHost
   void AudioInitialize(int media_id,
                        TrackId track_id,
                        const ::media::AudioDecoderConfig& config);
-  void VideoInitialize(int media_id,
-                       TrackId track_id,
-                       const ::media::VideoDecoderConfig& config);
+  void VideoInitialize(
+      int media_id,
+      TrackId track_id,
+      const std::vector<::media::VideoDecoderConfig>& configs);
   void StartPlayingFrom(int media_id, base::TimeDelta time);
   void Flush(int media_id);
   void Stop(int media_id);
@@ -109,6 +118,9 @@ class CmaMessageFilterHost
   // Render process ID correponding to this message filter.
   const int process_id_;
 
+  // Factory function for device-specific part of media pipeline creation
+  CreateDeviceComponentsCB create_device_components_cb_;
+
   // List of media pipeline and message loop media pipelines are running on.
   MediaPipelineMap media_pipelines_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
@@ -123,4 +135,3 @@ class CmaMessageFilterHost
 }  // namespace chromecast
 
 #endif  // CHROMECAST_BROWSER_MEDIA_CMA_MESSAGE_FILTER_HOST_H_
-

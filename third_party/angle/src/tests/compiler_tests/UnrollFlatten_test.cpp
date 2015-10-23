@@ -8,9 +8,10 @@
 //
 
 #include "angle_gl.h"
+#include "common/angleutils.h"
 #include "gtest/gtest.h"
 #include "GLSLANG/ShaderLang.h"
-#include "compiler/translator/TranslatorHLSL.h"
+#include "tests/test_utils/compiler_test.h"
 
 namespace
 {
@@ -21,34 +22,17 @@ class UnrollFlattenTest : public testing::Test
     UnrollFlattenTest() {}
 
   protected:
-    void SetUp() override
-    {
-        ShBuiltInResources resources;
-        ShInitBuiltInResources(&resources);
-        resources.FragmentPrecisionHigh = 1;
-
-        mTranslator = new TranslatorHLSL(GL_FRAGMENT_SHADER, SH_GLES2_SPEC, SH_HLSL11_OUTPUT);
-        ASSERT_TRUE(mTranslator->Init(resources));
-    }
-
-    void TearDown() override
-    {
-        SafeDelete(mTranslator);
-    }
-
     void compile(const std::string &shaderString)
     {
-        const char *shaderStrings[] = { shaderString.c_str() };
-        bool compilationSuccess = mTranslator->compile(shaderStrings, 1, SH_VARIABLES | SH_OBJECT_CODE);
-        TInfoSink &infoSink = mTranslator->getInfoSink();
+        std::string infoLog;
+        bool compilationSuccess = compileTestShader(GL_FRAGMENT_SHADER, SH_GLES2_SPEC, SH_HLSL11_OUTPUT,
+                                                    shaderString, SH_VARIABLES, &mTranslatedSource, &infoLog);
         if (!compilationSuccess)
         {
-            FAIL() << "Shader compilation failed " << infoSink.info.str();
+            FAIL() << "Shader compilation failed " << infoLog;
         }
-        mTranslatedSource = infoSink.obj.str();
-
         // Ignore the beginning of the shader to avoid the definitions of LOOP and FLATTEN
-        mCurrentPosition = mTranslatedSource.find("GL_USES_FRAG_COLOR");
+        mCurrentPosition = static_cast<int>(mTranslatedSource.find("GL_USES_FRAG_COLOR"));
     }
 
     void expect(const char *patterns[], size_t count)
@@ -75,7 +59,7 @@ class UnrollFlattenTest : public testing::Test
                 }
             }
             mExpectationList += " - " + std::string(pattern);
-            mCurrentPosition = position + 1;
+            mCurrentPosition = static_cast<int>(position) + 1;
         }
     }
 
@@ -83,7 +67,6 @@ class UnrollFlattenTest : public testing::Test
     static const char *FLATTEN;
 
   private:
-    TranslatorHLSL *mTranslator;
     std::string mTranslatedSource;
 
     int mCurrentPosition;

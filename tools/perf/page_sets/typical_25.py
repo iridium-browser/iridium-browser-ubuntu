@@ -2,14 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry.page import shared_page_state
+from telemetry import story
 
 
 class Typical25Page(page_module.Page):
 
   def __init__(self, url, page_set, run_no_page_interactions):
-    super(Typical25Page, self).__init__(url=url, page_set=page_set)
-    self.user_agent_type = 'desktop'
+    super(Typical25Page, self).__init__(
+        url=url, page_set=page_set,
+        shared_page_state_class=shared_page_state.SharedDesktopPageState)
     self.archive_data_file = 'data/typical_25.json'
     self._run_no_page_interactions = run_no_page_interactions
 
@@ -20,15 +22,14 @@ class Typical25Page(page_module.Page):
       action_runner.ScrollPage()
 
 
-class Typical25PageSet(page_set_module.PageSet):
+class Typical25PageSet(story.StorySet):
 
   """ Pages designed to represent the median, not highly optimized web """
 
   def __init__(self, run_no_page_interactions=False):
     super(Typical25PageSet, self).__init__(
-      user_agent_type='desktop',
       archive_data_file='data/typical_25.json',
-      bucket=page_set_module.PARTNER_BUCKET)
+      cloud_storage_bucket=story.PARTNER_BUCKET)
 
     urls_list = [
       # Why: Alexa games #48
@@ -72,5 +73,5 @@ class Typical25PageSet(page_set_module.PageSet):
     ]
 
     for url in urls_list:
-      self.AddUserStory(
+      self.AddStory(
         Typical25Page(url, self, run_no_page_interactions))

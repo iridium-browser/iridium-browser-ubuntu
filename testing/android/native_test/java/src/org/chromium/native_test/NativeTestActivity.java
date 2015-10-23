@@ -6,56 +6,103 @@ package org.chromium.native_test;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.Process;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
-import org.chromium.base.PathUtils;
-import org.chromium.base.PowerMonitor;
-import org.chromium.base.ResourceExtractor;
-import org.chromium.base.library_loader.NativeLibraries;
+import org.chromium.base.annotations.JNINamespace;
+import org.chromium.test.reporter.TestStatusReporter;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Iterator;
 
 /**
  *  Android's NativeActivity is mostly useful for pure-native code.
  *  Our tests need to go up to our own java classes, which is not possible using
  *  the native activity class loader.
  */
+@JNINamespace("testing::android")
 public class NativeTestActivity extends Activity {
     public static final String EXTRA_COMMAND_LINE_FILE =
             "org.chromium.native_test.NativeTestActivity.CommandLineFile";
     public static final String EXTRA_COMMAND_LINE_FLAGS =
             "org.chromium.native_test.NativeTestActivity.CommandLineFlags";
+    public static final String EXTRA_SHARD =
+            "org.chromium.native_test.NativeTestActivity.Shard";
     public static final String EXTRA_STDOUT_FILE =
             "org.chromium.native_test.NativeTestActivity.StdoutFile";
 
-    private static final String TAG = Log.makeTag("native_test");
+    private static final String TAG = "cr.native_test";
     private static final String EXTRA_RUN_IN_SUB_THREAD = "RunInSubThread";
-    // We post a delayed task to run tests so that we do not block onCreate().
-    private static final long RUN_TESTS_DELAY_IN_MS = 300;
+
+    private String mCommandLineFilePath;
+    private StringBuilder mCommandLineFlags = new StringBuilder();
+    private TestStatusReporter mReporter;
+    private boolean mRunInSubThread = false;
+    private boolean mStdoutFifo = false;
+    private String mStdoutFilePath;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         CommandLine.init(new String[]{});
 
-        // Needed by path_utils_unittest.cc
-        PathUtils.setPrivateDataDirectorySuffix("chrome", getApplicationContext());
+        parseArgumentsFromIntent(getIntent());
+        mReporter = new TestStatusReporter(this);
+    }
 
-        ResourceExtractor resourceExtractor = ResourceExtractor.get(getApplicationContext());
-        resourceExtractor.setExtractAllPaksAndV8SnapshotForTesting();
-        resourceExtractor.startExtractingResources();
-        resourceExtractor.waitForCompletion();
+    private void parseArgumentsFromIntent(Intent intent) {
+        mCommandLineFilePath = intent.getStringExtra(EXTRA_COMMAND_LINE_FILE);
+        if (mCommandLineFilePath == null) {
+            mCommandLineFilePath = "";
+        } else {
+            File commandLineFile = new File(mCommandLineFilePath);
+            if (!commandLineFile.isAbsolute()) {
+                mCommandLineFilePath = Environment.getExternalStorageDirectory() + "/"
+                        + mCommandLineFilePath;
+            }
+            Log.i(TAG, "command line file path: %s", mCommandLineFilePath);
+        }
 
-        // Needed by system_monitor_unittest.cc
-        PowerMonitor.createForTests(this);
+        String commandLineFlags = intent.getStringExtra(EXTRA_COMMAND_LINE_FLAGS);
+        if (commandLineFlags != null) mCommandLineFlags.append(commandLineFlags);
 
-        loadLibraries();
-        Bundle extras = this.getIntent().getExtras();
-        if (extras != null && extras.containsKey(EXTRA_RUN_IN_SUB_THREAD)) {
+        mRunInSubThread = intent.hasExtra(EXTRA_RUN_IN_SUB_THREAD);
+
+        ArrayList<String> shard = intent.getStringArrayListExtra(EXTRA_SHARD);
+        if (shard != null) {
+            StringBuilder filterFlag = new StringBuilder();
+            filterFlag.append("--gtest_filter=");
+            for (Iterator<String> test_iter = shard.iterator(); test_iter.hasNext();) {
+                filterFlag.append(test_iter.next());
+                if (test_iter.hasNext()) {
+                    filterFlag.append(":");
+                }
+            }
+            appendCommandLineFlags(filterFlag.toString());
+        }
+
+        mStdoutFilePath = intent.getStringExtra(EXTRA_STDOUT_FILE);
+        if (mStdoutFilePath == null) {
+            mStdoutFilePath = new File(getFilesDir(), "test.fifo").getAbsolutePath();
+            mStdoutFifo = true;
+        }
+    }
+
+    protected void appendCommandLineFlags(String flags) {
+        mCommandLineFlags.append(" ").append(flags);
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+
+        if (mRunInSubThread) {
             // Create a new thread and run tests on it.
             new Thread() {
                 @Override
@@ -66,42 +113,21 @@ public class NativeTestActivity extends Activity {
         } else {
             // Post a task to run the tests. This allows us to not block
             // onCreate and still run tests on the main thread.
-            new Handler().postDelayed(new Runnable() {
+            new Handler().post(new Runnable() {
                 @Override
                 public void run() {
                     runTests();
                 }
-            }, RUN_TESTS_DELAY_IN_MS);
+            });
         }
     }
 
     private void runTests() {
-        String commandLineFlags = getIntent().getStringExtra(EXTRA_COMMAND_LINE_FLAGS);
-        if (commandLineFlags == null) commandLineFlags = "";
-
-        String commandLineFilePath = getIntent().getStringExtra(EXTRA_COMMAND_LINE_FILE);
-        if (commandLineFilePath == null) {
-            commandLineFilePath = "";
-        } else {
-            File commandLineFile = new File(commandLineFilePath);
-            if (!commandLineFile.isAbsolute()) {
-                commandLineFilePath = Environment.getExternalStorageDirectory() + "/"
-                        + commandLineFilePath;
-            }
-            Log.i(TAG, "command line file path: %s", commandLineFilePath);
-        }
-
-        String stdoutFilePath = getIntent().getStringExtra(EXTRA_STDOUT_FILE);
-        boolean stdoutFifo = false;
-        if (stdoutFilePath == null) {
-            stdoutFilePath = new File(getFilesDir(), "test.fifo").getAbsolutePath();
-            stdoutFifo = true;
-        }
-
-        // This directory is used by build/android/pylib/test_package_apk.py.
-        nativeRunTests(commandLineFlags, commandLineFilePath, stdoutFilePath, stdoutFifo,
-                getApplicationContext());
+        mReporter.testRunStarted(Process.myPid());
+        nativeRunTests(mCommandLineFlags.toString(), mCommandLineFilePath, mStdoutFilePath,
+                mStdoutFifo, getApplicationContext());
         finish();
+        mReporter.testRunFinished(Process.myPid());
     }
 
     // Signal a failure of the native test loader to python scripts
@@ -109,14 +135,6 @@ public class NativeTestActivity extends Activity {
     // RUNNER_FAILED build/android/test_package.py.
     private void nativeTestFailed() {
         Log.e(TAG, "[ RUNNER_FAILED ] could not load native library");
-    }
-
-    private void loadLibraries() {
-        for (String library : NativeLibraries.LIBRARIES) {
-            Log.i(TAG, "loading: %s", library);
-            System.loadLibrary(library);
-            Log.i(TAG, "loaded: %s", library);
-        }
     }
 
     private native void nativeRunTests(String commandLineFlags, String commandLineFilePath,

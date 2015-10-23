@@ -33,8 +33,8 @@
 
 #include "core/animation/AnimationEffect.h"
 #include "core/animation/AnimationTranslationUtil.h"
-#include "core/animation/ElementAnimations.h"
 #include "core/animation/CompositorAnimationsImpl.h"
+#include "core/animation/ElementAnimations.h"
 #include "core/animation/animatable/AnimatableDouble.h"
 #include "core/animation/animatable/AnimatableFilterOperations.h"
 #include "core/animation/animatable/AnimatableTransform.h"
@@ -93,10 +93,28 @@ bool considerAnimationAsIncompatible(const Animation& animation, const Animation
     }
 }
 
+bool isTransformRelatedCSSProperty(const PropertyHandle property)
+{
+    return property.isCSSProperty()
+        && (property.cssProperty() == CSSPropertyRotate
+        || property.cssProperty() == CSSPropertyScale
+        || property.cssProperty() == CSSPropertyTransform
+        || property.cssProperty() == CSSPropertyTranslate);
+}
+
+
+bool isTransformRelatedAnimation(const Element& targetElement, const Animation* animation)
+{
+    return animation->affects(targetElement, CSSPropertyTransform)
+        || animation->affects(targetElement, CSSPropertyRotate)
+        || animation->affects(targetElement, CSSPropertyScale)
+        || animation->affects(targetElement, CSSPropertyTranslate);
+}
+
 bool hasIncompatibleAnimations(const Element& targetElement, const Animation& animationToAdd, const EffectModel& effectToAdd)
 {
     const bool affectsOpacity = effectToAdd.affects(PropertyHandle(CSSPropertyOpacity));
-    const bool affectsTransform = effectToAdd.affects(PropertyHandle(CSSPropertyTransform));
+    const bool affectsTransform = effectToAdd.isTransformRelatedEffect();
     const bool affectsFilter = effectToAdd.affects(PropertyHandle(CSSPropertyWebkitFilter));
 
     if (!targetElement.hasAnimations())
@@ -111,7 +129,7 @@ bool hasIncompatibleAnimations(const Element& targetElement, const Animation& an
             continue;
 
         if ((affectsOpacity && attachedAnimation->affects(targetElement, CSSPropertyOpacity))
-            || (affectsTransform && attachedAnimation->affects(targetElement, CSSPropertyTransform))
+            || (affectsTransform && isTransformRelatedAnimation(targetElement, attachedAnimation))
             || (affectsFilter && attachedAnimation->affects(targetElement, CSSPropertyWebkitFilter)))
             return true;
     }
@@ -121,8 +139,35 @@ bool hasIncompatibleAnimations(const Element& targetElement, const Animation& an
 
 }
 
-CSSPropertyID CompositorAnimations::CompositableProperties[3] = {
-    CSSPropertyOpacity, CSSPropertyTransform, CSSPropertyWebkitFilter
+CompositorAnimations::CompositorAnimations()
+{
+}
+
+CompositorAnimations* CompositorAnimations::instance(CompositorAnimations* newInstance)
+{
+    static CompositorAnimations* instance = new CompositorAnimations();
+    if (newInstance) {
+        instance = newInstance;
+    }
+    return instance;
+}
+
+bool CompositorAnimations::isCompositableProperty(CSSPropertyID property)
+{
+    for (CSSPropertyID id : compositableProperties) {
+        if (property == id)
+            return true;
+    }
+    return false;
+}
+
+const CSSPropertyID CompositorAnimations::compositableProperties[6] = {
+    CSSPropertyOpacity,
+    CSSPropertyRotate,
+    CSSPropertyScale,
+    CSSPropertyTransform,
+    CSSPropertyTranslate,
+    CSSPropertyWebkitFilter
 };
 
 bool CompositorAnimations::getAnimatedBoundingBox(FloatBox& box, const EffectModel& effect, double minValue, double maxValue) const
@@ -142,7 +187,7 @@ bool CompositorAnimations::getAnimatedBoundingBox(FloatBox& box, const EffectMod
             continue;
 
         // TODO: Add the ability to get expanded bounds for filters as well.
-        if (property.cssProperty() != CSSPropertyTransform)
+        if (!isTransformRelatedCSSProperty(property))
             continue;
 
         const PropertySpecificKeyframeVector& frames = keyframeEffect.getPropertySpecificKeyframes(property);
@@ -200,9 +245,13 @@ bool CompositorAnimations::isCandidateForAnimationOnCompositor(const Timing& tim
     if (properties.isEmpty())
         return false;
 
+    unsigned transformPropertyCount = 0;
     for (const auto& property : properties) {
         if (!property.isCSSProperty())
             return false;
+
+        if (isTransformRelatedCSSProperty(property))
+            transformPropertyCount++;
 
         const PropertySpecificKeyframeVector& keyframes = keyframeEffect.getPropertySpecificKeyframes(property);
         ASSERT(keyframes.size() >= 2);
@@ -215,6 +264,9 @@ bool CompositorAnimations::isCandidateForAnimationOnCompositor(const Timing& tim
             switch (property.cssProperty()) {
             case CSSPropertyOpacity:
                 break;
+            case CSSPropertyRotate:
+            case CSSPropertyScale:
+            case CSSPropertyTranslate:
             case CSSPropertyTransform:
                 if (toAnimatableTransform(keyframe->getAnimatableValue().get())->transformOperations().dependsOnBoxSize())
                     return false;
@@ -232,6 +284,10 @@ bool CompositorAnimations::isCandidateForAnimationOnCompositor(const Timing& tim
         }
     }
 
+    // TODO: Support multiple transform property animations on the compositor
+    if (transformPropertyCount > 1)
+        return false;
+
     if (animationToAdd && hasIncompatibleAnimations(targetElement, *animationToAdd, effect))
         return false;
 
@@ -245,7 +301,7 @@ bool CompositorAnimations::isCandidateForAnimationOnCompositor(const Timing& tim
 void CompositorAnimations::cancelIncompatibleAnimationsOnCompositor(const Element& targetElement, const Animation& animationToAdd, const EffectModel& effectToAdd)
 {
     const bool affectsOpacity = effectToAdd.affects(PropertyHandle(CSSPropertyOpacity));
-    const bool affectsTransform = effectToAdd.affects(PropertyHandle(CSSPropertyTransform));
+    const bool affectsTransform =  effectToAdd.isTransformRelatedEffect();
     const bool affectsFilter = effectToAdd.affects(PropertyHandle(CSSPropertyWebkitFilter));
 
     if (!targetElement.hasAnimations())
@@ -260,7 +316,7 @@ void CompositorAnimations::cancelIncompatibleAnimationsOnCompositor(const Elemen
             continue;
 
         if ((affectsOpacity && attachedAnimation->affects(targetElement, CSSPropertyOpacity))
-            || (affectsTransform && attachedAnimation->affects(targetElement, CSSPropertyTransform))
+            || (affectsTransform && isTransformRelatedAnimation(targetElement, attachedAnimation))
             || (affectsFilter && attachedAnimation->affects(targetElement, CSSPropertyWebkitFilter)))
             attachedAnimation->cancelAnimationOnCompositor();
     }
@@ -268,6 +324,8 @@ void CompositorAnimations::cancelIncompatibleAnimationsOnCompositor(const Elemen
 
 bool CompositorAnimations::canStartAnimationOnCompositor(const Element& element)
 {
+    if (!Platform::current()->isThreadedAnimationEnabled())
+        return false;
     return element.layoutObject() && element.layoutObject()->compositingState() == PaintsIntoOwnBacking;
 }
 
@@ -630,6 +688,9 @@ void CompositorAnimationsImpl::getAnimationOnCompositor(const Timing& timing, in
             curve = adoptPtr(filterCurve);
             break;
         }
+        case CSSPropertyRotate:
+        case CSSPropertyScale:
+        case CSSPropertyTranslate:
         case CSSPropertyTransform: {
             targetProperty = WebCompositorAnimation::TargetPropertyTransform;
             WebTransformAnimationCurve* transformCurve = Platform::current()->compositorSupport()->createTransformAnimationCurve();

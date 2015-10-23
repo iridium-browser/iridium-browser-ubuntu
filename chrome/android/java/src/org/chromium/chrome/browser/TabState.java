@@ -8,9 +8,11 @@ import android.os.Handler;
 import android.util.Log;
 import android.util.Pair;
 
+import org.chromium.base.StreamUtil;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.util.StreamUtil;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content.browser.crypto.CipherFactory;
+import org.chromium.content_public.browser.WebContents;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -53,8 +55,7 @@ public class TabState {
     private static final long KEY_CHECKER = 0;
 
     /** Overrides the Chrome channel/package name to test a variant channel-specific behaviour. */
-    @VisibleForTesting
-    static String sChannelNameOverrideForTest;
+    private static String sChannelNameOverrideForTest;
 
     /** Contains the state for a WebContents. */
     public static class WebContentsState {
@@ -80,9 +81,9 @@ public class TabState {
         /**
          * Creates a WebContents from the buffer.
          * @param isHidden Whether or not the tab initially starts hidden.
-         * @return Pointer to the native WebContents.
+         * @return Pointer A WebContents object.
          */
-        public long restoreContentsFromByteBuffer(boolean isHidden) {
+        public WebContents restoreContentsFromByteBuffer(boolean isHidden) {
             return nativeRestoreContentsFromByteBuffer(mBuffer, mVersion, isHidden);
         }
 
@@ -416,11 +417,12 @@ public class TabState {
      * Overrides the channel name for testing.
      * @param name Channel to use.
      */
+    @VisibleForTesting
     public static void setChannelNameOverrideForTest(String name) {
         sChannelNameOverrideForTest = name;
     }
 
-    private static native long nativeRestoreContentsFromByteBuffer(
+    private static native WebContents nativeRestoreContentsFromByteBuffer(
             ByteBuffer buffer, int savedStateVersion, boolean initiallyHidden);
 
     private static native ByteBuffer nativeGetContentsStateAsByteBuffer(Tab tab);

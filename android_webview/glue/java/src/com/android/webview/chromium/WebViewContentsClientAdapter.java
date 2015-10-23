@@ -16,7 +16,6 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
-import android.view.ActionMode;
 import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.ClientCertRequest;
@@ -31,6 +30,7 @@ import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebChromeClient.CustomViewCallback;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
@@ -45,15 +45,12 @@ import org.chromium.android_webview.AwWebResourceResponse;
 import org.chromium.android_webview.JsPromptResultReceiver;
 import org.chromium.android_webview.JsResultReceiver;
 import org.chromium.android_webview.permission.AwPermissionRequest;
+import org.chromium.android_webview.permission.Resource;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.SelectActionMode;
-import org.chromium.content.browser.SelectActionModeCallback;
-import org.chromium.content.browser.SelectActionModeCallback.ActionHandler;
 
 import java.lang.ref.WeakReference;
 import java.security.Principal;
@@ -275,6 +272,22 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         }
     }
 
+    private static class WebResourceErrorImpl extends WebResourceError {
+        private final AwWebResourceError mError;
+
+        public WebResourceErrorImpl(AwWebResourceError error) {
+            mError = error;
+        }
+
+        public int getErrorCode() {
+            return mError.errorCode;
+        }
+
+        public CharSequence getDescription() {
+            return mError.description;
+        }
+    }
+
     /**
      * @see AwContentsClient#shouldInterceptRequest(java.lang.String)
      */
@@ -381,32 +394,6 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         } finally {
             TraceEvent.end("WebViewContentsClientAdapter.onNewPicture");
         }
-    }
-
-    /**
-     * @See AwContentsClient#startActionMode(View,ActionHandler,boolean)
-     */
-    @Override
-    public SelectActionMode startActionMode(
-            View view, ActionHandler actionHandler, boolean floating) {
-        try {
-            TraceEvent.begin("WebViewContentsClientAdapter.startActionMode");
-            if (TRACE) Log.d(TAG, "startActionMode");
-            if (floating) return null;
-            ActionMode.Callback callback = new SelectActionModeCallback(mContext, actionHandler);
-            ActionMode actionMode = view.startActionMode(callback);
-            return actionMode != null ? new SelectActionMode(actionMode) : null;
-        } finally {
-            TraceEvent.end("WebViewContentsClientAdapter.startActionMode");
-        }
-    }
-
-    /**
-     * @See AwContentsClient#supportsFloatingActionMode()
-     */
-    @Override
-    public boolean supportsFloatingActionMode() {
-        return false;
     }
 
     @Override
@@ -553,10 +540,19 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         }
     }
 
+    /**
+     * @see ContentViewClient#onPageCommitVisible(String)
+     */
     @Override
     public void onPageCommitVisible(String url) {
-        // TODO: implement once required framework changes land
-        // Please note that this needs an SDK build check. See crbug/461303 for details.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        try {
+            TraceEvent.begin("WebViewContentsClientAdapter.onPageCommitVisible");
+            if (TRACE) Log.d(TAG, "onPageCommitVisible=" + url);
+            mWebViewClient.onPageCommitVisible(mWebView, url);
+        } finally {
+            TraceEvent.end("WebViewContentsClientAdapter.onPageCommitVisible");
+        }
     }
 
     /**
@@ -564,10 +560,7 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
      */
     @Override
     public void onReceivedError(int errorCode, String description, String failingUrl) {
-        // TODO(mnaganov): In the next version of glue, this will look as follows:
-        // if (<next-level-api>) return;
-        // Currently, we should just run this code always.
-        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.CUR_DEVELOPMENT + 1) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) return;
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.onReceivedError");
             if (description == null || description.isEmpty()) {
@@ -585,16 +578,11 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
     }
 
     /**
-     * @see ContentViewClient#onReceivedError(
-     * AwContentsClient.AwWebResourceRequest,AwContentsClient.AwWebResourceError)
+     * @see ContentViewClient#onReceivedError(AwWebResourceRequest,AwWebResourceError)
      */
     @Override
-    public void onReceivedError2(AwContentsClient.AwWebResourceRequest request,
-            AwContentsClient.AwWebResourceError error) {
-        // TODO(mnaganov): In the next version of glue, this will look as follows:
-        // if (!<next-level-api>) return;
-        // Currently, we should never run this code.
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.CUR_DEVELOPMENT + 1) return;
+    public void onReceivedError2(AwWebResourceRequest request, AwWebResourceError error) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.onReceivedError");
             if (error.description == null || error.description.isEmpty()) {
@@ -604,8 +592,8 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
                 error.description = mWebViewDelegate.getErrorString(mContext, error.errorCode);
             }
             if (TRACE) Log.d(TAG, "onReceivedError=" + request.url);
-            // TODO(mnaganov): When the new API becomes available, uncomment the following:
-            //   mWebViewClient.onReceivedError(request, error);
+            mWebViewClient.onReceivedError(mWebView, new WebResourceRequestImpl(request),
+                    new WebResourceErrorImpl(error));
         } finally {
             TraceEvent.end("WebViewContentsClientAdapter.onReceivedError");
         }
@@ -613,10 +601,14 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
 
     @Override
     public void onReceivedHttpError(AwWebResourceRequest request, AwWebResourceResponse response) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.onReceivedHttpError");
             if (TRACE) Log.d(TAG, "onReceivedHttpError=" + request.url);
-            // TODO(mnaganov): Call mWebViewClient.onReceivedHttpError(mWebView, request, response);
+            mWebViewClient.onReceivedHttpError(mWebView, new WebResourceRequestImpl(request),
+                    new WebResourceResponse(true, response.getMimeType(), response.getCharset(),
+                            response.getStatusCode(), response.getReasonPhrase(),
+                            response.getResponseHeaders(), response.getData()));
         } finally {
             TraceEvent.end("WebViewContentsClientAdapter.onReceivedHttpError");
         }
@@ -630,7 +622,7 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.onReceivedTitle");
             if (mWebChromeClient != null) {
-                if (TRACE) Log.d(TAG, "onReceivedTitle");
+                if (TRACE) Log.d(TAG, "onReceivedTitle=\"" + title + "\"");
                 mWebChromeClient.onReceivedTitle(mWebView, title);
             }
         } finally {
@@ -1165,10 +1157,10 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
                 result = mWebChromeClient.getDefaultVideoPoster();
             }
             if (result == null) {
-                // The ic_media_video_poster icon is transparent so we need to draw it on a gray
-                // background.
+                // The ic_play_circle_outline_black_48dp icon is transparent so we need to draw it
+                // on a gray background.
                 Bitmap poster = BitmapFactory.decodeResource(
-                        mContext.getResources(), R.drawable.ic_media_video_poster);
+                        mContext.getResources(), R.drawable.ic_play_circle_outline_black_48dp);
                 result = Bitmap.createBitmap(
                         poster.getWidth(), poster.getHeight(), poster.getConfig());
                 result.eraseColor(Color.GRAY);
@@ -1217,20 +1209,18 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
      * TODO: Move to the upstream once the PermissionRequest is part of SDK.
      */
     public static class PermissionRequestAdapter extends PermissionRequest {
-        // TODO: Move the below definitions to AwPermissionRequest.
-        private static final long BITMASK_RESOURCE_VIDEO_CAPTURE = 1 << 1;
-        private static final long BITMASK_RESOURCE_AUDIO_CAPTURE = 1 << 2;
-        private static final long BITMASK_RESOURCE_PROTECTED_MEDIA_ID = 1 << 3;
 
-        public static long toAwPermissionResources(String[] resources) {
+        private static long toAwPermissionResources(String[] resources) {
             long result = 0;
             for (String resource : resources) {
                 if (resource.equals(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) {
-                    result |= BITMASK_RESOURCE_VIDEO_CAPTURE;
+                    result |= Resource.VideoCapture;
                 } else if (resource.equals(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) {
-                    result |= BITMASK_RESOURCE_AUDIO_CAPTURE;
+                    result |= Resource.AudioCapture;
                 } else if (resource.equals(PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID)) {
-                    result |= BITMASK_RESOURCE_PROTECTED_MEDIA_ID;
+                    result |= Resource.ProtectedMediaId;
+                } else if (resource.equals(AwPermissionRequest.RESOURCE_MIDI_SYSEX)) {
+                    result |= Resource.MIDISysex;
                 }
             }
             return result;
@@ -1238,25 +1228,29 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
 
         private static String[] toPermissionResources(long resources) {
             ArrayList<String> result = new ArrayList<String>();
-            if ((resources & BITMASK_RESOURCE_VIDEO_CAPTURE) != 0) {
+            if ((resources & Resource.VideoCapture) != 0) {
                 result.add(PermissionRequest.RESOURCE_VIDEO_CAPTURE);
             }
-            if ((resources & BITMASK_RESOURCE_AUDIO_CAPTURE) != 0) {
+            if ((resources & Resource.AudioCapture) != 0) {
                 result.add(PermissionRequest.RESOURCE_AUDIO_CAPTURE);
             }
-            if ((resources & BITMASK_RESOURCE_PROTECTED_MEDIA_ID) != 0) {
+            if ((resources & Resource.ProtectedMediaId) != 0) {
                 result.add(PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID);
+            }
+            if ((resources & Resource.MIDISysex) != 0) {
+                result.add(AwPermissionRequest.RESOURCE_MIDI_SYSEX);
             }
             String[] resource_array = new String[result.size()];
             return result.toArray(resource_array);
         }
 
         private AwPermissionRequest mAwPermissionRequest;
-        private String[] mResources;
+        private final String[] mResources;
 
         public PermissionRequestAdapter(AwPermissionRequest awPermissionRequest) {
             assert awPermissionRequest != null;
             mAwPermissionRequest = awPermissionRequest;
+            mResources = toPermissionResources(mAwPermissionRequest.getResources());
         }
 
         @Override
@@ -1264,15 +1258,9 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
             return mAwPermissionRequest.getOrigin();
         }
 
-        @SuppressFBWarnings("CHROMIUM_SYNCHRONIZED_THIS")
         @Override
         public String[] getResources() {
-            synchronized (this) {
-                if (mResources == null) {
-                    mResources = toPermissionResources(mAwPermissionRequest.getResources());
-                }
-                return mResources;
-            }
+            return mResources.clone();
         }
 
         @Override

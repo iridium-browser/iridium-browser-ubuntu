@@ -65,16 +65,6 @@ enum Multiply {
     Unmultiplied
 };
 
-enum BackingStoreCopy {
-    CopyBackingStore, // Guarantee subsequent draws don't affect the copy.
-    DontCopyBackingStore // Subsequent draws may affect the copy.
-};
-
-enum ScaleBehavior {
-    Scaled,
-    Unscaled
-};
-
 class PLATFORM_EXPORT ImageBuffer {
     WTF_MAKE_NONCOPYABLE(ImageBuffer); WTF_MAKE_FAST_ALLOCATED(ImageBuffer);
 public:
@@ -92,18 +82,17 @@ public:
     bool isExpensiveToPaint() const { return m_surface->isExpensiveToPaint(); }
     bool isSurfaceValid() const;
     bool restoreSurface() const;
-    void didDraw(const FloatRect& rect) const { m_surface->didDraw(rect); }
+    void didDraw(const FloatRect&) const;
+    bool wasDrawnToAfterSnapshot() const { return m_snapshotState == DrawnToAfterSnapshot; }
 
     void setFilterQuality(SkFilterQuality filterQuality) { m_surface->setFilterQuality(filterQuality); }
     void setIsHidden(bool hidden) { m_surface->setIsHidden(hidden); }
 
     // Called by subclasses of ImageBufferSurface to install a new canvas object
-    void resetCanvas(SkCanvas*);
+    void resetCanvas(SkCanvas*) const;
 
-    void willDrawVideo() { m_surface->willDrawVideo(); }
-
-    GraphicsContext* context() const; // Deprecated: use canvas()
     SkCanvas* canvas() const;
+    void disableDeferral() const;
 
     // Called at the end of a task that rendered a whole frame
     void finalizeFrame(const FloatRect &dirtyRect);
@@ -111,21 +100,18 @@ public:
 
     bool isDirty();
 
-    const SkBitmap& bitmap() const;
+    // FIXME: crbug.com/485243
+    // Prefer writePixels() and canvas()->draw*() for writing, and newImageSnapshot() for reading
+    const SkBitmap& deprecatedBitmapForOverwrite() const;
 
-    void willAccessPixels() { m_surface->willAccessPixels(); }
+    bool writePixels(const SkImageInfo&, const void* pixels, size_t rowBytes, int x, int y);
+
     void willOverwriteCanvas() { m_surface->willOverwriteCanvas(); }
-
-    PassRefPtr<Image> copyImage(BackingStoreCopy = CopyBackingStore, ScaleBehavior = Scaled) const;
-    // Give hints on the faster copyImage Mode, return DontCopyBackingStore if it supports the DontCopyBackingStore behavior
-    // or return CopyBackingStore if it doesn't.
-    static BackingStoreCopy fastCopyImageMode();
 
     bool getImageData(Multiply, const IntRect&, WTF::ArrayBufferContents&) const;
 
     void putByteArray(Multiply, const unsigned char* source, const IntSize& sourceSize, const IntRect& sourceRect, const IntPoint& destPoint);
 
-    String toDataURL(const String& mimeType, const double* quality = 0) const;
     AffineTransform baseTransform() const { return AffineTransform(); }
     WebLayer* platformLayer() const;
 
@@ -135,30 +121,31 @@ public:
     // Destroys the TEXTURE_2D binding for the active texture unit of the passed context
     bool copyToPlatformTexture(WebGraphicsContext3D*, Platform3DObject, GLenum, GLenum, GLint, bool, bool);
 
-    Platform3DObject getBackingTexture();
-    void didModifyBackingTexture();
-
     bool copyRenderingResultsFromDrawingBuffer(DrawingBuffer*, SourceDrawingBuffer);
 
-    void flush();
+    void flush(); // process deferred draw commands immediately
+    void flushGpu(); // Like flush(), but flushes all the way down to the Gpu context if the surface is accelerated
 
     void notifySurfaceInvalid();
 
-    PassRefPtr<SkImage> newImageSnapshot() const;
+    PassRefPtr<SkImage> newSkImageSnapshot() const;
+    PassRefPtr<Image> newImageSnapshot() const;
 
     DisplayItemClient displayItemClient() const { return toDisplayItemClient(this); }
     String debugName() const { return "ImageBuffer"; }
 
+    void draw(GraphicsContext*, const FloatRect&, const FloatRect*, SkXfermode::Mode);
+
 private:
     ImageBuffer(PassOwnPtr<ImageBufferSurface>);
 
-    void draw(GraphicsContext*, const FloatRect&, const FloatRect*, SkXfermode::Mode);
-
-    friend class GraphicsContext;
-    friend class SkiaImageFilterBuilder;
-
+    enum SnapshotState {
+        InitialSnapshotState,
+        DidAcquireSnapshot,
+        DrawnToAfterSnapshot,
+    };
+    mutable SnapshotState m_snapshotState;
     OwnPtr<ImageBufferSurface> m_surface;
-    OwnPtr<GraphicsContext> m_context;
     ImageBufferClient* m_client;
 };
 

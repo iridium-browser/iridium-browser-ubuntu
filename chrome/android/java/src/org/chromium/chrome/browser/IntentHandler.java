@@ -14,20 +14,26 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.provider.Browser;
 import android.provider.MediaStore;
 import android.speech.RecognizerResultsIntent;
 import android.text.TextUtils;
+import android.util.Pair;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
+import org.chromium.chrome.browser.externalnav.IntentWithGesturesHandler;
 import org.chromium.chrome.browser.omnibox.AutocompleteController;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.document.ActivityDelegate;
 import org.chromium.chrome.browser.util.IntentUtils;
+import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.common.Referrer;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -38,7 +44,7 @@ import java.util.Locale;
  * Handles all browser-related Intents.
  */
 public class IntentHandler {
-    private static final String TAG = Log.makeTag("IntentHandler");
+    private static final String TAG = "cr.IntentHandler";
 
     /**
      * Document mode: If true, Chrome is launched into the same Task.
@@ -64,20 +70,19 @@ public class IntentHandler {
     public static final String EXTRA_STARTED_BY = "com.android.chrome.started_by";
 
     /**
-     * Document mode: A pointer to a native web contents object to associate with the given tab.
+     * Tab ID to use when creating a new Tab.
      */
-    public static final String EXTRA_NATIVE_WEB_CONTENTS = "com.android.chrome.native_web_contents";
-
-    /**
-     * Document mode: Whether or not to try loading a page with "Request Desktop Site" enabled.
-     */
-    public static final String EXTRA_USE_DESKTOP_USER_AGENT =
-            "com.android.chrome.use_desktop_user_agent";
+    public static final String EXTRA_TAB_ID = "com.android.chrome.tab_id";
 
     /**
      * The tab id of the parent tab, if any.
      */
     public static final String EXTRA_PARENT_TAB_ID = "com.android.chrome.parent_tab_id";
+
+    /**
+     * Intent to bring the parent Activity back, if the parent Tab lives in a different Activity.
+     */
+    public static final String EXTRA_PARENT_INTENT = "com.android.chrome.parent_intent";
 
     /**
      * Transition type is only set internally by a first-party app and has to be signed.
@@ -101,11 +106,29 @@ public class IntentHandler {
     private static final String TRUSTED_APPLICATION_CODE_EXTRA = "trusted_application_code_extra";
 
     /**
+     * The scheme for referrer coming from an application.
+     */
+    private static final String ANDROID_APP_REFERRER_SCHEME = "android-app://";
+
+    /**
+     * A referrer id used for Chrome to Chrome referrer passing.
+     */
+    public static final String EXTRA_REFERRER_ID = "org.chromium.chrome.browser.referrer_id";
+
+    /**
+     * Key to associate a timestamp with an intent.
+     */
+    private static final String EXTRA_TIMESTAMP_MS = "org.chromium.chrome.browser.timestamp";
+
+    /**
      * Fake ComponentName used in constructing TRUSTED_APPLICATION_CODE_EXTRA.
      */
     private static ComponentName sFakeComponentName = null;
 
     private static final Object LOCK = new Object();
+
+    private static Pair<Integer, String> sPendingReferrer;
+    private static int sReferrerId;
 
     private static final String PACKAGE_GMAIL = "com.google.android.gm";
     private static final String PACKAGE_PLUS = "com.google.android.apps.plus";
@@ -193,8 +216,9 @@ public class IntentHandler {
         /**
          * Processes a URL VIEW Intent.
          */
-        void processUrlViewIntent(String url, String headers, TabOpenType tabOpenType,
-                String externalAppId, int tabIdToBringToFront, Intent intent);
+        void processUrlViewIntent(String url, String referer, String headers,
+                TabOpenType tabOpenType, String externalAppId, int tabIdToBringToFront,
+                boolean hasUserGesture, Intent intent);
 
         void processWebSearchIntent(String query);
     }
@@ -261,12 +285,12 @@ public class IntentHandler {
      * Intent.
      *
      * @return Whether the Intent was successfully handled.
-     * TODO(mariakhomenko): make package protected after ChromeTabbedActivity is upstreamed.
      */
-    public boolean onNewIntent(Intent intent) {
+    boolean onNewIntent(Context context, Intent intent) {
         assert intentHasValidUrl(intent);
         String url = getUrlFromIntent(intent);
-
+        boolean hasUserGesture =
+                IntentWithGesturesHandler.getInstance().getUserGestureAndClear(intent);
         TabOpenType tabOpenType = getTabOpenType(intent);
         int tabIdToBringToFront = IntentUtils.safeGetIntExtra(
                 intent, TabOpenType.BRING_TAB_TO_FRONT.name(), Tab.INVALID_TAB_ID);
@@ -275,14 +299,112 @@ public class IntentHandler {
             return handleWebSearchIntent(intent);
         }
 
+        String referrerUrl = getReferrerUrlIncludingExtraHeaders(intent, context);
         String extraHeaders = getExtraHeadersFromIntent(intent);
 
         // TODO(joth): Presumably this should check the action too.
-        mDelegate.processUrlViewIntent(url, extraHeaders, tabOpenType,
+        mDelegate.processUrlViewIntent(url, referrerUrl, extraHeaders, tabOpenType,
                 IntentUtils.safeGetStringExtra(intent, Browser.EXTRA_APPLICATION_ID),
-                tabIdToBringToFront, intent);
+                tabIdToBringToFront, hasUserGesture, intent);
         recordExternalIntentSourceUMA(intent);
         return true;
+    }
+
+    /**
+     * Extracts referrer Uri from intent, if supplied.
+     * @param intent The intent to use.
+     * @return The referrer Uri.
+     */
+    private static Uri getReferrer(Intent intent) {
+        Uri referrer = intent.getParcelableExtra(Intent.EXTRA_REFERRER);
+        if (referrer != null) {
+            return referrer;
+        }
+        String referrerName = intent.getStringExtra(Intent.EXTRA_REFERRER_NAME);
+        if (referrerName != null) {
+            return Uri.parse(referrerName);
+        }
+        return null;
+    }
+
+    /**
+     * Extracts referrer URL string. The extra is used if we received it from a first party app or
+     * if the referrer_extra is specified as android-app://package style URL.
+     * @param intent The intent from which to extract the URL.
+     * @param context The activity that received the intent.
+     * @return The URL string or null if none should be used.
+     */
+    private static String getReferrerUrl(Intent intent, Context context) {
+        Uri referrerExtra = getReferrer(intent);
+        if (referrerExtra == null) return null;
+        String referrerUrl = IntentHandler.getPendingReferrerUrl(
+                IntentUtils.safeGetIntExtra(intent, EXTRA_REFERRER_ID, 0));
+        if (!TextUtils.isEmpty(referrerUrl)) {
+            return referrerUrl;
+        } else if (isValidReferrerHeader(referrerExtra.toString())) {
+            return referrerExtra.toString();
+        } else if (IntentHandler.isIntentChromeOrFirstParty(intent, context)) {
+            return referrerExtra.toString();
+        }
+        return null;
+    }
+
+    /**
+     * Gets the referrer, looking in the Intent extra and in the extra headers extra.
+     *
+     * The referrer extra takes priority over the "extra headers" one.
+     *
+     * @param intent The Intent containing the extras.
+     * @param context The application context.
+     * @return The referrer, or null.
+     */
+    public static String getReferrerUrlIncludingExtraHeaders(Intent intent, Context context) {
+        String referrerUrl = getReferrerUrl(intent, context);
+        if (referrerUrl != null) return referrerUrl;
+
+        Bundle bundleExtraHeaders = IntentUtils.safeGetBundleExtra(intent, Browser.EXTRA_HEADERS);
+        if (bundleExtraHeaders == null) return null;
+        for (String key : bundleExtraHeaders.keySet()) {
+            String value = bundleExtraHeaders.getString(key);
+            if ("referer".equals(key.toLowerCase(Locale.US)) && isValidReferrerHeader(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Add referrer and extra headers to a {@link LoadUrlParams}, if we managed to parse them from
+     * the intent.
+     * @param params The {@link LoadUrlParams} to add referrer and headers.
+     * @param intent The intent we use to parse the extras.
+     */
+    public static void addReferrerAndHeaders(LoadUrlParams params, Intent intent, Context context) {
+        String referrer = getReferrerUrlIncludingExtraHeaders(intent, context);
+        if (referrer != null) {
+            params.setReferrer(new Referrer(referrer, Referrer.REFERRER_POLICY_DEFAULT));
+        }
+        String headers = getExtraHeadersFromIntent(intent);
+        if (headers != null) params.setVerbatimHeaders(headers);
+    }
+
+    /**
+     * @return Whether that the given referrer is of the format that Chrome allows external
+     * apps to specify.
+     */
+    private static boolean isValidReferrerHeader(String referrer) {
+        return referrer != null && referrer.toLowerCase(Locale.US).startsWith(
+                ANDROID_APP_REFERRER_SCHEME);
+    }
+
+    /**
+     * Constructs a valid referrer using the given authority.
+     * @param authority The authority to use.
+     * @return Referrer with default policy that uses the valid android app scheme.
+     */
+    public static Referrer constructValidReferrerForAuthority(String authority) {
+        return new Referrer(new Uri.Builder().scheme(ANDROID_APP_REFERRER_SCHEME)
+                .authority(authority).build().toString(), Referrer.REFERRER_POLICY_DEFAULT);
     }
 
     /**
@@ -401,7 +523,6 @@ public class IntentHandler {
             // and check it with isIntentChromeInternal.
             intent.putExtra(TRUSTED_APPLICATION_CODE_EXTRA,
                     getAuthenticationToken(context.getApplicationContext()));
-
             // It is crucial that we never leak the authentication token to other packages, because
             // then the other package could be used to impersonate us/do things as us. Therefore,
             // scope the real Intent to our package.
@@ -424,21 +545,42 @@ public class IntentHandler {
     /**
      * Returns a String (or null) containing the extra headers sent by the intent, if any.
      *
+     * This methods skips the referrer header.
+     *
      * @param intent The intent containing the bundle extra with the HTTP headers.
      */
-    private String getExtraHeadersFromIntent(Intent intent) {
-        Bundle bundleExtraHeaders = IntentUtils.safeGetBundleExtra(intent, EXTRA_BROWSER_HEADERS);
+    public static String getExtraHeadersFromIntent(Intent intent) {
+        Bundle bundleExtraHeaders = IntentUtils.safeGetBundleExtra(intent, Browser.EXTRA_HEADERS);
         if (bundleExtraHeaders == null) return null;
         StringBuilder extraHeaders = new StringBuilder();
         Iterator<String> keys = bundleExtraHeaders.keySet().iterator();
         while (keys.hasNext()) {
             String key = keys.next();
+            String value = bundleExtraHeaders.getString(key);
+            if ("referer".equals(key.toLowerCase(Locale.US))) continue;
+            if (extraHeaders.length() != 0) extraHeaders.append("\n");
             extraHeaders.append(key);
             extraHeaders.append(": ");
-            extraHeaders.append(bundleExtraHeaders.getString(key));
-            if (keys.hasNext()) extraHeaders.append("\n");
+            extraHeaders.append(value);
         }
-        return extraHeaders.toString();
+        return extraHeaders.length() == 0 ? null : extraHeaders.toString();
+    }
+
+    /**
+     * Adds a timestamp to an intent, as returned by {@link SystemClock#elapsedRealtime()}.
+     *
+     * To track page load time, this needs to be called as close as possible to
+     * the entry point (in {@link Activity#onCreate()} for instance).
+     */
+    public static void addTimestampToIntent(Intent intent) {
+        intent.putExtra(EXTRA_TIMESTAMP_MS, SystemClock.elapsedRealtime());
+    }
+
+    /**
+     * @return the timestamp associated with an intent, or -1.
+     */
+    public static long getTimestampFromIntent(Intent intent) {
+        return intent.getLongExtra(EXTRA_TIMESTAMP_MS, -1);
     }
 
     /**
@@ -594,7 +736,7 @@ public class IntentHandler {
      */
     private TabOpenType getTabOpenType(Intent intent) {
         if (IntentUtils.safeGetBooleanExtra(
-                    intent, BookmarkUtils.REUSE_URL_MATCHING_TAB_ELSE_NEW_TAB, false)) {
+                    intent, ShortcutHelper.REUSE_URL_MATCHING_TAB_ELSE_NEW_TAB, false)) {
             return TabOpenType.REUSE_URL_MATCHING_TAB_ELSE_NEW_TAB;
         }
 
@@ -709,5 +851,35 @@ public class IntentHandler {
         if (url == null) return false;
         String urlScheme = Uri.parse(url).getScheme();
         return urlScheme != null && urlScheme.equals(GOOGLECHROME_SCHEME);
+    }
+
+    /**
+     * Records a pending referrer URL that we may be sending to ourselves through an intent.
+     * @param intent The intent to which we add a referrer.
+     * @param url The referrer URL.
+     */
+    public static void setPendingReferrer(Intent intent, String url) {
+        intent.putExtra(Intent.EXTRA_REFERRER, Uri.parse(url));
+        intent.putExtra(IntentHandler.EXTRA_REFERRER_ID, ++sReferrerId);
+        sPendingReferrer = new Pair<Integer, String>(sReferrerId, url);
+    }
+
+    /**
+     * Clears any pending referrer data.
+     */
+    public static void clearPendingReferrer() {
+        sPendingReferrer = null;
+    }
+
+    /**
+     * Retrieves pending referrer URL based on the given id.
+     * @param id The referrer id.
+     * @return The URL for the referrer or null if none found.
+     */
+    public static String getPendingReferrerUrl(int id) {
+        if (sPendingReferrer != null && (sPendingReferrer.first == id)) {
+            return sPendingReferrer.second;
+        }
+        return null;
     }
 }

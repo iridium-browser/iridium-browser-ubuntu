@@ -14,7 +14,7 @@
 #include "SkView.h"
 
 /**
- * Animated sample used to develop batched rect implementation in GrInOrderDrawBuffer.
+ * Animated sample used to develop batched rect implementation in GrBufferedDrawTarget.
  */
 class ManyRectsView : public SampleView {
 private:
@@ -34,7 +34,7 @@ protected:
         return this->INHERITED::onQuery(evt);
     }
 
-    virtual void onDrawContent(SkCanvas* canvas) {
+    void onDrawContent(SkCanvas* canvas) override {
         SkISize dsize = canvas->getDeviceSize();
         canvas->clear(0xFFF0E0F0);
 

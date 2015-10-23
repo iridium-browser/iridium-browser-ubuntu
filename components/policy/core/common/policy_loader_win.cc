@@ -84,8 +84,13 @@ const char* kInsecurePolicies[] = {
     key::kRestoreOnStartupURLs
 };
 
+#pragma warning(push)
+#pragma warning(disable: 4068)  // unknown pragmas
+// TODO(dcheng): Remove pragma once http://llvm.org/PR24007 is fixed.
+#pragma clang diagnostic ignored "-Wmissing-braces"
 // The GUID of the registry settings group policy extension.
 GUID kRegistrySettingsCSEGUID = REGISTRY_EXTENSION_GUID;
+#pragma warning(pop)
 
 // The list of possible errors that can occur while collecting information about
 // the current enterprise environment.
@@ -104,7 +109,7 @@ enum DomainCheckErrors {
 // add an "items" attribute to lists that don't declare it.
 std::string PatchSchema(const std::string& schema) {
   base::JSONParserOptions options = base::JSON_PARSE_RFC;
-  scoped_ptr<base::Value> json(base::JSONReader::Read(schema, options));
+  scoped_ptr<base::Value> json = base::JSONReader::Read(schema, options);
   base::DictionaryValue* dict = NULL;
   base::DictionaryValue* properties = NULL;
   if (!json ||
@@ -128,7 +133,7 @@ std::string PatchSchema(const std::string& schema) {
   }
 
   std::string serialized;
-  base::JSONWriter::Write(json.get(), &serialized);
+  base::JSONWriter::Write(*json, &serialized);
   return serialized;
 }
 
@@ -156,7 +161,8 @@ void FilterUntrustedPolicy(PolicyMap* policy) {
       if (pos == std::string::npos)
         continue;
       // Only allow custom update urls in enterprise environments.
-      if (!LowerCaseEqualsASCII(entry.substr(pos), kExpectedWebStoreUrl)) {
+      if (!base::LowerCaseEqualsASCII(entry.substr(pos),
+                                      kExpectedWebStoreUrl)) {
         entry = kBlockedExtensionPrefix + entry;
         invalid_policies++;
       }

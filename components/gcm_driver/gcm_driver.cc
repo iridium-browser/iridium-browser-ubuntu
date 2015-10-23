@@ -7,18 +7,33 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "components/gcm_driver/gcm_app_handler.h"
 
 namespace gcm {
 
-InstanceIDStore::InstanceIDStore() {
+const size_t kMaxSenders = 100;
+
+InstanceIDHandler::InstanceIDHandler() {
 }
 
-InstanceIDStore::~InstanceIDStore() {
+InstanceIDHandler::~InstanceIDHandler() {
 }
 
-GCMDriver::GCMDriver() : weak_ptr_factory_(this) {
+void InstanceIDHandler::DeleteAllTokensForApp(
+    const std::string& app_id, const DeleteTokenCallback& callback) {
+  DeleteToken(app_id, "*", "*", callback);
+}
+
+GCMDriver::GCMDriver(
+    const base::FilePath& store_path,
+    const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner)
+    : weak_ptr_factory_(this) {
+  // The |blocking_task_runner| can be NULL for tests that do not need the
+  // encryption capabilities of the GCMDriver class.
+  if (blocking_task_runner)
+    encryption_provider_.Init(store_path, blocking_task_runner);
 }
 
 GCMDriver::~GCMDriver() {
@@ -28,7 +43,7 @@ void GCMDriver::Register(const std::string& app_id,
                          const std::vector<std::string>& sender_ids,
                          const RegisterCallback& callback) {
   DCHECK(!app_id.empty());
-  DCHECK(!sender_ids.empty());
+  DCHECK(!sender_ids.empty() && sender_ids.size() <= kMaxSenders);
   DCHECK(!callback.is_null());
 
   GCMClient::Result result = EnsureStarted(GCMClient::IMMEDIATE_START);
@@ -116,7 +131,7 @@ void GCMDriver::UnregisterInternal(const std::string& app_id,
 
 void GCMDriver::Send(const std::string& app_id,
                      const std::string& receiver_id,
-                     const GCMClient::OutgoingMessage& message,
+                     const OutgoingMessage& message,
                      const SendCallback& callback) {
   DCHECK(!app_id.empty());
   DCHECK(!receiver_id.empty());
@@ -138,6 +153,12 @@ void GCMDriver::Send(const std::string& app_id,
   send_callbacks_[key] = callback;
 
   SendImpl(app_id, receiver_id, message);
+}
+
+void GCMDriver::GetPublicKey(
+    const std::string& app_id,
+    const GetPublicKeyCallback& callback) {
+  encryption_provider_.GetPublicKey(app_id, callback);
 }
 
 void GCMDriver::UnregisterWithSenderIdImpl(const std::string& app_id,

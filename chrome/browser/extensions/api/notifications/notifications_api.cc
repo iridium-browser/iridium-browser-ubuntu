@@ -11,24 +11,28 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_conversion_helper.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
+#include "chrome/browser/notifications/notifier_state_tracker.h"
+#include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/api/notifications/notification_style.h"
+#include "components/keyed_service/content/browser_context_keyed_service_shutdown_notifier_factory.h"
+#include "components/keyed_service/core/keyed_service_shutdown_notifier.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_system_provider.h"
+#include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/features/feature.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/layout.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/image/image_skia_rep.h"
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/notifier_settings.h"
@@ -71,6 +75,53 @@ std::string StripScopeFromIdentifier(const std::string& extension_id,
   return id.substr(index_of_separator);
 }
 
+const gfx::ImageSkia CreateSolidColorImage(int width,
+                                           int height,
+                                           SkColor color) {
+  SkBitmap bitmap;
+  bitmap.allocN32Pixels(width, height);
+  bitmap.eraseColor(color);
+  return gfx::ImageSkia::CreateFrom1xBitmap(bitmap);
+}
+
+// Take the alpha channel of small_image, mask it with the foreground,
+// then add the masked foreground on top of the background
+const gfx::Image GetMaskedSmallImage(const gfx::ImageSkia& small_image) {
+  int width = small_image.width();
+  int height = small_image.height();
+
+  // Background color grey
+  const gfx::ImageSkia background = CreateSolidColorImage(
+      width, height, message_center::kSmallImageMaskBackgroundColor);
+  // Foreground color white
+  const gfx::ImageSkia foreground = CreateSolidColorImage(
+      width, height, message_center::kSmallImageMaskForegroundColor);
+  const gfx::ImageSkia masked_small_image =
+      gfx::ImageSkiaOperations::CreateMaskedImage(foreground, small_image);
+  return gfx::Image(gfx::ImageSkiaOperations::CreateSuperimposedImage(
+      background, masked_small_image));
+}
+
+class ShutdownNotifierFactory
+    : public BrowserContextKeyedServiceShutdownNotifierFactory {
+ public:
+  static ShutdownNotifierFactory* GetInstance() {
+    return Singleton<ShutdownNotifierFactory>::get();
+  }
+
+ private:
+  friend struct DefaultSingletonTraits<ShutdownNotifierFactory>;
+
+  ShutdownNotifierFactory()
+      : BrowserContextKeyedServiceShutdownNotifierFactory(
+            "NotificationsApiDelegate") {
+    DependsOn(ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
+  }
+  ~ShutdownNotifierFactory() override {}
+
+  DISALLOW_COPY_AND_ASSIGN(ShutdownNotifierFactory);
+};
+
 class NotificationsApiDelegate : public NotificationDelegate {
  public:
   NotificationsApiDelegate(ChromeAsyncExtensionFunction* api_function,
@@ -78,11 +129,15 @@ class NotificationsApiDelegate : public NotificationDelegate {
                            const std::string& extension_id,
                            const std::string& id)
       : api_function_(api_function),
-        profile_(profile),
+        event_router_(EventRouter::Get(profile)),
         extension_id_(extension_id),
         id_(id),
         scoped_id_(CreateScopedIdentifier(extension_id, id)) {
-    DCHECK(api_function_.get());
+    DCHECK(api_function_);
+    shutdown_notifier_subscription_ =
+        ShutdownNotifierFactory::GetInstance()->Get(profile)->Subscribe(
+            base::Bind(&NotificationsApiDelegate::Shutdown,
+                       base::Unretained(this)));
   }
 
   void Close(bool by_user) override {
@@ -91,27 +146,31 @@ class NotificationsApiDelegate : public NotificationDelegate {
                 : EventRouter::USER_GESTURE_NOT_ENABLED;
     scoped_ptr<base::ListValue> args(CreateBaseEventArgs());
     args->Append(new base::FundamentalValue(by_user));
-    SendEvent(notifications::OnClosed::kEventName, gesture, args.Pass());
+    SendEvent(events::NOTIFICATIONS_ON_CLOSED,
+              notifications::OnClosed::kEventName, gesture, args.Pass());
   }
 
   void Click() override {
     scoped_ptr<base::ListValue> args(CreateBaseEventArgs());
-    SendEvent(notifications::OnClicked::kEventName,
-              EventRouter::USER_GESTURE_ENABLED,
-              args.Pass());
+    SendEvent(events::NOTIFICATIONS_ON_CLICKED,
+              notifications::OnClicked::kEventName,
+              EventRouter::USER_GESTURE_ENABLED, args.Pass());
   }
 
   bool HasClickedListener() override {
-    return EventRouter::Get(profile_)->HasEventListener(
+    if (!event_router_)
+      return false;
+
+    return event_router_->HasEventListener(
         notifications::OnClicked::kEventName);
   }
 
   void ButtonClick(int index) override {
     scoped_ptr<base::ListValue> args(CreateBaseEventArgs());
     args->Append(new base::FundamentalValue(index));
-    SendEvent(notifications::OnButtonClicked::kEventName,
-              EventRouter::USER_GESTURE_ENABLED,
-              args.Pass());
+    SendEvent(events::NOTIFICATIONS_ON_BUTTON_CLICKED,
+              notifications::OnButtonClicked::kEventName,
+              EventRouter::USER_GESTURE_ENABLED, args.Pass());
   }
 
   std::string id() const override { return scoped_id_; }
@@ -119,13 +178,21 @@ class NotificationsApiDelegate : public NotificationDelegate {
  private:
   ~NotificationsApiDelegate() override {}
 
-  void SendEvent(const std::string& name,
+  void SendEvent(events::HistogramValue histogram_value,
+                 const std::string& name,
                  EventRouter::UserGestureState user_gesture,
                  scoped_ptr<base::ListValue> args) {
-    scoped_ptr<Event> event(new Event(name, args.Pass()));
+    if (!event_router_)
+      return;
+
+    scoped_ptr<Event> event(new Event(histogram_value, name, args.Pass()));
     event->user_gesture = user_gesture;
-    EventRouter::Get(profile_)->DispatchEventToExtension(extension_id_,
-                                                         event.Pass());
+    event_router_->DispatchEventToExtension(extension_id_, event.Pass());
+  }
+
+  void Shutdown() {
+    event_router_ = nullptr;
+    shutdown_notifier_subscription_.reset();
   }
 
   scoped_ptr<base::ListValue> CreateBaseEventArgs() {
@@ -135,10 +202,18 @@ class NotificationsApiDelegate : public NotificationDelegate {
   }
 
   scoped_refptr<ChromeAsyncExtensionFunction> api_function_;
-  Profile* profile_;
+
+  // Since this class is refcounted it may outlive the profile.  We listen for
+  // profile-keyed service shutdown events and reset to nullptr at that time,
+  // so make sure to check for a valid pointer before use.
+  EventRouter* event_router_;
+
   const std::string extension_id_;
   const std::string id_;
   const std::string scoped_id_;
+
+  scoped_ptr<KeyedServiceShutdownNotifier::Subscription>
+      shutdown_notifier_subscription_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationsApiDelegate);
 };
@@ -183,11 +258,9 @@ bool NotificationsApiFunction::CreateNotification(
   const base::string16 message(base::UTF8ToUTF16(*options->message));
   gfx::Image icon;
 
-  if (!NotificationConversionHelper::NotificationBitmapToGfxImage(
-          image_scale,
-          bitmap_sizes.icon_size,
-          options->icon_bitmap.get(),
-          &icon)) {
+  if (!options->icon_bitmap.get() ||
+      !NotificationConversionHelper::NotificationBitmapToGfxImage(
+          image_scale, bitmap_sizes.icon_size, *options->icon_bitmap, &icon)) {
     SetError(kUnableToDecodeIconError);
     return false;
   }
@@ -195,14 +268,15 @@ bool NotificationsApiFunction::CreateNotification(
   // Then, handle any optional data that's been provided.
   message_center::RichNotificationData optional_fields;
   if (options->app_icon_mask_url.get()) {
+    gfx::Image small_icon_mask;
     if (!NotificationConversionHelper::NotificationBitmapToGfxImage(
-            image_scale,
-            bitmap_sizes.app_icon_mask_size,
-            options->app_icon_mask_bitmap.get(),
-            &optional_fields.small_image)) {
+            image_scale, bitmap_sizes.app_icon_mask_size,
+            *options->app_icon_mask_bitmap, &small_icon_mask)) {
       SetError(kUnableToDecodeIconError);
       return false;
     }
+    optional_fields.small_image =
+        GetMaskedSmallImage(small_icon_mask.AsImageSkia());
   }
 
   if (options->priority.get())
@@ -219,11 +293,13 @@ bool NotificationsApiFunction::CreateNotification(
     for (size_t i = 0; i < number_of_buttons; i++) {
       message_center::ButtonInfo info(
           base::UTF8ToUTF16((*options->buttons)[i]->title));
-      NotificationConversionHelper::NotificationBitmapToGfxImage(
-          image_scale,
-          bitmap_sizes.button_icon_size,
-          (*options->buttons)[i]->icon_bitmap.get(),
-          &info.icon);
+      extensions::api::notifications::NotificationBitmap* icon_bitmap_ptr =
+          (*options->buttons)[i]->icon_bitmap.get();
+      if (icon_bitmap_ptr) {
+        NotificationConversionHelper::NotificationBitmapToGfxImage(
+            image_scale, bitmap_sizes.button_icon_size, *icon_bitmap_ptr,
+            &info.icon);
+      }
       optional_fields.buttons.push_back(info);
     }
   }
@@ -233,11 +309,11 @@ bool NotificationsApiFunction::CreateNotification(
         base::UTF8ToUTF16(*options->context_message);
   }
 
-  bool has_image = NotificationConversionHelper::NotificationBitmapToGfxImage(
-      image_scale,
-      bitmap_sizes.image_size,
-      options->image_bitmap.get(),
-      &optional_fields.image);
+  bool has_image = options->image_bitmap.get() &&
+                   NotificationConversionHelper::NotificationBitmapToGfxImage(
+                       image_scale, bitmap_sizes.image_size,
+                       *options->image_bitmap, &optional_fields.image);
+
   // We should have an image if and only if the type is an image type.
   if (has_image != (type == message_center::NOTIFICATION_TYPE_IMAGE)) {
     SetError(kExtraImageProvided);
@@ -282,18 +358,12 @@ bool NotificationsApiFunction::CreateNotification(
   NotificationsApiDelegate* api_delegate(new NotificationsApiDelegate(
       this, GetProfile(), extension_->id(), id));  // ownership is passed to
                                                    // Notification
-  Notification notification(type,
-                            extension_->url(),
-                            title,
-                            message,
-                            icon,
-                            message_center::NotifierId(
-                                message_center::NotifierId::APPLICATION,
-                                extension_->id()),
-                            base::UTF8ToUTF16(extension_->name()),
-                            api_delegate->id(),
-                            optional_fields,
-                            api_delegate);
+  Notification notification(
+      type, title, message, icon,
+      message_center::NotifierId(message_center::NotifierId::APPLICATION,
+                                 extension_->id()),
+      base::UTF8ToUTF16(extension_->name()), extension_->url(),
+      api_delegate->id(), optional_fields, api_delegate);
 
   g_browser_process->notification_ui_manager()->Add(notification, GetProfile());
   return true;
@@ -315,21 +385,27 @@ bool NotificationsApiFunction::UpdateNotification(
   if (options->message)
     notification->set_message(base::UTF8ToUTF16(*options->message));
 
-  // TODO(dewittj): Return error if this fails.
-  if (options->icon_bitmap) {
+  if (options->icon_bitmap.get()) {
     gfx::Image icon;
-    NotificationConversionHelper::NotificationBitmapToGfxImage(
-        image_scale, bitmap_sizes.icon_size, options->icon_bitmap.get(), &icon);
+    if (!NotificationConversionHelper::NotificationBitmapToGfxImage(
+            image_scale, bitmap_sizes.icon_size, *options->icon_bitmap,
+            &icon)) {
+      SetError(kUnableToDecodeIconError);
+      return false;
+    }
     notification->set_icon(icon);
   }
 
-  gfx::Image app_icon_mask;
-  if (NotificationConversionHelper::NotificationBitmapToGfxImage(
-          image_scale,
-          bitmap_sizes.app_icon_mask_size,
-          options->app_icon_mask_bitmap.get(),
-          &app_icon_mask)) {
-    notification->set_small_image(app_icon_mask);
+  if (options->app_icon_mask_bitmap.get()) {
+    gfx::Image app_icon_mask;
+    if (!NotificationConversionHelper::NotificationBitmapToGfxImage(
+            image_scale, bitmap_sizes.app_icon_mask_size,
+            *options->app_icon_mask_bitmap, &app_icon_mask)) {
+      SetError(kUnableToDecodeIconError);
+      return false;
+    }
+    notification->set_small_image(
+        GetMaskedSmallImage(app_icon_mask.AsImageSkia()));
   }
 
   if (options->priority)
@@ -347,11 +423,13 @@ bool NotificationsApiFunction::UpdateNotification(
     for (size_t i = 0; i < number_of_buttons; i++) {
       message_center::ButtonInfo button(
           base::UTF8ToUTF16((*options->buttons)[i]->title));
-      NotificationConversionHelper::NotificationBitmapToGfxImage(
-          image_scale,
-          bitmap_sizes.button_icon_size,
-          (*options->buttons)[i]->icon_bitmap.get(),
-          &button.icon);
+      extensions::api::notifications::NotificationBitmap* icon_bitmap_ptr =
+          (*options->buttons)[i]->icon_bitmap.get();
+      if (icon_bitmap_ptr) {
+        NotificationConversionHelper::NotificationBitmapToGfxImage(
+            image_scale, bitmap_sizes.button_icon_size, *icon_bitmap_ptr,
+            &button.icon);
+      }
       buttons.push_back(button);
     }
     notification->set_buttons(buttons);
@@ -363,11 +441,11 @@ bool NotificationsApiFunction::UpdateNotification(
   }
 
   gfx::Image image;
-  bool has_image = NotificationConversionHelper::NotificationBitmapToGfxImage(
-      image_scale,
-      bitmap_sizes.image_size,
-      options->image_bitmap.get(),
-      &image);
+  bool has_image =
+      options->image_bitmap.get() &&
+      NotificationConversionHelper::NotificationBitmapToGfxImage(
+          image_scale, bitmap_sizes.image_size, *options->image_bitmap, &image);
+
   if (has_image) {
     // We should have an image if and only if the type is an image type.
     if (notification->type() != message_center::NOTIFICATION_TYPE_IMAGE) {
@@ -421,10 +499,12 @@ bool NotificationsApiFunction::UpdateNotification(
 }
 
 bool NotificationsApiFunction::AreExtensionNotificationsAllowed() const {
-  DesktopNotificationService* service =
-      DesktopNotificationServiceFactory::GetForProfile(GetProfile());
-  return service->IsNotifierEnabled(message_center::NotifierId(
-             message_center::NotifierId::APPLICATION, extension_->id()));
+  NotifierStateTracker* notifier_state_tracker =
+      NotifierStateTrackerFactory::GetForProfile(GetProfile());
+
+  return notifier_state_tracker->IsNotifierEnabled(
+      message_center::NotifierId(message_center::NotifierId::APPLICATION,
+                                 extension_->id()));
 }
 
 bool NotificationsApiFunction::IsNotificationsApiEnabled() const {
@@ -568,7 +648,7 @@ bool NotificationsGetAllFunction::RunNotificationsApi() {
       g_browser_process->notification_ui_manager();
   std::set<std::string> notification_ids =
       notification_ui_manager->GetAllIdsByProfileAndSourceOrigin(
-          GetProfile(), extension_->url());
+          NotificationUIManager::GetProfileID(GetProfile()), extension_->url());
 
   scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
 

@@ -31,7 +31,7 @@
 #ifndef InspectorInstrumentationCustom_inl_h
 #define InspectorInstrumentationCustom_inl_h
 
-#include "bindings/core/v8/ScriptSourceCode.h"
+#include "core/CoreExport.h"
 
 namespace blink {
 
@@ -39,9 +39,9 @@ namespace InspectorInstrumentation {
 
 bool isDebuggerPausedImpl(InstrumentingAgents*);
 bool collectingHTMLParseErrorsImpl(InstrumentingAgents*);
-void appendAsyncCallStack(ExecutionContext*, ScriptCallStack*);
+CORE_EXPORT void appendAsyncCallStack(ExecutionContext*, ScriptCallStack*);
 
-bool consoleAgentEnabled(ExecutionContext*);
+CORE_EXPORT bool consoleAgentEnabled(ExecutionContext*);
 
 inline bool isDebuggerPaused(LocalFrame* frame)
 {

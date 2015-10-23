@@ -62,19 +62,24 @@ def get_args(bot):
   if 'NexusPlayer' not in bot:
     configs.extend(mode + '-8888' for mode in
                    ['serialize', 'tiles_rt', 'pipe'])
-    configs.append('tiles_rt-gpu')
+
   if 'ANGLE' in bot:
     configs.append('angle')
   args.append('--config')
   args.extend(configs)
 
+  # Run tests and gms everywhere,
+  # and image decoding tests everywhere except GPU bots.
+  # TODO: remove skp from default --src list?
+  if 'GPU' in bot:
+    args.extend('--src tests gm'.split(' '))
+  else:
+    args.extend('--src tests gm image'.split(' '))
+
   if 'GalaxyS' in bot:
     args.extend(('--threads', '0'))
 
   blacklist = []
-  # This image is too large to be a texture for many GPUs.
-  blacklist.extend('gpu _ _ PANO_20121023_214540.jpg'.split(' '))
-  blacklist.extend('msaa _ _ PANO_20121023_214540.jpg'.split(' '))
 
   # Several of the newest version bmps fail on SkImageDecoder
   blacklist.extend('_ image decode pal8os2v2.bmp'.split(' '))
@@ -117,14 +122,6 @@ def get_args(bot):
     blacklist.extend('msaa16 gm _ colorwheelnative'.split(' '))
     blacklist.extend('pdf gm _ fontmgr_iter_factory'.split(' '))
 
-  # Drawing SKPs or images into GPU canvases is a New Thing.
-  # It seems like we're running out of RAM on some Android bots, so start off
-  # with a very wide blacklist disabling all these tests on all Android bots.
-  if 'Android' in bot:  # skia:3255
-    blacklist.extend('gpu skp _ _ msaa skp _ _'.split(' '))
-    blacklist.extend('gpu image decode _ msaa image decode _'.split(' '))
-    blacklist.extend('gpu image subset _ msaa image subset _'.split(' '))
-
   if 'Valgrind' in bot:
     # PDF + .webp -> jumps depending on uninitialized memory.  skia:3505
     blacklist.extend('pdf _ _ .webp'.split(' '))
@@ -141,9 +138,11 @@ def get_args(bot):
     blacklist.extend('gpu image subset _ msaa image subset _'.split(' '))
     blacklist.extend('msaa16 gm _ tilemodesProcess'.split(' '))
 
-  if 'GalaxyS4' in bot:
-    # This occasionally runs forever. skia:3802
-    blacklist.extend('tiles_rt-gpu gm _ imagefilterscropped'.split(' '))
+  # the 32-bit GCE bots run out of memory in DM when running these large images
+  if 'x86' in bot and not 'x86-64' in bot:
+    blacklist.extend('_ image _ interlaced1.png'.split(' '))
+    blacklist.extend('_ image _ interlaced2.png'.split(' '))
+    blacklist.extend('_ image _ interlaced3.png'.split(' '))
 
   if blacklist:
     args.append('--blacklist')
@@ -168,6 +167,9 @@ def get_args(bot):
 
   if 'iOS' in bot:
     match.append('~WritePixels')
+
+  if 'GalaxyS4' in bot:  # skia:4079
+    match.append('~imagefiltersclipped')
 
   if match:
     args.append('--match')

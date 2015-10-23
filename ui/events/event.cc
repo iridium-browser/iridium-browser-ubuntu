@@ -56,8 +56,6 @@ std::string EventTypeName(ui::EventType type) {
     CASE_TYPE(ET_TOUCH_MOVED);
     CASE_TYPE(ET_TOUCH_CANCELLED);
     CASE_TYPE(ET_DROP_TARGET_EVENT);
-    CASE_TYPE(ET_TRANSLATED_KEY_PRESS);
-    CASE_TYPE(ET_TRANSLATED_KEY_RELEASE);
     CASE_TYPE(ET_GESTURE_SCROLL_BEGIN);
     CASE_TYPE(ET_GESTURE_SCROLL_END);
     CASE_TYPE(ET_GESTURE_SCROLL_UPDATE);
@@ -321,8 +319,8 @@ void LocatedEvent::UpdateForRootTransform(
 
 MouseEvent::MouseEvent(const base::NativeEvent& native_event)
     : LocatedEvent(native_event),
-      changed_button_flags_(
-          GetChangedMouseButtonFlagsFromNative(native_event)) {
+      changed_button_flags_(GetChangedMouseButtonFlagsFromNative(native_event)),
+      pointer_details_(PointerDetails(EventPointerType::POINTER_TYPE_MOUSE)) {
   if (type() == ET_MOUSE_PRESSED || type() == ET_MOUSE_RELEASED)
     SetClickCount(GetRepeatCount(*this));
 }
@@ -334,7 +332,8 @@ MouseEvent::MouseEvent(EventType type,
                        int flags,
                        int changed_button_flags)
     : LocatedEvent(type, location, root_location, time_stamp, flags),
-      changed_button_flags_(changed_button_flags) {
+      changed_button_flags_(changed_button_flags),
+      pointer_details_(PointerDetails(EventPointerType::POINTER_TYPE_MOUSE)) {
   if (this->type() == ET_MOUSE_MOVED && IsAnyButton())
     SetType(ET_MOUSE_DRAGGED);
 }
@@ -516,12 +515,15 @@ TouchEvent::TouchEvent(const base::NativeEvent& native_event)
     : LocatedEvent(native_event),
       touch_id_(GetTouchId(native_event)),
       unique_event_id_(ui::GetNextTouchEventId()),
-      radius_x_(GetTouchRadiusX(native_event)),
-      radius_y_(GetTouchRadiusY(native_event)),
       rotation_angle_(GetTouchAngle(native_event)),
-      force_(GetTouchForce(native_event)),
       may_cause_scrolling_(false),
-      should_remove_native_touch_id_mapping_(false) {
+      should_remove_native_touch_id_mapping_(false),
+      pointer_details_(PointerDetails(EventPointerType::POINTER_TYPE_TOUCH,
+                                      GetTouchRadiusX(native_event),
+                                      GetTouchRadiusY(native_event),
+                                      GetTouchForce(native_event),
+                                      /* tilt_x */ 0.0f,
+                                      /* tilt_y */ 0.0f)) {
   latency()->AddLatencyNumberWithTimestamp(
       INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT, 0, 0,
       base::TimeTicks::FromInternalValue(time_stamp().ToInternalValue()), 1);
@@ -539,12 +541,10 @@ TouchEvent::TouchEvent(EventType type,
     : LocatedEvent(type, location, location, time_stamp, 0),
       touch_id_(touch_id),
       unique_event_id_(ui::GetNextTouchEventId()),
-      radius_x_(0.0f),
-      radius_y_(0.0f),
       rotation_angle_(0.0f),
-      force_(0.0f),
       may_cause_scrolling_(false),
-      should_remove_native_touch_id_mapping_(false) {
+      should_remove_native_touch_id_mapping_(false),
+      pointer_details_(PointerDetails(EventPointerType::POINTER_TYPE_TOUCH)) {
   latency()->AddLatencyNumber(INPUT_EVENT_LATENCY_UI_COMPONENT, 0, 0);
 }
 
@@ -560,12 +560,15 @@ TouchEvent::TouchEvent(EventType type,
     : LocatedEvent(type, location, location, time_stamp, flags),
       touch_id_(touch_id),
       unique_event_id_(ui::GetNextTouchEventId()),
-      radius_x_(radius_x),
-      radius_y_(radius_y),
       rotation_angle_(angle),
-      force_(force),
       may_cause_scrolling_(false),
-      should_remove_native_touch_id_mapping_(false) {
+      should_remove_native_touch_id_mapping_(false),
+      pointer_details_(PointerDetails(EventPointerType::POINTER_TYPE_TOUCH,
+                                      radius_x,
+                                      radius_y,
+                                      force,
+                                      /* tilt_x */ 0.0f,
+                                      /* tilt_y */ 0.0f)) {
   latency()->AddLatencyNumber(INPUT_EVENT_LATENCY_UI_COMPONENT, 0, 0);
   FixRotationAngle();
 }
@@ -574,12 +577,10 @@ TouchEvent::TouchEvent(const TouchEvent& copy)
     : LocatedEvent(copy),
       touch_id_(copy.touch_id_),
       unique_event_id_(copy.unique_event_id_),
-      radius_x_(copy.radius_x_),
-      radius_y_(copy.radius_y_),
       rotation_angle_(copy.rotation_angle_),
-      force_(copy.force_),
       may_cause_scrolling_(copy.may_cause_scrolling_),
-      should_remove_native_touch_id_mapping_(false) {
+      should_remove_native_touch_id_mapping_(false),
+      pointer_details_(copy.pointer_details_) {
   // Copied events should not remove touch id mapping, as this either causes the
   // mapping to be lost before the initial event has finished dispatching, or
   // the copy to attempt to remove the mapping from a null |native_event_|.
@@ -603,9 +604,9 @@ void TouchEvent::UpdateForRootTransform(
   bool success = gfx::DecomposeTransform(&decomp, inverted_root_transform);
   DCHECK(success);
   if (decomp.scale[0])
-    radius_x_ *= decomp.scale[0];
+    pointer_details_.radius_x_ *= decomp.scale[0];
   if (decomp.scale[1])
-    radius_y_ *= decomp.scale[1];
+    pointer_details_.radius_y_ *= decomp.scale[1];
 }
 
 void TouchEvent::DisableSynchronousHandling() {
@@ -899,35 +900,6 @@ void KeyEvent::NormalizeFlags() {
     set_flags(flags() | mask);
   else
     set_flags(flags() & ~mask);
-}
-
-bool KeyEvent::IsTranslated() const {
-  switch (type()) {
-    case ET_KEY_PRESSED:
-    case ET_KEY_RELEASED:
-      return false;
-    case ET_TRANSLATED_KEY_PRESS:
-    case ET_TRANSLATED_KEY_RELEASE:
-      return true;
-    default:
-      NOTREACHED();
-      return false;
-  }
-}
-
-void KeyEvent::SetTranslated(bool translated) {
-  switch (type()) {
-    case ET_KEY_PRESSED:
-    case ET_TRANSLATED_KEY_PRESS:
-      SetType(translated ? ET_TRANSLATED_KEY_PRESS : ET_KEY_PRESSED);
-      break;
-    case ET_KEY_RELEASED:
-    case ET_TRANSLATED_KEY_RELEASE:
-      SetType(translated ? ET_TRANSLATED_KEY_RELEASE : ET_KEY_RELEASED);
-      break;
-    default:
-      NOTREACHED();
-  }
 }
 
 KeyboardCode KeyEvent::GetLocatedWindowsKeyboardCode() const {

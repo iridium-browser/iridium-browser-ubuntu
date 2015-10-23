@@ -12,21 +12,21 @@ import android.os.Looper;
 import android.os.Process;
 import android.util.Log;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
-import org.chromium.base.NativeClassQualifiedName;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeClassQualifiedName;
 import org.chromium.base.annotations.UsedByReflection;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * UrlRequest context using Chromium HTTP stack implementation.
+ * UrlRequestContext using Chromium HTTP stack implementation.
  */
 @JNINamespace("cronet")
 @UsedByReflection("UrlRequestContext.java")
-public class CronetUrlRequestContext extends UrlRequestContext  {
+class CronetUrlRequestContext extends UrlRequestContext {
     private static final int LOG_NONE = 3;  // LOG(FATAL), no VLOG.
     private static final int LOG_DEBUG = -1;  // LOG(FATAL...INFO), VLOG(1)
     private static final int LOG_VERBOSE = -2;  // LOG(FATAL...INFO), VLOG(2)
@@ -79,6 +79,16 @@ public class CronetUrlRequestContext extends UrlRequestContext  {
             checkHaveAdapter();
             return new CronetUrlRequest(this, mUrlRequestContextAdapter, url,
                     UrlRequest.REQUEST_PRIORITY_MEDIUM, listener, executor);
+        }
+    }
+
+    @Override
+    public UrlRequest createRequest(String url, UrlRequestListener listener,
+                                    Executor executor, int priority) {
+        synchronized (mLock) {
+            checkHaveAdapter();
+            return new CronetUrlRequest(this, mUrlRequestContextAdapter, url,
+                    priority, listener, executor);
         }
     }
 

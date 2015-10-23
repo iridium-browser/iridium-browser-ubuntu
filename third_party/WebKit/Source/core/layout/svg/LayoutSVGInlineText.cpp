@@ -28,6 +28,7 @@
 #include "core/css/CSSFontSelector.h"
 #include "core/css/FontSize.h"
 #include "core/dom/StyleEngine.h"
+#include "core/editing/TextAffinity.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/layout/svg/LayoutSVGText.h"
 #include "core/layout/svg/SVGLayoutSupport.h"
@@ -121,19 +122,19 @@ LayoutRect LayoutSVGInlineText::localCaretRect(InlineBox* box, int caretOffset, 
     if (static_cast<unsigned>(caretOffset) < textBox->start() + textBox->len()) {
         LayoutRect rect = textBox->localSelectionRect(caretOffset, caretOffset + 1);
         LayoutUnit x = box->isLeftToRightDirection() ? rect.x() : rect.maxX();
-        return LayoutRect(x, rect.y(), caretWidth, rect.height());
+        return LayoutRect(x, rect.y(), caretWidth(), rect.height());
     }
 
     LayoutRect rect = textBox->localSelectionRect(caretOffset - 1, caretOffset);
     LayoutUnit x = box->isLeftToRightDirection() ? rect.maxX() : rect.x();
-    return LayoutRect(x, rect.y(), caretWidth, rect.height());
+    return LayoutRect(x, rect.y(), caretWidth(), rect.height());
 }
 
 FloatRect LayoutSVGInlineText::floatLinesBoundingBox() const
 {
     FloatRect boundingBox;
     for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox())
-        boundingBox.unite(box->calculateBoundaries().toFloatRect());
+        boundingBox.unite(FloatRect(box->calculateBoundaries()));
     return boundingBox;
 }
 
@@ -155,13 +156,13 @@ bool LayoutSVGInlineText::characterStartsNewTextChunk(int position) const
     if (it == m_layoutAttributes.characterDataMap().end())
         return false;
 
-    return it->value.x != SVGTextLayoutAttributes::emptyValue() || it->value.y != SVGTextLayoutAttributes::emptyValue();
+    return !SVGTextLayoutAttributes::isEmptyValue(it->value.x) || !SVGTextLayoutAttributes::isEmptyValue(it->value.y);
 }
 
 PositionWithAffinity LayoutSVGInlineText::positionForPoint(const LayoutPoint& point)
 {
-    if (!firstTextBox() || !textLength())
-        return createPositionWithAffinity(0, DOWNSTREAM);
+    if (!hasTextBoxes() || !textLength())
+        return createPositionWithAffinity(0);
 
     ASSERT(m_scalingFactor);
     float baseline = m_scaledFont.fontMetrics().floatAscent() / m_scalingFactor;
@@ -175,8 +176,8 @@ PositionWithAffinity LayoutSVGInlineText::positionForPoint(const LayoutPoint& po
 
     float closestDistance = std::numeric_limits<float>::max();
     float closestDistancePosition = 0;
-    const SVGTextFragment* closestDistanceFragment = 0;
-    SVGInlineTextBox* closestDistanceBox = 0;
+    const SVGTextFragment* closestDistanceFragment = nullptr;
+    SVGInlineTextBox* closestDistanceBox = nullptr;
 
     AffineTransform fragmentTransform;
     for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox()) {
@@ -208,10 +209,10 @@ PositionWithAffinity LayoutSVGInlineText::positionForPoint(const LayoutPoint& po
     }
 
     if (!closestDistanceFragment)
-        return createPositionWithAffinity(0, DOWNSTREAM);
+        return createPositionWithAffinity(0);
 
     int offset = closestDistanceBox->offsetForPositionInFragment(*closestDistanceFragment, absolutePoint.x() - closestDistancePosition, true);
-    return createPositionWithAffinity(offset + closestDistanceBox->start(), offset > 0 ? VP_UPSTREAM_IF_POSSIBLE : DOWNSTREAM);
+    return createPositionWithAffinity(offset + closestDistanceBox->start(), offset > 0 ? VP_UPSTREAM_IF_POSSIBLE : TextAffinity::Downstream);
 }
 
 void LayoutSVGInlineText::updateScaledFont()

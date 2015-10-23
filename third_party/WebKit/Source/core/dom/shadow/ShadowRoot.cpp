@@ -37,7 +37,7 @@
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/dom/shadow/InsertionPoint.h"
 #include "core/dom/shadow/ShadowRootRareData.h"
-#include "core/editing/markup.h"
+#include "core/editing/serializers/Serialization.h"
 #include "core/html/HTMLShadowElement.h"
 #include "public/platform/Platform.h"
 
@@ -59,9 +59,10 @@ ShadowRoot::ShadowRoot(Document& document, ShadowRootType type)
     , m_prev(nullptr)
     , m_next(nullptr)
     , m_numberOfStyles(0)
-    , m_type(type)
+    , m_type(static_cast<unsigned>(type))
     , m_registeredWithParentShadowRoot(false)
     , m_descendantInsertionPointsIsValid(false)
+    , m_delegatesFocus(false)
 {
 }
 
@@ -104,9 +105,9 @@ void ShadowRoot::dispose()
 ShadowRoot* ShadowRoot::olderShadowRootForBindings() const
 {
     ShadowRoot* older = olderShadowRoot();
-    while (older && !older->shouldExposeToBindings())
+    while (older && !older->isOpen())
         older = older->olderShadowRoot();
-    ASSERT(!older || older->shouldExposeToBindings());
+    ASSERT(!older || older->isOpen());
     return older;
 }
 

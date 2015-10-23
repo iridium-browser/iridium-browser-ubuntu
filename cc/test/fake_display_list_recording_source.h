@@ -5,9 +5,10 @@
 #ifndef CC_TEST_FAKE_DISPLAY_LIST_RECORDING_SOURCE_H_
 #define CC_TEST_FAKE_DISPLAY_LIST_RECORDING_SOURCE_H_
 
+#include "cc/base/region.h"
 #include "cc/playback/display_list_recording_source.h"
 #include "cc/test/fake_content_layer_client.h"
-#include "cc/test/impl_side_painting_settings.h"
+#include "cc/trees/layer_tree_settings.h"
 
 namespace cc {
 
@@ -16,18 +17,28 @@ namespace cc {
 // display list.
 class FakeDisplayListRecordingSource : public DisplayListRecordingSource {
  public:
-  FakeDisplayListRecordingSource(const gfx::Size& grid_cell_size,
-                                 bool use_cached_picture)
-      : DisplayListRecordingSource(grid_cell_size, use_cached_picture) {}
+  explicit FakeDisplayListRecordingSource(const gfx::Size& grid_cell_size)
+      : DisplayListRecordingSource(grid_cell_size) {}
   ~FakeDisplayListRecordingSource() override {}
 
   static scoped_ptr<FakeDisplayListRecordingSource> CreateRecordingSource(
-      const gfx::Rect& recorded_viewport) {
+      const gfx::Rect& recorded_viewport,
+      const gfx::Size& layer_bounds) {
     scoped_ptr<FakeDisplayListRecordingSource> recording_source(
         new FakeDisplayListRecordingSource(
-            ImplSidePaintingSettings().default_tile_grid_size,
-            ImplSidePaintingSettings().use_cached_picture_in_display_list));
+            LayerTreeSettings().default_tile_grid_size));
     recording_source->SetRecordedViewport(recorded_viewport);
+    recording_source->SetLayerBounds(layer_bounds);
+    return recording_source;
+  }
+
+  static scoped_ptr<FakeDisplayListRecordingSource> CreateFilledRecordingSource(
+      const gfx::Size& layer_bounds) {
+    scoped_ptr<FakeDisplayListRecordingSource> recording_source(
+        new FakeDisplayListRecordingSource(
+            LayerTreeSettings().default_tile_grid_size));
+    recording_source->SetRecordedViewport(gfx::Rect(layer_bounds));
+    recording_source->SetLayerBounds(layer_bounds);
     return recording_source;
   }
 
@@ -35,22 +46,20 @@ class FakeDisplayListRecordingSource : public DisplayListRecordingSource {
     recorded_viewport_ = recorded_viewport;
   }
 
+  void SetLayerBounds(const gfx::Size& layer_bounds) { size_ = layer_bounds; }
+
   void SetGridCellSize(const gfx::Size& grid_cell_size) {
     grid_cell_size_ = grid_cell_size;
   }
 
+  void SetClearCanvasWithDebugColor(bool clear) {
+    clear_canvas_with_debug_color_ = clear;
+  }
+
   void Rerecord() {
-    ContentLayerClient::PaintingControlSetting painting_control =
-        ContentLayerClient::PAINTING_BEHAVIOR_NORMAL;
-    bool use_cached_picture = true;
-    display_list_ =
-        DisplayItemList::Create(recorded_viewport_, use_cached_picture);
-    client_.PaintContentsToDisplayList(display_list_.get(), recorded_viewport_,
-                                       painting_control);
-    display_list_->ProcessAppendedItems();
-    display_list_->CreateAndCacheSkPicture();
-    if (gather_pixel_refs_)
-      display_list_->GatherPixelRefs(grid_cell_size_);
+    Region invalidation = recorded_viewport_;
+    UpdateAndExpandInvalidation(&client_, &invalidation, size_,
+                                recorded_viewport_, 0, RECORD_NORMALLY);
   }
 
   void add_draw_rect(const gfx::RectF& rect) {
@@ -83,6 +92,10 @@ class FakeDisplayListRecordingSource : public DisplayListRecordingSource {
   }
 
   void set_default_paint(const SkPaint& paint) { default_paint_ = paint; }
+
+  void set_reported_memory_usage(size_t reported_memory_usage) {
+    client_.set_reported_memory_usage(reported_memory_usage);
+  }
 
  private:
   FakeContentLayerClient client_;

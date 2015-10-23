@@ -110,7 +110,7 @@ public:
     void loadWithCallback(PassRefPtrWillBeRawPtr<LoadFontCallback>, ExecutionContext*);
 
     // ActiveDOMObject
-    virtual bool hasPendingActivity() const override;
+    bool hasPendingActivity() const override;
 
 private:
     static PassRefPtrWillBeRawPtr<FontFace> create(ExecutionContext*, const AtomicString& family, PassRefPtr<DOMArrayBuffer> source, const FontFaceDescriptors&);
@@ -132,6 +132,7 @@ private:
     typedef ScriptPromiseProperty<RawPtrWillBeMember<FontFace>, RawPtrWillBeMember<FontFace>, Member<DOMException>> LoadedProperty;
 
     AtomicString m_family;
+    String m_otsParseMessage;
     RefPtrWillBeMember<CSSValue> m_src;
     RefPtrWillBeMember<CSSValue> m_style;
     RefPtrWillBeMember<CSSValue> m_weight;

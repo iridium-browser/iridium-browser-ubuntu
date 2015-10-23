@@ -99,9 +99,9 @@ std::string GetTemplateURLStringForExtension(const std::string& extension_id) {
 // static
 void ExtensionOmniboxEventRouter::OnInputStarted(
     Profile* profile, const std::string& extension_id) {
-  scoped_ptr<Event> event(new Event(
-      omnibox::OnInputStarted::kEventName,
-      make_scoped_ptr(new base::ListValue())));
+  scoped_ptr<Event> event(new Event(events::OMNIBOX_ON_INPUT_STARTED,
+                                    omnibox::OnInputStarted::kEventName,
+                                    make_scoped_ptr(new base::ListValue())));
   event->restrict_to_browser_context = profile;
   EventRouter::Get(profile)
       ->DispatchEventToExtension(extension_id, event.Pass());
@@ -120,7 +120,8 @@ bool ExtensionOmniboxEventRouter::OnInputChanged(
   args->Set(0, new base::StringValue(input));
   args->Set(1, new base::FundamentalValue(suggest_id));
 
-  scoped_ptr<Event> event(new Event(omnibox::OnInputChanged::kEventName,
+  scoped_ptr<Event> event(new Event(events::OMNIBOX_ON_INPUT_CHANGED,
+                                    omnibox::OnInputChanged::kEventName,
                                     args.Pass()));
   event->restrict_to_browser_context = profile;
   event_router->DispatchEventToExtension(extension_id, event.Pass());
@@ -152,7 +153,8 @@ void ExtensionOmniboxEventRouter::OnInputEntered(
   else
     args->Set(1, new base::StringValue(kCurrentTabDisposition));
 
-  scoped_ptr<Event> event(new Event(omnibox::OnInputEntered::kEventName,
+  scoped_ptr<Event> event(new Event(events::OMNIBOX_ON_INPUT_ENTERED,
+                                    omnibox::OnInputEntered::kEventName,
                                     args.Pass()));
   event->restrict_to_browser_context = profile;
   EventRouter::Get(profile)
@@ -167,9 +169,9 @@ void ExtensionOmniboxEventRouter::OnInputEntered(
 // static
 void ExtensionOmniboxEventRouter::OnInputCancelled(
     Profile* profile, const std::string& extension_id) {
-  scoped_ptr<Event> event(new Event(
-      omnibox::OnInputCancelled::kEventName,
-      make_scoped_ptr(new base::ListValue())));
+  scoped_ptr<Event> event(new Event(events::OMNIBOX_ON_INPUT_CANCELLED,
+                                    omnibox::OnInputCancelled::kEventName,
+                                    make_scoped_ptr(new base::ListValue())));
   event->restrict_to_browser_context = profile;
   EventRouter::Get(profile)
       ->DispatchEventToExtension(extension_id, event.Pass());

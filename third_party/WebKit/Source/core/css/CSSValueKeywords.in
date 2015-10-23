@@ -254,7 +254,6 @@ square
 decimal
 decimal-leading-zero
 arabic-indic
-binary
 bengali
 cambodian
 khmer
@@ -262,19 +261,16 @@ devanagari
 gujarati
 gurmukhi
 kannada
-lower-hexadecimal
 lao
 malayalam
 mongolian
 myanmar
-octal
 oriya
 persian
 urdu
 telugu
 tibetan
 thai
-upper-hexadecimal
 lower-roman
 upper-roman
 lower-greek
@@ -282,48 +278,27 @@ lower-alpha
 lower-latin
 upper-alpha
 upper-latin
-afar
-ethiopic-halehame-aa-et
-ethiopic-halehame-aa-er
-amharic
-ethiopic-halehame-am-et
-amharic-abegede
-ethiopic-abegede-am-et
 cjk-earthly-branch
 cjk-heavenly-stem
-ethiopic
-ethiopic-halehame-gez
-ethiopic-abegede
-ethiopic-abegede-gez
-hangul-consonant
-hangul
-lower-norwegian
-oromo
-ethiopic-halehame-om-et
-sidama
-ethiopic-halehame-sid-et
-somali
-ethiopic-halehame-so-et
-tigre
-ethiopic-halehame-tig
-tigrinya-er
+ethiopic-halehame
+ethiopic-halehame-am
 ethiopic-halehame-ti-er
-tigrinya-er-abegede
-ethiopic-abegede-ti-er
-tigrinya-et
 ethiopic-halehame-ti-et
-tigrinya-et-abegede
-ethiopic-abegede-ti-et
-upper-greek
-upper-norwegian
-asterisks
-footnotes
+hangul
+hangul-consonant
+korean-hangul-formal
+korean-hanja-formal
+korean-hanja-informal
 hebrew
 armenian
 lower-armenian
 upper-armenian
 georgian
 cjk-ideographic
+simp-chinese-formal
+simp-chinese-informal
+trad-chinese-formal
+trad-chinese-informal
 hiragana
 katakana
 hiragana-iroha
@@ -567,9 +542,9 @@ min-intrinsic
 -webkit-max-content
 -webkit-fill-available
 -webkit-fit-content
-// Unprefixed for CSS Grid Layout.
 min-content
 max-content
+fit-content
 
 //
 // text-overflow
@@ -875,6 +850,9 @@ standalone
 minimal-ui
 browser
 
+// position
+sticky
+
 // (pointer:) media feature
 // none
 coarse
@@ -947,12 +925,6 @@ markers
 // isolation
 // auto
 isolate
-
-// scroll-blocks-on
-// none
-start-touch
-wheel-event
-scroll-event
 
 // touch-action
 pan-x
@@ -1075,3 +1047,9 @@ path
 
 calc
 -webkit-calc
+
+// scroll-snap-type
+// none
+mandatory
+proximity
+from-image

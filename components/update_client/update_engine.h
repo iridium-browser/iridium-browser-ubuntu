@@ -18,7 +18,6 @@
 #include "base/threading/thread_checker.h"
 #include "components/update_client/action.h"
 #include "components/update_client/component_patcher_operation.h"
-#include "components/update_client/component_unpacker.h"
 #include "components/update_client/crx_downloader.h"
 #include "components/update_client/crx_update_item.h"
 #include "components/update_client/ping_manager.h"
@@ -33,9 +32,7 @@ class SingleThreadTaskRunner;
 namespace update_client {
 
 class Configurator;
-class CrxDownloader;
 struct CrxUpdateItem;
-class PingManager;
 struct UpdateContext;
 
 // Handles updates for a group of components. Updates for different groups
@@ -61,7 +58,8 @@ class UpdateEngine {
 
   bool GetUpdateState(const std::string& id, CrxUpdateItem* update_state);
 
-  void Update(const std::vector<std::string>& ids,
+  void Update(bool is_foreground,
+              const std::vector<std::string>& ids,
               const UpdateClient::CrxDataCallback& crx_data_callback,
               const CompletionCallback& update_callback);
 
@@ -91,6 +89,7 @@ class UpdateEngine {
 struct UpdateContext {
   UpdateContext(
       const scoped_refptr<Configurator>& config,
+      bool is_foreground,
       const std::vector<std::string>& ids,
       const UpdateClient::CrxDataCallback& crx_data_callback,
       const UpdateEngine::NotifyObserversCallback& notify_observers_callback,
@@ -102,6 +101,9 @@ struct UpdateContext {
   ~UpdateContext();
 
   scoped_refptr<Configurator> config;
+
+  // True if this update has been initiated by the user.
+  bool is_foreground;
 
   // Contains the ids of all CRXs in this context.
   const std::vector<std::string> ids;
@@ -139,9 +141,6 @@ struct UpdateContext {
 
   // Contains the ids of the items to update.
   std::queue<std::string> queue;
-
-  scoped_ptr<CrxDownloader> crx_downloader;
-  scoped_refptr<ComponentUnpacker> unpacker;
 };
 
 }  // namespace update_client

@@ -19,7 +19,9 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
+#include "base/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_response_headers.h"
@@ -334,7 +336,7 @@ ScopedVector<WebSocketFrame> CreateFrameVector(
       result_frame->data = new IOBuffer(frame_length);
       memcpy(result_frame->data->data(), source_frame.data, frame_length);
     }
-    result_frames.push_back(result_frame.release());
+    result_frames.push_back(result_frame.Pass());
   }
   return result_frames.Pass();
 }
@@ -484,12 +486,9 @@ class ReadableFakeWebSocketStream : public FakeWebSocketStream {
       return ERR_IO_PENDING;
     if (responses_[index_]->async == ASYNC) {
       read_frames_pending_ = true;
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(&ReadableFakeWebSocketStream::DoCallback,
-                     base::Unretained(this),
-                     frames,
-                     callback));
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(&ReadableFakeWebSocketStream::DoCallback,
+                                base::Unretained(this), frames, callback));
       return ERR_IO_PENDING;
     } else {
       frames->swap(responses_[index_]->frames);
@@ -580,10 +579,9 @@ class EchoeyFakeWebSocketStream : public FakeWebSocketStream {
 
  private:
   void PostCallback() {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&EchoeyFakeWebSocketStream::DoCallback,
-                   base::Unretained(this)));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&EchoeyFakeWebSocketStream::DoCallback,
+                              base::Unretained(this)));
   }
 
   void DoCallback() {
@@ -634,17 +632,15 @@ class ResetOnWriteFakeWebSocketStream : public FakeWebSocketStream {
 
   int WriteFrames(ScopedVector<WebSocketFrame>* frames,
                   const CompletionCallback& callback) override {
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&ResetOnWriteFakeWebSocketStream::CallCallbackUnlessClosed,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   callback,
+                   weak_ptr_factory_.GetWeakPtr(), callback,
                    ERR_CONNECTION_RESET));
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&ResetOnWriteFakeWebSocketStream::CallCallbackUnlessClosed,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   read_callback_,
+                   weak_ptr_factory_.GetWeakPtr(), read_callback_,
                    ERR_CONNECTION_RESET));
     return ERR_IO_PENDING;
   }
@@ -771,7 +767,7 @@ class WebSocketChannelTest : public ::testing::Test {
   // A struct containing the data that will be used to connect the channel.
   // Grouped for readability.
   struct ConnectData {
-    ConnectData() : socket_url("ws://ws/"), origin("http://ws") {}
+    ConnectData() : socket_url("ws://ws/"), origin(GURL("http://ws")) {}
 
     // URLRequestContext object.
     URLRequestContext url_request_context;
@@ -996,7 +992,7 @@ class WebSocketChannelReceiveUtf8Test : public WebSocketChannelStreamTest {
 // passed to the creator function.
 TEST_F(WebSocketChannelTest, EverythingIsPassedToTheCreatorFunction) {
   connect_data_.socket_url = GURL("ws://example.com/test");
-  connect_data_.origin = url::Origin("http://example.com");
+  connect_data_.origin = url::Origin(GURL("http://example.com"));
   connect_data_.requested_subprotocols.push_back("Sinbad");
 
   CreateChannelAndConnect();
@@ -1008,7 +1004,7 @@ TEST_F(WebSocketChannelTest, EverythingIsPassedToTheCreatorFunction) {
   EXPECT_EQ(connect_data_.socket_url, actual.socket_url);
   EXPECT_EQ(connect_data_.requested_subprotocols,
             actual.requested_subprotocols);
-  EXPECT_EQ(connect_data_.origin.string(), actual.origin.string());
+  EXPECT_EQ(connect_data_.origin.Serialize(), actual.origin.Serialize());
 }
 
 // Verify that calling SendFlowControl before the connection is established does
@@ -2858,7 +2854,7 @@ TEST_F(WebSocketChannelEventInterfaceTest, ReadBinaryFramesAre8BitClean) {
   frame->data = new IOBuffer(kBinaryBlobSize);
   memcpy(frame->data->data(), kBinaryBlob, kBinaryBlobSize);
   ScopedVector<WebSocketFrame> frames;
-  frames.push_back(frame.release());
+  frames.push_back(frame.Pass());
   scoped_ptr<ReadableFakeWebSocketStream> stream(
       new ReadableFakeWebSocketStream);
   stream->PrepareRawReadFrames(

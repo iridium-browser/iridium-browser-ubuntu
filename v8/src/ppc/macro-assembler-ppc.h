@@ -13,6 +13,19 @@
 namespace v8 {
 namespace internal {
 
+// Give alias names to registers for calling conventions.
+const Register kReturnRegister0 = {kRegister_r3_Code};
+const Register kReturnRegister1 = {kRegister_r4_Code};
+const Register kJSFunctionRegister = {kRegister_r4_Code};
+const Register kContextRegister = {kRegister_r30_Code};
+const Register kInterpreterAccumulatorRegister = {kRegister_r3_Code};
+const Register kInterpreterRegisterFileRegister = {kRegister_r14_Code};
+const Register kInterpreterBytecodeOffsetRegister = {kRegister_r15_Code};
+const Register kInterpreterBytecodeArrayRegister = {kRegister_r16_Code};
+const Register kInterpreterDispatchTableRegister = {kRegister_r17_Code};
+const Register kRuntimeCallFunctionRegister = {kRegister_r4_Code};
+const Register kRuntimeCallArgCountRegister = {kRegister_r3_Code};
+
 // ----------------------------------------------------------------------------
 // Static helper functions
 
@@ -102,7 +115,9 @@ class MacroAssembler : public Assembler {
   MacroAssembler(Isolate* isolate, void* buffer, int size);
 
 
-  // Returns the size of a call in instructions.
+  // Returns the size of a call in instructions. Note, the value returned is
+  // only valid as long as no entries are added to the constant pool between
+  // checking the call size and emitting the actual call.
   static int CallSize(Register target);
   int CallSize(Address target, RelocInfo::Mode rmode, Condition cond = al);
   static int CallSizeNotPredictableCodeSize(Address target,
@@ -125,13 +140,17 @@ class MacroAssembler : public Assembler {
   void Call(Handle<Code> code, RelocInfo::Mode rmode = RelocInfo::CODE_TARGET,
             TypeFeedbackId ast_id = TypeFeedbackId::None(),
             Condition cond = al);
-  void Ret(Condition cond = al);
+  void Ret() { blr(); }
+  void Ret(Condition cond, CRegister cr = cr7) { bclr(cond, cr); }
 
   // Emit code to discard a non-negative number of pointer-sized elements
   // from the stack, clobbering only the sp register.
-  void Drop(int count, Condition cond = al);
+  void Drop(int count);
 
-  void Ret(int drop, Condition cond = al);
+  void Ret(int drop) {
+    Drop(drop);
+    blr();
+  }
 
   void Call(Label* target);
 
@@ -146,8 +165,11 @@ class MacroAssembler : public Assembler {
   void Move(Register dst, Register src, Condition cond = al);
   void Move(DoubleRegister dst, DoubleRegister src);
 
-  void MultiPush(RegList regs);
-  void MultiPop(RegList regs);
+  void MultiPush(RegList regs, Register location = sp);
+  void MultiPop(RegList regs, Register location = sp);
+
+  void MultiPushDoubles(RegList dregs, Register location = sp);
+  void MultiPopDoubles(RegList dregs, Register location = sp);
 
   // Load an object from the root table.
   void LoadRoot(Register destination, Heap::RootListIndex index,
@@ -211,7 +233,7 @@ class MacroAssembler : public Assembler {
   // |object| is the object being stored into, |value| is the object being
   // stored.  value and scratch registers are clobbered by the operation.
   // The offset is the offset from the start of the object, not the offset from
-  // the tagged HeapObject pointer.  For use with FieldOperand(reg, off).
+  // the tagged HeapObject pointer.  For use with FieldMemOperand(reg, off).
   void RecordWriteField(
       Register object, int offset, Register value, Register scratch,
       LinkRegisterStatus lr_status, SaveFPRegsMode save_fp,
@@ -616,13 +638,6 @@ class MacroAssembler : public Assembler {
   void Allocate(Register object_size, Register result, Register scratch1,
                 Register scratch2, Label* gc_required, AllocationFlags flags);
 
-  // Undo allocation in new space. The object passed and objects allocated after
-  // it will no longer be allocated. The caller must make sure that no pointers
-  // are left to the object(s) no longer allocated as they would be invalid when
-  // allocation is undone.
-  void UndoAllocationInNewSpace(Register object, Register scratch);
-
-
   void AllocateTwoByteString(Register result, Register length,
                              Register scratch1, Register scratch2,
                              Register scratch3, Label* gc_required);
@@ -889,12 +904,6 @@ class MacroAssembler : public Assembler {
     bind(&label);
   }
 
-  // Pushes <count> double values to <location>, starting from d<first>.
-  void SaveFPRegs(Register location, int first, int count);
-
-  // Pops <count> double values from <location>, starting from d<first>.
-  void RestoreFPRegs(Register location, int first, int count);
-
   // ---------------------------------------------------------------------------
   // Runtime calls
 
@@ -1061,11 +1070,16 @@ class MacroAssembler : public Assembler {
     DCHECK(rangeStart >= rangeEnd && rangeStart < kBitsPerPointer);
     int rotate = (rangeEnd == 0) ? 0 : kBitsPerPointer - rangeEnd;
     int width = rangeStart - rangeEnd + 1;
+    if (rc == SetRC && rangeEnd == 0 && width <= 16) {
+      andi(dst, src, Operand((1 << width) - 1));
+    } else {
 #if V8_TARGET_ARCH_PPC64
-    rldicl(dst, src, rotate, kBitsPerPointer - width, rc);
+      rldicl(dst, src, rotate, kBitsPerPointer - width, rc);
 #else
-    rlwinm(dst, src, rotate, kBitsPerPointer - width, kBitsPerPointer - 1, rc);
+      rlwinm(dst, src, rotate, kBitsPerPointer - width, kBitsPerPointer - 1,
+             rc);
 #endif
+    }
   }
 
   inline void ExtractBit(Register dst, Register src, uint32_t bitNumber,
@@ -1360,7 +1374,11 @@ class MacroAssembler : public Assembler {
   // ---------------------------------------------------------------------------
   // Patching helpers.
 
-  // Retrieve/patch the relocated value (lis/ori pair).
+  // Decode offset from constant pool load instruction(s).
+  // Caller must place the instruction word at <location> in <result>.
+  void DecodeConstantPoolOffset(Register result, Register location);
+
+  // Retrieve/patch the relocated value (lis/ori pair or constant pool load).
   void GetRelocatedValue(Register location, Register result, Register scratch);
   void SetRelocatedValue(Register location, Register scratch,
                          Register new_value);
@@ -1449,6 +1467,19 @@ class MacroAssembler : public Assembler {
   void JumpIfDictionaryInPrototypeChain(Register object, Register scratch0,
                                         Register scratch1, Label* found);
 
+  // Loads the constant pool pointer (kConstantPoolRegister).
+  void LoadConstantPoolPointerRegisterFromCodeTargetAddress(
+      Register code_target_address);
+  void LoadConstantPoolPointerRegister();
+  void LoadConstantPoolPointerRegister(Register base, int code_entry_delta = 0);
+
+  void AbortConstantPoolBuilding() {
+#ifdef DEBUG
+    // Avoid DCHECK(!is_linked()) failure in ~Label()
+    bind(ConstantPoolPosition());
+#endif
+  }
+
  private:
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
 
@@ -1509,7 +1540,7 @@ class CodePatcher {
   enum FlushICache { FLUSH, DONT_FLUSH };
 
   CodePatcher(byte* address, int instructions, FlushICache flush_cache = FLUSH);
-  virtual ~CodePatcher();
+  ~CodePatcher();
 
   // Macro assembler to emit code.
   MacroAssembler* masm() { return &masm_; }
@@ -1532,7 +1563,7 @@ class CodePatcher {
 // -----------------------------------------------------------------------------
 // Static helper functions.
 
-inline MemOperand ContextOperand(Register context, int index) {
+inline MemOperand ContextOperand(Register context, int index = 0) {
   return MemOperand(context, Context::SlotOffset(index));
 }
 

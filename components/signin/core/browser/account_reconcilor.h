@@ -15,7 +15,6 @@
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
@@ -23,10 +22,10 @@
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/core/browser/signin_metrics.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 
-class GaiaAuthFetcher;
 class ProfileOAuth2TokenService;
 class SigninClient;
 
@@ -40,13 +39,6 @@ class AccountReconcilor : public KeyedService,
                           public OAuth2TokenService::Observer,
                           public SigninManagerBase::Observer {
  public:
-  enum State {
-      NOT_RECONCILING,
-      NOT_RECONCILING_ERROR_OCCURED,
-      GATHERING_INFORMATION,
-      APPLYING_CHANGES
-  };
-
   AccountReconcilor(ProfileOAuth2TokenService* token_service,
                     SigninManagerBase* signin_manager,
                     SigninClient* client,
@@ -64,16 +56,11 @@ class AccountReconcilor : public KeyedService,
   void Shutdown() override;
 
   // Determine what the reconcilor is currently doing.
-  State GetState();
+  signin_metrics::AccountReconcilorState GetState();
 
  private:
   bool IsRegisteredWithTokenService() const {
     return registered_with_token_service_;
-  }
-
-  const std::vector<std::pair<std::string, bool> >& GetGaiaAccountsForTesting()
-      const {
-    return gaia_accounts_;
   }
 
   friend class AccountReconcilorTest;
@@ -106,6 +93,8 @@ class AccountReconcilor : public KeyedService,
                            StartReconcileWithSessionInfoExpiredDefault);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
                            AddAccountToCookieCompletedWithBogusAccount);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, NoLoopWithBadPrimary);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, WontMergeAccountsWithError);
 
   // Register and unregister with dependent services.
   void RegisterWithSigninManager();
@@ -147,7 +136,7 @@ class AccountReconcilor : public KeyedService,
       const std::string& account_id,
       const GoogleServiceAuthError& error) override;
   void OnGaiaAccountsInCookieUpdated(
-        const std::vector<std::pair<std::string, bool> >& accounts,
+        const std::vector<gaia::ListedAccount>& accounts,
         const GoogleServiceAuthError& error) override;
 
   // Overriden from OAuth2TokenService::Observer.
@@ -190,10 +179,9 @@ class AccountReconcilor : public KeyedService,
   // Used during reconcile action.
   // These members are used to validate the gaia cookie.  |gaia_accounts_|
   // holds the state of google accounts in the gaia cookie.  Each element is
-  // a pair that holds the email address of the account and a boolean that
-  // indicates whether the account is valid or not.  The accounts in the vector
-  // are ordered the in same way as the gaia cookie.
-  std::vector<std::pair<std::string, bool> > gaia_accounts_;
+  // holds the email address, gaia id and validity as returned from GAIA.  The
+  // accounts in the vector are ordered the in same way as the gaia cookie.
+  std::vector<gaia::ListedAccount> gaia_accounts_;
 
   // Used during reconcile action.
   // These members are used to validate the tokens in OAuth2TokenService.

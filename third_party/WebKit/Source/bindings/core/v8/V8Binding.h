@@ -57,6 +57,7 @@ class EventListener;
 class EventTarget;
 class ExceptionState;
 class ExecutionContext;
+class FlexibleArrayBufferView;
 class Frame;
 class LocalDOMWindow;
 class LocalFrame;
@@ -66,6 +67,7 @@ class XPathNSResolver;
 
 template <typename T>
 struct V8TypeOf {
+    STATIC_ONLY(V8TypeOf);
     // |Type| provides C++ -> V8 type conversion for DOM wrappers.
     // The Blink binding code generator will generate specialized version of
     // V8TypeOf for each wrapper class.
@@ -773,7 +775,7 @@ VectorType toImplArray(v8::Local<v8::Value> value, int argumentIndex, v8::Isolat
         return VectorType();
     }
 
-    if (length > WTF::DefaultAllocatorQuantizer::kMaxUnquantizedAllocation / sizeof(ValueType)) {
+    if (length > WTF::kGenericMaxDirectMapped / sizeof(ValueType)) {
         exceptionState.throwTypeError("Array length exceeds supported limit.");
         return VectorType();
     }
@@ -810,18 +812,19 @@ VectorType toImplArray(const Vector<ScriptValue>& value, v8::Isolate* isolate, E
     return result;
 }
 
-template <typename T>
-Vector<T> toImplArguments(const v8::FunctionCallbackInfo<v8::Value>& info, int startIndex, ExceptionState& exceptionState)
+template <typename VectorType>
+VectorType toImplArguments(const v8::FunctionCallbackInfo<v8::Value>& info, int startIndex, ExceptionState& exceptionState)
 {
-    Vector<T> result;
-    typedef NativeValueTraits<T> TraitsType;
+    VectorType result;
+    typedef typename VectorType::ValueType ValueType;
+    typedef NativeValueTraits<ValueType> TraitsType;
     int length = info.Length();
     if (startIndex < length) {
         result.reserveInitialCapacity(length - startIndex);
         for (int i = startIndex; i < length; ++i) {
             result.uncheckedAppend(TraitsType::nativeValue(info.GetIsolate(), info[i], exceptionState));
             if (exceptionState.hadException())
-                return Vector<T>();
+                return VectorType();
         }
     }
     return result;
@@ -943,6 +946,8 @@ struct NativeValueTraits<JSONValuePtr> {
     CORE_EXPORT static JSONValuePtr nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&, int maxDepth = JSONValue::maxDepth);
 };
 
+JSONValuePtr toJSONValue(v8::Isolate*, v8::Local<v8::Value>, int maxDepth = JSONValue::maxDepth);
+
 CORE_EXPORT v8::Isolate* toIsolate(ExecutionContext*);
 CORE_EXPORT v8::Isolate* toIsolate(LocalFrame*);
 
@@ -951,7 +956,7 @@ DOMWindow* toDOMWindow(v8::Local<v8::Context>);
 LocalDOMWindow* enteredDOMWindow(v8::Isolate*);
 CORE_EXPORT LocalDOMWindow* currentDOMWindow(v8::Isolate*);
 LocalDOMWindow* callingDOMWindow(v8::Isolate*);
-ExecutionContext* toExecutionContext(v8::Local<v8::Context>);
+CORE_EXPORT ExecutionContext* toExecutionContext(v8::Local<v8::Context>);
 CORE_EXPORT ExecutionContext* currentExecutionContext(v8::Isolate*);
 CORE_EXPORT ExecutionContext* callingExecutionContext(v8::Isolate*);
 
@@ -961,12 +966,19 @@ CORE_EXPORT v8::Local<v8::Context> toV8Context(ExecutionContext*, DOMWrapperWorl
 // Returns a V8 context associated with a Frame and a DOMWrapperWorld.
 // This method returns an empty context if the frame is already detached.
 CORE_EXPORT v8::Local<v8::Context> toV8Context(Frame*, DOMWrapperWorld&);
+// Like toV8Context but also returns the context if the frame is already detached.
+CORE_EXPORT v8::Local<v8::Context> toV8ContextEvenIfDetached(Frame*, DOMWrapperWorld&);
 
 // Returns the frame object of the window object associated with
 // a context, if the window is currently being displayed in a Frame.
 CORE_EXPORT Frame* toFrameIfNotDetached(v8::Local<v8::Context>);
 
 CORE_EXPORT EventTarget* toEventTarget(v8::Isolate*, v8::Local<v8::Value>);
+
+// If 'storage' is non-null, it must be large enough to copy all bytes in the
+// array buffer view into it.  Use allocateFlexibleArrayBufferStorage(v8Value)
+// to allocate it using alloca() in the callers stack frame.
+CORE_EXPORT void toFlexibleArrayBufferView(v8::Isolate*, v8::Local<v8::Value>, FlexibleArrayBufferView&, void* storage = nullptr);
 
 // If the current context causes out of memory, JavaScript setting
 // is disabled and it returns true.
@@ -1016,6 +1028,7 @@ enum DeleteResult {
 };
 
 class V8IsolateInterruptor : public ThreadState::Interruptor {
+    WTF_MAKE_FAST_ALLOCATED(V8IsolateInterruptor);
 public:
     explicit V8IsolateInterruptor(v8::Isolate* isolate)
         : m_isolate(isolate)
@@ -1028,7 +1041,7 @@ public:
         interruptor->onInterrupted();
     }
 
-    virtual void requestInterrupt() override
+    void requestInterrupt() override
     {
         m_isolate->RequestInterrupt(&onInterruptCallback, this);
     }
@@ -1038,6 +1051,7 @@ private:
 };
 
 class DevToolsFunctionInfo final {
+    STACK_ALLOCATED();
 public:
     explicit DevToolsFunctionInfo(v8::Local<v8::Function>& function)
         : m_scriptId(0)

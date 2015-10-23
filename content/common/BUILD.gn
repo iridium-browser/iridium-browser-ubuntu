@@ -6,6 +6,9 @@ import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//content/common/common.gni")
 import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
+if (is_mac) {
+  import("//build/config/mac/mac_sdk.gni")
+}
 
 if (is_chromeos && current_cpu != "arm") {
   action("libva_generate_stubs") {
@@ -132,6 +135,7 @@ source_set("common") {
 
   configs += [
     "//content:content_implementation",
+    "//build/config:precompiled_headers",
     "//build/config/compiler:no_size_t_to_int_warning",
   ]
 
@@ -143,6 +147,7 @@ source_set("common") {
     "//base",
     "//build/util:webkit_version",
     "//components/tracing",
+    "//components/tracing:startup_tracing",
     "//gpu/command_buffer/client:gles2_interface",
     "//gpu/command_buffer/common:gles2_utils",
     "//net",
@@ -151,7 +156,7 @@ source_set("common") {
     "//ui/accessibility",
     "//ui/base",
     "//ui/base/ime",
-    "//ui/events/ipc",
+    "//ui/events/ipc:events_ipc",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/gfx/ipc",
@@ -163,6 +168,7 @@ source_set("common") {
   if (!is_ios) {
     deps += [
       "//cc",
+      "//device/bluetooth",
       "//ipc",
       "//ipc/mojo",
 
@@ -180,12 +186,14 @@ source_set("common") {
       "//media/midi",
       "//media:shared_memory_support",
       "//mojo/application/public/interfaces",
+      "//mojo/common:common_base",
       "//mojo/environment:chromium",
       "//sandbox",
       "//storage/common",
       "//third_party/WebKit/public:blink",
       "//third_party/mojo/src/mojo/edk/system",
       "//ui/gl",
+      ":mojo_bindings",
     ]
   }
 
@@ -224,10 +232,12 @@ source_set("common") {
       "//third_party/WebKit/public:resources",
       "//ui/accelerated_widget_mac",
     ]
+    lib_dirs = [ "$mac_sdk_path/usr/lib" ]
     libs += [
       "IOSurface.framework",
       "OpenGL.framework",
       "QuartzCore.framework",
+      "sandbox",
     ]
   }
 
@@ -263,20 +273,19 @@ source_set("common") {
     deps += [
       "//ui/ozone:ozone",
       "//ui/ozone:ozone_base",
-      "//ui/ozone/gpu",
     ]
   } else {
     sources -= [
       "cursors/webcursor_ozone.cc",
       "font_list_ozone.cc",
-      "gpu/client/gpu_memory_buffer_impl_ozone_native_buffer.cc",
-      "gpu/client/gpu_memory_buffer_impl_ozone_native_buffer.h",
-      "gpu/gpu_memory_buffer_factory_ozone_native_buffer.cc",
-      "gpu/gpu_memory_buffer_factory_ozone_native_buffer.h",
+      "gpu/client/gpu_memory_buffer_impl_ozone_native_pixmap.cc",
+      "gpu/client/gpu_memory_buffer_impl_ozone_native_pixmap.h",
+      "gpu/gpu_memory_buffer_factory_ozone_native_pixmap.cc",
+      "gpu/gpu_memory_buffer_factory_ozone_native_pixmap.h",
     ]
   }
 
-  if (!use_aura) {
+  if (!use_aura || is_android) {
     sources -= [ "cursors/webcursor_aura.cc" ]
   }
 
@@ -361,6 +370,8 @@ source_set("common") {
         "gpu/media/v4l2_device.h",
         "gpu/media/v4l2_image_processor.cc",
         "gpu/media/v4l2_image_processor.h",
+        "gpu/media/v4l2_jpeg_decode_accelerator.cc",
+        "gpu/media/v4l2_jpeg_decode_accelerator.h",
         "gpu/media/v4l2_slice_video_decode_accelerator.cc",
         "gpu/media/v4l2_slice_video_decode_accelerator.h",
         "gpu/media/v4l2_video_decode_accelerator.cc",
@@ -382,6 +393,10 @@ source_set("common") {
     if (current_cpu != "arm") {
       sources += [
                    "gpu/media/va_surface.h",
+                   "gpu/media/vaapi_jpeg_decode_accelerator.cc",
+                   "gpu/media/vaapi_jpeg_decode_accelerator.h",
+                   "gpu/media/vaapi_jpeg_decoder.cc",
+                   "gpu/media/vaapi_jpeg_decoder.h",
                    "gpu/media/vaapi_picture.cc",
                    "gpu/media/vaapi_picture.h",
                    "gpu/media/vaapi_video_decode_accelerator.cc",
@@ -472,11 +487,6 @@ source_set("common") {
       ]
     }
   }
-
-  if (is_win && current_cpu == "x64") {
-    # TODO(jschuh): Remove this after crbug.com/173851 gets fixed.
-    cflags = [ "/bigobj" ]
-  }
 }
 
 mojom("mojo_bindings") {
@@ -484,13 +494,22 @@ mojom("mojo_bindings") {
     "application_setup.mojom",
     "background_sync_service.mojom",
     "geolocation_service.mojom",
+    "image_downloader/image_downloader.mojom",
     "permission_service.mojom",
     "presentation/presentation_service.mojom",
+    "process_control.mojom",
     "render_frame_setup.mojom",
+    "service_port_service.mojom",
+    "service_worker/embedded_worker_setup.mojom",
+    "vr_service.mojom",
   ]
+
+  import_dirs = [ "//mojo/services" ]
 
   deps = [
     "//content/public/common:mojo_bindings",
     "//mojo/application/public/interfaces",
+    "//skia/public/interfaces",
+    "//ui/mojo/geometry:interfaces",
   ]
 }

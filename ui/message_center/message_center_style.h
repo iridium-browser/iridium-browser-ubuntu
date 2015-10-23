@@ -61,6 +61,11 @@ const int kIconToTextPadding = 16;  // H space between icon & title/message.
 const int kTextTopPadding = 12;     // V space between text elements.
 const int kIconBottomPadding = 16;  // Minimum non-zero V space between icon
                                     // and frame.
+// H space between the context message and the end of the card.
+const int kTextRightPadding = 23;
+const int kTextLeftPadding = kNotificationIconSize + kIconToTextPadding;
+const int kContextMessageViewWidth =
+    kNotificationWidth - kTextLeftPadding - kTextRightPadding;
 
 // Text sizes.
 const int kTitleFontSize = 14;             // For title only.
@@ -77,17 +82,18 @@ extern const SkColor kIconBackgroundColor;         // Used behind icons smaller
 extern const SkColor kRegularTextColor;            // Title, message, ...
 extern const SkColor kDimTextColor;
 extern const SkColor kFocusBorderColor;  // The focus border.
-extern const SkColor
+MESSAGE_CENTER_EXPORT extern const SkColor
     kSmallImageMaskForegroundColor;  // Foreground of small icon image.
-extern const SkColor
+MESSAGE_CENTER_EXPORT extern const SkColor
     kSmallImageMaskBackgroundColor;  // Background of small icon image.
 
 // Limits.
 
 // Given the size of an image, returns the size of the properly scaled-up image
 // which fits into |container_size|.
-gfx::Size GetImageSizeForContainerSize(const gfx::Size& container_size,
-                                       const gfx::Size& image_size);
+MESSAGE_CENTER_EXPORT gfx::Size GetImageSizeForContainerSize(
+    const gfx::Size& container_size,
+    const gfx::Size& image_size);
 
 extern const int kNotificationMaximumImageHeight;  // For image notifications.
 extern const size_t kNotificationMaximumItems;     // For list notifications.

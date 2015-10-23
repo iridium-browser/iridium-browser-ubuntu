@@ -37,9 +37,9 @@ base::File::Error IsMediaHeader(const char* buf, size_t length) {
   if (!net::SniffMimeTypeFromLocalData(buf, length, &mime_type))
     return base::File::FILE_ERROR_SECURITY;
 
-  if (StartsWithASCII(mime_type, "image/", true) ||
-      StartsWithASCII(mime_type, "audio/", true) ||
-      StartsWithASCII(mime_type, "video/", true) ||
+  if (base::StartsWith(mime_type, "image/", base::CompareCase::SENSITIVE) ||
+      base::StartsWith(mime_type, "audio/", base::CompareCase::SENSITIVE) ||
+      base::StartsWith(mime_type, "video/", base::CompareCase::SENSITIVE) ||
       mime_type == "application/x-shockwave-flash") {
     return base::File::FILE_OK;
   }

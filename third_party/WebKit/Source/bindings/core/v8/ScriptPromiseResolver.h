@@ -26,24 +26,30 @@ namespace blink {
 //    ExecutionContext state. When the ExecutionContext is suspended,
 //    resolve or reject will be delayed. When it is stopped, resolve or reject
 //    will be ignored.
-class CORE_EXPORT ScriptPromiseResolver : public RefCountedWillBeRefCountedGarbageCollected<ScriptPromiseResolver>, public ActiveDOMObject {
+class CORE_EXPORT ScriptPromiseResolver : public GarbageCollectedFinalized<ScriptPromiseResolver>, public ActiveDOMObject {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ScriptPromiseResolver);
-#if ENABLE(ASSERT)
-    WILL_BE_USING_PRE_FINALIZER(ScriptPromiseResolver, assertNotPending);
-#endif
     WTF_MAKE_NONCOPYABLE(ScriptPromiseResolver);
 public:
-    static PassRefPtrWillBeRawPtr<ScriptPromiseResolver> create(ScriptState* scriptState)
+    static ScriptPromiseResolver* create(ScriptState* scriptState)
     {
-        RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = adoptRefWillBeNoop(new ScriptPromiseResolver(scriptState));
+        ScriptPromiseResolver* resolver = new ScriptPromiseResolver(scriptState);
         resolver->suspendIfNeeded();
-        return resolver.release();
+        return resolver;
     }
 
-#if !ENABLE(OILPAN) && ENABLE(ASSERT)
+#if ENABLE(ASSERT)
+    // Eagerly finalized so as to ensure valid access to executionContext()
+    // from the destructor's assert.
+    EAGERLY_FINALIZE();
+
     ~ScriptPromiseResolver() override
     {
-        assertNotPending();
+        // This assertion fails if:
+        //  - promise() is called at least once and
+        //  - this resolver is destructed before it is resolved, rejected, the
+        //    V8 isolate is terminated or the associated ExecutionContext is
+        //    stopped.
+        ASSERT(m_state == ResolvedOrRejected || !m_isPromiseCalled || !scriptState()->contextIsValid() || !executionContext() || executionContext()->activeDOMObjectsAreStopped());
     }
 #endif
 
@@ -79,9 +85,9 @@ public:
     ScriptState* scriptState() const { return m_scriptState.get(); }
 
     // ActiveDOMObject implementation.
-    virtual void suspend() override;
-    virtual void resume() override;
-    virtual void stop() override;
+    void suspend() override;
+    void resume() override;
+    void stop() override;
 
     // Once this function is called this resolver stays alive while the
     // promise is pending and the associated ExecutionContext isn't stopped.
@@ -102,41 +108,26 @@ private:
         Rejecting,
         ResolvedOrRejected,
     };
-    enum LifetimeMode {
-        Default,
-        KeepAliveWhilePending,
-    };
-
-#if ENABLE(ASSERT)
-    void assertNotPending()
-    {
-        // This assertion fails if:
-        //  - promise() is called at least once and
-        //  - this resolver is destructed before it is resolved, rejected or
-        //    the associated ExecutionContext is stopped.
-        // This function cannot be run in the destructor if
-        // ScriptPromiseResolver is on-heap.
-        ASSERT(m_state == ResolvedOrRejected || !m_isPromiseCalled || !executionContext() || executionContext()->activeDOMObjectsAreStopped());
-    }
-#endif
 
     template<typename T>
     void resolveOrReject(T value, ResolutionState newState)
     {
-        if (m_state != Pending || !executionContext() || executionContext()->activeDOMObjectsAreStopped())
+        if (m_state != Pending || !scriptState()->contextIsValid() || !executionContext() || executionContext()->activeDOMObjectsAreStopped())
             return;
         ASSERT(newState == Resolving || newState == Rejecting);
         m_state = newState;
-        // Retain this object until it is actually resolved or rejected.
-        // |deref| will be called in |clear|.
-        ref();
 
         ScriptState::Scope scope(m_scriptState.get());
         m_value.set(
             m_scriptState->isolate(),
             toV8(value, m_scriptState->context()->Global(), m_scriptState->isolate()));
-        if (!executionContext()->activeDOMObjectsAreSuspended())
-            resolveOrRejectImmediately();
+
+        if (executionContext()->activeDOMObjectsAreSuspended()) {
+            // Retain this object until it is actually resolved or rejected.
+            keepAliveWhilePending();
+            return;
+        }
+        resolveOrRejectImmediately();
     }
 
     void resolveOrRejectImmediately();
@@ -145,10 +136,14 @@ private:
 
     ResolutionState m_state;
     const RefPtr<ScriptState> m_scriptState;
-    LifetimeMode m_mode;
     Timer<ScriptPromiseResolver> m_timer;
     Resolver m_resolver;
     ScopedPersistent<v8::Value> m_value;
+
+    // To support keepAliveWhilePending(), this object needs to keep itself
+    // alive while in that state.
+    SelfKeepAlive<ScriptPromiseResolver> m_keepAlive;
+
 #if ENABLE(ASSERT)
     // True if promise() is called.
     bool m_isPromiseCalled;

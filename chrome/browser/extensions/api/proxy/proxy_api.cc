@@ -14,7 +14,7 @@
 #include "chrome/browser/extensions/api/proxy/proxy_api_helpers.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/prefs/proxy_config_dictionary.h"
+#include "components/proxy_config/proxy_config_dictionary.h"
 #include "net/base/net_errors.h"
 
 namespace extensions {
@@ -45,11 +45,13 @@ void ProxyEventRouter::OnProxyError(
   args->Append(dict);
 
   if (profile) {
-    event_router->DispatchEventToRenderers(
-        keys::kProxyEventOnProxyError, args.Pass(), profile, true, GURL());
+    event_router->DispatchEventToRenderers(events::PROXY_ON_PROXY_ERROR,
+                                           keys::kProxyEventOnProxyError,
+                                           args.Pass(), profile, true, GURL());
   } else {
-    event_router->BroadcastEventToRenderers(
-        keys::kProxyEventOnProxyError, args.Pass(), GURL());
+    event_router->BroadcastEventToRenderers(events::PROXY_ON_PROXY_ERROR,
+                                            keys::kProxyEventOnProxyError,
+                                            args.Pass(), GURL());
   }
 }
 
@@ -75,11 +77,13 @@ void ProxyEventRouter::OnPACScriptError(
   args->Append(dict);
 
   if (profile) {
-    event_router->DispatchEventToRenderers(
-        keys::kProxyEventOnProxyError, args.Pass(), profile, true, GURL());
+    event_router->DispatchEventToRenderers(events::PROXY_ON_PROXY_ERROR,
+                                           keys::kProxyEventOnProxyError,
+                                           args.Pass(), profile, true, GURL());
   } else {
-    event_router->BroadcastEventToRenderers(
-        keys::kProxyEventOnProxyError, args.Pass(), GURL());
+    event_router->BroadcastEventToRenderers(events::PROXY_ON_PROXY_ERROR,
+                                            keys::kProxyEventOnProxyError,
+                                            args.Pass(), GURL());
   }
 }
 

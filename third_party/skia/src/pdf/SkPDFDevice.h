@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
@@ -6,13 +5,13 @@
  * found in the LICENSE file.
  */
 
-
 #ifndef SkPDFDevice_DEFINED
 #define SkPDFDevice_DEFINED
 
-#include "SkDevice.h"
 #include "SkBitmap.h"
 #include "SkCanvas.h"
+#include "SkClipStack.h"
+#include "SkDevice.h"
 #include "SkPaint.h"
 #include "SkPath.h"
 #include "SkPicture.h"
@@ -93,10 +92,8 @@ public:
     void drawPath(const SkDraw&, const SkPath& origpath,
                   const SkPaint& paint, const SkMatrix* prePathMatrix,
                   bool pathIsMutable) override;
-    void drawBitmapRect(const SkDraw& draw, const SkBitmap& bitmap,
-                        const SkRect* src, const SkRect& dst,
-                        const SkPaint& paint,
-                        SkCanvas::DrawBitmapRectFlags flags) override;
+    void drawBitmapRect(const SkDraw& draw, const SkBitmap& bitmap, const SkRect* src,
+                        const SkRect& dst, const SkPaint&, SkCanvas::SrcRectConstraint) override;
     void drawBitmap(const SkDraw&, const SkBitmap& bitmap,
                     const SkMatrix& matrix, const SkPaint&) override;
     void drawSprite(const SkDraw&, const SkBitmap& bitmap, int x, int y,
@@ -273,8 +270,7 @@ private:
     int addGraphicStateResource(SkPDFObject* gs);
     int addXObjectResource(SkPDFObject* xObject);
 
-    void updateFont(const SkPaint& paint, uint16_t glyphID,
-                    ContentEntry* contentEntry);
+    void updateFont(const SkPaint& paint, uint16_t glyphID, ContentEntry* contentEntry);
     int getFontResourceIndex(SkTypeface* typeface, uint16_t glyphID);
 
     void internalDrawPaint(const SkPaint& paint, ContentEntry* contentEntry);
@@ -293,17 +289,9 @@ private:
     bool handleInversePath(const SkDraw& d, const SkPath& origPath,
                            const SkPaint& paint, bool pathIsMutable,
                            const SkMatrix* prePathMatrix = NULL);
-    bool handleRectAnnotation(const SkRect& r, const SkMatrix& matrix,
-                              const SkPaint& paint);
     bool handlePointAnnotation(const SkPoint* points, size_t count,
-                               const SkMatrix& matrix, const SkPaint& paint);
+                               const SkMatrix& matrix, SkAnnotation* annot);
     void addAnnotation(SkPDFDict*);
-    void handleLinkToURL(SkData* urlData, const SkRect& r,
-                         const SkMatrix& matrix);
-    void handleLinkToNamedDest(SkData* nameData, const SkRect& r,
-                               const SkMatrix& matrix);
-    void defineNamedDestination(SkData* nameData, const SkPoint& point,
-                                const SkMatrix& matrix);
 
     typedef SkBaseDevice INHERITED;
 

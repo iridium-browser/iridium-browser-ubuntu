@@ -4,12 +4,6 @@
 
 #include "content/test/content_test_suite.h"
 
-#if defined(OS_ANDROID)
-#include <android/native_window.h>
-#include <android/native_window_jni.h>
-#include <map>
-#endif
-
 #include "base/base_paths.h"
 #include "base/logging.h"
 #include "content/public/common/content_client.h"
@@ -26,6 +20,7 @@
 #include "base/mac/scoped_nsautorelease_pool.h"
 #if !defined(OS_IOS)
 #include "base/test/mock_chrome_application_mac.h"
+#include "content/browser/in_process_io_surface_manager_mac.h"
 #endif
 #endif
 
@@ -33,15 +28,15 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "media/base/media.h"
-#include "ui/gl/gl_surface.h"
+#include "ui/gl/test/gl_surface_test_support.h"
 #endif
 
 #if defined(OS_ANDROID)
-#include "base/android/jni_android.h"
-#include "base/memory/linked_ptr.h"
-#include "content/common/android/surface_texture_manager.h"
-#include "ui/gl/android/scoped_java_surface.h"
-#include "ui/gl/android/surface_texture.h"
+#include "content/browser/android/in_process_surface_texture_manager.h"
+#endif
+
+#if defined(USE_OZONE)
+#include "ui/ozone/public/client_native_pixmap_factory.h"
 #endif
 
 namespace content {
@@ -66,33 +61,6 @@ class TestInitializationListener : public testing::EmptyTestEventListener {
 
   DISALLOW_COPY_AND_ASSIGN(TestInitializationListener);
 };
-
-#if defined(OS_ANDROID)
-class TestSurfaceTextureManager : public SurfaceTextureManager {
- public:
-  // Overridden from SurfaceTextureManager:
-  void RegisterSurfaceTexture(int surface_texture_id,
-                              int client_id,
-                              gfx::SurfaceTexture* surface_texture) override {
-    surfaces_[surface_texture_id] =
-        make_linked_ptr(new gfx::ScopedJavaSurface(surface_texture));
-  }
-  void UnregisterSurfaceTexture(int surface_texture_id,
-                                int client_id) override {
-    surfaces_.erase(surface_texture_id);
-  }
-  gfx::AcceleratedWidget AcquireNativeWidgetForSurfaceTexture(
-      int surface_texture_id) override {
-    JNIEnv* env = base::android::AttachCurrentThread();
-    return ANativeWindow_fromSurface(
-        env, surfaces_[surface_texture_id]->j_surface().obj());
-  }
-
- private:
-  typedef std::map<int, linked_ptr<gfx::ScopedJavaSurface>> SurfaceMap;
-  SurfaceMap surfaces_;
-};
-#endif
 
 }  // namespace
 
@@ -125,9 +93,10 @@ void ContentTestSuite::Initialize() {
   media::InitializeMediaLibrary();
   // When running in a child process for Mac sandbox tests, the sandbox exists
   // to initialize GL, so don't do it here.
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kTestChildProcess)) {
-    gfx::GLSurface::InitializeOneOffForTests();
+  bool is_child_process = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kTestChildProcess);
+  if (!is_child_process) {
+    gfx::GLSurfaceTestSupport::InitializeOneOff();
     gpu::ApplyGpuDriverBugWorkarounds(base::CommandLine::ForCurrentProcess());
   }
 #endif
@@ -135,7 +104,18 @@ void ContentTestSuite::Initialize() {
       testing::UnitTest::GetInstance()->listeners();
   listeners.Append(new TestInitializationListener);
 #if defined(OS_ANDROID)
-  SurfaceTextureManager::InitInstance(new TestSurfaceTextureManager);
+  SurfaceTextureManager::SetInstance(
+      InProcessSurfaceTextureManager::GetInstance());
+#endif
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  IOSurfaceManager::SetInstance(InProcessIOSurfaceManager::GetInstance());
+#endif
+#if defined(USE_OZONE)
+  if (!is_child_process) {
+    client_native_pixmap_factory_ = ui::ClientNativePixmapFactory::Create();
+    ui::ClientNativePixmapFactory::SetInstance(
+        client_native_pixmap_factory_.get());
+  }
 #endif
 }
 

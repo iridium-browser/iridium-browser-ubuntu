@@ -5,8 +5,10 @@
 #include "extensions/browser/lazy_background_task_queue.h"
 
 #include "base/bind.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/prefs/testing_pref_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/pref_registry/testing_pref_service_syncable.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_context.h"
@@ -52,8 +54,8 @@ class TestProcessManager : public ProcessManager {
   DISALLOW_COPY_AND_ASSIGN(TestProcessManager);
 };
 
-KeyedService* CreateTestProcessManager(BrowserContext* context) {
-  return new TestProcessManager(context);
+scoped_ptr<KeyedService> CreateTestProcessManager(BrowserContext* context) {
+  return make_scoped_ptr(new TestProcessManager(context));
 }
 
 }  // namespace
@@ -113,7 +115,7 @@ class LazyBackgroundTaskQueueTest : public ExtensionsTest {
  private:
   scoped_ptr<content::NotificationService> notification_service_;
 
-  TestingPrefServiceSimple testing_pref_service_;
+  user_prefs::TestingPrefServiceSyncable testing_pref_service_;
 
   // The total number of pending tasks that have been executed.
   int task_run_count_;

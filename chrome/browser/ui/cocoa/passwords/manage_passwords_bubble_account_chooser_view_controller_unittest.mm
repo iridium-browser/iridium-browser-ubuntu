@@ -30,26 +30,7 @@
 @end
 
 @interface CredentialItemView(Testing)
-@property(nonatomic, readonly) NSTextField* usernameLabel;
-@end
-
-// Helper delegate for testing the account chooser view of the password
-// management bubble.
-@interface ManagePasswordsBubbleAccountChooserViewTestDelegate
-    : NSObject<ManagePasswordsBubbleContentViewDelegate> {
-  BOOL dismissed_;
-}
-@property(nonatomic, readonly) BOOL dismissed;
-@end
-
-@implementation ManagePasswordsBubbleAccountChooserViewTestDelegate
-
-@synthesize dismissed = dismissed_;
-
-- (void)viewShouldDismiss {
-  dismissed_ = YES;
-}
-
+@property(nonatomic, readonly) NSTextField* upperLabel;
 @end
 
 @interface AccountAvatarFetcherTestManager : AccountAvatarFetcherManager {
@@ -87,14 +68,11 @@ class ManagePasswordsBubbleAccountChooserViewControllerTest
 
   void SetUp() override {
     ManagePasswordsControllerTest::SetUp();
-    delegate_.reset(
-        [[ManagePasswordsBubbleAccountChooserViewTestDelegate alloc] init]);
+    delegate_.reset([[ContentViewDelegateMock alloc] init]);
     avatar_manager_.reset([[AccountAvatarFetcherTestManager alloc] init]);
   }
 
-  ManagePasswordsBubbleAccountChooserViewTestDelegate* delegate() {
-    return delegate_.get();
-  }
+  ContentViewDelegateMock* delegate() { return delegate_.get(); }
 
   AccountAvatarFetcherTestManager* avatar_manager() {
     return avatar_manager_.get();
@@ -116,8 +94,7 @@ class ManagePasswordsBubbleAccountChooserViewControllerTest
   base::scoped_nsobject<AccountAvatarFetcherTestManager> avatar_manager_;
   base::scoped_nsobject<ManagePasswordsBubbleAccountChooserViewController>
       controller_;
-  base::scoped_nsobject<ManagePasswordsBubbleAccountChooserViewTestDelegate>
-      delegate_;
+  base::scoped_nsobject<ContentViewDelegateMock> delegate_;
 };
 
 TEST_F(ManagePasswordsBubbleAccountChooserViewControllerTest, ConfiguresViews) {
@@ -139,13 +116,13 @@ TEST_F(ManagePasswordsBubbleAccountChooserViewControllerTest, ConfiguresViews) {
       base::mac::ObjCCastStrict<CredentialItemView>(
           base::mac::ObjCCastStrict<CredentialItemCell>(
               [view.delegate tableView:view dataCellForTableColumn:nil row:0])
-              .view).usernameLabel.stringValue);
+              .view).upperLabel.stringValue);
   EXPECT_NSEQ(
       @"taco",
       base::mac::ObjCCastStrict<CredentialItemView>(
           base::mac::ObjCCastStrict<CredentialItemCell>(
               [view.delegate tableView:view dataCellForTableColumn:nil row:1])
-              .view).usernameLabel.stringValue);
+              .view).upperLabel.stringValue);
   EXPECT_TRUE(avatar_manager().fetchedAvatars.empty());
 }
 
@@ -153,7 +130,7 @@ TEST_F(ManagePasswordsBubbleAccountChooserViewControllerTest,
        ForwardsAvatarFetchToManager) {
   ScopedVector<autofill::PasswordForm> local_forms;
   local_forms.push_back(Credential("taco"));
-  local_forms.back()->avatar_url = GURL("http://foo");
+  local_forms.back()->icon_url = GURL("http://foo");
   EXPECT_TRUE(ui_controller()->OnChooseCredentials(
       local_forms.Pass(),
       ScopedVector<autofill::PasswordForm>(),
@@ -194,6 +171,12 @@ TEST_F(ManagePasswordsBubbleAccountChooserViewControllerTest,
 
 TEST_F(ManagePasswordsBubbleAccountChooserViewControllerTest,
        SelectingNopeDismissesDialog) {
+  ScopedVector<autofill::PasswordForm> local_forms;
+  local_forms.push_back(Credential("pizza"));
+  EXPECT_TRUE(ui_controller()->OnChooseCredentials(
+      local_forms.Pass(), ScopedVector<autofill::PasswordForm>(),
+      GURL("http://example.com"),
+      base::Callback<void(const password_manager::CredentialInfo&)>()));
   [controller().cancelButton performClick:nil];
   EXPECT_TRUE(delegate().dismissed);
 }

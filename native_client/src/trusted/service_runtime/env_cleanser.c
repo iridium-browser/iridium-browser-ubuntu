@@ -21,8 +21,10 @@
 #define NACL_ENV_PREFIX "NACLENV_"
 #define NACL_ENV_PREFIX_LENGTH 8
 
-void NaClEnvCleanserCtor(struct NaClEnvCleanser *self, int with_whitelist) {
+void NaClEnvCleanserCtor(struct NaClEnvCleanser *self,
+                         int with_whitelist, int with_passthrough) {
   self->with_whitelist = with_whitelist;
+  self->with_passthrough = with_passthrough;
   self->cleansed_environ = (char const **) NULL;
 }
 
@@ -85,6 +87,22 @@ int NaClEnvInWhitelist(char const *env_entry) {
                          EnvCmp);
 }
 
+static int VarIsInExtraEnv(char const *env_entry,
+                           char const *const *extra_env) {
+  if (extra_env != NULL) {
+    const char *name_end = strchr(env_entry, '=');
+    if (name_end != NULL) {
+      size_t compare_len = name_end + 1 - env_entry;
+      char const *const *ep;
+      for (ep = extra_env; *ep != NULL; ++ep) {
+        if (strncmp(env_entry, *ep, compare_len) == 0)
+          return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 /* PRE: sizeof(char *) is a power of 2 */
 
 /*
@@ -107,24 +125,33 @@ int NaClEnvCleanserInit(struct NaClEnvCleanser *self, char const *const *envp,
    * then n*sizeof(void *) will have an arithmetic overflow.
    */
 
-  if (NULL == envp || NULL == *envp) {
+  if ((NULL == envp || NULL == *envp) &&
+      (NULL == extra_env || NULL == *extra_env)) {
     self->cleansed_environ = NULL;
     return 1;
   }
-  for (p = envp; NULL != *p; ++p) {
-    if (!(self->with_whitelist && NaClEnvInWhitelist(*p)) &&
-        !NaClEnvIsPassThroughVar(*p)) {
-      continue;
-    }
-    if (num_env == kMaxSize) {
-      /* would overflow */
-      return 0;
-    }
-    ++num_env;
-  }
 
+  /*
+   * The explicit extra variables go before the filtered inherited ones.
+   */
   if (extra_env) {
     for (p = extra_env; NULL != *p; ++p) {
+      if (num_env == kMaxSize) {
+        /* would overflow */
+        return 0;
+      }
+      ++num_env;
+    }
+  }
+
+  if (envp) {
+    for (p = envp; NULL != *p; ++p) {
+      if (VarIsInExtraEnv(*p, extra_env) ||
+          (!self->with_passthrough &&
+           !(self->with_whitelist && NaClEnvInWhitelist(*p)) &&
+           !NaClEnvIsPassThroughVar(*p))) {
+        continue;
+      }
       if (num_env == kMaxSize) {
         /* would overflow */
         return 0;
@@ -144,27 +171,36 @@ int NaClEnvCleanserInit(struct NaClEnvCleanser *self, char const *const *envp,
     return 0;
   }
 
-  /* this assumes no other thread is tweaking envp */
-  for (env = 0, p = envp; NULL != *p; ++p) {
-    if (NaClEnvIsPassThroughVar(*p)) {
-      ptr_tbl[env] = *p + NACL_ENV_PREFIX_LENGTH;
-    } else if (self->with_whitelist && NaClEnvInWhitelist(*p)) {
-      ptr_tbl[env] = *p;
-    } else {
-      continue;
-    }
-    ++env;
-  }
+  env = 0;
   if (extra_env) {
     for (p = extra_env; NULL != *p; ++p) {
       ptr_tbl[env] = *p;
       ++env;
     }
   }
+
+  if (envp) {
+    /* this assumes no other thread is tweaking envp */
+    for (p = envp; NULL != *p; ++p) {
+      if (VarIsInExtraEnv(*p, extra_env)) {
+        continue;
+      } else if (NaClEnvIsPassThroughVar(*p)) {
+        ptr_tbl[env] = *p + NACL_ENV_PREFIX_LENGTH;
+      } else if (self->with_passthrough ||
+                 (self->with_whitelist && NaClEnvInWhitelist(*p))) {
+        ptr_tbl[env] = *p;
+      } else {
+        continue;
+      }
+      ++env;
+    }
+  }
+
   if (num_env != env) {
     free((void *) ptr_tbl);
     return 0;
   }
+
   ptr_tbl[env] = NULL;
   self->cleansed_environ = ptr_tbl;
 

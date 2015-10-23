@@ -164,8 +164,6 @@ static const char kAttributeSctpPort[] = "sctp-port";
 // Experimental flags
 static const char kAttributeXGoogleFlag[] = "x-google-flag";
 static const char kValueConference[] = "conference";
-static const char kAttributeXGoogleBufferLatency[] =
-    "x-google-buffer-latency";
 
 // Candidate
 static const char kCandidateHost[] = "host";
@@ -539,27 +537,11 @@ static bool AddSsrcLine(uint32 ssrc_id, const std::string& attribute,
   return AddLine(os.str(), message);
 }
 
-// Split the message into two parts by the first delimiter.
-static bool SplitByDelimiter(const std::string& message,
-                             const char delimiter,
-                             std::string* field1,
-                             std::string* field2) {
-  // Find the first delimiter
-  size_t pos = message.find(delimiter);
-  if (pos == std::string::npos) {
-    return false;
-  }
-  *field1 = message.substr(0, pos);
-  // The rest is the value.
-  *field2 = message.substr(pos + 1);
-  return true;
-}
-
 // Get value only from <attribute>:<value>.
 static bool GetValue(const std::string& message, const std::string& attribute,
                      std::string* value, SdpParseError* error) {
   std::string leftpart;
-  if (!SplitByDelimiter(message, kSdpDelimiterColon, &leftpart, value)) {
+  if (!rtc::tokenize_first(message, kSdpDelimiterColon, &leftpart, value)) {
     return ParseFailedGetValue(message, attribute, error);
   }
   // The left part should end with the expected attribute.
@@ -732,7 +714,7 @@ static void GetDefaultDestination(
 // Update |mline|'s default destination and append a c line after it.
 static void UpdateMediaDefaultDestination(
     const std::vector<Candidate>& candidates,
-    const std::string mline,
+    const std::string& mline,
     std::string* message) {
   std::string new_lines;
   AddLine(mline, &new_lines);
@@ -824,9 +806,9 @@ std::string SdpSerialize(const JsepSessionDescription& jdesc) {
   // <unicast-address>
   std::ostringstream os;
   InitLine(kLineTypeOrigin, kSessionOriginUsername, &os);
-  const std::string session_id = jdesc.session_id().empty() ?
+  const std::string& session_id = jdesc.session_id().empty() ?
       kSessionOriginSessionId : jdesc.session_id();
-  const std::string session_version = jdesc.session_version().empty() ?
+  const std::string& session_version = jdesc.session_version().empty() ?
       kSessionOriginSessionVersion : jdesc.session_version();
   os << " " << session_id << " " << session_version << " "
      << kSessionOriginNettype << " " << kSessionOriginAddrtype << " "
@@ -972,7 +954,8 @@ bool ParseCandidate(const std::string& message, Candidate* candidate,
   // Makes sure |message| contains only one line.
   if (message.size() > first_line.size()) {
     std::string left, right;
-    if (SplitByDelimiter(message, kNewLine, &left, &right) && !right.empty()) {
+    if (rtc::tokenize_first(message, kNewLine, &left, &right) &&
+        !right.empty()) {
       return ParseFailed(message, 0, "Expect one line only", error);
     }
   }
@@ -989,8 +972,8 @@ bool ParseCandidate(const std::string& message, Candidate* candidate,
   std::string candidate_value;
 
   // |first_line| must be in the form of "candidate:<value>".
-  if (!SplitByDelimiter(first_line, kSdpDelimiterColon,
-                        &attribute_candidate, &candidate_value) ||
+  if (!rtc::tokenize_first(first_line, kSdpDelimiterColon, &attribute_candidate,
+                           &candidate_value) ||
       attribute_candidate != kAttributeCandidate) {
     if (is_raw) {
       std::ostringstream description;
@@ -1016,18 +999,18 @@ bool ParseCandidate(const std::string& message, Candidate* candidate,
       (fields[6] != kAttributeCandidateTyp)) {
     return ParseFailedExpectMinFieldNum(first_line, expected_min_fields, error);
   }
-  std::string foundation = fields[0];
+  const std::string& foundation = fields[0];
 
   int component_id = 0;
   if (!GetValueFromString(first_line, fields[1], &component_id, error)) {
     return false;
   }
-  const std::string transport = fields[2];
+  const std::string& transport = fields[2];
   uint32 priority = 0;
   if (!GetValueFromString(first_line, fields[3], &priority, error)) {
     return false;
   }
-  const std::string connection_address = fields[4];
+  const std::string& connection_address = fields[4];
   int port = 0;
   if (!GetValueFromString(first_line, fields[5], &port, error)) {
     return false;
@@ -1040,7 +1023,7 @@ bool ParseCandidate(const std::string& message, Candidate* candidate,
   }
 
   std::string candidate_type;
-  const std::string type = fields[7];
+  const std::string& type = fields[7];
   if (type == kCandidateHost) {
     candidate_type = cricket::LOCAL_PORT_TYPE;
   } else if (type == kCandidateSrflx) {
@@ -1275,7 +1258,7 @@ void BuildMediaDescription(const ContentInfo* content_info,
   // RFC 3264
   // To reject an offered stream, the port number in the corresponding stream in
   // the answer MUST be set to zero.
-  const std::string port = content_info->rejected ?
+  const std::string& port = content_info->rejected ?
       kMediaPortRejected : kDummyPort;
 
   rtc::SSLFingerprint* fp = (transport_info) ?
@@ -1289,16 +1272,7 @@ void BuildMediaDescription(const ContentInfo* content_info,
 
   // RFC 4566
   // b=AS:<bandwidth>
-  // We should always use the default bandwidth for RTP-based data
-  // channels.  Don't allow SDP to set the bandwidth, because that
-  // would give JS the opportunity to "break the Internet".
-  // TODO(pthatcher): But we need to temporarily allow the SDP to control
-  // this for backwards-compatibility.  Once we don't need that any
-  // more, remove this.
-  bool support_dc_sdp_bandwidth_temporarily = true;
-  if (media_desc->bandwidth() >= 1000 &&
-      (media_type != cricket::MEDIA_TYPE_DATA ||
-       support_dc_sdp_bandwidth_temporarily)) {
+  if (media_desc->bandwidth() >= 1000) {
     InitLine(kLineTypeSessionBandwidth, kApplicationSpecificMaximum, &os);
     os << kSdpDelimiterColon << (media_desc->bandwidth() / 1000);
     AddLine(os.str(), message);
@@ -1450,15 +1424,6 @@ void BuildRtpContentAttributes(
   // a=rtpmap:<payload type> <encoding name>/<clock rate>
   // [/<encodingparameters>]
   BuildRtpMap(media_desc, media_type, message);
-
-  // Specify latency for buffered mode.
-  // a=x-google-buffer-latency:<value>
-  if (media_desc->buffered_mode_latency() != cricket::kBufferedModeDisabled) {
-    std::ostringstream os;
-    InitAttrLine(kAttributeXGoogleBufferLatency, &os);
-    os << kSdpDelimiterColon << media_desc->buffered_mode_latency();
-    AddLine(os.str(), message);
-  }
 
   for (StreamParamsVec::const_iterator track = media_desc->streams().begin();
        track != media_desc->streams().end(); ++track) {
@@ -2216,7 +2181,7 @@ bool ParseMediaDescription(const std::string& message,
       for (size_t j = 3 ; j < fields.size(); ++j) {
         // TODO(wu): Remove when below bug is fixed.
         // https://bugzilla.mozilla.org/show_bug.cgi?id=996329
-        if (fields[j] == "" && j == fields.size() - 1) {
+        if (fields[j].empty() && j == fields.size() - 1) {
           continue;
         }
 
@@ -2263,17 +2228,6 @@ bool ParseMediaDescription(const std::string& message,
       if (data_desc && IsDtlsSctp(protocol) && rtc::FromString(fields[3], &p)) {
         if (!AddSctpDataCodec(data_desc, p))
           return false;
-      }
-
-      // We should always use the default bandwidth for RTP-based data
-      // channels.  Don't allow SDP to set the bandwidth, because that
-      // would give JS the opportunity to "break the Internet".
-      // TODO(pthatcher): But we need to temporarily allow the SDP to control
-      // this for backwards-compatibility.  Once we don't need that any
-      // more, remove this.
-      bool support_dc_sdp_bandwidth_temporarily = true;
-      if (content.get() && !support_dc_sdp_bandwidth_temporarily) {
-        content->set_bandwidth(cricket::kAutoBandwidth);
       }
     } else {
       LOG(LS_WARNING) << "Unsupported media type: " << line;
@@ -2532,6 +2486,17 @@ bool ParseContent(const std::string& message,
           if (!GetValueFromString(line, bandwidth, &b, error)) {
             return false;
           }
+          // We should never use more than the default bandwidth for RTP-based
+          // data channels. Don't allow SDP to set the bandwidth, because
+          // that would give JS the opportunity to "break the Internet".
+          // See: https://code.google.com/p/chromium/issues/detail?id=280726
+          if (media_type == cricket::MEDIA_TYPE_DATA && IsRtp(protocol) &&
+              b > cricket::kDataMaxBandwidth / 1000) {
+            std::ostringstream description;
+            description << "RTP-based data channels may not send more than "
+                        << cricket::kDataMaxBandwidth / 1000 << "kbps.";
+            return ParseFailed(line, description.str(), error);
+          }
           media_desc->set_bandwidth(b * 1000);
         }
       }
@@ -2655,22 +2620,6 @@ bool ParseContent(const std::string& message,
         }
         if (flag_value.compare(kValueConference) == 0)
           media_desc->set_conference_mode(true);
-      } else if (HasAttribute(line, kAttributeXGoogleBufferLatency)) {
-        // Experimental attribute.
-        // TODO: expose API to set this directly.
-        std::string flag_value;
-        if (!GetValue(line, kAttributeXGoogleBufferLatency, &flag_value,
-                      error)) {
-          return false;
-        }
-        int buffer_latency = 0;
-        if (!GetValueFromString(line, flag_value, &buffer_latency, error)) {
-          return false;
-        }
-        if (buffer_latency < 0) {
-          return ParseFailed(line, "Buffer latency less than 0.", error);
-        }
-        media_desc->set_buffered_mode_latency(buffer_latency);
       }
     } else {
       // Only parse lines that we are interested of.
@@ -2749,10 +2698,8 @@ bool ParseSsrcAttribute(const std::string& line, SsrcInfoVec* ssrc_infos,
   // a=ssrc:<ssrc-id> <attribute>
   // a=ssrc:<ssrc-id> <attribute>:<value>
   std::string field1, field2;
-  if (!SplitByDelimiter(line.substr(kLinePrefixLength),
-                        kSdpDelimiterSpace,
-                        &field1,
-                        &field2)) {
+  if (!rtc::tokenize_first(line.substr(kLinePrefixLength), kSdpDelimiterSpace,
+                           &field1, &field2)) {
     const size_t expected_fields = 2;
     return ParseFailedExpectFieldNum(line, expected_fields, error);
   }
@@ -2769,8 +2716,7 @@ bool ParseSsrcAttribute(const std::string& line, SsrcInfoVec* ssrc_infos,
 
   std::string attribute;
   std::string value;
-  if (!SplitByDelimiter(field2, kSdpDelimiterColon,
-                        &attribute, &value)) {
+  if (!rtc::tokenize_first(field2, kSdpDelimiterColon, &attribute, &value)) {
     std::ostringstream description;
     description << "Failed to get the ssrc attribute value from " << field2
                 << ". Expected format <attribute>:<value>.";
@@ -2872,8 +2818,8 @@ bool ParseCryptoAttribute(const std::string& line,
   if (!GetValueFromString(line, tag_value, &tag, error)) {
     return false;
   }
-  const std::string crypto_suite = fields[1];
-  const std::string key_params = fields[2];
+  const std::string& crypto_suite = fields[1];
+  const std::string& key_params = fields[2];
   std::string session_params;
   if (fields.size() > 3) {
     session_params = fields[3];
@@ -2953,7 +2899,7 @@ bool ParseRtpmapAttribute(const std::string& line,
                     << "<fmt> of the m-line: " << line;
     return true;
   }
-  const std::string encoder = fields[1];
+  const std::string& encoder = fields[1];
   std::vector<std::string> codec_params;
   rtc::split(encoder, '/', &codec_params);
   // <encoding name>/<clock rate>[/<encodingparameters>]
@@ -2964,7 +2910,7 @@ bool ParseRtpmapAttribute(const std::string& line,
                        "[/<encodingparameters>]\".",
                        error);
   }
-  const std::string encoding_name = codec_params[0];
+  const std::string& encoding_name = codec_params[0];
   int clock_rate = 0;
   if (!GetValueFromString(line, codec_params[1], &clock_rate, error)) {
     return false;
@@ -3016,22 +2962,13 @@ bool ParseRtpmapAttribute(const std::string& line,
   return true;
 }
 
-void PruneRight(const char delimiter, std::string* message) {
-  size_t trailing = message->find(delimiter);
-  if (trailing != std::string::npos) {
-    *message = message->substr(0, trailing);
-  }
-}
-
 bool ParseFmtpParam(const std::string& line, std::string* parameter,
                     std::string* value, SdpParseError* error) {
-  if (!SplitByDelimiter(line, kSdpDelimiterEqual, parameter, value)) {
+  if (!rtc::tokenize_first(line, kSdpDelimiterEqual, parameter, value)) {
     ParseFailed(line, "Unable to parse fmtp parameter. \'=\' missing.", error);
     return false;
   }
   // a=fmtp:<payload_type> <param1>=<value1>; <param2>=<value2>; ...
-  // When parsing the values the trailing ";" gets picked up. Remove them.
-  PruneRight(kSdpDelimiterSemicolon, value);
   return true;
 }
 
@@ -3042,44 +2979,52 @@ bool ParseFmtpAttributes(const std::string& line, const MediaType media_type,
       media_type != cricket::MEDIA_TYPE_VIDEO) {
     return true;
   }
-  std::vector<std::string> fields;
-  rtc::split(line.substr(kLinePrefixLength),
-                   kSdpDelimiterSpace, &fields);
+
+  std::string line_payload;
+  std::string line_params;
 
   // RFC 5576
   // a=fmtp:<format> <format specific parameters>
   // At least two fields, whereas the second one is any of the optional
   // parameters.
-  if (fields.size() < 2) {
+  if (!rtc::tokenize_first(line.substr(kLinePrefixLength), kSdpDelimiterSpace,
+                           &line_payload, &line_params)) {
     ParseFailedExpectMinFieldNum(line, 2, error);
     return false;
   }
 
+  // Parse out the payload information.
   std::string payload_type_str;
-  if (!GetValue(fields[0], kAttributeFmtp, &payload_type_str, error)) {
+  if (!GetValue(line_payload, kAttributeFmtp, &payload_type_str, error)) {
     return false;
   }
 
+  int payload_type = 0;
+  if (!GetPayloadTypeFromString(line_payload, payload_type_str, &payload_type,
+                                error)) {
+    return false;
+  }
+
+  // Parse out format specific parameters.
+  std::vector<std::string> fields;
+  rtc::split(line_params, kSdpDelimiterSemicolon, &fields);
+
   cricket::CodecParameterMap codec_params;
-  for (std::vector<std::string>::const_iterator iter = fields.begin() + 1;
-       iter != fields.end(); ++iter) {
-    std::string name;
-    std::string value;
-    if (iter->find(kSdpDelimiterEqual) == std::string::npos) {
+  for (auto& iter : fields) {
+    if (iter.find(kSdpDelimiterEqual) == std::string::npos) {
       // Only fmtps with equals are currently supported. Other fmtp types
       // should be ignored. Unknown fmtps do not constitute an error.
       continue;
     }
-    if (!ParseFmtpParam(*iter, &name, &value, error)) {
+
+    std::string name;
+    std::string value;
+    if (!ParseFmtpParam(rtc::string_trim(iter), &name, &value, error)) {
       return false;
     }
     codec_params[name] = value;
   }
 
-  int payload_type = 0;
-  if (!GetPayloadTypeFromString(line, payload_type_str, &payload_type, error)) {
-    return false;
-  }
   if (media_type == cricket::MEDIA_TYPE_AUDIO) {
     UpdateCodec<AudioContentDescription, cricket::AudioCodec>(
         media_desc, payload_type, codec_params);

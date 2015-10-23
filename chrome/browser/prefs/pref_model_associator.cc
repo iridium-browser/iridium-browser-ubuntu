@@ -13,9 +13,10 @@
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/common/pref_names.h"
+#include "components/content_settings/core/browser/website_settings_info.h"
+#include "components/content_settings/core/browser/website_settings_registry.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_error_factory.h"
 #include "sync/protocol/preference_specifics.pb.h"
@@ -319,17 +320,19 @@ scoped_ptr<base::Value> PrefModelAssociator::MergePreference(
   // to merge for all migrated values.
   if (name == prefs::kURLsToRestoreOnStartup ||
       name == prefs::kURLsToRestoreOnStartupOld) {
-    return scoped_ptr<base::Value>(
-        MergeListValues(local_value, server_value)).Pass();
+    return make_scoped_ptr(MergeListValues(local_value, server_value));
   }
 
-  if (name == prefs::kContentSettingsPatternPairs) {
-    return scoped_ptr<base::Value>(
-        MergeDictionaryValues(local_value, server_value)).Pass();
+  content_settings::WebsiteSettingsRegistry* registry =
+      content_settings::WebsiteSettingsRegistry::GetInstance();
+  for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
+    ContentSettingsType type = static_cast<ContentSettingsType>(i);
+    if (registry->Get(type)->pref_name() == name)
+      return make_scoped_ptr(MergeDictionaryValues(local_value, server_value));
   }
 
   // If this is not a specially handled preference, server wins.
-  return scoped_ptr<base::Value>(server_value.DeepCopy()).Pass();
+  return make_scoped_ptr(server_value.DeepCopy());
 }
 
 bool PrefModelAssociator::CreatePrefSyncData(
@@ -401,18 +404,19 @@ base::Value* PrefModelAssociator::MergeDictionaryValues(
 
   for (base::DictionaryValue::Iterator it(from_dict_value); !it.IsAtEnd();
        it.Advance()) {
-    const base::Value* from_value = &it.value();
+    const base::Value* from_key_value = &it.value();
     base::Value* to_key_value;
     if (result->GetWithoutPathExpansion(it.key(), &to_key_value)) {
-      if (to_key_value->GetType() == base::Value::TYPE_DICTIONARY) {
+      if (from_key_value->GetType() == base::Value::TYPE_DICTIONARY &&
+          to_key_value->GetType() == base::Value::TYPE_DICTIONARY) {
         base::Value* merged_value =
-            MergeDictionaryValues(*from_value, *to_key_value);
+            MergeDictionaryValues(*from_key_value, *to_key_value);
         result->SetWithoutPathExpansion(it.key(), merged_value);
       }
       // Note that for all other types we want to preserve the "to"
       // values so we do nothing here.
     } else {
-      result->SetWithoutPathExpansion(it.key(), from_value->DeepCopy());
+      result->SetWithoutPathExpansion(it.key(), from_key_value->DeepCopy());
     }
   }
   return result;

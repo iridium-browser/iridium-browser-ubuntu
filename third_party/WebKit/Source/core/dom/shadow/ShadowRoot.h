@@ -44,20 +44,21 @@ class InsertionPoint;
 class ShadowRootRareData;
 class StyleSheetList;
 
+enum class ShadowRootType {
+    UserAgent,
+    OpenByDefault,
+    Open,
+    Closed
+};
+
 class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope, public DoublyLinkedListNode<ShadowRoot> {
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ShadowRoot);
     friend class WTF::DoublyLinkedListNode<ShadowRoot>;
 public:
-    // FIXME: We will support multiple shadow subtrees, however current implementation does not work well
-    // if a shadow root is dynamically created. So we prohibit multiple shadow subtrees
-    // in several elements for a while.
-    // See https://bugs.webkit.org/show_bug.cgi?id=77503 and related bugs.
-    enum ShadowRootType {
-        UserAgentShadowRoot = 0,
-        OpenShadowRoot
-    };
-
+    // FIXME: Current implementation does not work well if a shadow root is dynamically created.
+    // So multiple shadow subtrees in several elements are prohibited.
+    // See https://github.com/w3c/webcomponents/issues/102 and http://crbug.com/234020
     static PassRefPtrWillBeRawPtr<ShadowRoot> create(Document& document, ShadowRootType type)
     {
         return adoptRefWillBeNoop(new ShadowRoot(document, type));
@@ -69,21 +70,23 @@ public:
     using TreeScope::document;
     using TreeScope::getElementById;
 
+    // TODO(kochi): crbug.com/507413 In non-Oilpan, host() may return null during queued
+    // event handling (e.g. during execCommand()).
     Element* host() const { return toElement(parentOrShadowHostNode()); }
     ElementShadow* owner() const { return host() ? host()->shadow() : 0; }
 
     ShadowRoot* youngerShadowRoot() const { return prev(); }
 
     ShadowRoot* olderShadowRootForBindings() const;
-    bool shouldExposeToBindings() const { return type() == OpenShadowRoot; }
+    bool isOpen() const { return type() == ShadowRootType::OpenByDefault || type() == ShadowRootType::Open; }
 
     bool isYoungest() const { return !youngerShadowRoot(); }
     bool isOldest() const { return !olderShadowRoot(); }
 
-    virtual void attach(const AttachContext& = AttachContext()) override;
+    void attach(const AttachContext& = AttachContext()) override;
 
-    virtual InsertionNotificationRequest insertedInto(ContainerNode*) override;
-    virtual void removedFrom(ContainerNode*) override;
+    InsertionNotificationRequest insertedInto(ContainerNode*) override;
+    void removedFrom(ContainerNode*) override;
 
     void registerScopedHTMLStyleChild();
     void unregisterScopedHTMLStyleChild();
@@ -125,17 +128,20 @@ public:
 
     StyleSheetList* styleSheets();
 
+    void setDelegatesFocus(bool flag) { m_delegatesFocus = flag; }
+    bool delegatesFocus() const { return m_delegatesFocus; }
+
     DECLARE_VIRTUAL_TRACE();
 
 private:
     ShadowRoot(Document&, ShadowRootType);
-    virtual ~ShadowRoot();
+    ~ShadowRoot() override;
 
 #if !ENABLE(OILPAN)
-    virtual void dispose() override;
+    void dispose() override;
 #endif
 
-    virtual void childrenChanged(const ChildrenChange&) override;
+    void childrenChanged(const ChildrenChange&) override;
 
     ShadowRootRareData* ensureShadowRootRareData();
 
@@ -144,7 +150,7 @@ private:
     void invalidateDescendantInsertionPoints();
 
     // ShadowRoots should never be cloned.
-    virtual PassRefPtrWillBeRawPtr<Node> cloneNode(bool) override { return nullptr; }
+    PassRefPtrWillBeRawPtr<Node> cloneNode(bool) override { return nullptr; }
 
     // FIXME: This shouldn't happen. https://bugs.webkit.org/show_bug.cgi?id=88834
     bool isOrphan() const { return !host(); }
@@ -153,9 +159,10 @@ private:
     RawPtrWillBeMember<ShadowRoot> m_next;
     OwnPtrWillBeMember<ShadowRootRareData> m_shadowRootRareData;
     unsigned m_numberOfStyles : 27;
-    unsigned m_type : 1;
+    unsigned m_type : 2;
     unsigned m_registeredWithParentShadowRoot : 1;
     unsigned m_descendantInsertionPointsIsValid : 1;
+    unsigned m_delegatesFocus : 1;
 };
 
 inline Element* ShadowRoot::activeElement() const

@@ -36,7 +36,6 @@
 #include "talk/media/webrtc/webrtcvideochannelfactory.h"
 #include "talk/media/webrtc/webrtcvideodecoderfactory.h"
 #include "talk/media/webrtc/webrtcvideoencoderfactory.h"
-#include "webrtc/base/cpumonitor.h"
 #include "webrtc/base/criticalsection.h"
 #include "webrtc/base/scoped_ptr.h"
 #include "webrtc/base/thread_annotations.h"
@@ -54,7 +53,6 @@ class VideoEncoder;
 }
 
 namespace rtc {
-class CpuMonitor;
 class Thread;
 }  // namespace rtc
 
@@ -123,8 +121,7 @@ class WebRtcVideoEngine2 : public sigslot::has_slots<> {
   void SetCallFactory(WebRtcCallFactory* call_factory);
 
   // Basic video engine implementation.
-  bool Init(rtc::Thread* worker_thread);
-  void Terminate();
+  void Init();
 
   int GetCapabilities();
   bool SetDefaultEncoderConfig(const VideoEncoderConfig& config);
@@ -158,7 +155,6 @@ class WebRtcVideoEngine2 : public sigslot::has_slots<> {
  private:
   std::vector<VideoCodec> GetSupportedCodecs() const;
 
-  rtc::Thread* worker_thread_;
   WebRtcVoiceEngine* voice_engine_;
   std::vector<VideoCodec> video_codecs_;
   std::vector<RtpHeaderExtension> rtp_header_extensions_;
@@ -189,6 +185,8 @@ class WebRtcVideoChannel2 : public rtc::MessageHandler,
 
   // VideoMediaChannel implementation
   void DetachVoiceChannel() override;
+  bool SetSendParameters(const VideoSendParameters& params) override;
+  bool SetRecvParameters(const VideoRecvParameters& params) override;
   bool SetRecvCodecs(const std::vector<VideoCodec>& codecs) override;
   bool SetSendCodecs(const std::vector<VideoCodec>& codecs) override;
   bool GetSendCodec(VideoCodec* send_codec) override;
@@ -378,6 +376,7 @@ class WebRtcVideoChannel2 : public rtc::MessageHandler,
         EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
     const std::vector<uint32> ssrcs_;
+    const std::vector<SsrcGroup> ssrc_groups_;
     webrtc::Call* const call_;
     WebRtcVideoEncoderFactory* const external_encoder_factory_
         GUARDED_BY(lock_);
@@ -394,6 +393,14 @@ class WebRtcVideoChannel2 : public rtc::MessageHandler,
     bool muted_ GUARDED_BY(lock_);
     VideoFormat format_ GUARDED_BY(lock_);
     int old_adapt_changes_ GUARDED_BY(lock_);
+
+    // The timestamp of the first frame received
+    // Used to generate the timestamps of subsequent frames
+    int64_t first_frame_timestamp_ms_ GUARDED_BY(lock_);
+
+    // The timestamp of the last frame received
+    // Used to generate timestamp for the black frame when capturer is removed
+    int64_t last_frame_timestamp_ms_ GUARDED_BY(lock_);
   };
 
   // Wrapper for the receiver part, contains configs etc. that are needed to
@@ -402,8 +409,8 @@ class WebRtcVideoChannel2 : public rtc::MessageHandler,
   class WebRtcVideoReceiveStream : public webrtc::VideoRenderer {
    public:
     WebRtcVideoReceiveStream(
-        webrtc::Call*,
-        const std::vector<uint32>& ssrcs,
+        webrtc::Call* call,
+        const StreamParams& sp,
         WebRtcVideoDecoderFactory* external_decoder_factory,
         bool default_stream,
         const webrtc::VideoReceiveStream::Config& config,
@@ -417,7 +424,7 @@ class WebRtcVideoChannel2 : public rtc::MessageHandler,
     void SetRecvCodecs(const std::vector<VideoCodecSettings>& recv_codecs);
     void SetRtpExtensions(const std::vector<webrtc::RtpExtension>& extensions);
 
-    void RenderFrame(const webrtc::I420VideoFrame& frame,
+    void RenderFrame(const webrtc::VideoFrame& frame,
                      int time_to_render_ms) override;
     bool IsTextureSupported() const override;
     bool IsDefaultStream() const;
@@ -449,6 +456,7 @@ class WebRtcVideoChannel2 : public rtc::MessageHandler,
 
     webrtc::Call* const call_;
     const std::vector<uint32> ssrcs_;
+    const std::vector<SsrcGroup> ssrc_groups_;
 
     webrtc::VideoReceiveStream* stream_;
     const bool default_stream_;

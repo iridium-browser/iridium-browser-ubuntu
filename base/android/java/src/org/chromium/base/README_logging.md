@@ -9,29 +9,53 @@ or off for individual groups.
 
 Usage:
 
-    private static final String TAG = Log.makeTag("Tag");
+    private static final String TAG = "cr.YourModuleTag";
     ...
-    Log.i(TAG, "Some debug info: %s", data);
+    Log.i(TAG, "Logged INFO message.");
+    Log.d(TAG, "Some DEBUG info: %s", data);
 
 Output:
 
-    D/cr.Tag: ( 999): [MyClass.java:42] Some debug info: data's toString output"
+    I/cr.YourModuleTag: ( 999): Logged INFO message
+    D/cr.YourModuleTag: ( 999): [MyClass.java:42] Some DEBUG info: data's toString output
 
 Here, **TAG** will be a feature or package name, "MediaRemote" or "NFC" for example. In most
-cases, the class name is not needed anymore. In Debug and Verbose logs, the file name and line
-number will be prepended to the log message. For higher priority logs, those are currently not
-added for performance concerns. It might be useful to make the log messages meaningful enough so
-that with the group tag, it's easy to pinpoint their origin.
-
-All log calls are guarded, which allows to enable or disable logging specific groups using ADB:
-
-    adb shell setprop log.tag.<YOUR_LOG_TAG> <LEVEL>
-
-Level here is either `VERBOSE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `ASSERT`, or `SUPPRESS`, and the
-log tag looks like `cr.Tag`. By default, the level for all tags is `INFO`.
+cases, the class name is not needed.
 
 **Caveat:** Property keys are limited to 23 characters. If the tag is too long, `Log#isLoggable`
 throws a RuntimeException.
+
+### Verbose and Debug logs have special handling ###
+
+*   `Log.v` and `Log.d` Calls made using `org.chromium.base.Log` are stripped
+    out of production binaries using Proguard. There is no way to get those logs
+	in release builds.
+
+*   The file name and line number will be prepended to the log message.
+    For higher priority logs, those are not added for performance concerns.
+
+*   By default, Verbose and Debug logs are not enabled, see guarding:
+
+### Log calls are guarded: Tag groups can be enabled or disabled using ADB ###
+
+    adb shell setprop log.tag.cr.YourModuleTag <LEVEL>
+
+Level here is either `VERBOSE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `ASSERT`, or `SUPPRESS`
+By default, the level for all tags is `INFO`.
+
+### An exception trace is printed when the exception is the last parameter ###
+
+As with `java.util.Log`, putting a throwable as last parameter will dump the corresponding stack
+trace:
+
+    Log.i(TAG, "An error happened: %s", e)
+
+    I/cr.YourModuleTag: ( 999): An error happened: This is the exception's message
+    I/cr.YourModuleTag: ( 999): java.lang.Exception: This is the exception's message
+    I/cr.YourModuleTag: ( 999):     at foo.bar.MyClass.test(MyClass.java:42)
+    I/cr.YourModuleTag: ( 999):     ...
+
+Having the exception as last parameter doesn't prevent it from being used for string formatting.
 
 ### Logging Best Practices
 
@@ -55,9 +79,7 @@ or service makes it more difficult to diagnose problems on other parts of the sy
 tend to push the interesting bit out of the buffer too soon. This is a recurring problem on
 Android, so avoid participating into it.
 
-All verbose and debug log calls made using `org.chromium.base.Log` will be stripped out of
-production binaries using Proguard. So there will be no way to get those logs in a release build.
-For other levels, they can be disabled using system properties. Because log messages might not be
+Logs can be disabled using system properties. Because log messages might not be
 written, the cost of creating them should also be avoided. This can be done using three
 complementary ways:
 
@@ -103,7 +125,7 @@ complementary ways:
     while the previous method can enable or disable debugging for a whole feature without changing
     any source file.
 
--   Annotate debug functions with the `@NoSideEffects` annotation.
+-   Annotate debug functions with the `@RemovableInRelease` annotation.
 
     That annotation tells Proguard to assume that a given function has no side effects, and is
     called only for its returned value. If this value is unused, the call will be removed. If the
@@ -113,7 +135,7 @@ complementary ways:
   
         /* If that function is only used in Log.d calls, proguard should completely remove it from
          * the release builds. */
-        @NoSideEffects
+        @RemovableInRelease
         private static String getSomeDebugLogString(Thing[] things) {
           /* Still needs to be guarded to avoid impacting debug builds, or in case it's used for
            * some other log levels. But at least it is done only once, inside the function. */

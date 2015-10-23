@@ -63,16 +63,18 @@ struct Cookie {
          const std::string& domain,
          const std::string& path,
          double expiry,
+         bool http_only,
          bool secure,
          bool session)
       : name(name), value(value), domain(domain), path(path), expiry(expiry),
-        secure(secure), session(session) {}
+        http_only(http_only), secure(secure), session(session) {}
 
   std::string name;
   std::string value;
   std::string domain;
   std::string path;
   double expiry;
+  bool http_only;
   bool secure;
   bool session;
 };
@@ -87,6 +89,7 @@ base::DictionaryValue* CreateDictionaryFrom(const Cookie& cookie) {
     dict->SetString("path", cookie.path);
   if (!cookie.session)
     dict->SetDouble("expiry", cookie.expiry);
+  dict->SetBoolean("httpOnly", cookie.http_only);
   dict->SetBoolean("secure", cookie.secure);
   return dict;
 }
@@ -114,13 +117,15 @@ Status GetVisibleCookies(WebView* web_view,
     double expiry = 0;
     cookie_dict->GetDouble("expires", &expiry);
     expiry /= 1000;  // Convert from millisecond to second.
+    bool http_only = false;
+    cookie_dict->GetBoolean("httpOnly", &http_only);
     bool session = false;
     cookie_dict->GetBoolean("session", &session);
     bool secure = false;
     cookie_dict->GetBoolean("secure", &secure);
 
     cookies_tmp.push_back(
-        Cookie(name, value, domain, path, expiry, secure, session));
+        Cookie(name, value, domain, path, expiry, http_only, secure, session));
   }
   cookies->swap(cookies_tmp);
   return Status(kOk);
@@ -211,20 +216,32 @@ Status ExecuteWindowCommand(
     return Status(kUnexpectedAlertOpen);
 
   Status nav_status(kOk);
-  for (int attempt = 0; attempt < 2; attempt++) {
-    if (attempt == 1) {
-      if (status.code() == kNoSuchExecutionContext)
-        // Switch to main frame and retry command if subframe no longer exists.
-        session->SwitchToTopFrame();
-      else
-        break;
+  for (int attempt = 0; attempt < 3; attempt++) {
+    if (attempt == 2) {
+      // Switch to main frame and retry command if subframe no longer exists.
+      session->SwitchToTopFrame();
     }
+
     nav_status = web_view->WaitForPendingNavigations(
         session->GetCurrentFrameId(), session->page_load_timeout, true);
     if (nav_status.IsError())
       return nav_status;
 
     status = command.Run(session, web_view, params, value);
+    if (status.code() == kNoSuchExecutionContext) {
+      continue;
+    } else if (status.IsError()) {
+      // If the command failed while a new page or frame started loading, retry
+      // the command after the pending navigation has completed.
+      bool is_pending = false;
+      nav_status = web_view->IsPendingNavigation(session->GetCurrentFrameId(),
+                                                 &is_pending);
+      if (nav_status.IsError())
+        return nav_status;
+      else if (is_pending)
+        continue;
+    }
+    break;
   }
 
   nav_status = web_view->WaitForPendingNavigations(
@@ -246,7 +263,11 @@ Status ExecuteGet(
   std::string url;
   if (!params.GetString("url", &url))
     return Status(kUnknownError, "'url' must be a string");
-  return web_view->Load(url);
+  Status status = web_view->Load(url);
+  if (status.IsError())
+    return status;
+  session->SwitchToTopFrame();
+  return Status(kOk);
 }
 
 Status ExecuteExecuteScript(
@@ -437,7 +458,11 @@ Status ExecuteGoBack(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  return web_view->TraverseHistory(-1);
+  Status status = web_view->TraverseHistory(-1);
+  if (status.IsError())
+    return status;
+  session->SwitchToTopFrame();
+  return Status(kOk);
 }
 
 Status ExecuteGoForward(
@@ -445,7 +470,11 @@ Status ExecuteGoForward(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  return web_view->TraverseHistory(1);
+  Status status = web_view->TraverseHistory(1);
+  if (status.IsError())
+    return status;
+  session->SwitchToTopFrame();
+  return Status(kOk);
 }
 
 Status ExecuteRefresh(
@@ -453,7 +482,11 @@ Status ExecuteRefresh(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  return web_view->Reload();
+  Status status = web_view->Reload();
+  if (status.IsError())
+    return status;
+  session->SwitchToTopFrame();
+  return Status(kOk);
 }
 
 Status ExecuteMouseMoveTo(
@@ -801,9 +834,10 @@ Status ExecuteScreenshot(
     if (status.IsError())
       return status;
     status = extension->CaptureScreenshot(&screenshot);
-    // If the screenshot was forbidden, fallback to DevTools.
-    if (status.code() == kForbidden)
+    if (status.IsError()) {
+      LOG(WARNING) << "screenshot failed with extension, fallback to DevTools";
       status = web_view->CaptureScreenshot(&screenshot);
+    }
   } else {
     status = web_view->CaptureScreenshot(&screenshot);
   }

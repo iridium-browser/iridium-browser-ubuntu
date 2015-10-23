@@ -29,13 +29,13 @@ class WaitableEvent;
 
 namespace gfx {
 class GLShareGroup;
-struct GpuMemoryBufferHandle;
 }
 
 namespace gpu {
 class SyncPointManager;
 union ValueState;
 namespace gles2 {
+class FramebufferCompletenessCache;
 class MailboxManager;
 class ProgramCache;
 class ShaderTranslatorCache;
@@ -43,9 +43,9 @@ class ShaderTranslatorCache;
 }
 
 namespace IPC {
+class AttachmentBroker;
 struct ChannelHandle;
 class SyncChannel;
-class MessageFilter;
 }
 
 struct GPUCreateCommandBufferConfig;
@@ -62,11 +62,15 @@ class MessageRouter;
 class CONTENT_EXPORT GpuChannelManager : public IPC::Listener,
                           public IPC::Sender {
  public:
+  // |broker| must outlive GpuChannelManager and any channels it creates.
   GpuChannelManager(MessageRouter* router,
                     GpuWatchdog* watchdog,
                     base::SingleThreadTaskRunner* io_task_runner,
                     base::WaitableEvent* shutdown_event,
-                    IPC::SyncChannel* channel);
+                    IPC::SyncChannel* channel,
+                    IPC::AttachmentBroker* broker,
+                    gpu::SyncPointManager* sync_point_manager,
+                    GpuMemoryBufferFactory* gpu_memory_buffer_factory);
   ~GpuChannelManager() override;
 
   // Remove the channel for a particular renderer.
@@ -89,19 +93,20 @@ class CONTENT_EXPORT GpuChannelManager : public IPC::Listener,
 
   gpu::gles2::ProgramCache* program_cache();
   gpu::gles2::ShaderTranslatorCache* shader_translator_cache();
+  gpu::gles2::FramebufferCompletenessCache* framebuffer_completeness_cache();
 
   GpuMemoryManager* gpu_memory_manager() { return &gpu_memory_manager_; }
 
   GpuChannel* LookupChannel(int32 client_id);
 
   gpu::SyncPointManager* sync_point_manager() {
-    return sync_point_manager_.get();
+    return sync_point_manager_;
   }
 
   gfx::GLSurface* GetDefaultOffscreenSurface();
 
   GpuMemoryBufferFactory* gpu_memory_buffer_factory() {
-    return gpu_memory_buffer_factory_.get();
+    return gpu_memory_buffer_factory_;
   }
 
  private:
@@ -109,6 +114,7 @@ class CONTENT_EXPORT GpuChannelManager : public IPC::Listener,
 
   // Message handlers.
   void OnEstablishChannel(int client_id,
+                          uint64_t client_tracing_id,
                           bool share_context,
                           bool allow_future_sync_points);
   void OnCloseChannel(const IPC::ChannelHandle& channel_handle);
@@ -127,15 +133,13 @@ class CONTENT_EXPORT GpuChannelManager : public IPC::Listener,
                                 int client_id,
                                 int32 sync_point);
 
-  void OnRelinquishResources();
-  void OnResourcesRelinquished();
+  void OnFinalize();
 
   void OnUpdateValueState(int client_id,
                           unsigned int target,
                           const gpu::ValueState& state);
 
   void OnLoseAllContexts();
-  void CheckRelinquishGpuResources();
 
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   base::WaitableEvent* shutdown_event_;
@@ -151,14 +155,17 @@ class CONTENT_EXPORT GpuChannelManager : public IPC::Listener,
   scoped_refptr<gpu::gles2::MailboxManager> mailbox_manager_;
   GpuMemoryManager gpu_memory_manager_;
   GpuWatchdog* watchdog_;
-  scoped_refptr<gpu::SyncPointManager> sync_point_manager_;
+  // SyncPointManager guaranteed to outlive running MessageLoop.
+  gpu::SyncPointManager* sync_point_manager_;
   scoped_ptr<gpu::gles2::ProgramCache> program_cache_;
   scoped_refptr<gpu::gles2::ShaderTranslatorCache> shader_translator_cache_;
+  scoped_refptr<gpu::gles2::FramebufferCompletenessCache>
+      framebuffer_completeness_cache_;
   scoped_refptr<gfx::GLSurface> default_offscreen_surface_;
-  scoped_ptr<GpuMemoryBufferFactory> gpu_memory_buffer_factory_;
+  GpuMemoryBufferFactory* const gpu_memory_buffer_factory_;
   IPC::SyncChannel* channel_;
-  scoped_refptr<IPC::MessageFilter> filter_;
-  bool relinquish_resources_pending_;
+  // Must outlive this instance of GpuChannelManager.
+  IPC::AttachmentBroker* attachment_broker_;
 
   // Member variables should appear before the WeakPtrFactory, to ensure
   // that any WeakPtrs to Controller are invalidated before its members

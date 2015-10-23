@@ -83,7 +83,9 @@ TEST_P(TransformFeedbackTest, ZeroSizedViewport)
     {
         "gl_Position"
     };
-    glTransformFeedbackVaryings(mProgram, ArraySize(transformFeedbackVaryings), transformFeedbackVaryings, GL_INTERLEAVED_ATTRIBS);
+    glTransformFeedbackVaryings(mProgram,
+                                static_cast<GLsizei>(ArraySize(transformFeedbackVaryings)),
+                                transformFeedbackVaryings, GL_INTERLEAVED_ATTRIBS);
     glLinkProgram(mProgram);
 
     // Re-link the program
@@ -118,7 +120,7 @@ TEST_P(TransformFeedbackTest, ZeroSizedViewport)
     glGetQueryObjectuiv(primitivesWrittenQuery, GL_QUERY_RESULT_EXT, &primitivesWritten);
     EXPECT_GL_NO_ERROR();
 
-    EXPECT_EQ(primitivesWritten, 2);
+    EXPECT_EQ(2u, primitivesWritten);
 }
 
 // Test that XFB can write back vertices to a buffer and that we can draw from this buffer afterward.
@@ -129,7 +131,9 @@ TEST_P(TransformFeedbackTest, RecordAndDraw)
     {
         "gl_Position"
     };
-    glTransformFeedbackVaryings(mProgram, ArraySize(transformFeedbackVaryings), transformFeedbackVaryings, GL_INTERLEAVED_ATTRIBS);
+    glTransformFeedbackVaryings(mProgram,
+                                static_cast<GLsizei>(ArraySize(transformFeedbackVaryings)),
+                                transformFeedbackVaryings, GL_INTERLEAVED_ATTRIBS);
     glLinkProgram(mProgram);
 
     // Re-link the program
@@ -185,7 +189,7 @@ TEST_P(TransformFeedbackTest, RecordAndDraw)
     glGetQueryObjectuiv(primitivesWrittenQuery, GL_QUERY_RESULT_EXT, &primitivesWritten);
     EXPECT_GL_NO_ERROR();
 
-    EXPECT_EQ(primitivesWritten, 6);
+    EXPECT_EQ(6u, primitivesWritten);
 
     // Nothing should have been drawn to the framebuffer
     EXPECT_PIXEL_EQ(getWindowWidth() / 2, getWindowHeight() / 2, 0, 0, 0, 0);
@@ -227,7 +231,7 @@ TEST_P(TransformFeedbackTest, BufferBinding)
     // Check that the buffer ID matches the one that was just bound
     GLint currentBufferBinding = 0;
     glGetIntegerv(GL_TRANSFORM_FEEDBACK_BUFFER_BINDING, &currentBufferBinding);
-    EXPECT_EQ(currentBufferBinding, mTransformFeedbackBuffer);
+    EXPECT_EQ(static_cast<GLuint>(currentBufferBinding), mTransformFeedbackBuffer);
 
     EXPECT_GL_NO_ERROR();
 
@@ -235,7 +239,7 @@ TEST_P(TransformFeedbackTest, BufferBinding)
     glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, transformFeedbackObject);
 
     glGetIntegerv(GL_TRANSFORM_FEEDBACK_BUFFER_BINDING, &currentBufferBinding);
-    EXPECT_EQ(currentBufferBinding, 0);
+    EXPECT_EQ(0, currentBufferBinding);
 
     EXPECT_GL_NO_ERROR();
 
@@ -243,7 +247,7 @@ TEST_P(TransformFeedbackTest, BufferBinding)
     glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, scratchBuffer, 0, 32);
 
     glGetIntegeri_v(GL_TRANSFORM_FEEDBACK_BUFFER_BINDING, 0, &currentBufferBinding);
-    EXPECT_EQ(scratchBuffer, currentBufferBinding);
+    EXPECT_EQ(static_cast<GLuint>(currentBufferBinding), scratchBuffer);
 
     EXPECT_GL_NO_ERROR();
 

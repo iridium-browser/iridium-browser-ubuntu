@@ -49,101 +49,75 @@ void PresentationController::provideTo(LocalFrame& frame, WebPresentationClient*
     WillBeHeapSupplement<LocalFrame>::provideTo(frame, PresentationController::supplementName(), PresentationController::create(frame, client));
 }
 
+WebPresentationClient* PresentationController::client()
+{
+    return m_client;
+}
+
 DEFINE_TRACE(PresentationController)
 {
     visitor->trace(m_presentation);
+    visitor->trace(m_sessions);
     WillBeHeapSupplement<LocalFrame>::trace(visitor);
     LocalFrameLifecycleObserver::trace(visitor);
 }
 
-void PresentationController::didChangeAvailability(bool available)
-{
-    if (m_presentation)
-        m_presentation->didChangeAvailability(available);
-}
-
-bool PresentationController::isAvailableChangeWatched() const
-{
-    if (!m_presentation)
-        return false;
-    return m_presentation->isAvailableChangeWatched();
-}
-
-void PresentationController::updateAvailableChangeWatched(bool watched)
-{
-    if (m_client)
-        m_client->updateAvailableChangeWatched(watched);
-}
-
 void PresentationController::didStartDefaultSession(WebPresentationSessionClient* sessionClient)
 {
-    if (!m_presentation) {
-        PresentationSession::dispose(sessionClient);
+    if (!m_presentation || !m_presentation->defaultRequest())
         return;
-    }
-
-    PresentationSession* session = PresentationSession::take(sessionClient, m_presentation);
-    m_presentation->didStartDefaultSession(session);
+    PresentationSession::take(this, adoptPtr(sessionClient), m_presentation->defaultRequest());
 }
 
 void PresentationController::didChangeSessionState(WebPresentationSessionClient* sessionClient, WebPresentationSessionState state)
 {
-    if (m_presentation)
-        m_presentation->didChangeSessionState(sessionClient, state);
-    else
-        PresentationSession::dispose(sessionClient);
+    OwnPtr<WebPresentationSessionClient> client = adoptPtr(sessionClient);
+
+    PresentationSession* session = findSession(client.get());
+    if (!session)
+        return;
+    session->didChangeState(state);
 }
 
 void PresentationController::didReceiveSessionTextMessage(WebPresentationSessionClient* sessionClient, const WebString& message)
 {
-    if (m_presentation)
-        m_presentation->didReceiveSessionTextMessage(sessionClient, message);
-    else
-        PresentationSession::dispose(sessionClient);
+    OwnPtr<WebPresentationSessionClient> client = adoptPtr(sessionClient);
+
+    PresentationSession* session = findSession(client.get());
+    if (!session)
+        return;
+    session->didReceiveTextMessage(message);
 }
 
-void PresentationController::startSession(const String& presentationUrl, const String& presentationId, WebPresentationSessionClientCallbacks* callbacks)
+void PresentationController::didReceiveSessionBinaryMessage(WebPresentationSessionClient* sessionClient, const uint8_t* data, size_t length)
 {
-    if (!m_client) {
-        delete callbacks;
-        return;
-    }
-    m_client->startSession(presentationUrl, presentationId, callbacks);
-}
+    OwnPtr<WebPresentationSessionClient> client = adoptPtr(sessionClient);
 
-void PresentationController::joinSession(const String& presentationUrl, const String& presentationId, WebPresentationSessionClientCallbacks* callbacks)
-{
-    if (!m_client) {
-        delete callbacks;
+    PresentationSession* session = findSession(client.get());
+    if (!session)
         return;
-    }
-    m_client->joinSession(presentationUrl, presentationId, callbacks);
-}
-
-void PresentationController::send(const String& presentationUrl, const String& presentationId, const String& message)
-{
-    if (!m_client)
-        return;
-    m_client->sendString(presentationUrl, presentationId, message);
-}
-
-void PresentationController::send(const String& presentationUrl, const String& presentationId, const uint8_t* data, size_t length)
-{
-    if (!m_client)
-        return;
-    m_client->sendArrayBuffer(presentationUrl, presentationId, data, length);
-}
-
-void PresentationController::closeSession(const String& url, const String& presentationId)
-{
-    if (!m_client)
-        return;
-    m_client->closeSession(url, presentationId);
+    session->didReceiveBinaryMessage(data, length);
 }
 
 void PresentationController::setPresentation(Presentation* presentation)
 {
     m_presentation = presentation;
+}
+
+void PresentationController::setDefaultRequestUrl(const KURL& url)
+{
+    if (!m_client)
+        return;
+
+    if (url.isValid())
+        m_client->setDefaultPresentationUrl(url.string());
+    else
+        m_client->setDefaultPresentationUrl(blink::WebString());
+}
+
+void PresentationController::registerSession(PresentationSession* session)
+{
+    m_sessions.add(session);
 }
 
 void PresentationController::willDetachFrameHost()
@@ -152,6 +126,16 @@ void PresentationController::willDetachFrameHost()
         m_client->setController(nullptr);
         m_client = nullptr;
     }
+}
+
+PresentationSession* PresentationController::findSession(WebPresentationSessionClient* sessionClient)
+{
+    for (const auto& session : m_sessions) {
+        if (session->matches(sessionClient))
+            return session.get();
+    }
+
+    return nullptr;
 }
 
 } // namespace blink

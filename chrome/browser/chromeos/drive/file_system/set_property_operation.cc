@@ -7,14 +7,11 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/sequenced_task_runner.h"
-#include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_delegate.h"
-#include "chrome/browser/chromeos/drive/job_scheduler.h"
-#include "chrome/browser/chromeos/drive/resource_metadata.h"
-#include "content/public/browser/browser_thread.h"
-
-using content::BrowserThread;
+#include "components/drive/drive.pb.h"
+#include "components/drive/file_errors.h"
+#include "components/drive/job_scheduler.h"
+#include "components/drive/resource_metadata.h"
 
 namespace drive {
 namespace file_system {
@@ -90,7 +87,7 @@ void SetPropertyOperation::SetProperty(
     const std::string& key,
     const std::string& value,
     const FileOperationCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   ResourceEntry* entry = new ResourceEntry;
@@ -106,7 +103,7 @@ void SetPropertyOperation::SetPropertyAfterUpdateLocalState(
     const FileOperationCallback& callback,
     const ResourceEntry* entry,
     FileError result) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (result == FILE_ERROR_OK) {

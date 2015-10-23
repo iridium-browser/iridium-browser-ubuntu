@@ -14,6 +14,7 @@
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_version_info.h"
 
 namespace gpu {
 namespace gles2 {
@@ -70,6 +71,12 @@ bool TargetIsSupported(const FeatureInfo* feature_info, GLuint target) {
       NOTREACHED();
       return false;
   }
+}
+
+GLuint GetBufferId(const Buffer* buffer) {
+  if (buffer)
+    return buffer->service_id();
+  return 0;
 }
 
 }  // anonymous namespace.
@@ -253,11 +260,22 @@ void ContextState::RestoreBufferBindings() const {
   if (vertex_attrib_manager.get()) {
     Buffer* element_array_buffer =
         vertex_attrib_manager->element_array_buffer();
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,
-        element_array_buffer ? element_array_buffer->service_id() : 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, GetBufferId(element_array_buffer));
   }
-  glBindBuffer(GL_ARRAY_BUFFER,
-               bound_array_buffer.get() ? bound_array_buffer->service_id() : 0);
+  glBindBuffer(GL_ARRAY_BUFFER, GetBufferId(bound_array_buffer.get()));
+  if (feature_info_->IsES3Enabled()) {
+    glBindBuffer(GL_COPY_READ_BUFFER,
+                 GetBufferId(bound_copy_read_buffer.get()));
+    glBindBuffer(GL_COPY_WRITE_BUFFER,
+                 GetBufferId(bound_copy_write_buffer.get()));
+    glBindBuffer(GL_PIXEL_PACK_BUFFER,
+                 GetBufferId(bound_pixel_pack_buffer.get()));
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER,
+                 GetBufferId(bound_pixel_unpack_buffer.get()));
+    glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,
+                 GetBufferId(bound_transform_feedback_buffer.get()));
+    glBindBuffer(GL_UNIFORM_BUFFER, GetBufferId(bound_uniform_buffer.get()));
+  }
 }
 
 void ContextState::RestoreRenderbufferBindings() {
@@ -424,6 +442,64 @@ void ContextState::EnableDisable(GLenum pname, bool enable) const {
   }
 }
 
+void ContextState::SetBoundBuffer(GLenum target, Buffer* buffer) {
+  switch (target) {
+    case GL_ARRAY_BUFFER:
+      bound_array_buffer = buffer;
+      break;
+    case GL_ELEMENT_ARRAY_BUFFER:
+      vertex_attrib_manager->SetElementArrayBuffer(buffer);
+      break;
+    case GL_COPY_READ_BUFFER:
+      bound_copy_read_buffer = buffer;
+      break;
+    case GL_COPY_WRITE_BUFFER:
+      bound_copy_write_buffer = buffer;
+      break;
+    case GL_PIXEL_PACK_BUFFER:
+      bound_pixel_pack_buffer = buffer;
+      break;
+    case GL_PIXEL_UNPACK_BUFFER:
+      bound_pixel_unpack_buffer = buffer;
+      break;
+    case GL_TRANSFORM_FEEDBACK_BUFFER:
+      bound_transform_feedback_buffer = buffer;
+      break;
+    case GL_UNIFORM_BUFFER:
+      bound_uniform_buffer = buffer;
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+}
+
+void ContextState::RemoveBoundBuffer(Buffer* buffer) {
+  DCHECK(buffer);
+  vertex_attrib_manager->Unbind(buffer);
+  if (bound_array_buffer.get() == buffer) {
+    bound_array_buffer = nullptr;
+  }
+  if (bound_copy_read_buffer.get() == buffer) {
+    bound_copy_read_buffer = nullptr;
+  }
+  if (bound_copy_write_buffer.get() == buffer) {
+    bound_copy_write_buffer = nullptr;
+  }
+  if (bound_pixel_pack_buffer.get() == buffer) {
+    bound_pixel_pack_buffer = nullptr;
+  }
+  if (bound_pixel_unpack_buffer.get() == buffer) {
+    bound_pixel_unpack_buffer = nullptr;
+  }
+  if (bound_transform_feedback_buffer.get() == buffer) {
+    bound_transform_feedback_buffer = nullptr;
+  }
+  if (bound_uniform_buffer.get() == buffer) {
+    bound_uniform_buffer = nullptr;
+  }
+}
+
 // Include the auto-generated part of this file. We split this because it means
 // we can easily edit the non-auto generated parts right here in this file
 // instead of having to edit some template or the code generator.
@@ -431,5 +507,3 @@ void ContextState::EnableDisable(GLenum pname, bool enable) const {
 
 }  // namespace gles2
 }  // namespace gpu
-
-

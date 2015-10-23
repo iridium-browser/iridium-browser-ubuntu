@@ -4,11 +4,11 @@
 
 #include "net/android/net_jni_registrar.h"
 
-#include "base/basictypes.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
 #include "net/android/android_private_key.h"
 #include "net/android/gurl_utils.h"
+#include "net/android/http_auth_negotiate_android.h"
 #include "net/android/keystore.h"
 #include "net/android/network_change_notifier_android.h"
 #include "net/android/network_library.h"
@@ -28,6 +28,7 @@ static base::android::RegistrationMethod kNetRegisteredMethods[] = {
     {"AndroidKeyStore", RegisterKeyStore},
     {"AndroidNetworkLibrary", RegisterNetworkLibrary},
     {"GURLUtils", RegisterGURLUtils},
+    {"HttpAuthNegotiateAndroid", HttpAuthNegotiateAndroid::Register},
     {"NetworkChangeNotifierAndroid", NetworkChangeNotifierAndroid::Register},
     {"ProxyConfigService", ProxyConfigServiceAndroid::Register},
     {"X509Util", RegisterX509Util},

@@ -66,8 +66,8 @@ ProcessingInstruction::~ProcessingInstruction()
     // crashes. We need to investigate ProcessingInstruction lifetime.
     if (inDocument() && m_isCSS)
         document().styleEngine().removeStyleSheetCandidateNode(this);
-#endif
     clearEventListenerForXSLT();
+#endif
 }
 
 EventListener* ProcessingInstruction::eventListenerForXSLT()
@@ -170,10 +170,10 @@ void ProcessingInstruction::process(const String& href, const String& charset)
     FetchRequest request(ResourceRequest(document().completeURL(href)), FetchInitiatorTypeNames::processinginstruction);
     if (m_isXSL) {
         if (RuntimeEnabledFeatures::xsltEnabled())
-            resource = document().fetcher()->fetchXSLStyleSheet(request);
+            resource = XSLStyleSheetResource::fetch(request, document().fetcher());
     } else {
         request.setCharset(charset.isEmpty() ? document().charset() : charset);
-        resource = document().fetcher()->fetchCSSStyleSheet(request);
+        resource = CSSStyleSheetResource::fetch(request, document().fetcher());
     }
 
     if (resource) {
@@ -258,15 +258,6 @@ void ProcessingInstruction::parseStyleSheet(const String& sheet)
         toXSLStyleSheet(m_sheet.get())->checkLoaded();
 }
 
-void ProcessingInstruction::setCSSStyleSheet(PassRefPtrWillBeRawPtr<CSSStyleSheet> sheet)
-{
-    ASSERT(!resource());
-    ASSERT(!m_loading);
-    m_sheet = sheet;
-    sheet->setTitle(m_title);
-    sheet->setDisabled(m_alternate);
-}
-
 Node::InsertionNotificationRequest ProcessingInstruction::insertedInto(ContainerNode* insertionPoint)
 {
     CharacterData::insertedInto(insertionPoint);
@@ -318,6 +309,7 @@ void ProcessingInstruction::clearSheet()
 DEFINE_TRACE(ProcessingInstruction)
 {
     visitor->trace(m_sheet);
+    visitor->trace(m_listenerForXSLT);
     CharacterData::trace(visitor);
 }
 

@@ -2,21 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/renderer/spellchecker/spellcheck.h"
+
+#include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/spellcheck_common.h"
 #include "chrome/common/spellcheck_result.h"
 #include "chrome/renderer/spellchecker/hunspell_engine.h"
-#include "chrome/renderer/spellchecker/spellcheck.h"
+#include "chrome/renderer/spellchecker/spellcheck_language.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebTextCheckingCompletion.h"
 #include "third_party/WebKit/public/web/WebTextCheckingResult.h"
 
+#define TYPOGRAPHICAL_APOSTROPHE L"\x2019"
+
 namespace {
+const int kNoOffset = 0;
+const int kNoTag = 0;
 
 base::FilePath GetHunspellDirectory() {
   base::FilePath hunspell_directory;
@@ -60,10 +67,13 @@ class SpellCheckTest : public testing::Test {
 #if defined(OS_MACOSX)
     // TODO(groby): Forcing spellcheck to use hunspell, even on OSX.
     // Instead, tests should exercise individual spelling engines.
-    spell_check_->spellcheck_.platform_spelling_engine_.reset(
+    spell_check_->languages_.push_back(new SpellcheckLanguage());
+    spell_check_->languages_.front()->platform_spelling_engine_.reset(
         new HunspellEngine);
+    spell_check_->languages_.front()->Init(file.Pass(), language);
+#else
+    spell_check_->AddSpellcheckLanguage(file.Pass(), language);
 #endif
-    spell_check_->Init(file.Pass(), std::set<std::string>(), language);
   }
 
   void EnableAutoCorrect(bool enable_autocorrect) {
@@ -75,8 +85,19 @@ class SpellCheckTest : public testing::Test {
   SpellCheck* spell_check() { return spell_check_.get(); }
 
   bool CheckSpelling(const std::string& word, int tag) {
-    return spell_check_->spellcheck_.platform_spelling_engine_->CheckSpelling(
-        base::ASCIIToUTF16(word), tag);
+    return spell_check_->languages_.front()
+        ->platform_spelling_engine_->CheckSpelling(base::ASCIIToUTF16(word),
+                                                   tag);
+  }
+
+  bool IsValidContraction(const base::string16& word, int tag) {
+    return spell_check_->languages_.front()->IsValidContraction(word, tag);
+  }
+
+  static void FillSuggestions(
+      const std::vector<std::vector<base::string16>>& suggestions_list,
+      std::vector<base::string16>* optional_suggestions) {
+    SpellCheck::FillSuggestions(suggestions_list, optional_suggestions);
   }
 
 #if !defined(OS_MACOSX)
@@ -200,7 +221,7 @@ TEST_F(SpellCheckTest, SpellCheckStrings_EN_US) {
     // A valid English contraction
     {L"isn't", true},
     // A valid English contraction with a typographical apostrophe.
-    {L"isn\x2019t", true},
+    {L"isn" TYPOGRAPHICAL_APOSTROPHE L"t", true},
     // A valid English word enclosed with underscores.
     {L"_hello_", true},
 
@@ -386,8 +407,9 @@ TEST_F(SpellCheckTest, SpellCheckStrings_EN_US) {
     int misspelling_length;
     bool result = spell_check()->SpellCheckWord(
         base::WideToUTF16(kTestCases[i].input).c_str(),
+        kNoOffset,
         static_cast<int>(input_length),
-        0,
+        kNoTag,
         &misspelling_start,
         &misspelling_length, NULL);
 
@@ -438,8 +460,9 @@ TEST_F(SpellCheckTest, SpellCheckSuggestions_EN_US) {
     int misspelling_length;
     bool result = spell_check()->SpellCheckWord(
         base::WideToUTF16(kTestCases[i].input).c_str(),
+        kNoOffset,
         static_cast<int>(input_length),
-        0,
+        kNoTag,
         &misspelling_start,
         &misspelling_length,
         &suggestions);
@@ -817,8 +840,9 @@ TEST_F(SpellCheckTest, MAYBE_SpellCheckText) {
     int misspelling_length = 0;
     bool result = spell_check()->SpellCheckWord(
         base::WideToUTF16(kTestCases[i].input).c_str(),
+        kNoOffset,
         static_cast<int>(input_length),
-        0,
+        kNoTag,
         &misspelling_start,
         &misspelling_length, NULL);
 
@@ -902,8 +926,9 @@ TEST_F(SpellCheckTest, MisspelledWords) {
     int misspelling_start = 0;
     int misspelling_length = 0;
     bool result = spell_check()->SpellCheckWord(word.c_str(),
+                                                kNoOffset,
                                                 word_length,
-                                                0,
+                                                kNoTag,
                                                 &misspelling_start,
                                                 &misspelling_length,
                                                 NULL);
@@ -1125,49 +1150,109 @@ TEST_F(SpellCheckTest, RequestSpellCheckMultipleTimesWithoutInitialization) {
     EXPECT_EQ(completion[i].completion_count_, 1U);
 }
 
-TEST_F(SpellCheckTest, CreateTextCheckingResults) {
-  // Verify that the SpellCheck class keeps the spelling marker added to a
-  // misspelled word "zz".
-  {
-    base::string16 text = base::ASCIIToUTF16("zz");
-    std::vector<SpellCheckResult> spellcheck_results;
-    spellcheck_results.push_back(SpellCheckResult(
-        SpellCheckResult::SPELLING, 0, 2, base::string16()));
-    blink::WebVector<blink::WebTextCheckingResult> textcheck_results;
-    spell_check()->CreateTextCheckingResults(SpellCheck::USE_NATIVE_CHECKER,
-                                             0,
-                                             text,
-                                             spellcheck_results,
-                                             &textcheck_results);
-    EXPECT_EQ(spellcheck_results.size(), textcheck_results.size());
-    EXPECT_EQ(blink::WebTextDecorationTypeSpelling,
-              textcheck_results[0].decoration);
-    EXPECT_EQ(spellcheck_results[0].location, textcheck_results[0].location);
-    EXPECT_EQ(spellcheck_results[0].length, textcheck_results[0].length);
-  }
+#endif
 
-  // Verify that the SpellCheck class replaces the spelling marker added to a
-  // contextually-misspelled word "bean" with a grammar marker.
-  {
-    base::string16 text = base::ASCIIToUTF16("I have bean to USA.");
-    std::vector<SpellCheckResult> spellcheck_results;
-    spellcheck_results.push_back(SpellCheckResult(
-        SpellCheckResult::SPELLING, 7, 4, base::string16()));
-    blink::WebVector<blink::WebTextCheckingResult> textcheck_results;
-    spell_check()->CreateTextCheckingResults(SpellCheck::USE_NATIVE_CHECKER,
-                                             0,
-                                             text,
-                                             spellcheck_results,
-                                             &textcheck_results);
-    EXPECT_EQ(spellcheck_results.size(), textcheck_results.size());
-    EXPECT_EQ(blink::WebTextDecorationTypeGrammar,
-              textcheck_results[0].decoration);
-    EXPECT_EQ(spellcheck_results[0].location, textcheck_results[0].location);
-    EXPECT_EQ(spellcheck_results[0].length, textcheck_results[0].length);
-  }
+// Verify that the SpellCheck class keeps the spelling marker added to a
+// misspelled word "zz".
+TEST_F(SpellCheckTest, CreateTextCheckingResultsKeepsMarkers) {
+  base::string16 text = base::ASCIIToUTF16("zz");
+  std::vector<SpellCheckResult> spellcheck_results;
+  spellcheck_results.push_back(
+      SpellCheckResult(SpellCheckResult::SPELLING, 0, 2, base::string16()));
+  blink::WebVector<blink::WebTextCheckingResult> textcheck_results;
+  spell_check()->CreateTextCheckingResults(SpellCheck::USE_NATIVE_CHECKER, 0,
+                                           text, spellcheck_results,
+                                           &textcheck_results);
+  ASSERT_EQ(spellcheck_results.size(), textcheck_results.size());
+  EXPECT_EQ(blink::WebTextDecorationTypeSpelling,
+            textcheck_results[0].decoration);
+  EXPECT_EQ(spellcheck_results[0].location, textcheck_results[0].location);
+  EXPECT_EQ(spellcheck_results[0].length, textcheck_results[0].length);
 }
 
-#endif
+// Verify that the SpellCheck class replaces the spelling marker added to a
+// contextually-misspelled word "bean" with a grammar marker.
+TEST_F(SpellCheckTest, CreateTextCheckingResultsAddsGrammarMarkers) {
+  base::string16 text = base::ASCIIToUTF16("I have bean to USA.");
+  std::vector<SpellCheckResult> spellcheck_results;
+  spellcheck_results.push_back(
+      SpellCheckResult(SpellCheckResult::SPELLING, 7, 4, base::string16()));
+  blink::WebVector<blink::WebTextCheckingResult> textcheck_results;
+  spell_check()->CreateTextCheckingResults(SpellCheck::USE_NATIVE_CHECKER, 0,
+                                           text, spellcheck_results,
+                                           &textcheck_results);
+  ASSERT_EQ(spellcheck_results.size(), textcheck_results.size());
+  EXPECT_EQ(blink::WebTextDecorationTypeGrammar,
+            textcheck_results[0].decoration);
+  EXPECT_EQ(spellcheck_results[0].location, textcheck_results[0].location);
+  EXPECT_EQ(spellcheck_results[0].length, textcheck_results[0].length);
+}
+
+// Verify that the SpellCheck preserves the original apostrophe type in the
+// checked text, regardless of the type of apostrophe the browser returns.
+TEST_F(SpellCheckTest, CreateTextCheckingResultsKeepsTypographicalApostrophe) {
+  base::string16 text = base::WideToUTF16(
+        L"Ik've havn" TYPOGRAPHICAL_APOSTROPHE L"t ni'n"
+        TYPOGRAPHICAL_APOSTROPHE L"out-s I've I" TYPOGRAPHICAL_APOSTROPHE
+        L"ve");
+  std::vector<SpellCheckResult> spellcheck_results;
+
+  // All typewriter apostrophe results.
+  spellcheck_results.push_back(SpellCheckResult(SpellCheckResult::SPELLING, 0,
+                                                5, base::UTF8ToUTF16("I've")));
+  spellcheck_results.push_back(SpellCheckResult(
+      SpellCheckResult::SPELLING, 6, 6, base::UTF8ToUTF16("haven't")));
+  spellcheck_results.push_back(SpellCheckResult(
+      SpellCheckResult::SPELLING, 13, 10, base::UTF8ToUTF16("in'n'out's")));
+
+  // Replacements that differ only by apostrophe type should be ignored.
+  spellcheck_results.push_back(SpellCheckResult(SpellCheckResult::SPELLING, 24,
+                                                4, base::UTF8ToUTF16("I've")));
+  spellcheck_results.push_back(SpellCheckResult(SpellCheckResult::SPELLING, 29,
+                                                4, base::UTF8ToUTF16("I've")));
+
+  // All typographical apostrophe results.
+  spellcheck_results.push_back(
+      SpellCheckResult(SpellCheckResult::SPELLING, 0, 5,
+                       base::WideToUTF16(L"I" TYPOGRAPHICAL_APOSTROPHE L"ve")));
+  spellcheck_results.push_back(SpellCheckResult(
+      SpellCheckResult::SPELLING, 6, 6,
+      base::WideToUTF16(L"haven" TYPOGRAPHICAL_APOSTROPHE L"t")));
+  spellcheck_results.push_back(SpellCheckResult(
+        SpellCheckResult::SPELLING, 13, 10, base::WideToUTF16(
+            L"in" TYPOGRAPHICAL_APOSTROPHE L"n" TYPOGRAPHICAL_APOSTROPHE L"out"
+            TYPOGRAPHICAL_APOSTROPHE L"s")));
+
+  // Replacements that differ only by apostrophe type should be ignored.
+  spellcheck_results.push_back(
+      SpellCheckResult(SpellCheckResult::SPELLING, 24, 4,
+                       base::WideToUTF16(L"I" TYPOGRAPHICAL_APOSTROPHE L"ve")));
+  spellcheck_results.push_back(
+      SpellCheckResult(SpellCheckResult::SPELLING, 29, 4,
+                       base::WideToUTF16(L"I" TYPOGRAPHICAL_APOSTROPHE L"ve")));
+
+  blink::WebVector<blink::WebTextCheckingResult> textcheck_results;
+  spell_check()->CreateTextCheckingResults(SpellCheck::USE_NATIVE_CHECKER, 0,
+                                           text, spellcheck_results,
+                                           &textcheck_results);
+
+  static const wchar_t* kExpectedReplacements[] = {
+      L"I've",
+      L"haven" TYPOGRAPHICAL_APOSTROPHE L"t",
+      L"in'n" TYPOGRAPHICAL_APOSTROPHE L"out's",
+      L"I've",
+      L"haven" TYPOGRAPHICAL_APOSTROPHE L"t",
+      L"in'n" TYPOGRAPHICAL_APOSTROPHE L"out" TYPOGRAPHICAL_APOSTROPHE L"s",
+  };
+
+  ASSERT_EQ(arraysize(kExpectedReplacements), textcheck_results.size());
+  for (size_t i = 0; i < arraysize(kExpectedReplacements); ++i) {
+    EXPECT_EQ(base::WideToUTF16(kExpectedReplacements[i]),
+              textcheck_results[i].replacement)
+        << "i=" << i << "\nactual: \""
+        << base::string16(textcheck_results[i].replacement) << "\"";
+  }
+}
 
 // Checks some words that should be present in all English dictionaries.
 TEST_F(SpellCheckTest, EnglishWords) {
@@ -1210,8 +1295,9 @@ TEST_F(SpellCheckTest, EnglishWords) {
       int misspelling_length = 0;
       bool result = spell_check()->SpellCheckWord(
           base::ASCIIToUTF16(kTestCases[i].input).c_str(),
+          kNoOffset,
           static_cast<int>(input_length),
-          0,
+          kNoTag,
           &misspelling_start,
           &misspelling_length, NULL);
 
@@ -1257,8 +1343,9 @@ TEST_F(SpellCheckTest, NoSuggest) {
     int misspelling_length = 0;
     bool result = spell_check()->SpellCheckWord(
         base::ASCIIToUTF16(kTestCases[i].suggestion).c_str(),
+        kNoOffset,
         static_cast<int>(suggestion_length),
-        0,
+        kNoTag,
         &misspelling_start,
         &misspelling_length, NULL);
 
@@ -1272,8 +1359,9 @@ TEST_F(SpellCheckTest, NoSuggest) {
       input_length = strlen(kTestCases[i].input);
     result = spell_check()->SpellCheckWord(
         base::ASCIIToUTF16(kTestCases[i].input).c_str(),
+        kNoOffset,
         static_cast<int>(input_length),
-        0,
+        kNoTag,
         &misspelling_start,
         &misspelling_length,
         &suggestions);
@@ -1332,8 +1420,9 @@ TEST_F(SpellCheckTest, SpellingEngine_CheckSpelling) {
   // flags internal state that a dictionary was requested. The second one will
   // take the passed-in file and initialize hunspell with it. (The file was
   // passed to hunspell in the ctor for the test fixture).
-  // This needs to be done since we need to ensure the SpellingEngine object
-  // contained in |spellcheck_| from the test fixture does get initialized.
+  // This needs to be done since we need to ensure the SpellingEngine objects
+  // contained in the SpellcheckLanguages in |languages_| from the test fixture
+  // does get initialized.
   // TODO(groby): Clean up this mess.
   InitializeIfNeeded();
   ASSERT_FALSE(InitializeIfNeeded());
@@ -1362,8 +1451,9 @@ TEST_F(SpellCheckTest, LogicalSuggestions) {
     std::vector<base::string16> suggestions;
     EXPECT_FALSE(spell_check()->SpellCheckWord(
         base::ASCIIToUTF16(kTestCases[i].misspelled).c_str(),
+        kNoOffset,
         strlen(kTestCases[i].misspelled),
-        0,
+        kNoTag,
         &misspelling_start,
         &misspelling_length,
         &suggestions));
@@ -1371,4 +1461,128 @@ TEST_F(SpellCheckTest, LogicalSuggestions) {
     if (suggestions.size() > 0)
       EXPECT_EQ(suggestions[0], base::ASCIIToUTF16(kTestCases[i].suggestion));
   }
+}
+
+// Words with apostrophes should be valid contractions.
+TEST_F(SpellCheckTest, IsValidContraction) {
+  static const char* kLanguages[] = {
+    "en-AU",
+    "en-CA",
+    "en-GB",
+    "en-US",
+  };
+
+  static const wchar_t* kWords[] = {
+    L"in'n'out",
+    L"in" TYPOGRAPHICAL_APOSTROPHE L"n" TYPOGRAPHICAL_APOSTROPHE L"out",
+  };
+
+  for (size_t i = 0; i < arraysize(kLanguages); ++i) {
+    ReinitializeSpellCheck(kLanguages[i]);
+    for (size_t j = 0; j < arraysize(kWords); ++j)
+      EXPECT_TRUE(IsValidContraction(base::WideToUTF16(kWords[j]), 0));
+  }
+}
+
+TEST_F(SpellCheckTest, FillSuggestions_OneLanguageNoSuggestions) {
+  std::vector<std::vector<base::string16>> suggestions_list;
+  std::vector<base::string16> suggestion_results;
+
+  suggestions_list.resize(1);
+
+  FillSuggestions(suggestions_list, &suggestion_results);
+  EXPECT_TRUE(suggestion_results.empty());
+}
+
+TEST_F(SpellCheckTest, FillSuggestions_OneLanguageFewSuggestions) {
+  std::vector<std::vector<base::string16>> suggestions_list;
+  std::vector<base::string16> suggestion_results;
+
+  suggestions_list.resize(1);
+  suggestions_list[0].push_back(base::ASCIIToUTF16("foo"));
+
+  FillSuggestions(suggestions_list, &suggestion_results);
+  ASSERT_EQ(1U, suggestion_results.size());
+  EXPECT_EQ(base::ASCIIToUTF16("foo"), suggestion_results[0]);
+}
+
+TEST_F(SpellCheckTest, FillSuggestions_OneLanguageManySuggestions) {
+  std::vector<std::vector<base::string16>> suggestions_list;
+  std::vector<base::string16> suggestion_results;
+
+  suggestions_list.resize(1);
+  for (int i = 0; i < chrome::spellcheck_common::kMaxSuggestions + 2; ++i)
+    suggestions_list[0].push_back(base::ASCIIToUTF16(base::IntToString(i)));
+
+  FillSuggestions(suggestions_list, &suggestion_results);
+  ASSERT_EQ(static_cast<size_t>(chrome::spellcheck_common::kMaxSuggestions),
+            suggestion_results.size());
+  for (int i = 0; i < chrome::spellcheck_common::kMaxSuggestions; ++i)
+    EXPECT_EQ(base::ASCIIToUTF16(base::IntToString(i)), suggestion_results[i]);
+}
+
+TEST_F(SpellCheckTest, FillSuggestions_RemoveDuplicates) {
+  std::vector<std::vector<base::string16>> suggestions_list;
+  std::vector<base::string16> suggestion_results;
+
+  suggestions_list.resize(2);
+  for (size_t i = 0; i < 2; ++i) {
+    suggestions_list[i].push_back(base::ASCIIToUTF16("foo"));
+    suggestions_list[i].push_back(base::ASCIIToUTF16("bar"));
+    suggestions_list[i].push_back(base::ASCIIToUTF16("baz"));
+  }
+
+  FillSuggestions(suggestions_list, &suggestion_results);
+  ASSERT_EQ(3U, suggestion_results.size());
+  EXPECT_EQ(base::ASCIIToUTF16("foo"), suggestion_results[0]);
+  EXPECT_EQ(base::ASCIIToUTF16("bar"), suggestion_results[1]);
+  EXPECT_EQ(base::ASCIIToUTF16("baz"), suggestion_results[2]);
+}
+
+TEST_F(SpellCheckTest, FillSuggestions_TwoLanguages) {
+  std::vector<std::vector<base::string16>> suggestions_list;
+  std::vector<base::string16> suggestion_results;
+
+  suggestions_list.resize(2);
+  for (size_t i = 0; i < 2; ++i) {
+    std::string prefix = base::IntToString(i);
+    suggestions_list[i].push_back(base::ASCIIToUTF16(prefix + "foo"));
+    suggestions_list[i].push_back(base::ASCIIToUTF16(prefix + "bar"));
+    suggestions_list[i].push_back(base::ASCIIToUTF16(prefix + "baz"));
+  }
+
+  // Yes, this test assumes kMaxSuggestions is 5. If it isn't, the test needs
+  // to be updated accordingly.
+  ASSERT_EQ(5, chrome::spellcheck_common::kMaxSuggestions);
+  FillSuggestions(suggestions_list, &suggestion_results);
+  ASSERT_EQ(5U, suggestion_results.size());
+  EXPECT_EQ(base::ASCIIToUTF16("0foo"), suggestion_results[0]);
+  EXPECT_EQ(base::ASCIIToUTF16("1foo"), suggestion_results[1]);
+  EXPECT_EQ(base::ASCIIToUTF16("0bar"), suggestion_results[2]);
+  EXPECT_EQ(base::ASCIIToUTF16("1bar"), suggestion_results[3]);
+  EXPECT_EQ(base::ASCIIToUTF16("0baz"), suggestion_results[4]);
+}
+
+TEST_F(SpellCheckTest, FillSuggestions_ThreeLanguages) {
+  std::vector<std::vector<base::string16>> suggestions_list;
+  std::vector<base::string16> suggestion_results;
+
+  suggestions_list.resize(3);
+  for (size_t i = 0; i < 3; ++i) {
+    std::string prefix = base::IntToString(i);
+    suggestions_list[i].push_back(base::ASCIIToUTF16(prefix + "foo"));
+    suggestions_list[i].push_back(base::ASCIIToUTF16(prefix + "bar"));
+    suggestions_list[i].push_back(base::ASCIIToUTF16(prefix + "baz"));
+  }
+
+  // Yes, this test assumes kMaxSuggestions is 5. If it isn't, the test needs
+  // to be updated accordingly.
+  ASSERT_EQ(5, chrome::spellcheck_common::kMaxSuggestions);
+  FillSuggestions(suggestions_list, &suggestion_results);
+  ASSERT_EQ(5U, suggestion_results.size());
+  EXPECT_EQ(base::ASCIIToUTF16("0foo"), suggestion_results[0]);
+  EXPECT_EQ(base::ASCIIToUTF16("1foo"), suggestion_results[1]);
+  EXPECT_EQ(base::ASCIIToUTF16("2foo"), suggestion_results[2]);
+  EXPECT_EQ(base::ASCIIToUTF16("0bar"), suggestion_results[3]);
+  EXPECT_EQ(base::ASCIIToUTF16("1bar"), suggestion_results[4]);
 }

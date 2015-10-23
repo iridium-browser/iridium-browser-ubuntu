@@ -5,13 +5,11 @@
 #include "media/mojo/services/media_type_converters.h"
 
 #include "media/base/audio_decoder_config.h"
+#include "media/base/cdm_config.h"
 #include "media/base/decoder_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using media::DecoderBuffer;
-
-namespace mojo {
-namespace test {
+namespace media {
 
 TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_Normal) {
   const uint8 kData[] = "hello, world";
@@ -26,12 +24,12 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_Normal) {
   buffer->set_timestamp(base::TimeDelta::FromMilliseconds(123));
   buffer->set_duration(base::TimeDelta::FromMilliseconds(456));
   buffer->set_splice_timestamp(base::TimeDelta::FromMilliseconds(200));
-  buffer->set_discard_padding(media::DecoderBuffer::DiscardPadding(
-      base::TimeDelta::FromMilliseconds(5),
-      base::TimeDelta::FromMilliseconds(6)));
+  buffer->set_discard_padding(
+      DecoderBuffer::DiscardPadding(base::TimeDelta::FromMilliseconds(5),
+                                    base::TimeDelta::FromMilliseconds(6)));
 
   // Convert from and back.
-  MediaDecoderBufferPtr ptr(MediaDecoderBuffer::From(buffer));
+  interfaces::DecoderBufferPtr ptr(interfaces::DecoderBuffer::From(buffer));
   scoped_refptr<DecoderBuffer> result(ptr.To<scoped_refptr<DecoderBuffer>>());
 
   // Compare.
@@ -56,7 +54,7 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_EOS) {
   scoped_refptr<DecoderBuffer> buffer(DecoderBuffer::CreateEOSBuffer());
 
   // Convert from and back.
-  MediaDecoderBufferPtr ptr(MediaDecoderBuffer::From(buffer));
+  interfaces::DecoderBufferPtr ptr(interfaces::DecoderBuffer::From(buffer));
   scoped_refptr<DecoderBuffer> result(ptr.To<scoped_refptr<DecoderBuffer>>());
 
   // Compare.
@@ -74,7 +72,7 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_KeyFrame) {
   EXPECT_TRUE(buffer->is_key_frame());
 
   // Convert from and back.
-  MediaDecoderBufferPtr ptr(MediaDecoderBuffer::From(buffer));
+  interfaces::DecoderBufferPtr ptr(interfaces::DecoderBuffer::From(buffer));
   scoped_refptr<DecoderBuffer> result(ptr.To<scoped_refptr<DecoderBuffer>>());
 
   // Compare.
@@ -90,19 +88,19 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_EncryptedBuffer) {
   const char kKeyId[] = "00112233445566778899aabbccddeeff";
   const char kIv[] = "0123456789abcdef";
 
-  std::vector<media::SubsampleEntry> subsamples;
-  subsamples.push_back(media::SubsampleEntry(10, 20));
-  subsamples.push_back(media::SubsampleEntry(30, 40));
-  subsamples.push_back(media::SubsampleEntry(50, 60));
+  std::vector<SubsampleEntry> subsamples;
+  subsamples.push_back(SubsampleEntry(10, 20));
+  subsamples.push_back(SubsampleEntry(30, 40));
+  subsamples.push_back(SubsampleEntry(50, 60));
 
   // Original.
   scoped_refptr<DecoderBuffer> buffer(DecoderBuffer::CopyFrom(
       reinterpret_cast<const uint8*>(&kData), kDataSize));
   buffer->set_decrypt_config(
-      make_scoped_ptr(new media::DecryptConfig(kKeyId, kIv, subsamples)));
+      make_scoped_ptr(new DecryptConfig(kKeyId, kIv, subsamples)));
 
   // Convert from and back.
-  MediaDecoderBufferPtr ptr(MediaDecoderBuffer::From(buffer));
+  interfaces::DecoderBufferPtr ptr(interfaces::DecoderBuffer::From(buffer));
   scoped_refptr<DecoderBuffer> result(ptr.To<scoped_refptr<DecoderBuffer>>());
 
   // Compare.
@@ -112,9 +110,10 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_EncryptedBuffer) {
   EXPECT_TRUE(buffer->decrypt_config()->Matches(*result->decrypt_config()));
 
   // Test empty IV. This is used for clear buffer in an encrypted stream.
-  buffer->set_decrypt_config(make_scoped_ptr(new media::DecryptConfig(
-      kKeyId, "", std::vector<media::SubsampleEntry>())));
-  result = MediaDecoderBuffer::From(buffer).To<scoped_refptr<DecoderBuffer>>();
+  buffer->set_decrypt_config(make_scoped_ptr(
+      new DecryptConfig(kKeyId, "", std::vector<SubsampleEntry>())));
+  result = interfaces::DecoderBuffer::From(buffer)
+               .To<scoped_refptr<DecoderBuffer>>();
   EXPECT_TRUE(buffer->decrypt_config()->Matches(*result->decrypt_config()));
   EXPECT_TRUE(buffer->decrypt_config()->iv().empty());
 }
@@ -124,55 +123,51 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_EncryptedBuffer) {
 TEST(MediaTypeConvertersTest, ConvertAudioDecoderConfig_Normal) {
   const uint8 kExtraData[] = "config extra data";
   const int kExtraDataSize = arraysize(kExtraData);
-  media::AudioDecoderConfig config;
-  config.Initialize(media::kCodecAAC,
-                    media::kSampleFormatU8,
-                    media::CHANNEL_LAYOUT_SURROUND,
-                    48000,
-                    reinterpret_cast<const uint8*>(&kExtraData),
-                    kExtraDataSize,
-                    false,
-                    false,
-                    base::TimeDelta(),
-                    0);
-  AudioDecoderConfigPtr ptr(AudioDecoderConfig::From(config));
-  media::AudioDecoderConfig result(ptr.To<media::AudioDecoderConfig>());
+  AudioDecoderConfig config;
+  config.Initialize(kCodecAAC, kSampleFormatU8, CHANNEL_LAYOUT_SURROUND, 48000,
+                    reinterpret_cast<const uint8*>(&kExtraData), kExtraDataSize,
+                    false, base::TimeDelta(), 0);
+  interfaces::AudioDecoderConfigPtr ptr(
+      interfaces::AudioDecoderConfig::From(config));
+  AudioDecoderConfig result(ptr.To<AudioDecoderConfig>());
   EXPECT_TRUE(result.Matches(config));
 }
 
 TEST(MediaTypeConvertersTest, ConvertAudioDecoderConfig_NullExtraData) {
-  media::AudioDecoderConfig config;
-  config.Initialize(media::kCodecAAC,
-                    media::kSampleFormatU8,
-                    media::CHANNEL_LAYOUT_SURROUND,
-                    48000,
-                    NULL,
-                    0,
-                    false,
-                    false,
-                    base::TimeDelta(),
-                    0);
-  AudioDecoderConfigPtr ptr(AudioDecoderConfig::From(config));
-  media::AudioDecoderConfig result(ptr.To<media::AudioDecoderConfig>());
+  AudioDecoderConfig config;
+  config.Initialize(kCodecAAC, kSampleFormatU8, CHANNEL_LAYOUT_SURROUND, 48000,
+                    NULL, 0, false, base::TimeDelta(), 0);
+  interfaces::AudioDecoderConfigPtr ptr(
+      interfaces::AudioDecoderConfig::From(config));
+  AudioDecoderConfig result(ptr.To<AudioDecoderConfig>());
   EXPECT_TRUE(result.Matches(config));
 }
 
 TEST(MediaTypeConvertersTest, ConvertAudioDecoderConfig_Encrypted) {
-  media::AudioDecoderConfig config;
-  config.Initialize(media::kCodecAAC,
-                    media::kSampleFormatU8,
-                    media::CHANNEL_LAYOUT_SURROUND,
-                    48000,
-                    NULL,
-                    0,
+  AudioDecoderConfig config;
+  config.Initialize(kCodecAAC, kSampleFormatU8, CHANNEL_LAYOUT_SURROUND, 48000,
+                    NULL, 0,
                     true,  // Is encrypted.
-                    false,
-                    base::TimeDelta(),
-                    0);
-  AudioDecoderConfigPtr ptr(AudioDecoderConfig::From(config));
-  media::AudioDecoderConfig result(ptr.To<media::AudioDecoderConfig>());
+                    base::TimeDelta(), 0);
+  interfaces::AudioDecoderConfigPtr ptr(
+      interfaces::AudioDecoderConfig::From(config));
+  AudioDecoderConfig result(ptr.To<AudioDecoderConfig>());
   EXPECT_TRUE(result.Matches(config));
 }
 
-}  // namespace test
-}  // namespace mojo
+TEST(MediaTypeConvertersTest, ConvertCdmConfig) {
+  CdmConfig config;
+  config.allow_distinctive_identifier = true;
+  config.allow_persistent_state = false;
+  config.use_hw_secure_codecs = true;
+
+  interfaces::CdmConfigPtr ptr(interfaces::CdmConfig::From(config));
+  CdmConfig result(ptr.To<CdmConfig>());
+
+  EXPECT_EQ(config.allow_distinctive_identifier,
+            result.allow_distinctive_identifier);
+  EXPECT_EQ(config.allow_persistent_state, result.allow_persistent_state);
+  EXPECT_EQ(config.use_hw_secure_codecs, result.use_hw_secure_codecs);
+}
+
+}  // namespace media

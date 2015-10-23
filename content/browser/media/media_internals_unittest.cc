@@ -41,8 +41,8 @@ class MediaInternalsTestBase {
     std::string utf8_update = base::UTF16ToUTF8(update);
     const std::string::size_type first_brace = utf8_update.find('{');
     const std::string::size_type last_brace = utf8_update.rfind('}');
-    scoped_ptr<base::Value> output_value(base::JSONReader::Read(
-        utf8_update.substr(first_brace, last_brace - first_brace + 1)));
+    scoped_ptr<base::Value> output_value = base::JSONReader::Read(
+        utf8_update.substr(first_brace, last_brace - first_brace + 1));
     CHECK(output_value);
 
     base::DictionaryValue* output_dict = NULL;
@@ -151,16 +151,18 @@ TEST_F(MediaInternalsVideoCaptureDeviceTest,
   // be updated at the same time as the media internals JS files.
   const float kFrameRate = 30.0f;
   const gfx::Size kFrameSize(1280, 720);
-  const media::VideoPixelFormat kPixelFormat = media::PIXEL_FORMAT_I420;
-  const media::VideoCaptureFormat capture_format(
-      kFrameSize, kFrameRate, kPixelFormat);
-  const std::string expected_string =
-      base::StringPrintf("resolution: %s, fps: %.3f, pixel format: %s",
-                         kFrameSize.ToString().c_str(),
-                         kFrameRate,
-                         media::VideoCaptureFormat::PixelFormatToString(
-                              kPixelFormat).c_str());
-  EXPECT_EQ(expected_string, capture_format.ToString());
+  const media::VideoCapturePixelFormat kPixelFormat =
+      media::VIDEO_CAPTURE_PIXEL_FORMAT_I420;
+  const media::VideoPixelStorage kPixelStorage = media::PIXEL_STORAGE_CPU;
+  const media::VideoCaptureFormat capture_format(kFrameSize, kFrameRate,
+                                                 kPixelFormat, kPixelStorage);
+  const std::string expected_string = base::StringPrintf(
+      "(%s)@%.3ffps, pixel format: %s storage: %s.",
+      kFrameSize.ToString().c_str(), kFrameRate,
+      media::VideoCaptureFormat::PixelFormatToString(kPixelFormat).c_str(),
+      media::VideoCaptureFormat::PixelStorageToString(kPixelStorage).c_str());
+  EXPECT_EQ(expected_string,
+            media::VideoCaptureFormat::ToString(capture_format));
 }
 
 TEST_F(MediaInternalsVideoCaptureDeviceTest,
@@ -168,7 +170,8 @@ TEST_F(MediaInternalsVideoCaptureDeviceTest,
   const int kWidth = 1280;
   const int kHeight = 720;
   const float kFrameRate = 30.0f;
-  const media::VideoPixelFormat kPixelFormat = media::PIXEL_FORMAT_I420;
+  const media::VideoCapturePixelFormat kPixelFormat =
+      media::VIDEO_CAPTURE_PIXEL_FORMAT_I420;
   const media::VideoCaptureFormat format_hd({kWidth, kHeight},
       kFrameRate, kPixelFormat);
   media::VideoCaptureFormats formats{};
@@ -207,7 +210,7 @@ TEST_F(MediaInternalsVideoCaptureDeviceTest,
 #endif
   ExpectString("name", "dummy");
   base::ListValue expected_list;
-  expected_list.AppendString(format_hd.ToString());
+  expected_list.AppendString(media::VideoCaptureFormat::ToString(format_hd));
   ExpectListOfStrings("formats", expected_list);
 #if defined(OS_LINUX)
   ExpectString("captureApi", "V4L2 SPLANE");

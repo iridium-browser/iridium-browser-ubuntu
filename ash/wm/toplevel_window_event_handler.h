@@ -8,7 +8,7 @@
 #include <set>
 
 #include "ash/ash_export.h"
-#include "ash/display/display_controller.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/wm/wm_types.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
@@ -33,7 +33,7 @@ class WindowResizer;
 class ASH_EXPORT ToplevelWindowEventHandler
     : public ui::EventHandler,
       public aura::client::WindowMoveClient,
-      public DisplayController::Observer {
+      public WindowTreeHostManager::Observer {
  public:
   ToplevelWindowEventHandler();
   ~ToplevelWindowEventHandler() override;
@@ -50,7 +50,7 @@ class ASH_EXPORT ToplevelWindowEventHandler
       aura::client::WindowMoveSource move_source) override;
   void EndMoveLoop() override;
 
-  // Overridden form ash::DisplayController::Observer:
+  // Overridden form ash::WindowTreeHostManager::Observer:
   void OnDisplayConfigurationChanging() override;
 
  private:
@@ -88,6 +88,9 @@ class ASH_EXPORT ToplevelWindowEventHandler
 
   // Called for mouse exits to hide window resize shadows.
   void HandleMouseExited(aura::Window* target, ui::LocatedEvent* event);
+
+  // Called when mouse capture is lost.
+  void HandleCaptureLost(ui::LocatedEvent* event);
 
   // Sets |window|'s state type to |new_state_type|. Called after the drag has
   // been completed for fling gestures.

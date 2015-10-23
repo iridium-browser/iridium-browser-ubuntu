@@ -11,13 +11,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/drive/drive_notification_observer.h"
-#include "chrome/browser/drive/drive_service_interface.h"
 #include "chrome/browser/sync_file_system/drive_backend/callback_tracker.h"
 #include "chrome/browser/sync_file_system/local_change_processor.h"
 #include "chrome/browser/sync_file_system/remote_file_sync_service.h"
 #include "chrome/browser/sync_file_system/sync_action.h"
 #include "chrome/browser/sync_file_system/sync_direction.h"
+#include "components/drive/drive_notification_observer.h"
+#include "components/drive/service/drive_service_interface.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "net/base/network_change_notifier.h"
 
@@ -222,8 +222,8 @@ class SyncEngine : public RemoteFileSyncService,
   scoped_ptr<WorkerObserver> worker_observer_;
   scoped_ptr<SyncWorkerInterface> sync_worker_;
 
-  ObserverList<SyncServiceObserver> service_observers_;
-  ObserverList<FileStatusObserver> file_status_observers_;
+  base::ObserverList<SyncServiceObserver> service_observers_;
+  base::ObserverList<FileStatusObserver> file_status_observers_;
   leveldb::Env* env_override_;
 
   CallbackTracker callback_tracker_;

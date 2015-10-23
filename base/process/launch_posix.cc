@@ -65,6 +65,8 @@ extern char** environ;
 
 namespace base {
 
+#if !defined(OS_NACL_NONSFI)
+
 namespace {
 
 // Get the process's "environment" (i.e. the thing that setenv/getenv
@@ -188,55 +190,6 @@ void ResetChildSignalHandlersToDefaults(void) {
 }
 #endif  // !defined(OS_LINUX) ||
         // (!defined(__i386__) && !defined(__x86_64__) && !defined(__arm__))
-
-#if defined(OS_LINUX)
-bool IsRunningOnValgrind() {
-  return RUNNING_ON_VALGRIND;
-}
-
-// This function runs on the stack specified on the clone call. It uses longjmp
-// to switch back to the original stack so the child can return from sys_clone.
-int CloneHelper(void* arg) {
-  jmp_buf* env_ptr = reinterpret_cast<jmp_buf*>(arg);
-  longjmp(*env_ptr, 1);
-
-  // Should not be reached.
-  RAW_CHECK(false);
-  return 1;
-}
-
-// This function is noinline to ensure that stack_buf is below the stack pointer
-// that is saved when setjmp is called below. This is needed because when
-// compiled with FORTIFY_SOURCE, glibc's longjmp checks that the stack is moved
-// upwards. See crbug.com/442912 for more details.
-#if defined(ADDRESS_SANITIZER)
-// Disable AddressSanitizer instrumentation for this function to make sure
-// |stack_buf| is allocated on thread stack instead of ASan's fake stack.
-// Under ASan longjmp() will attempt to clean up the area between the old and
-// new stack pointers and print a warning that may confuse the user.
-__attribute__((no_sanitize_address))
-#endif
-NOINLINE pid_t CloneAndLongjmpInChild(unsigned long flags,
-                                      pid_t* ptid,
-                                      pid_t* ctid,
-                                      jmp_buf* env) {
-  // We use the libc clone wrapper instead of making the syscall
-  // directly because making the syscall may fail to update the libc's
-  // internal pid cache. The libc interface unfortunately requires
-  // specifying a new stack, so we use setjmp/longjmp to emulate
-  // fork-like behavior.
-  char stack_buf[PTHREAD_STACK_MIN];
-#if defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARM_FAMILY) || \
-    defined(ARCH_CPU_MIPS64_FAMILY) || defined(ARCH_CPU_MIPS_FAMILY)
-  // The stack grows downward.
-  void* stack = stack_buf + sizeof(stack_buf);
-#else
-#error "Unsupported architecture"
-#endif
-  return clone(&CloneHelper, stack, flags, env, ptid, nullptr, ctid);
-}
-#endif  // defined(OS_LINUX)
-
 }  // anonymous namespace
 
 // Functor for |ScopedDIR| (below).
@@ -577,7 +530,8 @@ enum GetAppOutputInternalResult {
 // path for the application; in that case, |envp| must be null, and it will use
 // the current environment. If |do_search_path| is false, |argv[0]| should fully
 // specify the path of the application, and |envp| will be used as the
-// environment. Redirects stderr to /dev/null.
+// environment. If |include_stderr| is true, includes stderr otherwise redirects
+// it to /dev/null.
 // If we successfully start the application and get all requested output, we
 // return GOT_MAX_OUTPUT, or if there is a problem starting or exiting
 // the application we return RUN_FAILURE. Otherwise we return EXECUTE_SUCCESS.
@@ -590,6 +544,7 @@ enum GetAppOutputInternalResult {
 static GetAppOutputInternalResult GetAppOutputInternal(
     const std::vector<std::string>& argv,
     char* const envp[],
+    bool include_stderr,
     std::string* output,
     size_t max_output,
     bool do_search_path,
@@ -644,7 +599,9 @@ static GetAppOutputInternalResult GetAppOutputInternal(
         base::type_profiler::Controller::Stop();
 
         fd_shuffle1.push_back(InjectionArc(pipe_fd[1], STDOUT_FILENO, true));
-        fd_shuffle1.push_back(InjectionArc(dev_null, STDERR_FILENO, true));
+        fd_shuffle1.push_back(InjectionArc(
+            include_stderr ? pipe_fd[1] : dev_null,
+            STDERR_FILENO, true));
         fd_shuffle1.push_back(InjectionArc(dev_null, STDIN_FILENO, true));
         // Adding another element here? Remeber to increase the argument to
         // reserve(), above.
@@ -713,8 +670,17 @@ bool GetAppOutput(const std::vector<std::string>& argv, std::string* output) {
   // Run |execve()| with the current environment and store "unlimited" data.
   int exit_code;
   GetAppOutputInternalResult result = GetAppOutputInternal(
-      argv, NULL, output, std::numeric_limits<std::size_t>::max(), true,
+      argv, NULL, false, output, std::numeric_limits<std::size_t>::max(), true,
       &exit_code);
+  return result == EXECUTE_SUCCESS && exit_code == EXIT_SUCCESS;
+}
+
+bool GetAppOutputAndError(const CommandLine& cl, std::string* output) {
+  // Run |execve()| with the current environment and store "unlimited" data.
+  int exit_code;
+  GetAppOutputInternalResult result = GetAppOutputInternal(
+      cl.argv(), NULL, true, output, std::numeric_limits<std::size_t>::max(),
+      true, &exit_code);
   return result == EXECUTE_SUCCESS && exit_code == EXIT_SUCCESS;
 }
 
@@ -726,7 +692,7 @@ bool GetAppOutputRestricted(const CommandLine& cl,
   char* const empty_environ = NULL;
   int exit_code;
   GetAppOutputInternalResult result = GetAppOutputInternal(
-      cl.argv(), &empty_environ, output, max_output, false, &exit_code);
+      cl.argv(), &empty_environ, false, output, max_output, false, &exit_code);
   return result == GOT_MAX_OUTPUT || (result == EXECUTE_SUCCESS &&
                                       exit_code == EXIT_SUCCESS);
 }
@@ -736,12 +702,64 @@ bool GetAppOutputWithExitCode(const CommandLine& cl,
                               int* exit_code) {
   // Run |execve()| with the current environment and store "unlimited" data.
   GetAppOutputInternalResult result = GetAppOutputInternal(
-      cl.argv(), NULL, output, std::numeric_limits<std::size_t>::max(), true,
-      exit_code);
+      cl.argv(), NULL, false, output, std::numeric_limits<std::size_t>::max(),
+      true, exit_code);
   return result == EXECUTE_SUCCESS;
 }
 
-#if defined(OS_LINUX)
+#endif  // !defined(OS_NACL_NONSFI)
+
+#if defined(OS_LINUX) || defined(OS_NACL_NONSFI)
+namespace {
+
+bool IsRunningOnValgrind() {
+  return RUNNING_ON_VALGRIND;
+}
+
+// This function runs on the stack specified on the clone call. It uses longjmp
+// to switch back to the original stack so the child can return from sys_clone.
+int CloneHelper(void* arg) {
+  jmp_buf* env_ptr = reinterpret_cast<jmp_buf*>(arg);
+  longjmp(*env_ptr, 1);
+
+  // Should not be reached.
+  RAW_CHECK(false);
+  return 1;
+}
+
+// This function is noinline to ensure that stack_buf is below the stack pointer
+// that is saved when setjmp is called below. This is needed because when
+// compiled with FORTIFY_SOURCE, glibc's longjmp checks that the stack is moved
+// upwards. See crbug.com/442912 for more details.
+#if defined(ADDRESS_SANITIZER)
+// Disable AddressSanitizer instrumentation for this function to make sure
+// |stack_buf| is allocated on thread stack instead of ASan's fake stack.
+// Under ASan longjmp() will attempt to clean up the area between the old and
+// new stack pointers and print a warning that may confuse the user.
+__attribute__((no_sanitize_address))
+#endif
+NOINLINE pid_t CloneAndLongjmpInChild(unsigned long flags,
+                                      pid_t* ptid,
+                                      pid_t* ctid,
+                                      jmp_buf* env) {
+  // We use the libc clone wrapper instead of making the syscall
+  // directly because making the syscall may fail to update the libc's
+  // internal pid cache. The libc interface unfortunately requires
+  // specifying a new stack, so we use setjmp/longjmp to emulate
+  // fork-like behavior.
+  char stack_buf[PTHREAD_STACK_MIN];
+#if defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARM_FAMILY) || \
+    defined(ARCH_CPU_MIPS64_FAMILY) || defined(ARCH_CPU_MIPS_FAMILY)
+  // The stack grows downward.
+  void* stack = stack_buf + sizeof(stack_buf);
+#else
+#error "Unsupported architecture"
+#endif
+  return clone(&CloneHelper, stack, flags, env, ptid, nullptr, ctid);
+}
+
+}  // anonymous namespace
+
 pid_t ForkWithFlags(unsigned long flags, pid_t* ptid, pid_t* ctid) {
   const bool clone_tls_used = flags & CLONE_SETTLS;
   const bool invalid_ctid =
@@ -780,6 +798,6 @@ pid_t ForkWithFlags(unsigned long flags, pid_t* ptid, pid_t* ctid) {
 
   return 0;
 }
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_NACL_NONSFI)
 
 }  // namespace base

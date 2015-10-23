@@ -6,22 +6,33 @@
 #define CHROME_BROWSER_UI_BROWSER_DIALOGS_H_
 
 #include "base/callback.h"
-#include "content/public/common/signed_certificate_timestamp_id_and_status.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
+class GURL;
+class LoginHandler;
 class Profile;
 class SkBitmap;
 
 namespace content {
 class BrowserContext;
 class ColorChooser;
+struct SSLStatus;
 class WebContents;
 }
 
 namespace extensions {
 class Extension;
+}
+
+namespace gfx {
+class Point;
+}
+
+namespace net {
+class AuthChallengeInfo;
+class URLRequest;
 }
 
 namespace ui {
@@ -70,11 +81,28 @@ void ShowCreateChromeAppShortcutsDialog(
 content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,
                                         SkColor initial_color);
 
-// Shows the Signed Certificate Timestamps viewer, to view the signed
-// certificate timestamps in |sct_ids_list|
-void ShowSignedCertificateTimestampsViewer(
-    content::WebContents* web_contents,
-    const content::SignedCertificateTimestampIDStatusList& sct_ids_list);
+#if defined(OS_MACOSX)
+
+// For Mac, returns true if Chrome should show an equivalent toolkit-views based
+// dialog using one of the functions below, rather than showing a Cocoa dialog.
+bool ToolkitViewsDialogsEnabled();
+
+// Shows a Views website settings bubble at the given anchor point.
+void ShowWebsiteSettingsBubbleViewsAtPoint(const gfx::Point& anchor_point,
+                                           Profile* profile,
+                                           content::WebContents* web_contents,
+                                           const GURL& url,
+                                           const content::SSLStatus& ssl);
+
+#endif  // OS_MACOSX
+
+#if defined(TOOLKIT_VIEWS)
+
+// Creates a toolkit-views based LoginHandler (e.g. HTTP-Auth dialog).
+LoginHandler* CreateLoginHandlerViews(net::AuthChallengeInfo* auth_info,
+                                      net::URLRequest* request);
+
+#endif  // TOOLKIT_VIEWS
 
 }  // namespace chrome
 

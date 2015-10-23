@@ -356,7 +356,8 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   bool GetFullRequestHeaders(HttpRequestHeaders* headers) const;
 
   // Gets the total amount of data received from network after SSL decoding and
-  // proxy handling.
+  // proxy handling. Pertains only to the last URLRequestJob issued by this
+  // URLRequest -- i.e. the last redirect.
   int64 GetTotalReceivedBytes() const;
 
   // Returns the current load state for the request. The returned value's
@@ -599,6 +600,10 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   void set_received_response_content_length(int64 received_content_length) {
     received_response_content_length_ = received_content_length;
   }
+
+  // The number of bytes in the raw response body (before any decompression,
+  // etc.). This is only available after the final Read completes. Not available
+  // for FTP responses.
   int64 received_response_content_length() const {
     return received_response_content_length_;
   }
@@ -816,13 +821,13 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // populated during Start(), and the rest are populated in OnResponseReceived.
   LoadTimingInfo load_timing_info_;
 
-  scoped_ptr<const base::debug::StackTrace> stack_trace_;
-
   // Keeps track of whether or not OnBeforeNetworkStart has been called yet.
   bool notified_before_network_start_;
 
   // The proxy server used for this request, if any.
   HostPortPair proxy_server_;
+
+  scoped_ptr<const base::debug::StackTrace> stack_trace_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequest);
 };

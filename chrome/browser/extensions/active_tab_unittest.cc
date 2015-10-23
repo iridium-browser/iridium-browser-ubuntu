@@ -15,6 +15,7 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -67,7 +68,7 @@ enum PermittedFeature {
 class ActiveTabTest : public ChromeRenderViewHostTestHarness {
  protected:
   ActiveTabTest()
-      : current_channel(chrome::VersionInfo::CHANNEL_DEV),
+      : current_channel(version_info::Channel::DEV),
         extension(CreateTestExtension("deadbeef", true, false)),
         another_extension(CreateTestExtension("feedbeef", true, false)),
         extension_without_active_tab(CreateTestExtension("badbeef",
@@ -108,7 +109,7 @@ class ActiveTabTest : public ChromeRenderViewHostTestHarness {
                  int tab_id) {
     const PermissionsData* permissions_data = extension->permissions_data();
     bool script = permissions_data->CanAccessPage(
-        extension.get(), url, url, tab_id, -1, NULL);
+        extension.get(), url, tab_id, -1, NULL);
     bool capture = HasTabsPermission(extension, tab_id) &&
                    permissions_data->CanCaptureVisiblePage(tab_id, NULL);
     switch (feature) {
@@ -276,7 +277,7 @@ TEST_F(ActiveTabTest, GrantToSinglePage) {
   EXPECT_TRUE(IsAllowed(extension, chromium, PERMITTED_CAPTURE_ONLY));
   EXPECT_TRUE(IsAllowed(another_extension, chromium, PERMITTED_CAPTURE_ONLY));
   EXPECT_TRUE(IsBlocked(extension_without_active_tab, chromium));
-};
+}
 
 TEST_F(ActiveTabTest, Uninstalling) {
   // Some semi-arbitrary setup.

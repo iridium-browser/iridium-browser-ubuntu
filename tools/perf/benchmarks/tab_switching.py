@@ -2,15 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import benchmark
+from core import perf_benchmark
 
 from measurements import tab_switching
 import page_sets
+from telemetry import benchmark
 
 
 @benchmark.Enabled('has tabs')
 @benchmark.Disabled('android')  # http://crbug.com/460084
-class TabSwitchingTop10(benchmark.Benchmark):
+class TabSwitchingTop10(perf_benchmark.PerfBenchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
 
   The histogram is a measure of the time between when a tab was requested to be
@@ -28,7 +29,7 @@ class TabSwitchingTop10(benchmark.Benchmark):
 
 @benchmark.Enabled('has tabs')
 @benchmark.Disabled('android')  # http://crbug.com/460084
-class TabSwitchingTypical25(benchmark.Benchmark):
+class TabSwitchingTypical25(perf_benchmark.PerfBenchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
 
   The histogram is a measure of the time between when a tab was requested to be
@@ -38,7 +39,7 @@ class TabSwitchingTypical25(benchmark.Benchmark):
   """
   test = tab_switching.TabSwitching
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     return page_sets.Typical25PageSet(run_no_page_interactions=True)
 
   @classmethod
@@ -48,7 +49,7 @@ class TabSwitchingTypical25(benchmark.Benchmark):
 
 @benchmark.Disabled('android')  # http://crbug.com/460084
 @benchmark.Enabled('has tabs')
-class TabSwitchingFiveBlankTabs(benchmark.Benchmark):
+class TabSwitchingFiveBlankTabs(perf_benchmark.PerfBenchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
 
   The histogram is a measure of the time between when a tab was requested to be
@@ -68,7 +69,7 @@ class TabSwitchingFiveBlankTabs(benchmark.Benchmark):
 @benchmark.Enabled('has tabs')
 # http://crbug.com/460084, http://crbug.com/488067
 @benchmark.Disabled('android', 'linux')
-class TabSwitchingToughEnergyCases(benchmark.Benchmark):
+class TabSwitchingToughEnergyCases(perf_benchmark.PerfBenchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
 
   The histogram is a measure of the time between when a tab was requested to be
@@ -87,7 +88,7 @@ class TabSwitchingToughEnergyCases(benchmark.Benchmark):
 
 @benchmark.Enabled('has tabs')
 @benchmark.Disabled('android')  # http://crbug.com/460084
-class TabSwitchingToughImageCases(benchmark.Benchmark):
+class TabSwitchingToughImageCases(perf_benchmark.PerfBenchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
 
   The histogram is a measure of the time between when a tab was requested to be
@@ -103,8 +104,8 @@ class TabSwitchingToughImageCases(benchmark.Benchmark):
     return 'tab_switching.tough_image_cases'
 
 
-@benchmark.Enabled('linux', 'mac', 'win', 'chromeos')
-class TabSwitchingFlashEnergyCases(benchmark.Benchmark):
+@benchmark.Disabled
+class TabSwitchingFlashEnergyCases(perf_benchmark.PerfBenchmark):
   test = tab_switching.TabSwitching
   page_set = page_sets.FlashEnergyCasesPageSet
   options = {'pageset_repeat': 10}
@@ -114,13 +115,13 @@ class TabSwitchingFlashEnergyCases(benchmark.Benchmark):
     return 'tab_switching.flash_energy_cases'
 
 
-@benchmark.Enabled('linux', 'mac', 'win', 'chromeos')
-class TabSwitchingPluginPowerSaver(benchmark.Benchmark):
+@benchmark.Disabled
+class TabSwitchingPluginPowerSaver(perf_benchmark.PerfBenchmark):
   test = tab_switching.TabSwitching
   page_set = page_sets.FlashEnergyCasesPageSet
   options = {'pageset_repeat': 10}
 
-  def CustomizeBrowserOptions(self, options):
+  def SetExtraBrowserOptions(self, options):
     options.AppendExtraBrowserArgs(['--enable-plugin-power-saver'])
 
   @classmethod

@@ -10,7 +10,7 @@
 
 #include "base/synchronization/waitable_event.h"
 #include "cc/playback/picture_pile.h"
-#include "cc/test/impl_side_painting_settings.h"
+#include "cc/trees/layer_tree_settings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace cc {
@@ -32,8 +32,8 @@ scoped_refptr<FakePicturePileImpl> FakePicturePileImpl::CreatePile(
     const gfx::Size& tile_size,
     const gfx::Size& layer_bounds,
     bool is_filled) {
-  FakePicturePile pile(ImplSidePaintingSettings().minimum_contents_scale,
-                       ImplSidePaintingSettings().default_tile_grid_size);
+  FakePicturePile pile(LayerTreeSettings().minimum_contents_scale,
+                       LayerTreeSettings().default_tile_grid_size);
   pile.tiling().SetBorderTexels(0);
   pile.tiling().SetTilingSize(layer_bounds);
   pile.tiling().SetMaxTextureSize(tile_size);
@@ -69,8 +69,8 @@ FakePicturePileImpl::CreateEmptyPileThatThinksItHasRecordings(
     const gfx::Size& tile_size,
     const gfx::Size& layer_bounds,
     bool is_solid_color) {
-  FakePicturePile pile(ImplSidePaintingSettings().minimum_contents_scale,
-                       ImplSidePaintingSettings().default_tile_grid_size);
+  FakePicturePile pile(LayerTreeSettings().minimum_contents_scale,
+                       LayerTreeSettings().default_tile_grid_size);
   pile.tiling().SetBorderTexels(0);
   pile.tiling().SetTilingSize(layer_bounds);
   pile.tiling().SetMaxTextureSize(tile_size);
@@ -85,7 +85,7 @@ scoped_refptr<FakePicturePileImpl>
 FakePicturePileImpl::CreateInfiniteFilledPile() {
   gfx::Size size(std::numeric_limits<int>::max(),
                  std::numeric_limits<int>::max());
-  FakePicturePile pile(ImplSidePaintingSettings().minimum_contents_scale, size);
+  FakePicturePile pile(LayerTreeSettings().minimum_contents_scale, size);
   pile.tiling().SetBorderTexels(0);
   pile.tiling().SetTilingSize(size);
   pile.tiling().SetMaxTextureSize(size);
@@ -104,12 +104,15 @@ scoped_refptr<FakePicturePileImpl> FakePicturePileImpl::CreateFromPile(
       new FakePicturePileImpl(other, playback_allowed_event));
 }
 
-void FakePicturePileImpl::PlaybackToCanvas(SkCanvas* canvas,
-                                           const gfx::Rect& canvas_rect,
-                                           float contents_scale) const {
+void FakePicturePileImpl::PlaybackToCanvas(
+    SkCanvas* canvas,
+    const gfx::Rect& canvas_bitmap_rect,
+    const gfx::Rect& canvas_playback_rect,
+    float contents_scale) const {
   if (playback_allowed_event_)
     playback_allowed_event_->Wait();
-  PicturePileImpl::PlaybackToCanvas(canvas, canvas_rect, contents_scale);
+  PicturePileImpl::PlaybackToCanvas(canvas, canvas_bitmap_rect,
+                                    canvas_playback_rect, contents_scale);
 }
 
 bool FakePicturePileImpl::HasRecordingAt(int x, int y) const {

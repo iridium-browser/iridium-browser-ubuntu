@@ -16,7 +16,13 @@ namespace media_router {
 // The text that corresponds with an action a user can take for a Issue.
 class IssueAction {
  public:
-  enum Type { OK, CANCEL, DISMISS, LEARN_MORE };
+  enum Type {
+    TYPE_OK,
+    TYPE_CANCEL,
+    TYPE_DISMISS,
+    TYPE_LEARN_MORE,
+    TYPE_MAX /* Denotes enum value boundary. */
+  };
 
   explicit IssueAction(const Type type);
   ~IssueAction();
@@ -32,7 +38,7 @@ class IssueAction {
 // Contains the information relevant to an issue.
 class Issue {
  public:
-  using IssueId = std::string;
+  using Id = std::string;
 
   enum Severity { FATAL, WARNING, NOTIFICATION };
 
@@ -51,7 +57,7 @@ class Issue {
         const std::string& message,
         const IssueAction& default_action,
         const std::vector<IssueAction>& secondary_actions,
-        const MediaRouteId& route_id,
+        const MediaRoute::Id& route_id,
         const Severity severity,
         bool is_blocking,
         const std::string& helpUrl);
@@ -65,9 +71,9 @@ class Issue {
   const std::vector<IssueAction>& secondary_actions() const {
     return secondary_actions_;
   }
-  MediaRouteId route_id() const { return route_id_; }
+  MediaRoute::Id route_id() const { return route_id_; }
   Severity severity() const { return severity_; }
-  const IssueId& id() const { return id_; }
+  const Issue::Id id() const { return id_; }
   bool is_blocking() const { return is_blocking_; }
   bool is_global() const { return route_id_.empty(); }
   const GURL& help_url() const { return help_url_; }
@@ -81,7 +87,7 @@ class Issue {
   std::vector<IssueAction> secondary_actions_;
   std::string route_id_;
   Severity severity_;
-  IssueId id_;
+  Issue::Id id_;
   bool is_blocking_;
   GURL help_url_;
 };

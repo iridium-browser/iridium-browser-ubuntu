@@ -7,8 +7,10 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_manager_client.h"
@@ -25,8 +27,10 @@ namespace chromeos {
 
 namespace {
 
-std::string kSimPin = "1111";
-std::string kFailedMessage = "Failed";
+const char kSimPuk[] = "12345678";  // Matches pseudomodem.
+const int kSimPinMinLength = 4;
+const int kSimPukRetryCount = 10;
+const char kFailedMessage[] = "Failed";
 
 void ErrorFunction(const std::string& device_path,
                    const std::string& error_name,
@@ -37,7 +41,7 @@ void ErrorFunction(const std::string& device_path,
 
 void PostError(const std::string& error,
                const ShillDeviceClient::ErrorCallback& error_callback) {
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(error_callback, error, kFailedMessage));
 }
 
@@ -53,11 +57,13 @@ bool IsReadOnlyProperty(const std::string& name) {
 
 }  // namespace
 
+const char FakeShillDeviceClient::kDefaultSimPin[] = "1111";
+const int FakeShillDeviceClient::kSimPinRetryCount = 3;
+
 FakeShillDeviceClient::FakeShillDeviceClient()
     : initial_tdls_busy_count_(0),
       tdls_busy_count_(0),
-      weak_ptr_factory_(this) {
-}
+      weak_ptr_factory_(this) {}
 
 FakeShillDeviceClient::~FakeShillDeviceClient() {
   STLDeleteContainerPairSecondPointers(
@@ -83,11 +89,10 @@ void FakeShillDeviceClient::RemovePropertyChangedObserver(
 void FakeShillDeviceClient::GetProperties(
     const dbus::ObjectPath& device_path,
     const DictionaryValueCallback& callback) {
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&FakeShillDeviceClient::PassStubDeviceProperties,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 device_path, callback));
+                 weak_ptr_factory_.GetWeakPtr(), device_path, callback));
 }
 
 void FakeShillDeviceClient::ProposeScan(
@@ -119,11 +124,11 @@ void FakeShillDeviceClient::SetPropertyInternal(
     return;
   }
   device_properties->SetWithoutPathExpansion(name, value.DeepCopy());
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&FakeShillDeviceClient::NotifyObserversPropertyChanged,
                  weak_ptr_factory_.GetWeakPtr(), device_path, name));
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
 void FakeShillDeviceClient::ClearProperty(
@@ -144,10 +149,9 @@ void FakeShillDeviceClient::AddIPConfig(
     const dbus::ObjectPath& device_path,
     const std::string& method,
     const ObjectPathDBusMethodCallback& callback) {
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::Bind(callback,
-                                                    DBUS_METHOD_CALL_SUCCESS,
-                                                    dbus::ObjectPath()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(callback, DBUS_METHOD_CALL_SUCCESS, dbus::ObjectPath()));
 }
 
 void FakeShillDeviceClient::RequirePin(const dbus::ObjectPath& device_path,
@@ -156,34 +160,21 @@ void FakeShillDeviceClient::RequirePin(const dbus::ObjectPath& device_path,
                                        const base::Closure& callback,
                                        const ErrorCallback& error_callback) {
   VLOG(1) << "RequirePin: " << device_path.value();
-  if (pin != kSimPin) {
-    base::MessageLoop::current()->PostTask(
+  if (!stub_devices_.HasKey(device_path.value())) {
+    PostNotFoundError(error_callback);
+    return;
+  }
+  if (!SimTryPin(device_path.value(), pin)) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(error_callback, shill::kErrorResultIncorrectPin, ""));
     return;
   }
-  base::DictionaryValue* device_properties = NULL;
-  if (!stub_devices_.GetDictionaryWithoutPathExpansion(device_path.value(),
-                                                       &device_properties)) {
-    PostNotFoundError(error_callback);
-    return;
-  }
-  base::DictionaryValue* simlock_dict = NULL;
-  if (!device_properties->GetDictionaryWithoutPathExpansion(
-          shill::kSIMLockStatusProperty, &simlock_dict)) {
-    simlock_dict = new base::DictionaryValue;
-    device_properties->SetWithoutPathExpansion(
-        shill::kSIMLockStatusProperty, simlock_dict);
-  }
-  simlock_dict->Clear();
-  simlock_dict->SetBoolean(shill::kSIMLockEnabledProperty, require);
-  // TODO(stevenjb): Investigate why non-empty value breaks UI.
-  std::string lock_type = "";  // shill::kSIMLockPin
-  simlock_dict->SetString(shill::kSIMLockTypeProperty, lock_type);
-  simlock_dict->SetInteger(shill::kSIMLockRetriesLeftProperty, 5);
+  SimLockStatus status = GetSimLockStatus(device_path.value());
+  status.lock_enabled = require;
+  SetSimLockStatus(device_path.value(), status);
 
-  NotifyObserversPropertyChanged(device_path, shill::kSIMLockStatusProperty);
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
 void FakeShillDeviceClient::EnterPin(const dbus::ObjectPath& device_path,
@@ -191,17 +182,19 @@ void FakeShillDeviceClient::EnterPin(const dbus::ObjectPath& device_path,
                                      const base::Closure& callback,
                                      const ErrorCallback& error_callback) {
   VLOG(1) << "EnterPin: " << device_path.value();
-  if (pin != kSimPin) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(error_callback, shill::kErrorResultIncorrectPin, ""));
-    return;
-  }
   if (!stub_devices_.HasKey(device_path.value())) {
     PostNotFoundError(error_callback);
     return;
   }
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  if (!SimTryPin(device_path.value(), pin)) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(error_callback, shill::kErrorResultIncorrectPin, ""));
+    return;
+  }
+  SetSimLocked(device_path.value(), false);
+
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
 void FakeShillDeviceClient::UnblockPin(const dbus::ObjectPath& device_path,
@@ -214,7 +207,22 @@ void FakeShillDeviceClient::UnblockPin(const dbus::ObjectPath& device_path,
     PostNotFoundError(error_callback);
     return;
   }
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  if (!SimTryPuk(device_path.value(), puk)) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(error_callback, shill::kErrorResultIncorrectPin, ""));
+    return;
+  }
+  if (pin.length() < kSimPinMinLength) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(error_callback, shill::kErrorResultInvalidArguments, ""));
+    return;
+  }
+  sim_pin_[device_path.value()] = pin;
+  SetSimLocked(device_path.value(), false);
+
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
 void FakeShillDeviceClient::ChangePin(const dbus::ObjectPath& device_path,
@@ -227,7 +235,21 @@ void FakeShillDeviceClient::ChangePin(const dbus::ObjectPath& device_path,
     PostNotFoundError(error_callback);
     return;
   }
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  if (!SimTryPin(device_path.value(), old_pin)) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(error_callback, shill::kErrorResultIncorrectPin, ""));
+    return;
+  }
+  if (new_pin.length() < kSimPinMinLength) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(error_callback, shill::kErrorResultInvalidArguments, ""));
+    return;
+  }
+  sim_pin_[device_path.value()] = new_pin;
+
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
 void FakeShillDeviceClient::Register(const dbus::ObjectPath& device_path,
@@ -238,7 +260,7 @@ void FakeShillDeviceClient::Register(const dbus::ObjectPath& device_path,
     PostNotFoundError(error_callback);
     return;
   }
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
 void FakeShillDeviceClient::SetCarrier(const dbus::ObjectPath& device_path,
@@ -256,7 +278,7 @@ void FakeShillDeviceClient::Reset(const dbus::ObjectPath& device_path,
     PostNotFoundError(error_callback);
     return;
   }
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
 void FakeShillDeviceClient::PerformTDLSOperation(
@@ -271,14 +293,14 @@ void FakeShillDeviceClient::PerformTDLSOperation(
   }
   // Use -1 to emulate a TDLS failure.
   if (tdls_busy_count_ == -1) {
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(error_callback, shill::kErrorDhcpFailed, "Failed"));
     return;
   }
   if (operation != shill::kTDLSStatusOperation && tdls_busy_count_ > 0) {
     --tdls_busy_count_;
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(error_callback, shill::kErrorResultInProgress,
                               "In-Progress"));
     return;
@@ -300,8 +322,8 @@ void FakeShillDeviceClient::PerformTDLSOperation(
     result = tdls_state_;
   }
 
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::Bind(callback, result));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                base::Bind(callback, result));
 }
 
 void FakeShillDeviceClient::AddWakeOnPacketConnection(
@@ -316,7 +338,7 @@ void FakeShillDeviceClient::AddWakeOnPacketConnection(
 
   wake_on_packet_connections_[device_path].insert(ip_endpoint);
 
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
 void FakeShillDeviceClient::RemoveWakeOnPacketConnection(
@@ -339,7 +361,7 @@ void FakeShillDeviceClient::RemoveWakeOnPacketConnection(
 
   device_iter->second.erase(endpoint_iter);
 
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
 void FakeShillDeviceClient::RemoveAllWakeOnPacketConnections(
@@ -355,7 +377,7 @@ void FakeShillDeviceClient::RemoveAllWakeOnPacketConnections(
 
   wake_on_packet_connections_.erase(iter);
 
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
 ShillDeviceClient::TestInterface* FakeShillDeviceClient::GetTestInterface() {
@@ -432,6 +454,122 @@ void FakeShillDeviceClient::SetTDLSState(const std::string& state) {
   tdls_state_ = state;
 }
 
+void FakeShillDeviceClient::SetSimLocked(const std::string& device_path,
+                                         bool locked) {
+  SimLockStatus status = GetSimLockStatus(device_path);
+  status.type = locked ? shill::kSIMLockPin : "";
+  status.retries_left = kSimPinRetryCount;
+  SetSimLockStatus(device_path, status);
+}
+
+// Private Methods -------------------------------------------------------------
+
+FakeShillDeviceClient::SimLockStatus FakeShillDeviceClient::GetSimLockStatus(
+    const std::string& device_path) {
+  SimLockStatus status;
+  base::DictionaryValue* device_properties = nullptr;
+  base::DictionaryValue* simlock_dict = nullptr;
+  if (stub_devices_.GetDictionaryWithoutPathExpansion(device_path,
+                                                      &device_properties) &&
+      device_properties->GetDictionaryWithoutPathExpansion(
+          shill::kSIMLockStatusProperty, &simlock_dict)) {
+    simlock_dict->GetStringWithoutPathExpansion(shill::kSIMLockTypeProperty,
+                                                &status.type);
+    simlock_dict->GetIntegerWithoutPathExpansion(
+        shill::kSIMLockRetriesLeftProperty, &status.retries_left);
+    simlock_dict->GetBooleanWithoutPathExpansion(shill::kSIMLockEnabledProperty,
+                                                 &status.lock_enabled);
+    if (status.type == shill::kSIMLockPin && status.retries_left == 0)
+      status.retries_left = kSimPinRetryCount;
+  }
+  return status;
+}
+
+void FakeShillDeviceClient::SetSimLockStatus(const std::string& device_path,
+                                             const SimLockStatus& status) {
+  base::DictionaryValue* device_properties = NULL;
+  if (!stub_devices_.GetDictionaryWithoutPathExpansion(device_path,
+                                                       &device_properties)) {
+    NOTREACHED() << "Device not found: " << device_path;
+    return;
+  }
+
+  base::DictionaryValue* simlock_dict = nullptr;
+  if (!device_properties->GetDictionaryWithoutPathExpansion(
+          shill::kSIMLockStatusProperty, &simlock_dict)) {
+    simlock_dict = new base::DictionaryValue;
+    device_properties->SetWithoutPathExpansion(shill::kSIMLockStatusProperty,
+                                               simlock_dict);
+  }
+  simlock_dict->Clear();
+  simlock_dict->SetStringWithoutPathExpansion(shill::kSIMLockTypeProperty,
+                                              status.type);
+  simlock_dict->SetIntegerWithoutPathExpansion(
+      shill::kSIMLockRetriesLeftProperty, status.retries_left);
+  simlock_dict->SetBooleanWithoutPathExpansion(shill::kSIMLockEnabledProperty,
+                                               status.lock_enabled);
+  NotifyObserversPropertyChanged(dbus::ObjectPath(device_path),
+                                 shill::kSIMLockStatusProperty);
+}
+
+bool FakeShillDeviceClient::SimTryPin(const std::string& device_path,
+                                      const std::string& pin) {
+  SimLockStatus status = GetSimLockStatus(device_path);
+  if (status.type == shill::kSIMLockPuk) {
+    VLOG(1) << "SimTryPin called with PUK locked.";
+    return false;  // PUK locked, PIN won't work.
+  }
+  if (pin.length() < kSimPinMinLength)
+    return false;
+  std::string sim_pin = sim_pin_[device_path];
+  if (sim_pin.empty()) {
+    sim_pin = kDefaultSimPin;
+    sim_pin_[device_path] = sim_pin;
+  }
+  if (pin == sim_pin) {
+    status.type = "";
+    status.retries_left = kSimPinRetryCount;
+    SetSimLockStatus(device_path, status);
+    return true;
+  }
+
+  VLOG(1) << "SIM PIN: " << pin << " != " << sim_pin
+          << " Retries left: " << (status.retries_left - 1);
+  if (--status.retries_left <= 0) {
+    status.retries_left = kSimPukRetryCount;
+    status.type = shill::kSIMLockPuk;
+    status.lock_enabled = true;
+  }
+  SetSimLockStatus(device_path, status);
+  return false;
+}
+
+bool FakeShillDeviceClient::SimTryPuk(const std::string& device_path,
+                                      const std::string& puk) {
+  SimLockStatus status = GetSimLockStatus(device_path);
+  if (status.type != shill::kSIMLockPuk) {
+    VLOG(1) << "PUK Not locked";
+    return true;  // Not PUK locked.
+  }
+  if (status.retries_left == 0) {
+    VLOG(1) << "PUK: No retries left";
+    return false;  // Permanently locked.
+  }
+
+  if (puk == kSimPuk) {
+    status.type = "";
+    status.retries_left = kSimPinRetryCount;
+    SetSimLockStatus(device_path, status);
+    return true;
+  }
+
+  --status.retries_left;
+  VLOG(1) << "SIM PUK: " << puk << " != " << kSimPuk
+          << " Retries left: " << status.retries_left;
+  SetSimLockStatus(device_path, status);
+  return false;
+}
+
 void FakeShillDeviceClient::PassStubDeviceProperties(
     const dbus::ObjectPath& device_path,
     const DictionaryValueCallback& callback) const {
@@ -449,8 +587,8 @@ void FakeShillDeviceClient::PassStubDeviceProperties(
 void FakeShillDeviceClient::PostVoidCallback(
     const VoidDBusMethodCallback& callback,
     DBusMethodCallStatus status) {
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::Bind(callback, status));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                base::Bind(callback, status));
 }
 
 void FakeShillDeviceClient::NotifyObserversPropertyChanged(

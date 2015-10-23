@@ -12,7 +12,6 @@
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
@@ -44,6 +44,7 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/window/frame_background.h"
@@ -75,8 +76,10 @@ const int kResizeAreaCornerSize = 16;
 // The content left/right images have a shadow built into them.
 const int kContentEdgeShadowThickness = 2;
 
+#if !defined(OS_WIN)
 // The icon never shrinks below 16 px on a side.
 const int kIconMinimumSize = 16;
+#endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 // The number of pixels to move the frame background image upwards when using
@@ -203,10 +206,12 @@ bool OpaqueBrowserFrameView::IsWithinAvatarMenuButtons(
      avatar_button()->GetMirroredBounds().Contains(point)) {
     return true;
   }
+#if defined(FRAME_AVATAR_BUTTON)
   if (new_avatar_button() &&
      new_avatar_button()->GetMirroredBounds().Contains(point)) {
     return true;
   }
+#endif
 
   return false;
 }
@@ -318,16 +323,19 @@ void OpaqueBrowserFrameView::ButtonPressed(views::Button* sender,
     frame()->Restore();
   } else if (sender == close_button_) {
     frame()->Close();
+#if defined(FRAME_AVATAR_BUTTON)
   } else if (sender == new_avatar_button()) {
     BrowserWindow::AvatarBubbleMode mode =
         BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT;
-    if (event.IsMouseEvent() &&
-        static_cast<const ui::MouseEvent&>(event).IsRightMouseButton()) {
+    if ((event.IsMouseEvent() &&
+         static_cast<const ui::MouseEvent&>(event).IsRightMouseButton()) ||
+        (event.type() == ui::ET_GESTURE_LONG_PRESS)) {
       mode = BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH;
     }
     browser_view()->ShowAvatarBubbleFromAvatarButton(
         mode,
         signin::ManageAccountsParams());
+#endif
   }
 }
 
@@ -481,7 +489,9 @@ bool OpaqueBrowserFrameView::ShouldPaintAsThemed() const {
 }
 
 void OpaqueBrowserFrameView::UpdateNewAvatarButtonImpl() {
+#if defined(FRAME_AVATAR_BUTTON)
   UpdateNewAvatarButton(this, NewAvatarButton::THEMED_BUTTON);
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -582,10 +592,10 @@ bool OpaqueBrowserFrameView::ShouldShowWindowTitleBar() const {
 
   // Do not show caption buttons if the window manager is forcefully providing a
   // title bar (e.g., in Ubuntu Unity, if the window is maximized).
-  if (!views::ViewsDelegate::views_delegate)
+  if (!views::ViewsDelegate::GetInstance())
     return true;
-  return !views::ViewsDelegate::views_delegate->WindowManagerProvidesTitleBar(
-              IsMaximized());
+  return !views::ViewsDelegate::GetInstance()->WindowManagerProvidesTitleBar(
+      IsMaximized());
 }
 
 void OpaqueBrowserFrameView::PaintRestoredFrameBorder(gfx::Canvas* canvas) {

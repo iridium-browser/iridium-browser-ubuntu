@@ -12,17 +12,20 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/location.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/process_iterator.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/sys_byteorder.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/win/windows_version.h"
 #include "build/build_config.h"
@@ -34,6 +37,7 @@
 #include "components/nacl/common/nacl_messages.h"
 #include "components/nacl/common/nacl_process_type.h"
 #include "components/nacl/common/nacl_switches.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_ppapi_host.h"
 #include "content/public/browser/child_process_data.h"
@@ -47,8 +51,7 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_switches.h"
 #include "native_client/src/shared/imc/nacl_imc_c.h"
-#include "net/base/net_util.h"
-#include "net/socket/tcp_listen_socket.h"
+#include "net/socket/socket_descriptor.h"
 #include "ppapi/host/host_factory.h"
 #include "ppapi/host/ppapi_host.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -58,6 +61,8 @@
 #if defined(OS_POSIX)
 
 #include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 #include "ipc/ipc_channel_posix.h"
 #elif defined(OS_WIN)
@@ -104,12 +109,9 @@ void FindAddressSpace(base::ProcessHandle process,
 #ifdef _DLL
 
 bool IsInPath(const std::string& path_env_var, const std::string& dir) {
-  std::vector<std::string> split;
-  base::SplitString(path_env_var, ';', &split);
-  for (std::vector<std::string>::const_iterator i(split.begin());
-       i != split.end();
-       ++i) {
-    if (*i == dir)
+  for (const base::StringPiece& cur : base::SplitStringPiece(
+           path_env_var, ";", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
+    if (cur == dir)
       return true;
   }
   return false;
@@ -308,7 +310,7 @@ NaClProcessHost::NaClProcessHost(
   // We aren't on the UI thread so getting the pref locale for language
   // formatting isn't possible, so IDN will be lost, but this is probably OK
   // for this use case.
-  process_->SetName(net::FormatUrl(manifest_url_, std::string()));
+  process_->SetName(url_formatter::FormatUrl(manifest_url_, std::string()));
 
   enable_debug_stub_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableNaClDebug);
@@ -459,7 +461,8 @@ void NaClProcessHost::Launch(
 #if defined(OS_LINUX)
     nonsfi_mode_forced_by_command_line =
         cmd->HasSwitch(switches::kEnableNaClNonSfiMode);
-#if defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
+#if defined(OS_CHROMEOS) && \
+    (defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARMEL))
     nonsfi_mode_allowed = NaClBrowser::GetDelegate()->IsNonSfiModeAllowed(
         nacl_host_message_filter->profile_directory(), manifest_url_);
 #endif
@@ -471,6 +474,13 @@ void NaClProcessHost::Launch(
       SendErrorToRenderer(
           "NaCl non-SFI mode is not available for this platform"
           " and NaCl module.");
+      delete this;
+      return;
+    }
+
+    if (!enable_ppapi_proxy()) {
+      SendErrorToRenderer(
+          "PPAPI proxy must be enabled on NaCl in Non-SFI mode.");
       delete this;
       return;
     }
@@ -545,11 +555,10 @@ void NaClProcessHost::LaunchNaClGdb() {
 #else
   base::CommandLine::StringType nacl_gdb =
       command_line.GetSwitchValueNative(switches::kNaClGdb);
-  base::CommandLine::StringVector argv;
   // We don't support spaces inside arguments in --nacl-gdb switch.
-  base::SplitString(nacl_gdb, static_cast<base::CommandLine::CharType>(' '),
-                    &argv);
-  base::CommandLine cmd_line(argv);
+  base::CommandLine cmd_line(base::SplitString(
+      nacl_gdb, base::CommandLine::StringType(1, ' '),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL));
 #endif
   cmd_line.AppendArg("--eval-command");
   base::FilePath::StringType irt_path(
@@ -672,37 +681,34 @@ bool NaClProcessHost::LaunchSelLdr() {
 }
 
 bool NaClProcessHost::OnMessageReceived(const IPC::Message& msg) {
-  bool handled = true;
   if (uses_nonsfi_mode_) {
     // IPC messages relating to NaCl's validation cache must not be exposed
-    // in Non-SFI Mode, otherwise a Non-SFI nexe could use
-    // SetKnownToValidate to create a hole in the SFI sandbox.
-    IPC_BEGIN_MESSAGE_MAP(NaClProcessHost, msg)
-      IPC_MESSAGE_HANDLER(NaClProcessHostMsg_PpapiChannelsCreated,
-                          OnPpapiChannelsCreated)
-      IPC_MESSAGE_UNHANDLED(handled = false)
-    IPC_END_MESSAGE_MAP()
-  } else {
-    IPC_BEGIN_MESSAGE_MAP(NaClProcessHost, msg)
-      IPC_MESSAGE_HANDLER(NaClProcessMsg_QueryKnownToValidate,
-                          OnQueryKnownToValidate)
-      IPC_MESSAGE_HANDLER(NaClProcessMsg_SetKnownToValidate,
-                          OnSetKnownToValidate)
-      IPC_MESSAGE_HANDLER(NaClProcessMsg_ResolveFileToken,
-                          OnResolveFileToken)
+    // in Non-SFI Mode, otherwise a Non-SFI nexe could use SetKnownToValidate
+    // to create a hole in the SFI sandbox.
+    // In Non-SFI mode, no message is expected.
+    return false;
+  }
+
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(NaClProcessHost, msg)
+    IPC_MESSAGE_HANDLER(NaClProcessMsg_QueryKnownToValidate,
+                        OnQueryKnownToValidate)
+    IPC_MESSAGE_HANDLER(NaClProcessMsg_SetKnownToValidate,
+                        OnSetKnownToValidate)
+    IPC_MESSAGE_HANDLER(NaClProcessMsg_ResolveFileToken,
+                        OnResolveFileToken)
 
 #if defined(OS_WIN)
-      IPC_MESSAGE_HANDLER_DELAY_REPLY(
-          NaClProcessMsg_AttachDebugExceptionHandler,
-          OnAttachDebugExceptionHandler)
-      IPC_MESSAGE_HANDLER(NaClProcessHostMsg_DebugStubPortSelected,
-                          OnDebugStubPortSelected)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(
+        NaClProcessMsg_AttachDebugExceptionHandler,
+        OnAttachDebugExceptionHandler)
+    IPC_MESSAGE_HANDLER(NaClProcessHostMsg_DebugStubPortSelected,
+                        OnDebugStubPortSelected)
 #endif
-      IPC_MESSAGE_HANDLER(NaClProcessHostMsg_PpapiChannelsCreated,
-                          OnPpapiChannelsCreated)
-      IPC_MESSAGE_UNHANDLED(handled = false)
-    IPC_END_MESSAGE_MAP()
-  }
+    IPC_MESSAGE_HANDLER(NaClProcessHostMsg_PpapiChannelsCreated,
+                        OnPpapiChannelsCreated)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
   return handled;
 }
 
@@ -815,16 +821,46 @@ void NaClProcessHost::SetDebugStubPort(int port) {
 static const uint16_t kInitialDebugStubPort = 4014;
 
 net::SocketDescriptor NaClProcessHost::GetDebugStubSocketHandle() {
-  net::SocketDescriptor s = net::kInvalidSocket;
   // We always try to allocate the default port first. If this fails, we then
   // allocate any available port.
   // On success, if the test system has register a handler
   // (GdbDebugStubPortListener), we fire a notification.
   uint16 port = kInitialDebugStubPort;
-  s = net::TCPListenSocket::CreateAndBind("127.0.0.1", port);
-  if (s == net::kInvalidSocket) {
-    s = net::TCPListenSocket::CreateAndBindAnyPort("127.0.0.1", &port);
+  net::SocketDescriptor s =
+      net::CreatePlatformSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (s != net::kInvalidSocket) {
+    // Allow rapid reuse.
+    static const int kOn = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &kOn, sizeof(kOn));
+
+    sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    addr.sin_port = base::HostToNet16(port);
+    if (bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr))) {
+      // Try allocate any available port.
+      addr.sin_port = base::HostToNet16(0);
+      if (bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr))) {
+        close(s);
+        LOG(ERROR) << "Could not bind socket to port" << port;
+        s = net::kInvalidSocket;
+      } else {
+        sockaddr_in sock_addr;
+        socklen_t sock_addr_size = sizeof(sock_addr);
+        if (getsockname(s, reinterpret_cast<struct sockaddr*>(&sock_addr),
+                        &sock_addr_size) != 0 ||
+            sock_addr_size != sizeof(sock_addr)) {
+          LOG(ERROR) << "Could not determine bound port, getsockname() failed";
+          close(s);
+          s = net::kInvalidSocket;
+        } else {
+          port = base::NetToHost16(sock_addr.sin_port);
+        }
+      }
+    }
   }
+
   if (s != net::kInvalidSocket) {
     SetDebugStubPort(port);
   }
@@ -907,7 +943,10 @@ bool NaClProcessHost::StartNaClExecution() {
       DLOG(ERROR) << "Failed to allocate memory buffer";
       return false;
     }
-    base::ScopedFD memory_fd(dup(memory_buffer.handle().fd));
+    base::SharedMemoryHandle duped_handle =
+        base::SharedMemory::DuplicateHandle(memory_buffer.handle());
+    base::ScopedFD memory_fd(
+        base::SharedMemory::GetFdFromSharedMemoryHandle(duped_handle));
     if (!memory_fd.is_valid()) {
       DLOG(ERROR) << "Failed to dup() a file descriptor";
       return false;
@@ -975,9 +1014,7 @@ bool NaClProcessHost::StartNaClExecution() {
     }
   }
 
-  params.nexe_file = IPC::TakeFileHandleForProcess(nexe_file_.Pass(),
-                                                   process_->GetData().handle);
-  process_->Send(new NaClProcessMsg_Start(params));
+  StartNaClFileResolved(params, base::FilePath(), base::File());
   return true;
 }
 
@@ -998,45 +1035,108 @@ void NaClProcessHost::StartNaClFileResolved(
     params.nexe_file = IPC::TakeFileHandleForProcess(
         nexe_file_.Pass(), process_->GetData().handle);
   }
+
+#if defined(OS_LINUX)
+  // In Non-SFI mode, create socket pairs for IPC channels here, unlike in
+  // SFI-mode, in which those channels are created in nacl_listener.cc.
+  // This is for security hardening. We can then prohibit the socketpair()
+  // system call in nacl_helper and nacl_helper_nonsfi.
+  if (uses_nonsfi_mode_) {
+    // Note: here, because some FDs/handles for the NaCl loader process are
+    // already opened, they are transferred to NaCl loader process even if
+    // an error occurs first. It is because this is the simplest way to
+    // ensure that these FDs/handles don't get leaked and that the NaCl loader
+    // process will exit properly.
+    bool has_error = false;
+
+    // Note: this check is redundant. We check this earlier.
+    DCHECK(params.enable_ipc_proxy);
+
+    ScopedChannelHandle ppapi_browser_server_channel_handle;
+    ScopedChannelHandle ppapi_browser_client_channel_handle;
+    ScopedChannelHandle ppapi_renderer_server_channel_handle;
+    ScopedChannelHandle ppapi_renderer_client_channel_handle;
+    ScopedChannelHandle trusted_service_server_channel_handle;
+    ScopedChannelHandle trusted_service_client_channel_handle;
+    ScopedChannelHandle manifest_service_server_channel_handle;
+    ScopedChannelHandle manifest_service_client_channel_handle;
+
+    if (!CreateChannelHandlePair(&ppapi_browser_server_channel_handle,
+                                 &ppapi_browser_client_channel_handle) ||
+        !CreateChannelHandlePair(&ppapi_renderer_server_channel_handle,
+                                 &ppapi_renderer_client_channel_handle) ||
+        !CreateChannelHandlePair(&trusted_service_server_channel_handle,
+                                 &trusted_service_client_channel_handle) ||
+        !CreateChannelHandlePair(&manifest_service_server_channel_handle,
+                                 &manifest_service_client_channel_handle)) {
+      SendErrorToRenderer("Failed to create socket pairs.");
+      has_error = true;
+    }
+
+    if (!has_error &&
+        !StartPPAPIProxy(ppapi_browser_client_channel_handle.Pass())) {
+      SendErrorToRenderer("Failed to start browser PPAPI proxy.");
+      has_error = true;
+    }
+
+    if (!has_error) {
+      // On success, send back a success message to the renderer process,
+      // and transfer the channel handles for the NaCl loader process to
+      // |params|.
+      ReplyToRenderer(ppapi_renderer_client_channel_handle.Pass(),
+                      trusted_service_client_channel_handle.Pass(),
+                      manifest_service_client_channel_handle.Pass());
+      params.ppapi_browser_channel_handle =
+          ppapi_browser_server_channel_handle.release();
+      params.ppapi_renderer_channel_handle =
+          ppapi_renderer_server_channel_handle.release();
+      params.trusted_service_channel_handle =
+          trusted_service_server_channel_handle.release();
+      params.manifest_service_channel_handle =
+          manifest_service_server_channel_handle.release();
+    }
+  }
+#endif
+
   process_->Send(new NaClProcessMsg_Start(params));
 }
 
-// This method is called when NaClProcessHostMsg_PpapiChannelCreated is
-// received.
-void NaClProcessHost::OnPpapiChannelsCreated(
-    const IPC::ChannelHandle& raw_browser_channel_handle,
-    const IPC::ChannelHandle& raw_ppapi_renderer_channel_handle,
-    const IPC::ChannelHandle& raw_trusted_renderer_channel_handle,
-    const IPC::ChannelHandle& raw_manifest_service_channel_handle) {
-  ScopedChannelHandle browser_channel_handle(raw_browser_channel_handle);
-  ScopedChannelHandle ppapi_renderer_channel_handle(
-      raw_ppapi_renderer_channel_handle);
-  ScopedChannelHandle trusted_renderer_channel_handle(
-      raw_trusted_renderer_channel_handle);
-  ScopedChannelHandle manifest_service_channel_handle(
-      raw_manifest_service_channel_handle);
+#if defined(OS_LINUX)
+// static
+bool NaClProcessHost::CreateChannelHandlePair(
+    ScopedChannelHandle* channel_handle1,
+    ScopedChannelHandle* channel_handle2) {
+  DCHECK(channel_handle1);
+  DCHECK(channel_handle2);
 
-  if (!enable_ppapi_proxy()) {
-    ReplyToRenderer(ScopedChannelHandle(),
-                    trusted_renderer_channel_handle.Pass(),
-                    manifest_service_channel_handle.Pass());
-    return;
+  int fd1 = -1;
+  int fd2 = -1;
+  if (!IPC::SocketPair(&fd1, &fd2)) {
+    return false;
   }
 
+  IPC::ChannelHandle handle = IPC::Channel::GenerateVerifiedChannelID("nacl");
+  handle.socket = base::FileDescriptor(fd1, true);
+  channel_handle1->reset(handle);
+  handle.socket = base::FileDescriptor(fd2, true);
+  channel_handle2->reset(handle);
+  return true;
+}
+#endif
+
+bool NaClProcessHost::StartPPAPIProxy(ScopedChannelHandle channel_handle) {
   if (ipc_proxy_channel_.get()) {
     // Attempt to open more than 1 browser channel is not supported.
     // Shut down the NaCl process.
     process_->GetHost()->ForceShutdown();
-    return;
+    return false;
   }
 
   DCHECK_EQ(PROCESS_TYPE_NACL_LOADER, process_->GetData().process_type);
 
-  ipc_proxy_channel_ =
-      IPC::ChannelProxy::Create(browser_channel_handle.release(),
-                                IPC::Channel::MODE_CLIENT,
-                                NULL,
-                                base::MessageLoopProxy::current().get());
+  ipc_proxy_channel_ = IPC::ChannelProxy::Create(
+      channel_handle.release(), IPC::Channel::MODE_CLIENT, NULL,
+      base::ThreadTaskRunnerHandle::Get().get());
   // Create the browser ppapi host and enable PPAPI message dispatching to the
   // browser process.
   ppapi_host_.reset(content::BrowserPpapiHost::CreateExternalPluginProcess(
@@ -1076,6 +1176,38 @@ void NaClProcessHost::OnPpapiChannelsCreated(
 
   // Send a message to initialize the IPC dispatchers in the NaCl plugin.
   ipc_proxy_channel_->Send(new PpapiMsg_InitializeNaClDispatcher(args));
+  return true;
+}
+
+// This method is called when NaClProcessHostMsg_PpapiChannelCreated is
+// received.
+void NaClProcessHost::OnPpapiChannelsCreated(
+    const IPC::ChannelHandle& raw_ppapi_browser_channel_handle,
+    const IPC::ChannelHandle& raw_ppapi_renderer_channel_handle,
+    const IPC::ChannelHandle& raw_trusted_renderer_channel_handle,
+    const IPC::ChannelHandle& raw_manifest_service_channel_handle) {
+  ScopedChannelHandle ppapi_browser_channel_handle(
+      raw_ppapi_browser_channel_handle);
+  ScopedChannelHandle ppapi_renderer_channel_handle(
+      raw_ppapi_renderer_channel_handle);
+  ScopedChannelHandle trusted_renderer_channel_handle(
+      raw_trusted_renderer_channel_handle);
+  ScopedChannelHandle manifest_service_channel_handle(
+      raw_manifest_service_channel_handle);
+
+  if (enable_ppapi_proxy()) {
+    if (!StartPPAPIProxy(ppapi_browser_channel_handle.Pass())) {
+      SendErrorToRenderer("Browser PPAPI proxy could not start.");
+      return;
+    }
+  } else {
+    // If PPAPI proxy is disabled, channel handles should be invalid.
+    DCHECK(ppapi_browser_channel_handle.get().name.empty());
+    DCHECK(ppapi_renderer_channel_handle.get().name.empty());
+    // Invalidate, just in case.
+    ppapi_browser_channel_handle.reset();
+    ppapi_renderer_channel_handle.reset();
+  }
 
   // Let the renderer know that the IPC channels are established.
   ReplyToRenderer(ppapi_renderer_channel_handle.Pass(),
@@ -1251,8 +1383,7 @@ bool NaClProcessHost::AttachDebugExceptionHandler(const std::string& info,
                info);
   } else {
     NaClStartDebugExceptionHandlerThread(
-        process.Pass(), info,
-        base::MessageLoopProxy::current(),
+        process.Pass(), info, base::ThreadTaskRunnerHandle::Get(),
         base::Bind(&NaClProcessHost::OnDebugExceptionHandlerLaunchedByBroker,
                    weak_factory_.GetWeakPtr()));
     return true;

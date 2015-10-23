@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "SkPathPriv.h"
 
 static void create_ngon(int n, SkPoint* pts, SkScalar width, SkScalar height) {
     float angleStep = 360.0f / n, angle = 0.0f, sin, cos;
@@ -162,7 +163,7 @@ protected:
             SK_ARRAY_COUNT(gPoints9),
             SK_ARRAY_COUNT(gPoints10),
         };
-        SK_COMPILE_ASSERT(SK_ARRAY_COUNT(gSizes) == SK_ARRAY_COUNT(gPoints), array_mismatch);
+        static_assert(SK_ARRAY_COUNT(gSizes) == SK_ARRAY_COUNT(gPoints), "array_mismatch");
 
         SkAutoTDeleteArray<SkPoint> data(NULL);
         const SkPoint* points;
@@ -237,9 +238,9 @@ protected:
         // of the GMs rows.
         SkASSERT(path.isConvex());
         SkASSERT(SkPath::kLine_SegmentMask == path.getSegmentMasks());
-        SkPath::Direction actualDir;
-        SkASSERT(path.cheapComputeDirection(&actualDir));
-        SkASSERT(dir == actualDir);
+        SkPathPriv::FirstDirection actualDir;
+        SkASSERT(SkPathPriv::CheapComputeFirstDirection(path, &actualDir));
+        SkASSERT(SkPathPriv::AsFirstDirection(dir) == actualDir);
         SkRect bounds = path.getBounds();
         SkASSERT(SkScalarNearlyEqual(bounds.centerX(), 0.0f));
         SkASSERT(bounds.height() <= kMaxPathHeight);

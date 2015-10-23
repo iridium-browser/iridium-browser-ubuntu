@@ -37,19 +37,18 @@
 #include "platform/graphics/ImageSource.h"
 #include "platform/image-decoders/ImageAnimation.h"
 #include "wtf/Forward.h"
+#include "wtf/OwnPtr.h"
 
 namespace blink {
 
 template <typename T> class Timer;
 
-class PLATFORM_EXPORT BitmapImage : public Image {
+class PLATFORM_EXPORT BitmapImage final : public Image {
     friend class GeneratedImage;
     friend class CrossfadeGeneratedImage;
     friend class GradientGeneratedImage;
     friend class GraphicsContext;
 public:
-    static PassRefPtr<BitmapImage> create(const SkBitmap&, ImageObserver* = 0);
-
     static PassRefPtr<BitmapImage> create(ImageObserver* observer = 0)
     {
         return adoptRef(new BitmapImage(observer));
@@ -58,17 +57,17 @@ public:
     // This allows constructing a BitmapImage with a forced non-default orientation.
     static PassRefPtr<BitmapImage> createWithOrientationForTesting(const SkBitmap&, ImageOrientation);
 
-    virtual ~BitmapImage();
+    ~BitmapImage() override;
 
-    virtual bool isBitmapImage() const override;
+    bool isBitmapImage() const override;
 
-    virtual bool currentFrameHasSingleSecurityOrigin() const override;
+    bool currentFrameHasSingleSecurityOrigin() const override;
 
-    virtual IntSize size() const override;
+    IntSize size() const override;
     IntSize sizeRespectingOrientation() const;
-    virtual bool getHotSpot(IntPoint&) const override;
-    virtual String filenameExtension() const override;
-    virtual bool dataChanged(bool allDataReceived) override;
+    bool getHotSpot(IntPoint&) const override;
+    String filenameExtension() const override;
+    bool dataChanged(bool allDataReceived) override;
 
     bool isAllDataReceived() const { return m_allDataReceived; }
     bool hasColorProfile() const;
@@ -77,22 +76,21 @@ public:
     // This because we start and stop animating lazily. Animation starts when
     // the image is rendered, and automatically pauses once all observers no
     // longer want to render the image.
-    virtual void stopAnimation() override;
-    virtual void resetAnimation() override;
-    virtual bool maybeAnimated() override;
+    void stopAnimation() override;
+    void resetAnimation() override;
+    bool maybeAnimated() override;
 
-    virtual void setAnimationPolicy(ImageAnimationPolicy policy) override { m_animationPolicy = policy; }
-    virtual ImageAnimationPolicy animationPolicy() override { return m_animationPolicy; }
-    virtual void advanceTime(double deltaTimeInSeconds) override;
+    void setAnimationPolicy(ImageAnimationPolicy policy) override { m_animationPolicy = policy; }
+    ImageAnimationPolicy animationPolicy() override { return m_animationPolicy; }
+    void advanceTime(double deltaTimeInSeconds) override;
 
-    virtual bool bitmapForCurrentFrame(SkBitmap*) override;
-    virtual PassRefPtr<Image> imageForDefaultFrame() override;
-    virtual bool currentFrameKnownToBeOpaque() override;
+    PassRefPtr<SkImage> imageForCurrentFrame() override;
+    PassRefPtr<Image> imageForDefaultFrame() override;
+    bool currentFrameKnownToBeOpaque() override;
+    bool currentFrameIsComplete() override;
+    bool currentFrameIsLazyDecoded() override;
+
     ImageOrientation currentFrameOrientation();
-
-#if ENABLE(ASSERT)
-    virtual bool notSolidColor() override;
-#endif
 
 private:
     friend class BitmapImageTest;
@@ -109,17 +107,18 @@ private:
     BitmapImage(const SkBitmap &, ImageObserver* = 0);
     BitmapImage(ImageObserver* = 0);
 
-    void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, SkXfermode::Mode, RespectImageOrientationEnum) override;
+    void draw(SkCanvas*, const SkPaint&, const FloatRect& dstRect, const FloatRect& srcRect, RespectImageOrientationEnum, ImageClampingMode) override;
 
     size_t currentFrame() const { return m_currentFrame; }
     size_t frameCount();
 
-    bool frameAtIndex(size_t, SkBitmap*) WARN_UNUSED_RETURN;
+    PassRefPtr<SkImage> frameAtIndex(size_t);
 
     bool frameIsCompleteAtIndex(size_t);
     float frameDurationAtIndex(size_t);
     bool frameHasAlphaAtIndex(size_t);
     ImageOrientation frameOrientationAtIndex(size_t);
+    bool frameIsLazyDecodedAtIndex(size_t) const;
 
     // Decodes and caches a frame. Never accessed except internally.
     void cacheFrame(size_t index);
@@ -140,7 +139,7 @@ private:
     // frame; this is used while animating large images to keep memory footprint
     // low; the decoder should preserve the current frame and may preserve some
     // other frames to avoid redecoding the whole image on every frame.
-    virtual void destroyDecodedData(bool destroyAll) override;
+    void destroyDecodedData(bool destroyAll) override;
 
     // If the image is large enough, calls destroyDecodedData().
     void destroyDecodedDataIfNecessary();
@@ -156,7 +155,7 @@ private:
     // Animation.
     int repetitionCount(bool imageKnownToBeComplete);  // |imageKnownToBeComplete| should be set if the caller knows the entire image has been decoded.
     bool shouldAnimate();
-    virtual void startAnimation(CatchUpAnimation = CatchUp) override;
+    void startAnimation(CatchUpAnimation = CatchUp) override;
     void advanceAnimation(Timer<BitmapImage>*);
 
     // Function that does the real work of advancing the animation.  When
@@ -166,14 +165,6 @@ private:
     // Returns whether the animation was advanced.
     bool internalAdvanceAnimation(bool skippingFrames);
 
-    // Checks to see if the image is a 1x1 solid color.  We optimize these images and just do a fill rect instead.
-    // This check should happen regardless whether m_checkedForSolidColor is already set, as the frame may have
-    // changed.
-    void checkForSolidColor();
-
-    virtual bool mayFillWithSolidColor() override;
-    virtual Color solidColor() const override;
-
     ImageSource m_source;
     mutable IntSize m_size; // The size to use for the overall image (will just be the size of the first image).
     mutable IntSize m_sizeRespectingOrientation;
@@ -181,20 +172,15 @@ private:
     size_t m_currentFrame; // The index of the current frame of animation.
     Vector<FrameData, 1> m_frames; // An array of the cached frames of the animation. We have to ref frames to pin them in the cache.
 
-    Timer<BitmapImage>* m_frameTimer;
+    OwnPtr<Timer<BitmapImage>> m_frameTimer;
     int m_repetitionCount; // How many total animation loops we should do.  This will be cAnimationNone if this image type is incapable of animation.
     RepetitionCountStatus m_repetitionCountStatus;
     int m_repetitionsComplete;  // How many repetitions we've finished.
     double m_desiredFrameStartTime;  // The system time at which we hope to see the next call to startAnimation().
 
-    Color m_solidColor;  // If we're a 1x1 solid color, this is the color to use to fill.
-
     size_t m_frameCount;
 
     ImageAnimationPolicy m_animationPolicy; // Whether or not we can play animation.
-
-    bool m_isSolidColor : 1; // Whether or not we are a 1x1 solid image.
-    bool m_checkedForSolidColor : 1; // Whether we've checked the frame for solid color.
 
     bool m_animationFinished : 1; // Whether or not we've completed the entire animation.
 

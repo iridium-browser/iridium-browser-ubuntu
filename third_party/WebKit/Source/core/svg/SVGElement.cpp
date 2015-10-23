@@ -31,7 +31,6 @@
 #include "core/XLinkNames.h"
 #include "core/XMLNames.h"
 #include "core/css/CSSCursorImageValue.h"
-#include "core/css/parser/CSSParser.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
@@ -48,7 +47,7 @@
 #include "core/svg/SVGSVGElement.h"
 #include "core/svg/SVGTitleElement.h"
 #include "core/svg/SVGUseElement.h"
-
+#include "platform/JSONValues.h"
 #include "wtf/TemporaryChange.h"
 
 namespace blink {
@@ -186,7 +185,7 @@ void SVGElement::reportAttributeParsingError(SVGParsingError error, const Qualif
     if (error == NoError)
         return;
 
-    String errorString = "<" + tagName() + "> attribute " + name.toString() + "=\"" + value + "\"";
+    String errorString = "<" + tagName() + "> attribute " + name.toString() + "=" + JSONValue::quoteString(value);
     SVGDocumentExtensions& extensions = document().accessSVGExtensions();
 
     if (error == NegativeValueForbiddenError) {
@@ -311,7 +310,6 @@ CSSPropertyID SVGElement::cssPropertyIdForSVGAttributeName(const QualifiedName& 
             &SVGNames::directionAttr,
             &displayAttr,
             &dominant_baselineAttr,
-            &enable_backgroundAttr,
             &fillAttr,
             &fill_opacityAttr,
             &fill_ruleAttr,
@@ -559,7 +557,7 @@ SVGElement* SVGElement::correspondingElement()
 SVGUseElement* SVGElement::correspondingUseElement() const
 {
     if (ShadowRoot* root = containingShadowRoot()) {
-        if (isSVGUseElement(root->host()) && (root->type() == ShadowRoot::UserAgentShadowRoot))
+        if (isSVGUseElement(root->host()) && (root->type() == ShadowRootType::UserAgent))
             return toSVGUseElement(root->host());
     }
     return nullptr;
@@ -742,9 +740,9 @@ static inline void collectInstancesForSVGElement(SVGElement* element, WillBeHeap
     instances = element->instancesForElement();
 }
 
-bool SVGElement::addEventListener(const AtomicString& eventType, PassRefPtr<EventListener> prpListener, bool useCapture)
+bool SVGElement::addEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener> prpListener, bool useCapture)
 {
-    RefPtr<EventListener> listener = prpListener;
+    RefPtrWillBeRawPtr<EventListener> listener = prpListener;
 
     // Add event listener to regular DOM element
     if (!Node::addEventListener(eventType, listener, useCapture))
@@ -761,9 +759,9 @@ bool SVGElement::addEventListener(const AtomicString& eventType, PassRefPtr<Even
     return true;
 }
 
-bool SVGElement::removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener> prpListener, bool useCapture)
+bool SVGElement::removeEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener> prpListener, bool useCapture)
 {
-    RefPtr<EventListener> listener = prpListener;
+    RefPtrWillBeRawPtr<EventListener> listener = prpListener;
 
     // Remove event listener from regular DOM element
     if (!Node::removeEventListener(eventType, listener, useCapture))
@@ -787,9 +785,11 @@ static bool hasLoadListener(Element* element)
         return true;
 
     for (element = element->parentOrShadowHostElement(); element; element = element->parentOrShadowHostElement()) {
-        const EventListenerVector& entry = element->getEventListeners(EventTypeNames::load);
-        for (size_t i = 0; i < entry.size(); ++i) {
-            if (entry[i].useCapture)
+        EventListenerVector* entry = element->getEventListeners(EventTypeNames::load);
+        if (!entry)
+            continue;
+        for (size_t i = 0; i < entry->size(); ++i) {
+            if (entry->at(i).useCapture)
                 return true;
         }
     }
@@ -828,27 +828,11 @@ void SVGElement::sendSVGLoadEventToSelfAndAncestorChainIfPossible()
     toSVGElement(parent)->sendSVGLoadEventToSelfAndAncestorChainIfPossible();
 }
 
-void SVGElement::sendSVGLoadEventIfPossibleAsynchronously()
-{
-    svgLoadEventTimer()->startOneShot(0, FROM_HERE);
-}
-
-void SVGElement::svgLoadEventTimerFired(Timer<SVGElement>*)
-{
-    sendSVGLoadEventIfPossible();
-}
-
-Timer<SVGElement>* SVGElement::svgLoadEventTimer()
-{
-    ASSERT_NOT_REACHED();
-    return nullptr;
-}
-
 void SVGElement::attributeChanged(const QualifiedName& name, const AtomicString& newValue, AttributeModificationReason)
 {
     Element::attributeChanged(name, newValue);
 
-    if (isIdAttributeName(name))
+    if (name == HTMLNames::idAttr)
         rebuildAllIncomingReferences();
 
     // Changes to the style attribute are processed lazily (see Element::getAttribute() and related methods),
@@ -871,7 +855,7 @@ void SVGElement::svgAttributeChanged(const QualifiedName& attrName)
         return;
     }
 
-    if (isIdAttributeName(attrName)) {
+    if (attrName == HTMLNames::idAttr) {
         LayoutObject* object = layoutObject();
         // Notify resources about id changes, this is important as we cache resources by id in SVGDocumentExtensions
         if (object && object->isSVGResourceContainer())
@@ -1022,7 +1006,6 @@ bool SVGElement::isAnimatableAttribute(const QualifiedName& name) const
             &SVGNames::edgeModeAttr,
             &SVGNames::elevationAttr,
             &SVGNames::exponentAttr,
-            &SVGNames::filterResAttr,
             &SVGNames::filterUnitsAttr,
             &SVGNames::fxAttr,
             &SVGNames::fyAttr,

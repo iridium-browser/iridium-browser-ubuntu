@@ -15,7 +15,7 @@
 #include "sync/test/engine/test_directory_setter_upper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
 class SyncContextProxyImplTest : public ::testing::Test {
  public:
@@ -25,7 +25,7 @@ class SyncContextProxyImplTest : public ::testing::Test {
 
   void SetUp() override {
     dir_maker_.SetUp();
-    registry_.reset(new ModelTypeRegistry(
+    registry_.reset(new syncer::ModelTypeRegistry(
         workers_, dir_maker_.directory(), &nudge_handler_));
     context_proxy_.reset(
         new SyncContextProxyImpl(sync_task_runner_, registry_->AsWeakPtr()));
@@ -48,10 +48,10 @@ class SyncContextProxyImplTest : public ::testing::Test {
   scoped_refptr<base::SequencedTaskRunner> sync_task_runner_;
   scoped_refptr<base::SequencedTaskRunner> type_task_runner_;
 
-  std::vector<scoped_refptr<ModelSafeWorker> > workers_;
-  TestDirectorySetterUpper dir_maker_;
-  MockNudgeHandler nudge_handler_;
-  scoped_ptr<ModelTypeRegistry> registry_;
+  std::vector<scoped_refptr<syncer::ModelSafeWorker>> workers_;
+  syncer::TestDirectorySetterUpper dir_maker_;
+  syncer::MockNudgeHandler nudge_handler_;
+  scoped_ptr<syncer::ModelTypeRegistry> registry_;
 
   scoped_ptr<SyncContextProxyImpl> context_proxy_;
 };

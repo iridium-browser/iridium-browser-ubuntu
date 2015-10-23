@@ -98,7 +98,7 @@ bool NonZeroSegmentBaseIsSlow() {
 // requests.
 bool SendIPCRequestAndReadReply(int ipc_channel,
                                 const std::vector<int>& attached_fds,
-                                const Pickle& request_pickle,
+                                const base::Pickle& request_pickle,
                                 char* reply_data_buffer,
                                 size_t reply_data_buffer_size,
                                 ssize_t* reply_size) {
@@ -106,8 +106,8 @@ bool SendIPCRequestAndReadReply(int ipc_channel,
             reply_data_buffer_size);
   DCHECK(reply_size);
 
-  if (!UnixDomainSocket::SendMsg(ipc_channel, request_pickle.data(),
-                                 request_pickle.size(), attached_fds)) {
+  if (!base::UnixDomainSocket::SendMsg(ipc_channel, request_pickle.data(),
+                                       request_pickle.size(), attached_fds)) {
     LOG(ERROR) << "SendIPCRequestAndReadReply: SendMsg failed";
     return false;
   }
@@ -115,8 +115,8 @@ bool SendIPCRequestAndReadReply(int ipc_channel,
   // Then read the remote reply.
   ScopedVector<base::ScopedFD> received_fds;
   const ssize_t msg_len =
-      UnixDomainSocket::RecvMsg(ipc_channel, reply_data_buffer,
-                                reply_data_buffer_size, &received_fds);
+      base::UnixDomainSocket::RecvMsg(ipc_channel, reply_data_buffer,
+                                      reply_data_buffer_size, &received_fds);
   if (msg_len <= 0) {
     LOG(ERROR) << "SendIPCRequestAndReadReply: RecvMsg failed";
     return false;
@@ -367,7 +367,7 @@ pid_t NaClForkDelegate::Fork(const std::string& process_type,
   }
 
   // First, send a remote fork request.
-  Pickle write_pickle;
+  base::Pickle write_pickle;
   write_pickle.WriteInt(nacl::kNaClForkRequest);
   // TODO(hamaji): When we split the helper binary for non-SFI mode
   // from nacl_helper, stop sending this information.
@@ -385,8 +385,8 @@ pid_t NaClForkDelegate::Fork(const std::string& process_type,
   }
 
   // Now see if the other end managed to fork.
-  Pickle reply_pickle(reply_buf, reply_size);
-  PickleIterator iter(reply_pickle);
+  base::Pickle reply_pickle(reply_buf, reply_size);
+  base::PickleIterator iter(reply_pickle);
   pid_t nacl_child;
   if (!iter.ReadInt(&nacl_child)) {
     LOG(ERROR) << "NaClForkDelegate::Fork: pickle failed";
@@ -403,7 +403,7 @@ bool NaClForkDelegate::GetTerminationStatus(pid_t pid, bool known_dead,
   DCHECK(status);
   DCHECK(exit_code);
 
-  Pickle write_pickle;
+  base::Pickle write_pickle;
   write_pickle.WriteInt(nacl::kNaClGetTerminationStatusRequest);
   write_pickle.WriteInt(pid);
   write_pickle.WriteBool(known_dead);
@@ -419,8 +419,8 @@ bool NaClForkDelegate::GetTerminationStatus(pid_t pid, bool known_dead,
     return false;
   }
 
-  Pickle reply_pickle(reply_buf, reply_size);
-  PickleIterator iter(reply_pickle);
+  base::Pickle reply_pickle(reply_buf, reply_size);
+  base::PickleIterator iter(reply_pickle);
   int termination_status;
   if (!iter.ReadInt(&termination_status) ||
       termination_status < 0 ||
@@ -447,8 +447,9 @@ void NaClForkDelegate::AddPassthroughEnvToOptions(
   std::string pass_through_string;
   std::vector<std::string> pass_through_vars;
   if (env->GetVar(kNaClEnvPassthrough, &pass_through_string)) {
-    base::SplitString(
-        pass_through_string, kNaClEnvPassthroughDelimiter, &pass_through_vars);
+    pass_through_vars = base::SplitString(
+        pass_through_string, std::string(1, kNaClEnvPassthroughDelimiter),
+        base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   }
   pass_through_vars.push_back(kNaClExeStderr);
   pass_through_vars.push_back(kNaClExeStdout);

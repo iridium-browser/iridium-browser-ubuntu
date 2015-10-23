@@ -236,7 +236,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   g_browser_process->AddRefModule();
 
   // Close the browser.
-  browser()->window()->Close();
+  CloseBrowserAsynchronously(browser());
 
   // Do a simple non-process-startup browser launch.
   base::CommandLine dummy(base::CommandLine::NO_PROGRAM);
@@ -734,7 +734,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, StartupURLsForTwoProfiles) {
   SessionStartupPref::SetStartupPref(other_profile, pref2);
 
   // Close the browser.
-  browser()->window()->Close();
+  CloseBrowserAsynchronously(browser());
 
   // Do a simple non-process-startup browser launch.
   base::CommandLine dummy(base::CommandLine::NO_PROGRAM);
@@ -801,7 +801,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, PRE_UpdateWithTwoProfiles) {
   chrome::NewTab(browser1);
   ui_test_utils::NavigateToURL(browser1,
                                test_server()->GetURL("files/empty.html"));
-  browser1->window()->Close();
+  CloseBrowserSynchronously(browser1);
 
   Browser* browser2 = new Browser(
       Browser::CreateParams(Browser::TYPE_TABBED, profile2,
@@ -809,7 +809,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, PRE_UpdateWithTwoProfiles) {
   chrome::NewTab(browser2);
   ui_test_utils::NavigateToURL(browser2,
                                test_server()->GetURL("files/form.html"));
-  browser2->window()->Close();
+  CloseBrowserSynchronously(browser2);
 
   // Set different startup preferences for the 2 profiles.
   std::vector<GURL> urls1;
@@ -957,12 +957,12 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   chrome::NewTab(browser_last);
   ui_test_utils::NavigateToURL(browser_last,
                                test_server()->GetURL("files/empty.html"));
-  browser_last->window()->Close();
+  CloseBrowserAsynchronously(browser_last);
 
   // Close the main browser.
   chrome::HostDesktopType original_desktop_type =
       browser()->host_desktop_type();
-  browser()->window()->Close();
+  CloseBrowserAsynchronously(browser());
 
   // Do a simple non-process-startup browser launch.
   base::CommandLine dummy(base::CommandLine::NO_PROGRAM);
@@ -1071,7 +1071,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   SessionStartupPref::SetStartupPref(profile_urls, pref_urls);
 
   // Simulate a launch after an unclear exit.
-  browser()->window()->Close();
+  CloseBrowserAsynchronously(browser());
   static_cast<ProfileImpl*>(profile_home)->last_session_exit_type_ =
       Profile::EXIT_CRASHED;
   static_cast<ProfileImpl*>(profile_last)->last_session_exit_type_ =
@@ -1187,8 +1187,9 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBrowserCreatorTest,
   ASSERT_TRUE(new_browser);
 
   TabStripModel* tab_strip = new_browser->tab_strip_model();
-  // There should be only one tab.
-  EXPECT_EQ(1, tab_strip->count());
+  // There should be only one tab, except on Windows 10. See crbug.com/505029.
+  const int tab_count = IsWindows10OrNewer() ? 2 : 1;
+  EXPECT_EQ(tab_count, tab_strip->count());
 }
 
 #endif  // !defined(OS_CHROMEOS)

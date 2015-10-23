@@ -67,7 +67,9 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
       unauthenticated_load_allowed_ = false;
 #endif
     } else {
-      base::FilePath::StringType paths = JoinString(load_extensions_, ',');
+      base::FilePath::StringType paths =
+          base::JoinString(load_extensions_,
+                           base::FilePath::StringType(1, ','));
       command_line->AppendSwitchNative(switches::kLoadExtension,
                                        paths);
       command_line->AppendSwitch(switches::kDisableExtensionsFileAccessCheck);
@@ -256,9 +258,6 @@ class ExtensionsLoadTest : public ExtensionStartupTestBase {
   }
 };
 
-// Fails inconsistently on Linux x64. http://crbug.com/80961
-// TODO(dpapad): Has not failed since October 2011, let's reenable, monitor
-// and act accordingly.
 IN_PROC_BROWSER_TEST_F(ExtensionsLoadTest, Test) {
   WaitForServicesToStart(1, true);
   TestInjection(true, true);

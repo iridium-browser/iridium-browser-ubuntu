@@ -13,6 +13,9 @@
 #include "base/values.h"
 #include "content/public/common/manifest.h"
 #include "content/renderer/manifest/manifest_uma_util.h"
+#include "third_party/WebKit/public/platform/WebColor.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/web/WebCSSParser.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace content {
@@ -26,7 +29,7 @@ bool IsValidIconWidthOrHeight(const std::string& str) {
   if (str.empty() || str[0] == '0')
     return false;
   for (size_t i = 0; i < str.size(); ++i)
-    if (!IsAsciiDigit(str[i]))
+    if (!base::IsAsciiDigit(str[i]))
       return false;
   return true;
 }
@@ -44,9 +47,10 @@ std::vector<gfx::Size> ParseIconSizesHTML(const base::string16& sizes_str16) {
 
   std::vector<gfx::Size> sizes;
   std::string sizes_str =
-      base::StringToLowerASCII(base::UTF16ToUTF8(sizes_str16));
-  std::vector<std::string> sizes_str_list;
-  base::SplitStringAlongWhitespace(sizes_str, &sizes_str_list);
+      base::ToLowerASCII(base::UTF16ToUTF8(sizes_str16));
+  std::vector<std::string> sizes_str_list = base::SplitString(
+      sizes_str, base::kWhitespaceASCII, base::KEEP_WHITESPACE,
+      base::SPLIT_WANT_NONEMPTY);
 
   for (size_t i = 0; i < sizes_str_list.size(); ++i) {
     std::string& size_str = sizes_str_list[i];
@@ -56,8 +60,8 @@ std::vector<gfx::Size> ParseIconSizesHTML(const base::string16& sizes_str16) {
     }
 
     // It is expected that [0] => width and [1] => height after the split.
-    std::vector<std::string> size_list;
-    base::SplitStringDontTrim(size_str, L'x', &size_list);
+    std::vector<std::string> size_list = base::SplitString(
+        size_str, "x", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
     if (size_list.size() != 2)
       continue;
     if (!IsValidIconWidthOrHeight(size_list[0]) ||
@@ -100,9 +104,8 @@ ManifestParser::~ManifestParser() {
 
 void ManifestParser::Parse() {
   std::string parse_error;
-  scoped_ptr<base::Value> value(
-      base::JSONReader::ReadAndReturnError(data_, base::JSON_PARSE_RFC,
-                                           nullptr, &parse_error));
+  scoped_ptr<base::Value> value(base::JSONReader::DeprecatedReadAndReturnError(
+      data_, base::JSON_PARSE_RFC, nullptr, &parse_error));
 
   if (!value) {
     errors_.push_back(GetErrorPrefix() + parse_error);
@@ -130,8 +133,9 @@ void ManifestParser::Parse() {
   manifest_.related_applications = ParseRelatedApplications(*dictionary);
   manifest_.prefer_related_applications =
       ParsePreferRelatedApplications(*dictionary);
+  manifest_.theme_color = ParseThemeColor(*dictionary);
+  manifest_.background_color = ParseBackgroundColor(*dictionary);
   manifest_.gcm_sender_id = ParseGCMSenderID(*dictionary);
-  manifest_.gcm_user_visible_only = ParseGCMUserVisibleOnly(*dictionary);
 
   ManifestUmaUtil::ParseSucceeded(manifest_);
 }
@@ -183,6 +187,29 @@ base::NullableString16 ManifestParser::ParseString(
   return base::NullableString16(value, false);
 }
 
+int64_t ManifestParser::ParseColor(
+    const base::DictionaryValue& dictionary,
+    const std::string& key) {
+  base::NullableString16 parsed_color = ParseString(dictionary, key, Trim);
+  if (parsed_color.is_null())
+    return Manifest::kInvalidOrMissingColor;
+
+  blink::WebColor color;
+  if (!blink::WebCSSParser::parseColor(&color, parsed_color.string())) {
+      errors_.push_back(GetErrorPrefix() +
+                        "property '" + key + "' ignored, '" +
+                        base::UTF16ToUTF8(parsed_color.string()) +
+                        "' is not a valid color.");
+      return Manifest::kInvalidOrMissingColor;
+  }
+
+  // We do this here because Java does not have an unsigned int32 type so colors
+  // with high alpha values will be negative. Instead of doing the conversion
+  // after we pass over to Java, we do it here as it is easier and clearer.
+  int32_t signed_color = reinterpret_cast<int32_t&>(color);
+  return static_cast<int64_t>(signed_color);
+}
+
 GURL ManifestParser::ParseURL(const base::DictionaryValue& dictionary,
                               const std::string& key,
                               const GURL& base_url) {
@@ -217,23 +244,23 @@ GURL ManifestParser::ParseStartURL(const base::DictionaryValue& dictionary) {
   return start_url;
 }
 
-Manifest::DisplayMode ManifestParser::ParseDisplay(
+blink::WebDisplayMode ManifestParser::ParseDisplay(
     const base::DictionaryValue& dictionary) {
   base::NullableString16 display = ParseString(dictionary, "display", Trim);
   if (display.is_null())
-    return Manifest::DISPLAY_MODE_UNSPECIFIED;
+    return blink::WebDisplayModeUndefined;
 
-  if (LowerCaseEqualsASCII(display.string(), "fullscreen"))
-    return Manifest::DISPLAY_MODE_FULLSCREEN;
-  else if (LowerCaseEqualsASCII(display.string(), "standalone"))
-    return Manifest::DISPLAY_MODE_STANDALONE;
-  else if (LowerCaseEqualsASCII(display.string(), "minimal-ui"))
-    return Manifest::DISPLAY_MODE_MINIMAL_UI;
-  else if (LowerCaseEqualsASCII(display.string(), "browser"))
-    return Manifest::DISPLAY_MODE_BROWSER;
+  if (base::LowerCaseEqualsASCII(display.string(), "fullscreen"))
+    return blink::WebDisplayModeFullscreen;
+  else if (base::LowerCaseEqualsASCII(display.string(), "standalone"))
+    return blink::WebDisplayModeStandalone;
+  else if (base::LowerCaseEqualsASCII(display.string(), "minimal-ui"))
+    return blink::WebDisplayModeMinimalUi;
+  else if (base::LowerCaseEqualsASCII(display.string(), "browser"))
+    return blink::WebDisplayModeBrowser;
   else {
     errors_.push_back(GetErrorPrefix() + "unknown 'display' value ignored.");
-    return Manifest::DISPLAY_MODE_UNSPECIFIED;
+    return blink::WebDisplayModeUndefined;
   }
 }
 
@@ -245,21 +272,25 @@ blink::WebScreenOrientationLockType ManifestParser::ParseOrientation(
   if (orientation.is_null())
     return blink::WebScreenOrientationLockDefault;
 
-  if (LowerCaseEqualsASCII(orientation.string(), "any"))
+  if (base::LowerCaseEqualsASCII(orientation.string(), "any"))
     return blink::WebScreenOrientationLockAny;
-  else if (LowerCaseEqualsASCII(orientation.string(), "natural"))
+  else if (base::LowerCaseEqualsASCII(orientation.string(), "natural"))
     return blink::WebScreenOrientationLockNatural;
-  else if (LowerCaseEqualsASCII(orientation.string(), "landscape"))
+  else if (base::LowerCaseEqualsASCII(orientation.string(), "landscape"))
     return blink::WebScreenOrientationLockLandscape;
-  else if (LowerCaseEqualsASCII(orientation.string(), "landscape-primary"))
+  else if (base::LowerCaseEqualsASCII(orientation.string(),
+                                      "landscape-primary"))
     return blink::WebScreenOrientationLockLandscapePrimary;
-  else if (LowerCaseEqualsASCII(orientation.string(), "landscape-secondary"))
+  else if (base::LowerCaseEqualsASCII(orientation.string(),
+                                      "landscape-secondary"))
     return blink::WebScreenOrientationLockLandscapeSecondary;
-  else if (LowerCaseEqualsASCII(orientation.string(), "portrait"))
+  else if (base::LowerCaseEqualsASCII(orientation.string(), "portrait"))
     return blink::WebScreenOrientationLockPortrait;
-  else if (LowerCaseEqualsASCII(orientation.string(), "portrait-primary"))
+  else if (base::LowerCaseEqualsASCII(orientation.string(),
+                                      "portrait-primary"))
     return blink::WebScreenOrientationLockPortraitPrimary;
-  else if (LowerCaseEqualsASCII(orientation.string(), "portrait-secondary"))
+  else if (base::LowerCaseEqualsASCII(orientation.string(),
+                                      "portrait-secondary"))
     return blink::WebScreenOrientationLockPortraitSecondary;
   else {
     errors_.push_back(GetErrorPrefix() +
@@ -405,14 +436,19 @@ bool ManifestParser::ParsePreferRelatedApplications(
   return ParseBoolean(dictionary, "prefer_related_applications", false);
 }
 
+int64_t ManifestParser::ParseThemeColor(
+    const base::DictionaryValue& dictionary) {
+  return ParseColor(dictionary, "theme_color");
+}
+
+int64_t ManifestParser::ParseBackgroundColor(
+    const base::DictionaryValue& dictionary) {
+  return ParseColor(dictionary, "background_color");
+}
+
 base::NullableString16 ManifestParser::ParseGCMSenderID(
     const base::DictionaryValue& dictionary)  {
   return ParseString(dictionary, "gcm_sender_id", Trim);
-}
-
-bool ManifestParser::ParseGCMUserVisibleOnly(
-    const base::DictionaryValue& dictionary) {
-  return ParseBoolean(dictionary, "gcm_user_visible_only", false);
 }
 
 } // namespace content

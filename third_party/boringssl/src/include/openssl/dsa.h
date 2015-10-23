@@ -354,7 +354,7 @@ struct dsa_st {
   /* Normally used to cache montgomery values */
   CRYPTO_MUTEX method_mont_p_lock;
   BN_MONT_CTX *method_mont_p;
-  int references;
+  CRYPTO_refcount_t references;
   CRYPTO_EX_DATA ex_data;
   DSA_METHOD *meth;
   /* functional reference if 'meth' is ENGINE-provided */
@@ -366,11 +366,6 @@ struct dsa_st {
 }  /* extern C */
 #endif
 
-#define DSA_F_DSA_new_method 100
-#define DSA_F_dsa_sig_cb 101
-#define DSA_F_sign 102
-#define DSA_F_sign_setup 103
-#define DSA_F_verify 104
 #define DSA_R_BAD_Q_VALUE 100
 #define DSA_R_MISSING_PARAMETERS 101
 #define DSA_R_MODULUS_TOO_LARGE 102

@@ -121,6 +121,7 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"winstylerthemehelper.dll"     // Tuneup utilities 2006.
 };
 
+#if !defined(NACL_WIN64)
 // Adds the policy rules for the path and path\ with the semantic |access|.
 // If |children| is set to true, we need to add the wildcard rules to also
 // apply the rule to the subfiles and subfolders.
@@ -152,26 +153,7 @@ bool AddDirectory(int path, const wchar_t* sub_dir, bool children,
 
   return true;
 }
-
-// Adds the policy rules for the path and path\* with the semantic |access|.
-// We need to add the wildcard rules to also apply the rule to the subkeys.
-bool AddKeyAndSubkeys(std::wstring key,
-                      sandbox::TargetPolicy::Semantics access,
-                      sandbox::TargetPolicy* policy) {
-  sandbox::ResultCode result;
-  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_REGISTRY, access,
-                           key.c_str());
-  if (result != sandbox::SBOX_ALL_OK)
-    return false;
-
-  key += L"\\*";
-  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_REGISTRY, access,
-                           key.c_str());
-  if (result != sandbox::SBOX_ALL_OK)
-    return false;
-
-  return true;
-}
+#endif  // !defined(NACL_WIN64)
 
 // Compares the loaded |module| file name matches |module_name|.
 bool IsExpandedModuleName(HMODULE module, const wchar_t* module_name) {
@@ -272,7 +254,7 @@ bool ShouldSetJobLevel(const base::CommandLine& cmd_line) {
     return true;
 
   // ...or there is a job but the JOB_OBJECT_LIMIT_BREAKAWAY_OK limit is set.
-  JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_info = {0};
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_info = {};
   if (!::QueryInformationJobObject(NULL,
                                    JobObjectExtendedLimitInformation, &job_info,
                                    sizeof(job_info), NULL)) {
@@ -346,8 +328,8 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
     return false;
 #endif  // NDEBUG
 
-  // Add the policy for read-only PDB file access for AddressSanitizer.
-#if defined(ADDRESS_SANITIZER)
+  // Add the policy for read-only PDB file access for stack traces.
+#if !defined(OFFICIAL_BUILD)
   base::FilePath exe;
   if (!PathService::Get(base::FILE_EXE, &exe))
     return false;
@@ -366,7 +348,8 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
     LOG(WARNING) << "SANITIZER_COVERAGE_DIR was not set, coverage won't work.";
   } else {
     std::wstring coverage_dir;
-    wchar_t* coverage_dir_str = WriteInto(&coverage_dir, coverage_dir_size);
+    wchar_t* coverage_dir_str =
+        base::WriteInto(&coverage_dir, coverage_dir_size);
     coverage_dir_size = ::GetEnvironmentVariable(
         L"SANITIZER_COVERAGE_DIR", coverage_dir_str, coverage_dir_size);
     CHECK(coverage_dir.size() == coverage_dir_size);
@@ -575,6 +558,17 @@ void AddBaseHandleClosePolicy(sandbox::TargetPolicy* policy) {
   policy->AddKernelObjectToClose(L"Section", object_path.data());
 }
 
+void AddAppContainerPolicy(sandbox::TargetPolicy* policy, const wchar_t* sid) {
+  if (base::win::GetVersion() == base::win::VERSION_WIN8 ||
+      base::win::GetVersion() == base::win::VERSION_WIN8_1) {
+    const base::CommandLine& command_line =
+        *base::CommandLine::ForCurrentProcess();
+    if (command_line.HasSwitch(switches::kEnableAppContainer)) {
+      policy->SetLowBox(sid);
+    }
+  }
+}
+
 bool InitBrokerServices(sandbox::BrokerServices* broker_services) {
   // TODO(abarth): DCHECK(CalledOnValidThread());
   //               See <http://b/1287166>.
@@ -747,12 +741,12 @@ base::Process StartSandboxedProcess(
     return base::Process();
   }
 
-  if (browser_command_line.HasSwitch(switches::kEnableLogging)) {
-    // If stdout/stderr point to a Windows console, these calls will
-    // have no effect.
-    policy->SetStdoutHandle(GetStdHandle(STD_OUTPUT_HANDLE));
-    policy->SetStderrHandle(GetStdHandle(STD_ERROR_HANDLE));
-  }
+#if !defined(OFFICIAL_BUILD)
+  // If stdout/stderr point to a Windows console, these calls will
+  // have no effect.
+  policy->SetStdoutHandle(GetStdHandle(STD_OUTPUT_HANDLE));
+  policy->SetStderrHandle(GetStdHandle(STD_ERROR_HANDLE));
+#endif
 
   if (delegate) {
     bool success = true;

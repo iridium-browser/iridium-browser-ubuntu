@@ -15,7 +15,6 @@
 #include "ui/events/blink/blink_event_util.h"
 #include "ui/events/gesture_detection/gesture_provider_config_helper.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/screen.h"
 
 using blink::WebGestureEvent;
 using blink::WebInputEvent;
@@ -45,7 +44,8 @@ const double kMouseMoveDropIntervalSeconds = 5.f / 1000;
 
 } // namespace
 
-TouchEmulator::TouchEmulator(TouchEmulatorClient* client)
+TouchEmulator::TouchEmulator(TouchEmulatorClient* client,
+                             float device_scale_factor)
     : client_(client),
       gesture_provider_config_type_(
           ui::GestureProviderConfigType::CURRENT_PLATFORM),
@@ -55,8 +55,7 @@ TouchEmulator::TouchEmulator(TouchEmulatorClient* client)
   DCHECK(client_);
   ResetState();
 
-  bool use_2x = gfx::Screen::GetNativeScreen()->
-      GetPrimaryDisplay().device_scale_factor() > 1.5f;
+  bool use_2x = device_scale_factor > 1.5f;
   float cursor_scale_factor = use_2x ? 2.f : 1.f;
   cursor_size_ = InitCursorFromResource(&touch_cursor_,
       cursor_scale_factor,
@@ -234,14 +233,16 @@ void TouchEmulator::HandleEmulatedTouchEvent(blink::WebTouchEvent event) {
   const bool event_consumed = true;
   // Block emulated event when emulated native stream is active.
   if (native_stream_active_sequence_count_) {
-    gesture_provider_->OnSyncTouchEventAck(event_consumed);
+    gesture_provider_->OnTouchEventAck(event.uniqueTouchEventId,
+                                       event_consumed);
     return;
   }
 
   bool is_sequence_start = WebTouchEventTraits::IsTouchSequenceStart(event);
   // Do not allow middle-sequence event to pass through, if start was blocked.
   if (!emulated_stream_active_sequence_count_ && !is_sequence_start) {
-    gesture_provider_->OnSyncTouchEventAck(event_consumed);
+    gesture_provider_->OnTouchEventAck(event.uniqueTouchEventId,
+                                       event_consumed);
     return;
   }
 
@@ -261,7 +262,8 @@ bool TouchEmulator::HandleTouchEventAck(
 
     const bool event_consumed = ack_result == INPUT_EVENT_ACK_STATE_CONSUMED;
     if (gesture_provider_)
-      gesture_provider_->OnAsyncTouchEventAck(event_consumed);
+      gesture_provider_->OnTouchEventAck(event.uniqueTouchEventId,
+                                         event_consumed);
     return true;
   }
 

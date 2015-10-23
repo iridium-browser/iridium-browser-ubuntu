@@ -39,12 +39,12 @@ public:
     GC_PLUGIN_IGNORE("crbug.com/443854")
     void* operator new(size_t size)
     {
-        return allocateObject(size);
+        return allocateObject(size, false);
     }
-    static void* allocateObject(size_t size)
+    static void* allocateObject(size_t size, bool isEager)
     {
         ThreadState* state = ThreadStateFor<ThreadingTrait<CSSValue>::Affinity>::state();
-        return Heap::allocateOnHeapIndex(state, size, CSSValueHeapIndex, GCInfoTrait<CSSValue>::index());
+        return Heap::allocateOnHeapIndex(state, size, isEager ? ThreadState::EagerSweepHeapIndex : ThreadState::CSSValueHeapIndex, GCInfoTrait<CSSValue>::index());
     }
 #else
     // Override RefCounted's deref() to ensure operator delete is called on
@@ -68,7 +68,6 @@ public:
     bool isCursorImageValue() const { return m_classType == CursorImageClass; }
     bool isCrossfadeValue() const { return m_classType == CrossfadeClass; }
     bool isFontFeatureValue() const { return m_classType == FontFeatureClass; }
-    bool isFontValue() const { return m_classType == FontClass; }
     bool isFontFaceSrcValue() const { return m_classType == FontFaceSrcClass; }
     bool isFunctionValue() const { return m_classType == FunctionClass; }
     bool isImageGeneratorValue() const { return m_classType >= CanvasClass && m_classType <= RadialGradientClass; }
@@ -88,7 +87,6 @@ public:
     bool isCubicBezierTimingFunctionValue() const { return m_classType == CubicBezierTimingFunctionClass; }
     bool isStepsTimingFunctionValue() const { return m_classType == StepsTimingFunctionClass; }
     bool isLineBoxContainValue() const { return m_classType == LineBoxContainClass; }
-    bool isCalcValue() const {return m_classType == CalculationClass; }
     bool isGridTemplateAreasValue() const { return m_classType == GridTemplateAreasClass; }
     bool isSVGDocumentValue() const { return m_classType == CSSSVGDocumentClass; }
     bool isContentDistributionValue() const { return m_classType == CSSContentDistributionClass; }
@@ -132,7 +130,6 @@ protected:
         // Other class types.
         BorderImageSliceClass,
         FontFeatureClass,
-        FontClass,
         FontFaceSrcClass,
 
         InheritedClass,
@@ -143,7 +140,6 @@ protected:
         ShadowClass,
         UnicodeRangeClass,
         LineBoxContainClass,
-        CalculationClass,
         GridTemplateAreasClass,
         PathClass,
 
@@ -219,19 +215,31 @@ inline bool compareCSSValueVector(const WillBeHeapVector<RefPtrWillBeMember<CSSV
 template<typename CSSValueType>
 inline bool compareCSSValuePtr(const RefPtr<CSSValueType>& first, const RefPtr<CSSValueType>& second)
 {
-    return first ? second && first->equals(*second) : !second;
+    if (first == second)
+        return true;
+    if (!first || !second)
+        return false;
+    return first->equals(*second);
 }
 
 template<typename CSSValueType>
 inline bool compareCSSValuePtr(const RawPtr<CSSValueType>& first, const RawPtr<CSSValueType>& second)
 {
-    return first ? second && first->equals(*second) : !second;
+    if (first == second)
+        return true;
+    if (!first || !second)
+        return false;
+    return first->equals(*second);
 }
 
 template<typename CSSValueType>
 inline bool compareCSSValuePtr(const Member<CSSValueType>& first, const Member<CSSValueType>& second)
 {
-    return first ? second && first->equals(*second) : !second;
+    if (first == second)
+        return true;
+    if (!first || !second)
+        return false;
+    return first->equals(*second);
 }
 
 #define DEFINE_CSS_VALUE_TYPE_CASTS(thisType, predicate) \

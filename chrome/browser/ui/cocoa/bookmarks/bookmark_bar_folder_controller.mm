@@ -7,8 +7,7 @@
 #include "base/mac/bundle_locations.h"
 #include "base/strings/sys_string_conversions.h"
 #import "chrome/browser/bookmarks/bookmark_model_factory.h"
-#import "chrome/browser/bookmarks/chrome_bookmark_client.h"
-#import "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
+#import "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #import "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
@@ -21,6 +20,7 @@
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node_data.h"
+#import "components/bookmarks/managed/managed_bookmark_service.h"
 #include "ui/base/theme_provider.h"
 
 using bookmarks::BookmarkModel;
@@ -914,8 +914,11 @@ NSRect GetFirstButtonFrameForHeight(CGFloat height) {
   return NO;
 }
 
-// Perform a single scroll of the specified amount.
-- (void)performOneScroll:(CGFloat)delta {
+// Perform a single scroll of the specified amount. If |updateMouseSection| is
+// YES, and the mouse cursor is over the currently selected item, then change
+// the selection to the item under the mouse cursor after the scroll.
+- (void)performOneScroll:(CGFloat)delta
+    updateMouseSelection:(BOOL)updateMouseSelection {
   if (delta == 0.0)
     return;
   CGFloat finalDelta = [self determineFinalScrollDelta:delta];
@@ -924,12 +927,14 @@ NSRect GetFirstButtonFrameForHeight(CGFloat height) {
   int index = [self indexOfButton:buttonThatMouseIsIn_];
   // Check for a current mouse-initiated selection.
   BOOL maintainHoverSelection =
-      (buttonThatMouseIsIn_ &&
+      (updateMouseSelection &&
+      buttonThatMouseIsIn_ &&
       [[buttonThatMouseIsIn_ cell] isMouseReallyInside] &&
       selectedIndex_ != -1 &&
       index == selectedIndex_);
   NSRect windowFrame = [[self window] frame];
   NSSize newSize = NSMakeSize(NSWidth(windowFrame), 0.0);
+  isScrolling_ = YES;
   [self adjustWindowLeft:windowFrame.origin.x
                     size:newSize
              scrollingBy:finalDelta];
@@ -1000,7 +1005,9 @@ NSRect GetFirstButtonFrameForHeight(CGFloat height) {
 // Called by a timer when scrolling.
 - (void)performScroll:(NSTimer*)timer {
   DCHECK(verticalScrollDelta_);
-  [self performOneScroll:verticalScrollDelta_];
+  // Since this scroll was initiated by hovering over an arrow, there should be
+  // no mouse selection to update.
+  [self performOneScroll:verticalScrollDelta_ updateMouseSelection:NO];
 }
 
 
@@ -1149,7 +1156,9 @@ NSRect GetFirstButtonFrameForHeight(CGFloat height) {
   if (![scrollUpArrowView_ isHidden] || ![scrollDownArrowView_ isHidden]) {
     // We go negative since an NSScrollView has a flipped coordinate frame.
     CGFloat amt = kBookmarkBarFolderScrollWheelAmount * -[theEvent deltaY];
-    [self performOneScroll:amt];
+    // Make sure that the selection stays under the mouse for scroll wheel
+    // scrolls.
+    [self performOneScroll:amt updateMouseSelection:YES];
   }
 }
 
@@ -1272,11 +1281,11 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     destIndex += [[parentButton_ cell] startingChildIndex];
   }
 
-  ChromeBookmarkClient* client =
-      ChromeBookmarkClientFactory::GetForProfile(profile_);
-  if (!client->CanBeEditedByUser(destParent))
+  bookmarks::ManagedBookmarkService* managed =
+      ManagedBookmarkServiceFactory::GetForProfile(profile_);
+  if (!managed->CanBeEditedByUser(destParent))
     return NO;
-  if (!client->CanBeEditedByUser(sourceNode))
+  if (!managed->CanBeEditedByUser(sourceNode))
     copy = YES;
 
   // Prevent cycles.
@@ -1332,6 +1341,11 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 // Called from BookmarkButton.
 // Unlike bookmark_bar_controller's version, we DO default to being enabled.
 - (void)mouseEnteredButton:(id)sender event:(NSEvent*)event {
+  // Prevent unnecessary button selection change while scrolling due to the
+  // size changing that happens in -performOneScroll:.
+  if (isScrolling_)
+    return;
+
   [[NSCursor arrowCursor] set];
 
   buttonThatMouseIsIn_ = sender;
@@ -1361,6 +1375,10 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   if (buttonThatMouseIsIn_ == sender)
     buttonThatMouseIsIn_ = nil;
     [self setSelectedButtonByIndex:-1];
+
+  // During scrolling -mouseExitedButton: stops scrolling, so update the
+  // corresponding status field to reflect is has stopped.
+  isScrolling_ = NO;
 
   // Stop any timer about opening a new hover-open folder.
 
@@ -1543,7 +1561,9 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     return;
   }
 
-  [self performOneScroll:delta];
+  // We have just updated the selection and are about to scroll it to be
+  // visible; don't change the selection based on the mouse cursor location.
+  [self performOneScroll:delta updateMouseSelection:NO];
 }
 
 // All changes to selectedness of buttons (aka fake menu items) ends up
@@ -1842,9 +1862,9 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     destIndex += [[parentButton_ cell] startingChildIndex];
   }
 
-  ChromeBookmarkClient* client =
-      ChromeBookmarkClientFactory::GetForProfile(profile_);
-  if (!client->CanBeEditedByUser(destParent))
+  bookmarks::ManagedBookmarkService* managed =
+      ManagedBookmarkServiceFactory::GetForProfile(profile_);
+  if (!managed->CanBeEditedByUser(destParent))
     return NO;
 
   // Create and add the new bookmark nodes.
@@ -1999,6 +2019,10 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 
 - (BOOL)canScrollDown {
   return ![scrollDownArrowView_ isHidden];
+}
+
+- (BOOL)isScrolling {
+  return isScrolling_;
 }
 
 - (CGFloat)verticalScrollArrowHeight {

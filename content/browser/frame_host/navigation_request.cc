@@ -7,6 +7,7 @@
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/navigation_controller_impl.h"
+#include "content/browser/frame_host/navigation_handle_impl.h"
 #include "content/browser/frame_host/navigation_request_info.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/loader/navigation_url_loader.h"
@@ -51,17 +52,14 @@ int LoadFlagFromNavigationType(FrameMsg_Navigate_Type::Value navigation_type) {
 }  // namespace
 
 // static
-bool NavigationRequest::ShouldMakeNetworkRequest(const GURL& url) {
-  // Data urls should not make network requests.
-  // TODO(clamy): same document navigations should not make network requests.
-  return !url.SchemeIs(url::kDataScheme);
-}
-
-// static
 scoped_ptr<NavigationRequest> NavigationRequest::CreateBrowserInitiated(
     FrameTreeNode* frame_tree_node,
+    const GURL& dest_url,
+    const Referrer& dest_referrer,
+    const FrameNavigationEntry& frame_entry,
     const NavigationEntryImpl& entry,
     FrameMsg_Navigate_Type::Value navigation_type,
+    bool is_same_document_history_load,
     base::TimeTicks navigation_start,
     NavigationControllerImpl* controller) {
   std::string method = entry.GetHasPostData() ? "POST" : "GET";
@@ -86,16 +84,19 @@ scoped_ptr<NavigationRequest> NavigationRequest::CreateBrowserInitiated(
   }
 
   scoped_ptr<NavigationRequest> navigation_request(new NavigationRequest(
-      frame_tree_node, entry.ConstructCommonNavigationParams(navigation_type),
+      frame_tree_node,
+      entry.ConstructCommonNavigationParams(dest_url, dest_referrer,
+                                            frame_entry, navigation_type),
       BeginNavigationParams(method, headers.ToString(),
                             LoadFlagFromNavigationType(navigation_type), false),
       entry.ConstructRequestNavigationParams(
-          navigation_start,
+          frame_entry, navigation_start, is_same_document_history_load,
+          frame_tree_node->has_committed_real_load(),
           controller->GetPendingEntryIndex() == -1,
           controller->GetIndexOfEntry(&entry),
           controller->GetLastCommittedEntryIndex(),
           controller->GetEntryCount()),
-      request_body, true, &entry));
+      request_body, true, &frame_entry, &entry));
   return navigation_request.Pass();
 }
 
@@ -113,12 +114,13 @@ scoped_ptr<NavigationRequest> NavigationRequest::CreateRendererInitiated(
   // TODO(clamy): See if the navigation start time should be measured in the
   // renderer and sent to the browser instead of being measured here.
   // TODO(clamy): The pending history list offset should be properly set.
+  // TODO(clamy): Set has_committed_real_load.
   RequestNavigationParams request_params;
   request_params.current_history_list_offset = current_history_list_offset;
   request_params.current_history_list_length = current_history_list_length;
   scoped_ptr<NavigationRequest> navigation_request(
       new NavigationRequest(frame_tree_node, common_params, begin_params,
-                            request_params, body, false, nullptr));
+                            request_params, body, false, nullptr, nullptr));
   return navigation_request.Pass();
 }
 
@@ -129,6 +131,7 @@ NavigationRequest::NavigationRequest(
     const RequestNavigationParams& request_params,
     scoped_refptr<ResourceRequestBody> body,
     bool browser_initiated,
+    const FrameNavigationEntry* frame_entry,
     const NavigationEntryImpl* entry)
     : frame_tree_node_(frame_tree_node),
       common_params_(common_params),
@@ -139,12 +142,20 @@ NavigationRequest::NavigationRequest(
       restore_type_(NavigationEntryImpl::RESTORE_NONE),
       is_view_source_(false),
       bindings_(NavigationEntryImpl::kInvalidBindings) {
-  if (entry) {
+  DCHECK_IMPLIES(browser_initiated, entry != nullptr && frame_entry != nullptr);
+  if (browser_initiated) {
+    // TODO(clamy): use the FrameNavigationEntry for the source SiteInstance
+    // once it has been moved from the NavigationEntry.
     source_site_instance_ = entry->source_site_instance();
-    dest_site_instance_ = entry->site_instance();
+    dest_site_instance_ = frame_entry->site_instance();
     restore_type_ = entry->restore_type();
     is_view_source_ = entry->IsViewSourceMode();
     bindings_ = entry->bindings();
+  } else {
+    // This is needed to have about:blank and data URLs commit in the same
+    // SiteInstance as the initiating renderer.
+    source_site_instance_ =
+        frame_tree_node->current_frame_host()->GetSiteInstance();
   }
 
   const GURL& first_party_for_cookies =
@@ -154,8 +165,9 @@ NavigationRequest::NavigationRequest(
   bool parent_is_main_frame = !frame_tree_node->parent() ?
       false : frame_tree_node->parent()->IsMainFrame();
   info_.reset(new NavigationRequestInfo(
-        common_params, begin_params, first_party_for_cookies,
-        frame_tree_node->IsMainFrame(), parent_is_main_frame, body));
+      common_params, begin_params, first_party_for_cookies,
+      frame_tree_node->IsMainFrame(), parent_is_main_frame,
+      frame_tree_node->frame_tree_node_id(), body));
 }
 
 NavigationRequest::~NavigationRequest() {
@@ -166,7 +178,7 @@ bool NavigationRequest::BeginNavigation() {
   DCHECK(state_ == NOT_STARTED || state_ == WAITING_FOR_RENDERER_RESPONSE);
   state_ = STARTED;
 
-  if (ShouldMakeNetworkRequest(common_params_.url)) {
+  if (ShouldMakeNetworkRequestForURL(common_params_.url)) {
     loader_ = NavigationURLLoader::Create(
         frame_tree_node_->navigator()->GetController()->GetBrowserContext(),
         frame_tree_node_->frame_tree_node_id(), info_.Pass(), this);
@@ -184,6 +196,16 @@ bool NavigationRequest::BeginNavigation() {
   // DidStartProvisionalLoadForFrame for the navigation.
 }
 
+void NavigationRequest::CreateNavigationHandle(NavigatorDelegate* delegate) {
+  navigation_handle_ = NavigationHandleImpl::Create(
+      common_params_.url, frame_tree_node_->IsMainFrame(), delegate);
+}
+
+void NavigationRequest::TransferNavigationHandleOwnership(
+    RenderFrameHostImpl* render_frame_host) {
+  render_frame_host->SetNavigationHandle(navigation_handle_.Pass());
+}
+
 void NavigationRequest::OnRequestRedirected(
     const net::RedirectInfo& redirect_info,
     const scoped_refptr<ResourceResponse>& response) {
@@ -194,6 +216,8 @@ void NavigationRequest::OnRequestRedirected(
   // TODO(davidben): This where prerender and navigation_interceptor should be
   // integrated. For now, just always follow all redirects.
   loader_->FollowRedirect();
+
+  navigation_handle_->DidRedirectNavigation(redirect_info.new_url);
 }
 
 void NavigationRequest::OnResponseStarted(
@@ -209,6 +233,7 @@ void NavigationRequest::OnRequestFailed(bool has_stale_copy_in_cache,
                                         int net_error) {
   DCHECK(state_ == STARTED);
   state_ = FAILED;
+  navigation_handle_->set_net_error_code(static_cast<net::Error>(net_error));
   frame_tree_node_->navigator()->FailedNavigation(
       frame_tree_node_, has_stale_copy_in_cache, net_error);
 }

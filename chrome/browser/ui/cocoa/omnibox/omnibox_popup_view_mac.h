@@ -11,8 +11,8 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/omnibox/omnibox_popup_matrix.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
-#include "components/omnibox/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/omnibox_popup_view.h"
 #include "ui/gfx/font.h"
 
 class AutocompleteResult;
@@ -46,6 +46,9 @@ class OmniboxPopupViewMac : public OmniboxPopupView,
   void OnMatrixRowMiddleClicked(OmniboxPopupMatrix* matrix,
                                 size_t row) override;
 
+  // Returns the NSImage that should be used as an icon for the given match.
+  NSImage* ImageForMatch(const AutocompleteMatch& match) const;
+
   OmniboxPopupMatrix* matrix() { return matrix_; }
 
  protected:
@@ -64,9 +67,6 @@ class OmniboxPopupViewMac : public OmniboxPopupView,
   // allows existing animations to continue if the size doesn't
   // change.
   void PositionPopup(const CGFloat matrixHeight);
-
-  // Returns the NSImage that should be used as an icon for the given match.
-  NSImage* ImageForMatch(const AutocompleteMatch& match);
 
   // Opens the URL at the given row.
   void OpenURLForRow(size_t row, WindowOpenDisposition disposition);

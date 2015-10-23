@@ -648,6 +648,7 @@ static NaClErrorCode NaClElfFileMapSegment(struct NaClApp *nap,
                      (uint8_t *) image_sys_addr,
                      segment_size,  /* actual size */
                      0,  /* stubout_mode: no */
+                     nap->pnacl_mode ? NACL_DISABLE_NONTEMPORALS_X86 : 0,
                      1,  /* readonly_text: yes */
                      nap->cpu_features,
                      &metadata,
@@ -904,6 +905,15 @@ NaClErrorCode NaClElfImageLoadDynamically(
     Elf_Off filesz = php->p_offset + php->p_filesz - offset;
     Elf_Off memsz = php->p_offset + php->p_memsz - offset;
     int32_t result;
+
+    /*
+     * By checking if filesz is larger than memsz, we no longer run the risk of
+     * a malicious ELF object overrunning into the trusted address space when
+     * reading data of size "filez" into a buffer of size "memsz".
+     */
+    if (filesz > memsz) {
+      return LOAD_UNLOADABLE;
+    }
 
     /*
      * We check for PT_LOAD directly rather than using the "loadable"

@@ -8,9 +8,7 @@
 
 #include "base/files/file_path.h"
 #include "base/message_loop/message_loop.h"
-#include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
-#include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
@@ -22,6 +20,8 @@
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/file_manager_private.h"
+#include "components/drive/drive.pb.h"
+#include "components/drive/file_errors.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_url.h"
@@ -200,6 +200,7 @@ void VolumeToVolumeMetadata(
   }
 
   volume_metadata->configurable = volume.configurable();
+  volume_metadata->watchable = volume.watchable();
 
   if (volume.type() == VOLUME_TYPE_PROVIDED) {
     volume_metadata->extension_id.reset(new std::string(volume.extension_id()));
@@ -301,14 +302,14 @@ void VolumeToVolumeMetadata(
   }
 }
 
-base::FilePath GetLocalPathFromURL(content::RenderViewHost* render_view_host,
+base::FilePath GetLocalPathFromURL(content::RenderFrameHost* render_frame_host,
                                    Profile* profile,
                                    const GURL& url) {
-  DCHECK(render_view_host);
+  DCHECK(render_frame_host);
   DCHECK(profile);
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
-      util::GetFileSystemContextForRenderViewHost(profile, render_view_host);
+      util::GetFileSystemContextForRenderFrameHost(profile, render_frame_host);
 
   const storage::FileSystemURL filesystem_url(
       file_system_context->CrackURL(url));
@@ -318,12 +319,12 @@ base::FilePath GetLocalPathFromURL(content::RenderViewHost* render_view_host,
   return filesystem_url.path();
 }
 
-void GetSelectedFileInfo(content::RenderViewHost* render_view_host,
+void GetSelectedFileInfo(content::RenderFrameHost* render_frame_host,
                          Profile* profile,
                          const std::vector<GURL>& file_urls,
                          GetSelectedFileInfoLocalPathOption local_path_option,
                          GetSelectedFileInfoCallback callback) {
-  DCHECK(render_view_host);
+  DCHECK(render_frame_host);
   DCHECK(profile);
 
   scoped_ptr<GetSelectedFileInfoParams> params(new GetSelectedFileInfoParams);
@@ -333,7 +334,7 @@ void GetSelectedFileInfo(content::RenderViewHost* render_view_host,
   for (size_t i = 0; i < file_urls.size(); ++i) {
     const GURL& file_url = file_urls[i];
     const base::FilePath path = GetLocalPathFromURL(
-        render_view_host, profile, file_url);
+        render_frame_host, profile, file_url);
     if (!path.empty()) {
       DVLOG(1) << "Selected: file path: " << path.value();
       params->file_paths.push_back(path);

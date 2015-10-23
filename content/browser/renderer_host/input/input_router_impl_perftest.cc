@@ -31,8 +31,12 @@ class NullInputAckHandler : public InputAckHandler {
   ~NullInputAckHandler() override {}
 
   // InputAckHandler
-  void OnKeyboardEventAck(const NativeWebKeyboardEvent& event,
+  void OnKeyboardEventAck(const NativeWebKeyboardEventWithLatencyInfo& event,
                           InputEventAckState ack_result) override {
+    ++ack_count_;
+  }
+  void OnMouseEventAck(const MouseEventWithLatencyInfo& event,
+                       InputEventAckState ack_result) override {
     ++ack_count_;
   }
   void OnWheelEventAck(const MouseWheelEventWithLatencyInfo& event,
@@ -233,11 +237,9 @@ class InputRouterImplPerfTest : public testing::Test {
 
   void SendEventAckIfNecessary(const blink::WebInputEvent& event,
                                InputEventAckState ack_result) {
-    if (WebInputEventTraits::IgnoresAckDisposition(event))
+    if (!WebInputEventTraits::WillReceiveAckFromRenderer(event))
       return;
-    InputHostMsg_HandleInputEvent_ACK_Params ack;
-    ack.type = event.type;
-    ack.state = ack_result;
+    InputEventAck ack(event.type, ack_result);
     InputHostMsg_HandleInputEvent_ACK response(0, ack);
     input_router_->OnMessageReceived(response);
   }

@@ -113,6 +113,8 @@ class BookmarkModelAssociator
   typedef std::map<int64, const bookmarks::BookmarkNode*>
       SyncIdToBookmarkNodeMap;
   typedef std::set<int64> DirtyAssociationsSyncIds;
+  typedef std::vector<const bookmarks::BookmarkNode*> BookmarkList;
+  typedef std::stack<const bookmarks::BookmarkNode*> BookmarkStack;
 
   // Add association between native node and sync node to the maps.
   void AddAssociation(const bookmarks::BookmarkNode* node, int64 sync_id);
@@ -121,6 +123,26 @@ class BookmarkModelAssociator
   void PostPersistAssociationsTask();
   // Persists all dirty associations.
   void PersistAssociations();
+
+  // Result of the native model version check against the sync
+  // version performed by CheckModelSyncState.
+  enum NativeModelSyncState {
+    // The native version is syncer::syncable::kInvalidTransactionVersion,
+    // which is the case when the version has either not been set yet or reset
+    // as a result of a previous error during the association. Basically the
+    // state should return back to UNSET on an association following the one
+    // where the state was different than IN_SYNC.
+    UNSET,
+    // The native version was in sync with the Sync version.
+    IN_SYNC,
+    // The native version was behing the sync version which indicates a failure
+    // to persist the native bookmarks model.
+    BEHIND,
+    // The native version was ahead of the sync version which indicates a
+    // a failure to persist Sync DB.
+    AHEAD,
+    NATIVE_MODEL_SYNC_STATE_COUNT
+  };
 
   // Helper class used within AssociateModels to simplify the logic and
   // minimize the number of arguments passed between private functions.
@@ -145,10 +167,29 @@ class BookmarkModelAssociator
     void IncrementLocalItemsAdded();
     void IncrementLocalItemsModified();
     void IncrementSyncItemsAdded();
+    void IncrementSyncItemsDeleted(int count);
 
     void UpdateDuplicateCount(const base::string16& title, const GURL& url);
 
     int duplicate_count() const { return duplicate_count_; }
+    NativeModelSyncState native_model_sync_state() const {
+      return native_model_sync_state_;
+    }
+    void set_native_model_sync_state(NativeModelSyncState state) {
+      native_model_sync_state_ = state;
+    }
+
+    // Bookmark roots participating in the sync.
+    void AddBookmarkRoot(const bookmarks::BookmarkNode* root);
+    const BookmarkList& bookmark_roots() const { return bookmark_roots_; }
+
+    // Index of local bookmark nodes by native ID.
+    const bookmarks::BookmarkNode* LookupNodeInIdIndex(int64 native_id);
+
+    void MarkForVersionUpdate(const bookmarks::BookmarkNode* node);
+    const BookmarkList& bookmarks_for_version_update() const {
+      return bookmarks_for_version_update_;
+    }
 
    private:
     // DFS stack of sync nodes traversed during association.
@@ -163,6 +204,20 @@ class BookmarkModelAssociator
     base::hash_set<size_t> hashes_;
     // Overall number of bookmark collisions from RecordDuplicates call.
     int duplicate_count_;
+    // Result of the most recent BookmarkModelAssociator::CheckModelSyncState.
+    NativeModelSyncState native_model_sync_state_;
+    // List of bookmark model roots participating in the sync.
+    BookmarkList bookmark_roots_;
+    // Map of bookmark nodes by native ID. Used to lookup sync node matches
+    // by external ID.
+    typedef base::hash_map<int64, const bookmarks::BookmarkNode*> IdIndex;
+    IdIndex id_index_;
+    bool id_index_initialized_;
+    // List of bookmark nodes for which the transaction version needs to be
+    // updated.
+    BookmarkList bookmarks_for_version_update_;
+
+    void BuildIdIndex();
 
     DISALLOW_COPY_AND_ASSIGN(Context);
   };
@@ -215,6 +270,28 @@ class BookmarkModelAssociator
       const std::vector<int64>& sync_ids,
       Context* context);
 
+  // This is a variation of BuildAssociations method above for the optimistic
+  // case where the native version of the storage is in sync or ahead of the
+  // sync version.
+  syncer::SyncError BuildAssociationsOptimistic(
+      syncer::WriteTransaction* trans,
+      const bookmarks::BookmarkNode* parent_node,
+      const std::vector<int64>& sync_ids,
+      Context* context);
+
+  // Helper method for creating a new native bookmark node.
+  const bookmarks::BookmarkNode* CreateBookmarkNode(
+      const bookmarks::BookmarkNode* parent_node,
+      int bookmark_index,
+      const syncer::BaseNode* sync_child_node,
+      const GURL& url,
+      Context* context,
+      syncer::SyncError* error);
+
+  // Helper method for deleting a sync node and all its children.
+  // Returns the number of sync nodes deleted.
+  int RemoveSyncNodeHierarchy(syncer::WriteTransaction* trans, int64 sync_id);
+
   // Check whether bookmark model and sync model are synced by comparing
   // their transaction versions.
   // Returns a PERSISTENCE_ERROR if a transaction mismatch was detected where
@@ -230,6 +307,8 @@ class BookmarkModelAssociator
   SyncIdToBookmarkNodeMap id_map_inverse_;
   // Stores sync ids for dirty associations.
   DirtyAssociationsSyncIds dirty_associations_sync_ids_;
+  // Specifies whether optimistic association experiment is enabled.
+  bool optimistic_association_enabled_;
 
   // Used to post PersistAssociation tasks to the current message loop and
   // guarantees no invocations can occur if |this| has been deleted. (This

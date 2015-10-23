@@ -6,8 +6,8 @@ import shutil
 import tempfile
 
 from telemetry import decorators
-from telemetry.unittest_util import options_for_unittests
-from telemetry.unittest_util import page_test_test_case
+from telemetry.testing import options_for_unittests
+from telemetry.testing import page_test_test_case
 
 from measurements import skpicture_printer
 
@@ -22,7 +22,7 @@ class SkpicturePrinterUnitTest(page_test_test_case.PageTestTestCase):
 
   @decorators.Disabled('android')
   def testSkpicturePrinter(self):
-    ps = self.CreatePageSetFromFileInUnittestDataDir('blank.html')
+    ps = self.CreateStorySetFromFileInUnittestDataDir('blank.html')
     measurement = skpicture_printer.SkpicturePrinter(self._skp_outdir)
     results = self.RunMeasurement(measurement, ps, options=self._options)
 

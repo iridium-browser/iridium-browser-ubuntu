@@ -65,6 +65,11 @@ Polymer({
       type: Array,
       value: function() { return []; },
     },
+
+    inSubpage: {
+      type: Boolean,
+      notify: true,
+    },
   },
 
   /** @override */
@@ -108,7 +113,17 @@ Polymer({
   },
 
   /** @private */
-  manageSearchEngines_: function() {
-    MoreRouting.navigateTo('search-engines');
+  onBackTap_: function() {
+    this.$.pages.back();
+  },
+
+  /** @private */
+  onSearchEnginesTap_: function() {
+    this.$.pages.navigateTo('search-engines');
+  },
+
+  /** @private */
+  onSearchEnginesSubpageTap_: function() {
+    this.$.pages.navigateTo('search-engines-subpage');
   },
 });

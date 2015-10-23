@@ -25,6 +25,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_surface_stub.h"
 #include "ui/gl/gl_mock.h"
+#include "ui/gl/gl_version_info.h"
 
 namespace base {
 class CommandLine;
@@ -199,6 +200,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
     bool bind_generates_resource;
     bool lose_context_when_out_of_memory;
     bool use_native_vao;  // default is true.
+    unsigned webgl_version;  // default to 0, i.e., not WebGL context.
   };
 
   void InitDecoder(const InitState& init);
@@ -326,6 +328,8 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   void DoBufferSubData(
       GLenum target, GLint offset, GLsizei size, const void* data);
 
+  void DoScissor(GLint x, GLint y, GLsizei width, GLsizei height);
+
   void SetupVertexBuffer();
   void SetupAllNeededVertexBuffers();
 
@@ -335,37 +339,44 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
 
   void DeleteIndexBuffer();
 
-  void SetupClearTextureExpectations(
-      GLuint service_id,
-      GLuint old_service_id,
-      GLenum bind_target,
-      GLenum target,
-      GLint level,
-      GLenum internal_format,
-      GLenum format,
-      GLenum type,
-      GLsizei width,
-      GLsizei height);
+  void SetupClearTextureExpectations(GLuint service_id,
+                                     GLuint old_service_id,
+                                     GLenum bind_target,
+                                     GLenum target,
+                                     GLint level,
+                                     GLenum internal_format,
+                                     GLenum format,
+                                     GLenum type,
+                                     GLint xoffset,
+                                     GLint yoffset,
+                                     GLsizei width,
+                                     GLsizei height);
 
-  void SetupExpectationsForRestoreClearState(
-      GLclampf restore_red,
-      GLclampf restore_green,
-      GLclampf restore_blue,
-      GLclampf restore_alpha,
-      GLuint restore_stencil,
-      GLclampf restore_depth,
-      bool restore_scissor_test);
+  void SetupExpectationsForRestoreClearState(GLclampf restore_red,
+                                             GLclampf restore_green,
+                                             GLclampf restore_blue,
+                                             GLclampf restore_alpha,
+                                             GLuint restore_stencil,
+                                             GLclampf restore_depth,
+                                             bool restore_scissor_test,
+                                             GLint restore_scissor_x,
+                                             GLint restore_scissor_y,
+                                             GLsizei restore_scissor_width,
+                                             GLsizei restore_scissor_height);
 
-  void SetupExpectationsForFramebufferClearing(
-      GLenum target,
-      GLuint clear_bits,
-      GLclampf restore_red,
-      GLclampf restore_green,
-      GLclampf restore_blue,
-      GLclampf restore_alpha,
-      GLuint restore_stencil,
-      GLclampf restore_depth,
-      bool restore_scissor_test);
+  void SetupExpectationsForFramebufferClearing(GLenum target,
+                                               GLuint clear_bits,
+                                               GLclampf restore_red,
+                                               GLclampf restore_green,
+                                               GLclampf restore_blue,
+                                               GLclampf restore_alpha,
+                                               GLuint restore_stencil,
+                                               GLclampf restore_depth,
+                                               bool restore_scissor_test,
+                                               GLint restore_scissor_x,
+                                               GLint restore_scissor_y,
+                                               GLsizei restore_scissor_width,
+                                               GLsizei restore_scissor_height);
 
   void SetupExpectationsForFramebufferClearingMulti(
       GLuint read_framebuffer_service_id,
@@ -378,7 +389,11 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
       GLclampf restore_alpha,
       GLuint restore_stencil,
       GLclampf restore_depth,
-      bool restore_scissor_test);
+      bool restore_scissor_test,
+      GLint restore_scissor_x,
+      GLint restore_scissor_y,
+      GLsizei restore_scissor_width,
+      GLsizei restore_scissor_height);
 
   void SetupExpectationsForDepthMask(bool mask);
   void SetupExpectationsForEnableDisable(GLenum cap, bool enable);

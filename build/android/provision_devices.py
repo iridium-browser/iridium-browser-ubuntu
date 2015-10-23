@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 import posixpath
@@ -28,9 +29,7 @@ from pylib.device import device_utils
 from pylib.utils import run_tests_helper
 from pylib.utils import timeout_retry
 
-sys.path.append(os.path.join(constants.DIR_SOURCE_ROOT,
-                             'third_party', 'android_testrunner'))
-import errors
+_SYSTEM_WEBVIEW_PATHS = ['/system/app/webview', '/system/app/WebViewGoogle']
 
 
 class _DEFAULT_TIMEOUTS(object):
@@ -49,24 +48,33 @@ class _PHASES(object):
   ALL = [WIPE, PROPERTIES, FINISH]
 
 
-def ProvisionDevices(options):
-  devices = device_utils.DeviceUtils.HealthyDevices()
-  if options.device:
-    devices = [d for d in devices if d == options.device]
+def ProvisionDevices(args):
+  if args.blacklist_file:
+    blacklist = device_blacklist.Blacklist(args.blacklist_file)
+  else:
+    # TODO(jbudorick): Remove once the bots have switched over.
+    blacklist = device_blacklist.Blacklist(device_blacklist.BLACKLIST_JSON)
+
+  devices = device_utils.DeviceUtils.HealthyDevices(blacklist)
+  if args.device:
+    devices = [d for d in devices if d == args.device]
     if not devices:
-      raise device_errors.DeviceUnreachableError(options.device)
+      raise device_errors.DeviceUnreachableError(args.device)
 
   parallel_devices = device_utils.DeviceUtils.parallel(devices)
-  parallel_devices.pMap(ProvisionDevice, options)
-  if options.auto_reconnect:
+  parallel_devices.pMap(ProvisionDevice, blacklist, args)
+  if args.auto_reconnect:
     _LaunchHostHeartbeat()
-  blacklist = device_blacklist.ReadBlacklist()
-  if all(d in blacklist for d in devices):
+  blacklisted_devices = blacklist.Read()
+  if args.output_device_blacklist:
+    with open(args.output_device_blacklist, 'w') as f:
+      json.dump(blacklisted_devices, f)
+  if all(d in blacklisted_devices for d in devices):
     raise device_errors.NoDevicesError
   return 0
 
 
-def ProvisionDevice(device, options):
+def ProvisionDevice(device, blacklist, options):
   if options.reboot_timeout:
     reboot_timeout = options.reboot_timeout
   elif (device.build_version_sdk >=
@@ -79,7 +87,11 @@ def ProvisionDevice(device, options):
     return not options.phases or phase_name in options.phases
 
   def run_phase(phase_func, reboot=True):
-    device.WaitUntilFullyBooted(timeout=reboot_timeout)
+    try:
+      device.WaitUntilFullyBooted(timeout=reboot_timeout, retries=0)
+    except device_errors.CommandTimeoutError:
+      logging.error('Device did not finish booting. Will try to reboot.')
+      device.Reboot(timeout=reboot_timeout)
     phase_func(device, options)
     if reboot:
       device.Reboot(False, retries=0)
@@ -95,16 +107,15 @@ def ProvisionDevice(device, options):
     if should_run_phase(_PHASES.FINISH):
       run_phase(FinishProvisioning, reboot=False)
 
-  except (errors.WaitForResponseTimedOutError,
-          device_errors.CommandTimeoutError):
+  except device_errors.CommandTimeoutError:
     logging.exception('Timed out waiting for device %s. Adding to blacklist.',
                       str(device))
-    device_blacklist.ExtendBlacklist([str(device)])
+    blacklist.Extend([str(device)])
 
   except device_errors.CommandFailedError:
     logging.exception('Failed to provision device %s. Adding to blacklist.',
                       str(device))
-    device_blacklist.ExtendBlacklist([str(device)])
+    blacklist.Extend([str(device)])
 
 
 def WipeDevice(device, options):
@@ -173,24 +184,30 @@ def SetProperties(device, options):
   else:
     device_settings.ConfigureContentSettings(
         device, device_settings.ENABLE_LOCATION_SETTINGS)
+
+  if options.disable_mock_location:
+    device_settings.ConfigureContentSettings(
+        device, device_settings.DISABLE_MOCK_LOCATION_SETTINGS)
+  else:
+    device_settings.ConfigureContentSettings(
+        device, device_settings.ENABLE_MOCK_LOCATION_SETTINGS)
+
   device_settings.SetLockScreenSettings(device)
   if options.disable_network:
     device_settings.ConfigureContentSettings(
         device, device_settings.NETWORK_DISABLED_SETTINGS)
 
-  if options.min_battery_level is not None:
-    try:
-      battery = battery_utils.BatteryUtils(device)
-      battery.ChargeDeviceToLevel(options.min_battery_level)
-    except device_errors.CommandFailedError as e:
-      logging.exception('Unable to charge device to specified level.')
+  if options.remove_system_webview:
+    if device.HasRoot():
+      # This is required, e.g., to replace the system webview on a device.
+      device.adb.Remount()
+      device.RunShellCommand(['stop'], check_return=True)
+      device.RunShellCommand(['rm', '-rf'] + _SYSTEM_WEBVIEW_PATHS,
+                             check_return=True)
+      device.RunShellCommand(['start'], check_return=True)
+    else:
+      logging.warning('Cannot remove system webview from a non-rooted device')
 
-  if options.max_battery_temp is not None:
-    try:
-      battery = battery_utils.BatteryUtils(device)
-      battery.LetBatteryCoolToTemperature(options.max_battery_temp)
-    except device_errors.CommandFailedError as e:
-      logging.exception('Unable to let battery cool to specified temperature.')
 
 def _ConfigureLocalProperties(device, java_debug=True):
   """Set standard readonly testing device properties prior to reboot."""
@@ -218,6 +235,20 @@ def _ConfigureLocalProperties(device, java_debug=True):
 
 
 def FinishProvisioning(device, options):
+  if options.min_battery_level is not None:
+    try:
+      battery = battery_utils.BatteryUtils(device)
+      battery.ChargeDeviceToLevel(options.min_battery_level)
+    except device_errors.CommandFailedError:
+      logging.exception('Unable to charge device to specified level.')
+
+  if options.max_battery_temp is not None:
+    try:
+      battery = battery_utils.BatteryUtils(device)
+      battery.LetBatteryCoolToTemperature(options.max_battery_temp)
+    except device_errors.CommandFailedError:
+      logging.exception('Unable to let battery cool to specified temperature.')
+
   device.RunShellCommand(
       ['date', '-s', time.strftime('%Y%m%d.%H%M%S', time.gmtime())],
       as_root=True, check_return=True)
@@ -286,6 +317,7 @@ def main():
   parser.add_argument('-d', '--device', metavar='SERIAL',
                       help='the serial number of the device to be provisioned'
                       ' (the default is to provision all devices attached)')
+  parser.add_argument('--blacklist-file', help='Device blacklist JSON file.')
   parser.add_argument('--phase', action='append', choices=_PHASES.ALL,
                       dest='phases',
                       help='Phases of provisioning to run. '
@@ -301,11 +333,15 @@ def main():
                       ' level before trying to continue')
   parser.add_argument('--disable-location', action='store_true',
                       help='disable Google location services on devices')
+  parser.add_argument('--disable-mock-location', action='store_true',
+                      default=False, help='Set ALLOW_MOCK_LOCATION to false')
   parser.add_argument('--disable-network', action='store_true',
                       help='disable network access on devices')
   parser.add_argument('--disable-java-debug', action='store_false',
                       dest='enable_java_debug', default=True,
                       help='disable Java property asserts and JNI checking')
+  parser.add_argument('--remove-system-webview', action='store_true',
+                      help='Remove the system webview from devices.')
   parser.add_argument('-t', '--target', default='Debug',
                       help='the build target (default: %(default)s)')
   parser.add_argument('-r', '--auto-reconnect', action='store_true',
@@ -317,6 +353,8 @@ def main():
                       help='Log more information.')
   parser.add_argument('--max-battery-temp', type=int, metavar='NUM',
                       help='Wait for the battery to have this temp or lower.')
+  parser.add_argument('--output-device-blacklist',
+                      help='Json file to output the device blacklist.')
   args = parser.parse_args()
   constants.SetBuildType(args.target)
 

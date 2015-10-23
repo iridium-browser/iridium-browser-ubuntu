@@ -4,7 +4,8 @@
 
 #include "base/bind.h"
 #include "chrome/browser/sync/glue/local_device_info_provider_impl.h"
-#include "chrome/common/chrome_version_info.h"
+#include "chrome/common/channel_info.h"
+#include "chrome/common/sync_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/util/get_session_name.h"
 #include "ui/base/device_form_factor.h"
@@ -12,25 +13,6 @@
 namespace browser_sync {
 
 namespace {
-
-// Converts VersionInfo::Channel to string for user-agent string.
-std::string ChannelToString(chrome::VersionInfo::Channel channel) {
-  switch (channel) {
-    case chrome::VersionInfo::CHANNEL_UNKNOWN:
-      return "unknown";
-    case chrome::VersionInfo::CHANNEL_CANARY:
-      return "canary";
-    case chrome::VersionInfo::CHANNEL_DEV:
-      return "dev";
-    case chrome::VersionInfo::CHANNEL_BETA:
-      return "beta";
-    case chrome::VersionInfo::CHANNEL_STABLE:
-      return "stable";
-    default:
-      NOTREACHED();
-      return "unknown";
-  }
-}
 
 #if defined(OS_ANDROID)
 bool IsTabletUI() {
@@ -64,44 +46,23 @@ LocalDeviceInfoProviderImpl::LocalDeviceInfoProviderImpl()
 LocalDeviceInfoProviderImpl::~LocalDeviceInfoProviderImpl() {
 }
 
-// static.
-std::string LocalDeviceInfoProviderImpl::MakeUserAgentForSyncApi(
-    const chrome::VersionInfo& version_info) {
-  std::string user_agent;
-  user_agent = "Chrome ";
-#if defined(OS_WIN)
-  user_agent += "WIN ";
-#elif defined(OS_CHROMEOS)
-  user_agent += "CROS ";
-#elif defined(OS_ANDROID)
-  if (IsTabletUI())
-    user_agent += "ANDROID-TABLET ";
-  else
-    user_agent += "ANDROID-PHONE ";
-#elif defined(OS_LINUX)
-  user_agent += "LINUX ";
-#elif defined(OS_FREEBSD)
-  user_agent += "FREEBSD ";
-#elif defined(OS_OPENBSD)
-  user_agent += "OPENBSD ";
-#elif defined(OS_MACOSX)
-  user_agent += "MAC ";
-#endif
-  user_agent += version_info.Version();
-  user_agent += " (" + version_info.LastChange() + ")";
-  if (!version_info.IsOfficialBuild()) {
-    user_agent += "-devel";
-  } else {
-    user_agent +=
-        " channel(" + ChannelToString(version_info.GetChannel()) + ")";
-  }
-
-  return user_agent;
-}
-
 const sync_driver::DeviceInfo*
 LocalDeviceInfoProviderImpl::GetLocalDeviceInfo() const {
   return local_device_info_.get();
+}
+
+std::string LocalDeviceInfoProviderImpl::GetSyncUserAgent() const {
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+  return MakeDesktopUserAgentForSync();
+#elif defined(OS_CHROMEOS)
+  return MakeUserAgentForSync("CROS ");
+#elif defined(OS_ANDROID)
+  if (IsTabletUI()) {
+    return MakeUserAgentForSync("ANDROID-TABLET ");
+  } else {
+    return MakeUserAgentForSync("ANDROID-PHONE ");
+  }
+#endif
 }
 
 std::string LocalDeviceInfoProviderImpl::GetLocalSyncCacheGUID() const {
@@ -132,13 +93,11 @@ void LocalDeviceInfoProviderImpl::InitializeContinuation(
     const std::string& guid,
     const std::string& signin_scoped_device_id,
     const std::string& session_name) {
-  chrome::VersionInfo version_info;
-
   local_device_info_.reset(
       new sync_driver::DeviceInfo(guid,
                                   session_name,
-                                  version_info.CreateVersionString(),
-                                  MakeUserAgentForSyncApi(version_info),
+                                  chrome::GetVersionString(),
+                                  GetSyncUserAgent(),
                                   GetLocalDeviceType(),
                                   signin_scoped_device_id));
 

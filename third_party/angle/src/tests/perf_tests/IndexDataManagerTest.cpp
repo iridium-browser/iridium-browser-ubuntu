@@ -54,8 +54,8 @@ class MockBufferFactoryD3D : public rx::BufferFactoryD3D
     }
 
     MOCK_METHOD0(createVertexBuffer, rx::VertexBuffer*());
-    MOCK_CONST_METHOD1(getVertexConversionType, rx::VertexConversionType(const gl::VertexFormat &));
-    MOCK_CONST_METHOD1(getVertexComponentType, GLenum(const gl::VertexFormat &));
+    MOCK_CONST_METHOD1(getVertexConversionType, rx::VertexConversionType(gl::VertexFormatType));
+    MOCK_CONST_METHOD1(getVertexComponentType, GLenum(gl::VertexFormatType));
 
     // Dependency injection
     rx::IndexBuffer* createIndexBuffer() override
@@ -154,10 +154,11 @@ IndexDataManagerPerfTest::IndexDataManagerPerfTest()
 void IndexDataManagerPerfTest::step(float dt, double totalTime)
 {
     rx::TranslatedIndexData translatedIndexData;
+    rx::SourceIndexData sourceIndexData;
     for (unsigned int iteration = 0; iteration < 100; ++iteration)
     {
         mIndexBuffer.getIndexRange(GL_UNSIGNED_SHORT, 0, mIndexCount, &translatedIndexData.indexRange);
-        mIndexDataManager.prepareIndexData(GL_UNSIGNED_SHORT, mIndexCount, &mIndexBuffer, nullptr, &translatedIndexData);
+        mIndexDataManager.prepareIndexData(GL_UNSIGNED_SHORT, mIndexCount, &mIndexBuffer, nullptr, &translatedIndexData, &sourceIndexData);
     }
 
     if (mTimer->getElapsedTime() >= 5.0)

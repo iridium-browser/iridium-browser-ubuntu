@@ -7,7 +7,10 @@ package org.chromium.chrome.test;
 import android.app.Activity;
 import android.os.Bundle;
 import android.os.Environment;
+import android.text.TextUtils;
 import android.util.Log;
+
+import junit.framework.TestCase;
 
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpException;
@@ -25,10 +28,17 @@ import org.apache.http.params.CoreProtocolPNames;
 import org.apache.http.params.HttpParams;
 
 import org.chromium.base.test.BaseInstrumentationTestRunner;
+import org.chromium.base.test.BaseTestResult;
+import org.chromium.base.test.BaseTestResult.SkipCheck;
+import org.chromium.base.test.util.Restriction;
+import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.test.util.DisableInTabbedMode;
 import org.chromium.net.test.BaseHttpTestServer;
+import org.chromium.ui.base.DeviceFormFactor;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.net.Socket;
 import java.util.Collections;
 import java.util.HashMap;
@@ -142,7 +152,8 @@ public class ChromeInstrumentationTestRunner extends BaseInstrumentationTestRunn
         }
 
         @Override
-        protected HttpResponse handleGet(HttpRequest request) throws HttpException {
+        protected void handleGet(HttpRequest request, HttpResponseCallback callback)
+                throws HttpException {
             RequestLine requestLine = request.getRequestLine();
 
             String requestPath = requestLine.getUri();
@@ -188,7 +199,7 @@ public class ChromeInstrumentationTestRunner extends BaseInstrumentationTestRunn
             if (entity != null) {
                 response.setEntity(entity);
             }
-            return response;
+            callback.onResponse(response);
         }
     }
 
@@ -207,6 +218,59 @@ public class ChromeInstrumentationTestRunner extends BaseInstrumentationTestRunn
         }
     }
 
+    @Override
+    protected void addSkipChecks(BaseTestResult result) {
+        super.addSkipChecks(result);
+        result.addSkipCheck(new DisableInTabbedModeSkipCheck());
+        result.addSkipCheck(new ChromeRestrictionSkipCheck());
+    }
 
+    private class ChromeRestrictionSkipCheck extends RestrictionSkipCheck {
+        @Override
+        protected boolean restrictionApplies(String restriction) {
+            if (TextUtils.equals(restriction, Restriction.RESTRICTION_TYPE_PHONE)
+                    && DeviceFormFactor.isTablet(getTargetContext())) {
+                return true;
+            }
+            if (TextUtils.equals(restriction, Restriction.RESTRICTION_TYPE_TABLET)
+                    && !DeviceFormFactor.isTablet(getTargetContext())) {
+                return true;
+            }
+            return false;
+        }
+    }
 
+    /**
+     * Checks for tests that should only run in document mode.
+     */
+    private class DisableInTabbedModeSkipCheck implements SkipCheck {
+
+        /**
+         * If the test is running in tabbed mode, checks for
+         * {@link org.chromium.chrome.test.util.DisableInTabbedMode}.
+         *
+         * @param testCase The test to check.
+         * @return Whether the test is running in tabbed mode and has been marked as disabled in
+         *      tabbed mode.
+         */
+        @Override
+        public boolean shouldSkip(TestCase testCase) {
+            Class<?> testClass = testCase.getClass();
+            try {
+                if (!FeatureUtilities.isDocumentMode(getContext())) {
+                    Method testMethod = testClass.getMethod(testCase.getName());
+                    if (testMethod.isAnnotationPresent(DisableInTabbedMode.class)
+                            || testClass.isAnnotationPresent(DisableInTabbedMode.class)) {
+                        Log.i(TAG, "Test " + testClass.getName() + "#" + testCase.getName()
+                                + " is disabled in non-document mode.");
+                        return true;
+                    }
+                }
+            } catch (NoSuchMethodException e) {
+                Log.e(TAG, "Couldn't find test method: " + e.toString());
+            }
+
+            return false;
+        }
+    }
 }

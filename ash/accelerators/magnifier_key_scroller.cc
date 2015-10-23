@@ -9,6 +9,7 @@
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
+#include "ui/events/event.h"
 
 namespace ash {
 namespace {
@@ -49,6 +50,10 @@ bool MagnifierKeyScroller::ShouldProcessEvent(const ui::KeyEvent* event) const {
 bool MagnifierKeyScroller::IsStartEvent(const ui::KeyEvent* event) const {
   return event->type() == ui::ET_KEY_PRESSED &&
       event->flags() & ui::EF_SHIFT_DOWN;
+}
+
+bool MagnifierKeyScroller::ShouldStopEventPropagation() const {
+  return true;
 }
 
 void MagnifierKeyScroller::OnKeyHold(const ui::KeyEvent* event) {

@@ -46,23 +46,6 @@
 
 namespace blink {
 
-TreeScope* ScopedStyleResolver::treeScopeFor(Document& document, const CSSStyleSheet* sheet)
-{
-    ASSERT(sheet);
-
-    if (!sheet->ownerDocument())
-        return 0;
-
-    Node* ownerNode = sheet->ownerNode();
-    if (!isHTMLStyleElement(ownerNode) && !isSVGStyleElement(ownerNode))
-        return &document;
-
-    Element& styleElement = toElement(*ownerNode);
-    if (styleElement.isInShadowTree())
-        return styleElement.containingShadowRoot();
-    return &document;
-}
-
 ScopedStyleResolver* ScopedStyleResolver::parent() const
 {
     for (TreeScope* scope = treeScope().parentTreeScope(); scope; scope = scope->parentTreeScope()) {
@@ -162,36 +145,33 @@ void ScopedStyleResolver::addKeyframeStyle(PassRefPtrWillBeRawPtr<StyleRuleKeyfr
 
 void ScopedStyleResolver::collectMatchingAuthorRules(ElementRuleCollector& collector, bool includeEmptyRules, CascadeOrder cascadeOrder)
 {
-    RuleRange ruleRange = collector.matchedResult().ranges.authorRuleRange();
     ASSERT(!collector.scopeContainsLastMatchedElement());
     collector.setScopeContainsLastMatchedElement(true);
     for (size_t i = 0; i < m_authorStyleSheets.size(); ++i) {
         ASSERT(m_authorStyleSheets[i]->ownerNode());
         MatchRequest matchRequest(&m_authorStyleSheets[i]->contents()->ruleSet(), includeEmptyRules, &m_scope->rootNode(), m_authorStyleSheets[i], i);
-        collector.collectMatchingRules(matchRequest, ruleRange, cascadeOrder);
+        collector.collectMatchingRules(matchRequest, cascadeOrder);
     }
     collector.setScopeContainsLastMatchedElement(false);
 }
 
 void ScopedStyleResolver::collectMatchingShadowHostRules(ElementRuleCollector& collector, bool includeEmptyRules, CascadeOrder cascadeOrder)
 {
-    RuleRange ruleRange = collector.matchedResult().ranges.authorRuleRange();
     ASSERT(!collector.scopeContainsLastMatchedElement());
     collector.setScopeContainsLastMatchedElement(true);
     for (size_t i = 0; i < m_authorStyleSheets.size(); ++i) {
         ASSERT(m_authorStyleSheets[i]->ownerNode());
         MatchRequest matchRequest(&m_authorStyleSheets[i]->contents()->ruleSet(), includeEmptyRules, &m_scope->rootNode(), m_authorStyleSheets[i], i);
-        collector.collectMatchingShadowHostRules(matchRequest, ruleRange, cascadeOrder);
+        collector.collectMatchingShadowHostRules(matchRequest, cascadeOrder);
     }
     collector.setScopeContainsLastMatchedElement(false);
 }
 
 void ScopedStyleResolver::collectMatchingTreeBoundaryCrossingRules(ElementRuleCollector& collector, bool includeEmptyRules, CascadeOrder cascadeOrder)
 {
-    RuleRange ruleRange = collector.matchedResult().ranges.authorRuleRange();
     for (const auto& rules : *m_treeBoundaryCrossingRuleSet) {
         MatchRequest request(rules->m_ruleSet.get(), includeEmptyRules, &treeScope().rootNode(), rules->m_parentStyleSheet, rules->m_parentIndex);
-        collector.collectMatchingRules(request, ruleRange, cascadeOrder, true);
+        collector.collectMatchingRules(request, cascadeOrder, true);
     }
 }
 
@@ -251,6 +231,7 @@ void ScopedStyleResolver::addTreeBoundaryCrossingRules(const RuleSet& authorRule
 
 DEFINE_TRACE(ScopedStyleResolver::RuleSubSet)
 {
+    visitor->trace(m_parentStyleSheet);
     visitor->trace(m_ruleSet);
 }
 

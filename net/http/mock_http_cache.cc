@@ -5,7 +5,9 @@
 #include "net/http/mock_http_cache.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -53,9 +55,14 @@ struct MockDiskEntry::CallbackInfo {
 };
 
 MockDiskEntry::MockDiskEntry(const std::string& key)
-    : key_(key), doomed_(false), sparse_(false),
-      fail_requests_(false), fail_sparse_requests_(false), busy_(false),
-      delayed_(false) {
+    : key_(key),
+      doomed_(false),
+      sparse_(false),
+      fail_requests_(false),
+      fail_sparse_requests_(false),
+      busy_(false),
+      delayed_(false),
+      cancel_(false) {
   test_mode_ = GetTestModeForEntry(key);
 }
 
@@ -146,7 +153,7 @@ int MockDiskEntry::ReadSparseData(int64 offset,
   DCHECK(!callback.is_null());
   if (fail_sparse_requests_)
     return ERR_NOT_IMPLEMENTED;
-  if (!sparse_ || busy_)
+  if (!sparse_ || busy_ || cancel_)
     return ERR_CACHE_OPERATION_NOT_SUPPORTED;
   if (offset < 0)
     return ERR_FAILED;
@@ -179,7 +186,7 @@ int MockDiskEntry::WriteSparseData(int64 offset,
   DCHECK(!callback.is_null());
   if (fail_sparse_requests_)
     return ERR_NOT_IMPLEMENTED;
-  if (busy_)
+  if (busy_ || cancel_)
     return ERR_CACHE_OPERATION_NOT_SUPPORTED;
   if (!sparse_) {
     if (data_[1].size())
@@ -213,7 +220,7 @@ int MockDiskEntry::GetAvailableRange(int64 offset,
                                      int64* start,
                                      const CompletionCallback& callback) {
   DCHECK(!callback.is_null());
-  if (!sparse_ || busy_)
+  if (!sparse_ || busy_ || cancel_)
     return ERR_CACHE_OPERATION_NOT_SUPPORTED;
   if (offset < 0)
     return ERR_FAILED;
@@ -297,7 +304,7 @@ void MockDiskEntry::CallbackLater(const CompletionCallback& callback,
                                   int result) {
   if (ignore_callbacks_)
     return StoreAndDeliverCallbacks(true, this, callback, result);
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&MockDiskEntry::RunCallback, this, callback, result));
 }
@@ -343,7 +350,6 @@ void MockDiskEntry::StoreAndDeliverCallbacks(bool store,
 }
 
 // Statics.
-bool MockDiskEntry::cancel_ = false;
 bool MockDiskEntry::ignore_callbacks_ = false;
 
 //-----------------------------------------------------------------------------
@@ -498,7 +504,7 @@ void MockDiskCache::ReleaseAll() {
 
 void MockDiskCache::CallbackLater(const CompletionCallback& callback,
                                   int result) {
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&CallbackForwader, callback, result));
 }
 
@@ -564,7 +570,7 @@ bool MockHttpCache::WriteResponseInfo(disk_cache::Entry* disk_entry,
                                       const HttpResponseInfo* response_info,
                                       bool skip_transient_headers,
                                       bool response_truncated) {
-  Pickle pickle;
+  base::Pickle pickle;
   response_info->Persist(
       &pickle, skip_transient_headers, response_truncated);
 

@@ -6,6 +6,7 @@
 
 #include "base/guid.h"
 #include "base/stl_util.h"
+#include "base/time/time.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
@@ -16,12 +17,12 @@
 #include "content/browser/service_worker/service_worker_dispatcher_host.h"
 #include "content/browser/service_worker/service_worker_handle.h"
 #include "content/browser/service_worker/service_worker_registration_handle.h"
-#include "content/browser/service_worker/service_worker_utils.h"
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/resource_request_body.h"
 #include "content/common/service_worker/service_worker_messages.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -31,9 +32,8 @@ namespace content {
 
 namespace {
 
-ServiceWorkerClientInfo FocusOnUIThread(
-    int render_process_id,
-    int render_frame_id) {
+ServiceWorkerClientInfo FocusOnUIThread(int render_process_id,
+                                        int render_frame_id) {
   RenderFrameHostImpl* render_frame_host =
       RenderFrameHostImpl::FromID(render_process_id, render_frame_id);
   WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
@@ -70,14 +70,14 @@ ServiceWorkerProviderHost::OneShotGetReadyCallback::~OneShotGetReadyCallback() {
 
 ServiceWorkerProviderHost::ServiceWorkerProviderHost(
     int render_process_id,
-    int render_frame_id,
+    int route_id,
     int provider_id,
     ServiceWorkerProviderType provider_type,
     base::WeakPtr<ServiceWorkerContextCore> context,
     ServiceWorkerDispatcherHost* dispatcher_host)
     : client_uuid_(base::GenerateGUID()),
       render_process_id_(render_process_id),
-      render_frame_id_(render_frame_id),
+      route_id_(route_id),
       render_thread_id_(kDocumentMainThreadId),
       provider_id_(provider_id),
       provider_type_(provider_type),
@@ -86,6 +86,7 @@ ServiceWorkerProviderHost::ServiceWorkerProviderHost(
       allow_association_(true) {
   DCHECK_NE(ChildProcessHost::kInvalidUniqueID, render_process_id_);
   DCHECK_NE(SERVICE_WORKER_PROVIDER_UNKNOWN, provider_type_);
+  DCHECK_NE(SERVICE_WORKER_PROVIDER_FOR_SANDBOXED_FRAME, provider_type_);
   if (provider_type_ == SERVICE_WORKER_PROVIDER_FOR_CONTROLLER) {
     // Actual thread id is set when the service worker context gets started.
     render_thread_id_ = kInvalidEmbeddedWorkerThreadId;
@@ -110,6 +111,12 @@ ServiceWorkerProviderHost::~ServiceWorkerProviderHost() {
 
   for (const GURL& pattern : associated_patterns_)
     DecreaseProcessReference(pattern);
+}
+
+int ServiceWorkerProviderHost::frame_id() const {
+  if (provider_type_ == SERVICE_WORKER_PROVIDER_FOR_WINDOW)
+    return route_id_;
+  return MSG_ROUTING_NONE;
 }
 
 void ServiceWorkerProviderHost::OnVersionAttributesChanged(
@@ -215,8 +222,10 @@ bool ServiceWorkerProviderHost::IsProviderForClient() const {
     case SERVICE_WORKER_PROVIDER_FOR_SHARED_WORKER:
       return true;
     case SERVICE_WORKER_PROVIDER_FOR_CONTROLLER:
-    case SERVICE_WORKER_PROVIDER_UNKNOWN:
       return false;
+    case SERVICE_WORKER_PROVIDER_FOR_SANDBOXED_FRAME:
+    case SERVICE_WORKER_PROVIDER_UNKNOWN:
+      NOTREACHED() << provider_type_;
   }
   NOTREACHED() << provider_type_;
   return false;
@@ -232,6 +241,7 @@ blink::WebServiceWorkerClientType ServiceWorkerProviderHost::client_type()
     case SERVICE_WORKER_PROVIDER_FOR_SHARED_WORKER:
       return blink::WebServiceWorkerClientTypeSharedWorker;
     case SERVICE_WORKER_PROVIDER_FOR_CONTROLLER:
+    case SERVICE_WORKER_PROVIDER_FOR_SANDBOXED_FRAME:
     case SERVICE_WORKER_PROVIDER_UNKNOWN:
       NOTREACHED() << provider_type_;
   }
@@ -323,6 +333,7 @@ scoped_ptr<ServiceWorkerRequestHandler>
 ServiceWorkerProviderHost::CreateRequestHandler(
     FetchRequestMode request_mode,
     FetchCredentialsMode credentials_mode,
+    FetchRedirectMode redirect_mode,
     ResourceType resource_type,
     RequestContextType request_context_type,
     RequestContextFrameType frame_type,
@@ -336,15 +347,10 @@ ServiceWorkerProviderHost::CreateRequestHandler(
   if (ServiceWorkerUtils::IsMainResourceType(resource_type) ||
       controlling_version()) {
     return scoped_ptr<ServiceWorkerRequestHandler>(
-        new ServiceWorkerControlleeRequestHandler(context_,
-                                                  AsWeakPtr(),
-                                                  blob_storage_context,
-                                                  request_mode,
-                                                  credentials_mode,
-                                                  resource_type,
-                                                  request_context_type,
-                                                  frame_type,
-                                                  body));
+        new ServiceWorkerControlleeRequestHandler(
+            context_, AsWeakPtr(), blob_storage_context, request_mode,
+            credentials_mode, redirect_mode, resource_type,
+            request_context_type, frame_type, body));
   }
   return scoped_ptr<ServiceWorkerRequestHandler>();
 }
@@ -381,6 +387,7 @@ bool ServiceWorkerProviderHost::CanAssociateRegistration(
 }
 
 void ServiceWorkerProviderHost::PostMessage(
+    ServiceWorkerVersion* version,
     const base::string16& message,
     const std::vector<TransferredMessagePort>& sent_message_ports) {
   if (!dispatcher_host_)
@@ -391,28 +398,36 @@ void ServiceWorkerProviderHost::PostMessage(
       UpdateMessagePortsWithNewRoutes(sent_message_ports,
                                       &new_routing_ids);
 
-  Send(new ServiceWorkerMsg_MessageToDocument(
-      kDocumentMainThreadId, provider_id(),
-      message,
-      sent_message_ports,
-      new_routing_ids));
+  ServiceWorkerMsg_MessageToDocument_Params params;
+  params.thread_id = kDocumentMainThreadId;
+  params.provider_id = provider_id();
+  params.service_worker_info = GetOrCreateServiceWorkerHandle(version);
+  params.message = message;
+  params.message_ports = sent_message_ports;
+  params.new_routing_ids = new_routing_ids;
+  Send(new ServiceWorkerMsg_MessageToDocument(params));
 }
 
 void ServiceWorkerProviderHost::Focus(const GetClientInfoCallback& callback) {
+  if (provider_type_ != SERVICE_WORKER_PROVIDER_FOR_WINDOW) {
+    callback.Run(ServiceWorkerClientInfo());
+    return;
+  }
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&FocusOnUIThread,
-                 render_process_id_,
-                 render_frame_id_),
-      callback);
+      base::Bind(&FocusOnUIThread, render_process_id_, route_id_), callback);
 }
 
 void ServiceWorkerProviderHost::GetWindowClientInfo(
     const GetClientInfoCallback& callback) const {
+  if (provider_type_ != SERVICE_WORKER_PROVIDER_FOR_WINDOW) {
+    callback.Run(ServiceWorkerClientInfo());
+    return;
+  }
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&ServiceWorkerProviderHost::GetWindowClientInfoOnUI,
-                 render_process_id_, render_frame_id_),
+                 render_process_id_, route_id_),
       callback);
 }
 
@@ -429,11 +444,11 @@ ServiceWorkerClientInfo ServiceWorkerProviderHost::GetWindowClientInfoOnUI(
   // for a frame that is actually being navigated and isn't exactly what we are
   // expecting.
   return ServiceWorkerClientInfo(
-      render_frame_host->GetVisibilityState(),
-      render_frame_host->IsFocused(),
+      render_frame_host->GetVisibilityState(), render_frame_host->IsFocused(),
       render_frame_host->GetLastCommittedURL(),
       render_frame_host->GetParent() ? REQUEST_CONTEXT_FRAME_TYPE_NESTED
                                      : REQUEST_CONTEXT_FRAME_TYPE_TOP_LEVEL,
+      render_frame_host->frame_tree_node()->last_focus_time(),
       blink::WebServiceWorkerClientTypeWindow);
 }
 
@@ -466,7 +481,7 @@ bool ServiceWorkerProviderHost::GetRegistrationForReady(
 
 void ServiceWorkerProviderHost::PrepareForCrossSiteTransfer() {
   DCHECK_NE(ChildProcessHost::kInvalidUniqueID, render_process_id_);
-  DCHECK_NE(MSG_ROUTING_NONE, render_frame_id_);
+  DCHECK_NE(MSG_ROUTING_NONE, route_id_);
   DCHECK_EQ(kDocumentMainThreadId, render_thread_id_);
   DCHECK_NE(SERVICE_WORKER_PROVIDER_UNKNOWN, provider_type_);
 
@@ -484,7 +499,7 @@ void ServiceWorkerProviderHost::PrepareForCrossSiteTransfer() {
   }
 
   render_process_id_ = ChildProcessHost::kInvalidUniqueID;
-  render_frame_id_ = MSG_ROUTING_NONE;
+  route_id_ = MSG_ROUTING_NONE;
   render_thread_id_ = kInvalidEmbeddedWorkerThreadId;
   provider_id_ = kInvalidServiceWorkerProviderId;
   provider_type_ = SERVICE_WORKER_PROVIDER_UNKNOWN;
@@ -502,7 +517,7 @@ void ServiceWorkerProviderHost::CompleteCrossSiteTransfer(
   DCHECK_NE(MSG_ROUTING_NONE, new_frame_id);
 
   render_process_id_ = new_process_id;
-  render_frame_id_ = new_frame_id;
+  route_id_ = new_frame_id;
   render_thread_id_ = kDocumentMainThreadId;
   provider_id_ = new_provider_id;
   provider_type_ = new_provider_type;

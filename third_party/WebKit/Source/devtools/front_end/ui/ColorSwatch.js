@@ -78,11 +78,11 @@ WebInspector.ColorSwatch.prototype = {
 
     createdCallback: function()
     {
-        var root = this.createShadowRoot();
+        var root = WebInspector.createShadowRootWithCoreStyles(this);
         root.appendChild(WebInspector.Widget.createStyleElement("ui/colorSwatch.css"));
 
         this._iconElement = root.createChild("span", "color-swatch");
-        this._iconElement.title = WebInspector.UIString("Shift-click to change color format.");
+        this._iconElement.title = WebInspector.UIString("Shift-click to change color format");
         this._swatchInner = this._iconElement.createChild("span", "color-swatch-inner");
         this._swatchInner.addEventListener("dblclick", consumeEvent, false);
         this._swatchInner.addEventListener("mousedown", consumeEvent, false);

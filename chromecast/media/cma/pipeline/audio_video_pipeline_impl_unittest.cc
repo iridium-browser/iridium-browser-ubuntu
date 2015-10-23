@@ -9,12 +9,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "chromecast/media/cma/backend/audio_pipeline_device.h"
-#include "chromecast/media/cma/backend/media_clock_device.h"
-#include "chromecast/media/cma/backend/media_pipeline_device.h"
-#include "chromecast/media/cma/backend/media_pipeline_device_fake.h"
+#include "chromecast/base/task_runner_impl.h"
+#include "chromecast/media/cma/backend/media_pipeline_backend_default.h"
 #include "chromecast/media/cma/base/buffering_controller.h"
 #include "chromecast/media/cma/base/decoder_buffer_base.h"
 #include "chromecast/media/cma/pipeline/audio_pipeline_impl.h"
@@ -24,6 +23,8 @@
 #include "chromecast/media/cma/pipeline/video_pipeline_impl.h"
 #include "chromecast/media/cma/test/frame_generator_for_test.h"
 #include "chromecast/media/cma/test/mock_frame_provider.h"
+#include "chromecast/public/media/audio_pipeline_device.h"
+#include "chromecast/public/media/media_clock_device.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/buffers.h"
 #include "media/base/decoder_buffer.h"
@@ -50,18 +51,23 @@ class AudioVideoPipelineImplTest : public testing::Test {
   void OnEos();
 
   base::Closure task_after_eos_cb_;
+  scoped_ptr<base::MessageLoop> message_loop_;
 
  private:
+  scoped_ptr<TaskRunnerImpl> task_runner_;
   scoped_ptr<MediaPipelineImpl> media_pipeline_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioVideoPipelineImplTest);
 };
 
 AudioVideoPipelineImplTest::AudioVideoPipelineImplTest()
-  : media_pipeline_(new MediaPipelineImpl()) {
-  scoped_ptr<MediaPipelineDevice> media_pipeline_device(
-      new MediaPipelineDeviceFake());
-  media_pipeline_->Initialize(kLoadTypeURL, media_pipeline_device.Pass());
+    : message_loop_(new base::MessageLoop()),
+      task_runner_(new TaskRunnerImpl()),
+      media_pipeline_(new MediaPipelineImpl()) {
+  MediaPipelineDeviceParams params(task_runner_.get());
+  scoped_ptr<MediaPipelineBackend> backend =
+      make_scoped_ptr(new MediaPipelineBackendDefault(params));
+  media_pipeline_->Initialize(kLoadTypeURL, backend.Pass());
   media_pipeline_->SetPlaybackRate(1.0);
 }
 
@@ -90,14 +96,12 @@ void AudioVideoPipelineImplTest::Initialize(
       ::media::CHANNEL_LAYOUT_STEREO,
       44100,
       NULL, 0, false);
-  ::media::VideoDecoderConfig video_config(
-      ::media::kCodecH264,
-      ::media::H264PROFILE_MAIN,
-      ::media::VideoFrame::I420,
-      gfx::Size(640, 480),
-      gfx::Rect(0, 0, 640, 480),
-      gfx::Size(640, 480),
-      NULL, 0, false);
+  std::vector<::media::VideoDecoderConfig> video_configs;
+  video_configs.push_back(::media::VideoDecoderConfig(
+      ::media::kCodecH264, ::media::H264PROFILE_MAIN,
+      ::media::PIXEL_FORMAT_I420, ::media::COLOR_SPACE_UNSPECIFIED,
+      gfx::Size(640, 480), gfx::Rect(0, 0, 640, 480), gfx::Size(640, 480), NULL,
+      0, false));
 
   // Frame generation on the producer side.
   std::vector<FrameGeneratorForTest::FrameSpec> frame_specs;
@@ -134,11 +138,11 @@ void AudioVideoPipelineImplTest::Initialize(
                  next_task) :
       base::Bind(&MediaPipeline::InitializeVideo,
                  base::Unretained(media_pipeline_.get()),
-                 video_config,
+                 video_configs,
                  base::Passed(&frame_provider_base),
                  next_task);
 
-  base::MessageLoopProxy::current()->PostTask(FROM_HERE, task);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, task);
 }
 
 void AudioVideoPipelineImplTest::StartPlaying(
@@ -159,10 +163,9 @@ void AudioVideoPipelineImplTest::Flush(
   ::media::PipelineStatusCB next_task =
       base::Bind(&AudioVideoPipelineImplTest::Stop, base::Unretained(this),
                  done_cb);
-  base::MessageLoopProxy::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&MediaPipeline::Flush,
-                 base::Unretained(media_pipeline_.get()),
+      base::Bind(&MediaPipeline::Flush, base::Unretained(media_pipeline_.get()),
                  next_task));
 }
 
@@ -181,14 +184,11 @@ TEST_F(AudioVideoPipelineImplTest, AudioFullCycleInitToStop) {
       &AudioVideoPipelineImplTest::Flush, base::Unretained(this),
       base::Closure(), ::media::PIPELINE_OK);
 
-  scoped_ptr<base::MessageLoop> message_loop(new base::MessageLoop());
-  message_loop->PostTask(
-      FROM_HERE,
-      base::Bind(&AudioVideoPipelineImplTest::Initialize,
-                 base::Unretained(this),
-                 base::Closure(),
-                 ::media::PIPELINE_OK, is_audio));
-  message_loop->Run();
+  message_loop_->PostTask(FROM_HERE,
+                          base::Bind(&AudioVideoPipelineImplTest::Initialize,
+                                     base::Unretained(this), base::Closure(),
+                                     ::media::PIPELINE_OK, is_audio));
+  message_loop_->Run();
 };
 
 TEST_F(AudioVideoPipelineImplTest, VideoFullCycleInitToStop) {
@@ -197,14 +197,11 @@ TEST_F(AudioVideoPipelineImplTest, VideoFullCycleInitToStop) {
       &AudioVideoPipelineImplTest::Flush, base::Unretained(this),
       base::Closure(), ::media::PIPELINE_OK);
 
-  scoped_ptr<base::MessageLoop> message_loop(new base::MessageLoop());
-  message_loop->PostTask(
-      FROM_HERE,
-      base::Bind(&AudioVideoPipelineImplTest::Initialize,
-                 base::Unretained(this),
-                 base::Closure(),
-                 ::media::PIPELINE_OK, is_audio));
-  message_loop->Run();
+  message_loop_->PostTask(FROM_HERE,
+                          base::Bind(&AudioVideoPipelineImplTest::Initialize,
+                                     base::Unretained(this), base::Closure(),
+                                     ::media::PIPELINE_OK, is_audio));
+  message_loop_->Run();
 };
 
 }  // namespace media

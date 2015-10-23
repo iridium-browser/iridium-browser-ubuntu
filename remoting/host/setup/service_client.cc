@@ -83,7 +83,7 @@ void ServiceClient::Core::RegisterHost(
   if (!host_client_id.empty())
     url_suffix = "?hostClientId=" + host_client_id;
   std::string post_body_str;
-  base::JSONWriter::Write(&post_body, &post_body_str);
+  base::JSONWriter::Write(post_body, &post_body_str);
   MakeChromotingRequest(net::URLFetcher::POST,
                         url_suffix,
                         post_body_str,
@@ -145,7 +145,7 @@ void ServiceClient::Core::HandleResponse(const net::URLFetcher* source) {
         {
           std::string data;
           source->GetResponseAsString(&data);
-          scoped_ptr<base::Value> message_value(base::JSONReader::Read(data));
+          scoped_ptr<base::Value> message_value = base::JSONReader::Read(data);
           base::DictionaryValue *dict;
           std::string code;
           if (message_value.get() &&

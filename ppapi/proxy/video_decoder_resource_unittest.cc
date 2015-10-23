@@ -31,7 +31,9 @@ const uint32_t kShmSize = 256;
 const size_t kDecodeBufferSize = 16;
 const uint32_t kDecodeId = 5;
 const uint32_t kTextureId1 = 1;
+#if !defined(OS_WIN) || !defined(ARCH_CPU_64_BITS)
 const uint32_t kTextureId2 = 2;
+#endif
 const uint32_t kNumRequestedTextures = 2;
 
 class MockCompletionCallback {
@@ -58,9 +60,9 @@ class MockCompletionCallback {
 class VideoDecoderResourceTest : public PluginProxyTest {
  public:
   VideoDecoderResourceTest()
-      : decoder_iface_(thunk::GetPPB_VideoDecoder_1_0_Thunk()) {}
+      : decoder_iface_(thunk::GetPPB_VideoDecoder_1_1_Thunk()) {}
 
-  const PPB_VideoDecoder_1_0* decoder_iface() const { return decoder_iface_; }
+  const PPB_VideoDecoder_1_1* decoder_iface() const { return decoder_iface_; }
 
   void SendReply(const ResourceMessageCallParams& params,
                  int32_t result,
@@ -117,6 +119,7 @@ class VideoDecoderResourceTest : public PluginProxyTest {
         graphics3d.get(),
         PP_VIDEOPROFILE_H264MAIN,
         PP_HARDWAREACCELERATION_WITHFALLBACK,
+        0,
         PP_MakeOptionalCompletionCallback(&MockCompletionCallback::Callback,
                                           &cb));
     if (result != PP_OK_COMPLETIONPENDING)
@@ -297,7 +300,7 @@ class VideoDecoderResourceTest : public PluginProxyTest {
     return true;
   }
 
-  const PPB_VideoDecoder_1_0* decoder_iface_;
+  const PPB_VideoDecoder_1_1* decoder_iface_;
 
   char decode_buffer_[kDecodeBufferSize];
 };
@@ -314,6 +317,7 @@ TEST_F(VideoDecoderResourceTest, Initialize) {
         0 /* invalid 3d graphics */,
         PP_VIDEOPROFILE_H264MAIN,
         PP_HARDWAREACCELERATION_WITHFALLBACK,
+        0,
         PP_MakeOptionalCompletionCallback(&MockCompletionCallback::Callback,
                                           &cb));
     ASSERT_EQ(PP_ERROR_BADRESOURCE, result);
@@ -327,6 +331,7 @@ TEST_F(VideoDecoderResourceTest, Initialize) {
         1 /* non-zero resource */,
         static_cast<PP_VideoProfile>(-1),
         PP_HARDWAREACCELERATION_WITHFALLBACK,
+        0,
         PP_MakeOptionalCompletionCallback(&MockCompletionCallback::Callback,
                                           &cb));
     ASSERT_EQ(PP_ERROR_BADARGUMENT, result);
@@ -341,6 +346,7 @@ TEST_F(VideoDecoderResourceTest, Initialize) {
         graphics3d.get(),
         PP_VIDEOPROFILE_H264MAIN,
         PP_HARDWAREACCELERATION_WITHFALLBACK,
+        0,
         PP_MakeOptionalCompletionCallback(&MockCompletionCallback::Callback,
                                           &cb));
     ASSERT_EQ(PP_OK_COMPLETIONPENDING, result);
@@ -352,6 +358,7 @@ TEST_F(VideoDecoderResourceTest, Initialize) {
         graphics3d.get(),
         PP_VIDEOPROFILE_H264MAIN,
         PP_HARDWAREACCELERATION_WITHFALLBACK,
+        0,
         PP_MakeOptionalCompletionCallback(&MockCompletionCallback::Callback,
                                           &cb));
     ASSERT_EQ(PP_ERROR_INPROGRESS, result);

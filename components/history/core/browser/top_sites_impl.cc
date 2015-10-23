@@ -9,23 +9,26 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/md5.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop/message_loop_proxy.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/page_usage_data.h"
 #include "components/history/core/browser/top_sites_cache.h"
+#include "components/history/core/browser/top_sites_observer.h"
 #include "components/history/core/browser/url_utils.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -88,6 +91,10 @@ const int64 kMaxUpdateIntervalMinutes = 5;
 // artifacts for these small sized, highly detailed images.
 const int kTopSitesImageQuality = 100;
 
+// Key for preference listing the URLs that should not be shown as most
+// visited thumbnails.
+const char kMostVisitedURLsBlacklist[] = "ntp.most_visited_blacklist";
+
 }  // namespace
 
 // Initially, histogram is not recorded.
@@ -95,7 +102,6 @@ bool TopSitesImpl::histogram_recorded_ = false;
 
 TopSitesImpl::TopSitesImpl(PrefService* pref_service,
                            HistoryService* history_service,
-                           const char* blacklist_pref_name,
                            const PrepopulatedPageList& prepopulated_pages,
                            const CanAddURLToHistoryFn& can_add_url_to_history)
     : backend_(nullptr),
@@ -104,13 +110,11 @@ TopSitesImpl::TopSitesImpl(PrefService* pref_service,
       last_num_urls_changed_(0),
       prepopulated_pages_(prepopulated_pages),
       pref_service_(pref_service),
-      blacklist_pref_name_(blacklist_pref_name),
       history_service_(history_service),
       can_add_url_to_history_(can_add_url_to_history),
       loaded_(false),
       history_service_observer_(this) {
   DCHECK(pref_service_);
-  DCHECK(blacklist_pref_name_);
   DCHECK(!can_add_url_to_history_.is_null());
 }
 
@@ -210,11 +214,9 @@ void TopSitesImpl::GetMostVisitedURLs(
     if (!loaded_) {
       // A request came in before we finished loading. Store the callback and
       // we'll run it on current thread when we finish loading.
-      pending_callbacks_.push_back(
-          base::Bind(&RunOrPostGetMostVisitedURLsCallback,
-                     base::MessageLoopProxy::current(),
-                     include_forced_urls,
-                     callback));
+      pending_callbacks_.push_back(base::Bind(
+          &RunOrPostGetMostVisitedURLsCallback,
+          base::ThreadTaskRunnerHandle::Get(), include_forced_urls, callback));
       return;
     }
     if (include_forced_urls) {
@@ -318,7 +320,7 @@ void TopSitesImpl::SyncWithHistory() {
 
 bool TopSitesImpl::HasBlacklistedItems() const {
   const base::DictionaryValue* blacklist =
-      pref_service_->GetDictionary(blacklist_pref_name_);
+      pref_service_->GetDictionary(kMostVisitedURLsBlacklist);
   return blacklist && !blacklist->empty();
 }
 
@@ -327,42 +329,42 @@ void TopSitesImpl::AddBlacklistedURL(const GURL& url) {
 
   scoped_ptr<base::Value> dummy = base::Value::CreateNullValue();
   {
-    DictionaryPrefUpdate update(pref_service_, blacklist_pref_name_);
+    DictionaryPrefUpdate update(pref_service_, kMostVisitedURLsBlacklist);
     base::DictionaryValue* blacklist = update.Get();
     blacklist->SetWithoutPathExpansion(GetURLHash(url), dummy.Pass());
   }
 
   ResetThreadSafeCache();
-  NotifyTopSitesChanged();
+  NotifyTopSitesChanged(TopSitesObserver::ChangeReason::BLACKLIST);
 }
 
 void TopSitesImpl::RemoveBlacklistedURL(const GURL& url) {
   DCHECK(thread_checker_.CalledOnValidThread());
   {
-    DictionaryPrefUpdate update(pref_service_, blacklist_pref_name_);
+    DictionaryPrefUpdate update(pref_service_, kMostVisitedURLsBlacklist);
     base::DictionaryValue* blacklist = update.Get();
     blacklist->RemoveWithoutPathExpansion(GetURLHash(url), nullptr);
   }
   ResetThreadSafeCache();
-  NotifyTopSitesChanged();
+  NotifyTopSitesChanged(TopSitesObserver::ChangeReason::BLACKLIST);
 }
 
 bool TopSitesImpl::IsBlacklisted(const GURL& url) {
   DCHECK(thread_checker_.CalledOnValidThread());
   const base::DictionaryValue* blacklist =
-      pref_service_->GetDictionary(blacklist_pref_name_);
+      pref_service_->GetDictionary(kMostVisitedURLsBlacklist);
   return blacklist && blacklist->HasKey(GetURLHash(url));
 }
 
 void TopSitesImpl::ClearBlacklistedURLs() {
   DCHECK(thread_checker_.CalledOnValidThread());
   {
-    DictionaryPrefUpdate update(pref_service_, blacklist_pref_name_);
+    DictionaryPrefUpdate update(pref_service_, kMostVisitedURLsBlacklist);
     base::DictionaryValue* blacklist = update.Get();
     blacklist->Clear();
   }
   ResetThreadSafeCache();
-  NotifyTopSitesChanged();
+  NotifyTopSitesChanged(TopSitesObserver::ChangeReason::BLACKLIST);
 }
 
 void TopSitesImpl::ShutdownOnUIThread() {
@@ -374,6 +376,11 @@ void TopSitesImpl::ShutdownOnUIThread() {
   cancelable_task_tracker_.TryCancelAll();
   if (backend_)
     backend_->Shutdown();
+}
+
+// static
+void TopSitesImpl::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterDictionaryPref(kMostVisitedURLsBlacklist);
 }
 
 // static
@@ -585,6 +592,14 @@ bool TopSitesImpl::loaded() const {
 
 bool TopSitesImpl::AddForcedURL(const GURL& url, const base::Time& time) {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (!loaded_) {
+    // Optimally we could cache this and apply it after the load completes, but
+    // in practice it's not an issue since AddForcedURL will be called again
+    // next time the user hits the NTP.
+    return false;
+  }
+
   size_t num_forced = cache_->GetNumForcedURLs();
   MostVisitedURLList new_list(cache_->top_sites());
   MostVisitedURL new_url;
@@ -612,7 +627,7 @@ bool TopSitesImpl::AddForcedURL(const GURL& url, const base::Time& time) {
   new_list.insert(mid, new_url);
   mid = new_list.begin() + num_forced;  // Mid was invalidated.
   std::inplace_merge(new_list.begin(), mid, mid + 1, ForcedURLComparator);
-  SetTopSites(new_list, CALL_LOCATION_FROM_OTHER_PLACES);
+  SetTopSites(new_list, CALL_LOCATION_FROM_FORCED_URLS);
   return true;
 }
 
@@ -686,7 +701,7 @@ void TopSitesImpl::ApplyBlacklist(const MostVisitedURLList& urls,
   // Log the number of times ApplyBlacklist is called so we can compute the
   // average number of blacklisted items per user.
   const base::DictionaryValue* blacklist =
-      pref_service_->GetDictionary(blacklist_pref_name_);
+      pref_service_->GetDictionary(kMostVisitedURLsBlacklist);
   UMA_HISTOGRAM_BOOLEAN("TopSites.NumberOfApplyBlacklist", true);
   UMA_HISTOGRAM_COUNTS_100("TopSites.NumberOfBlacklistedItems",
       (blacklist ? blacklist->size() : 0));
@@ -789,7 +804,10 @@ void TopSitesImpl::SetTopSites(const MostVisitedURLList& new_top_sites,
 
   ResetThreadSafeCache();
   ResetThreadSafeImageCache();
-  NotifyTopSitesChanged();
+  if (location == CALL_LOCATION_FROM_FORCED_URLS)
+    NotifyTopSitesChanged(TopSitesObserver::ChangeReason::FORCED_URL);
+  else
+    NotifyTopSitesChanged(TopSitesObserver::ChangeReason::MOST_VISITED);
 
   // Restart the timer that queries history for top sites. This is done to
   // ensure we stay in sync with history.
@@ -800,7 +818,7 @@ int TopSitesImpl::num_results_to_request_from_history() const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   const base::DictionaryValue* blacklist =
-      pref_service_->GetDictionary(blacklist_pref_name_);
+      pref_service_->GetDictionary(kMostVisitedURLsBlacklist);
   return kNonForcedTopSitesNumber + (blacklist ? blacklist->size() : 0);
 }
 

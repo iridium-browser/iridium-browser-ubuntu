@@ -14,7 +14,6 @@ namespace rx
 
 Buffer9::Buffer9(Renderer9 *renderer)
     : BufferD3D(renderer),
-      mRenderer(renderer),
       mSize(0)
 {}
 
@@ -41,11 +40,7 @@ gl::Error Buffer9::setData(const void* data, size_t size, GLenum usage)
 
     invalidateStaticData();
 
-    if (usage == GL_STATIC_DRAW)
-    {
-        initializeStaticData();
-    }
-
+    updateD3DBufferUsage(usage);
     return gl::Error(GL_NO_ERROR);
 }
 

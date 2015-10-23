@@ -29,13 +29,12 @@ std::string FormatLog(const char* fmt, va_list args) {
 EventReaderLibevdevCros::EventReaderLibevdevCros(int fd,
                                                  const base::FilePath& path,
                                                  int id,
-                                                 InputDeviceType type,
                                                  const EventDeviceInfo& devinfo,
                                                  scoped_ptr<Delegate> delegate)
     : EventConverterEvdev(fd,
                           path,
                           id,
-                          type,
+                          devinfo.device_type(),
                           devinfo.name(),
                           devinfo.vendor_id(),
                           devinfo.product_id()),
@@ -45,7 +44,7 @@ EventReaderLibevdevCros::EventReaderLibevdevCros(int fd,
       has_caps_lock_led_(devinfo.HasLedEvent(LED_CAPSL)),
       delegate_(delegate.Pass()) {
   // This class assumes it does not deal with internal keyboards.
-  CHECK(!has_keyboard_ || type != INPUT_DEVICE_INTERNAL);
+  CHECK(!has_keyboard_ || type() != INPUT_DEVICE_INTERNAL);
 
   memset(&evdev_, 0, sizeof(evdev_));
   evdev_.log = OnLogMessage;
@@ -64,8 +63,9 @@ EventReaderLibevdevCros::EventReaderLibevdevCros(int fd,
 }
 
 EventReaderLibevdevCros::~EventReaderLibevdevCros() {
-  Stop();
+  DCHECK(!watching_);
   EvdevClose(&evdev_);
+  fd_ = -1;
 }
 
 EventReaderLibevdevCros::Delegate::~Delegate() {}
@@ -100,7 +100,7 @@ bool EventReaderLibevdevCros::HasCapsLockLed() const {
   return has_caps_lock_led_;
 }
 
-void EventReaderLibevdevCros::OnStopped() {
+void EventReaderLibevdevCros::OnDisabled() {
   delegate_->OnLibEvdevCrosStopped(&evdev_, &evstate_);
 }
 
@@ -109,7 +109,7 @@ void EventReaderLibevdevCros::OnSynReport(void* data,
                                           EventStateRec* evstate,
                                           struct timeval* tv) {
   EventReaderLibevdevCros* reader = static_cast<EventReaderLibevdevCros*>(data);
-  if (reader->ignore_events_)
+  if (!reader->enabled_)
     return;
 
   reader->delegate_->OnLibEvdevCrosEvent(&reader->evdev_, evstate, *tv);

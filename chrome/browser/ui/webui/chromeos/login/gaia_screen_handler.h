@@ -35,9 +35,6 @@ struct GaiaContext {
   // Whether local verison of Gaia is used.
   bool is_local;
 
-  // True if password was changed for the current user.
-  bool password_changed;
-
   // True if user pods can be displayed.
   bool show_users;
 
@@ -52,6 +49,9 @@ struct GaiaContext {
 
   // GAIA ID of the current user.
   std::string gaia_id;
+
+  // GAPS cookie.
+  std::string gaps_cookie;
 
   // Whether consumer management enrollment is in progress.
   bool is_enrolling_consumer_management;
@@ -85,6 +85,10 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // not loading right now.
   void ReloadGaia(bool force_reload);
 
+  // Turns offline idle detection on or off. Idle detection should only be on if
+  // we're using the offline login page but the device is online.
+  void MonitorOfflineIdle(bool is_online);
+
   // Decides whether an auth extension should be pre-loaded. If it should,
   // pre-loads it.
   void MaybePreloadAuthExtension();
@@ -115,7 +119,8 @@ class GaiaScreenHandler : public BaseScreenHandler {
                                     const std::string& email,
                                     const std::string& password,
                                     const std::string& auth_code,
-                                    bool using_saml);
+                                    bool using_saml,
+                                    const std::string& gaps_cookie);
   void HandleCompleteAuthenticationAuthCodeOnly(const std::string& auth_code);
   void HandleCompleteLogin(const std::string& gaia_id,
                            const std::string& typed_email,
@@ -130,7 +135,7 @@ class GaiaScreenHandler : public BaseScreenHandler {
 
   void HandleToggleEasyBootstrap();
 
-  void HandleToggleWebviewSignin();
+  void HandleIdentifierEntered(const std::string& account_identifier);
 
   // This is called when ConsumerManagementService::SetOwner() returns.
   void OnSetOwnerDone(const std::string& gaia_id,
@@ -147,9 +152,6 @@ class GaiaScreenHandler : public BaseScreenHandler {
 
   // Fill GAIA user name.
   void PopulateEmail(const std::string& user_id);
-
-  // Mark user as having password changed:
-  void PasswordChangedFor(const std::string& user_id);
 
   // Kick off cookie / local storage cleanup.
   void StartClearingCookies(const base::Closure& on_clear_callback);
@@ -219,9 +221,6 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // Email to pre-populate with.
   std::string populated_email_;
 
-  // Emails of the users, whose passwords have recently been changed.
-  std::set<std::string> password_changed_for_;
-
   // True if dns cache cleanup is done.
   bool dns_cleared_;
 
@@ -234,9 +233,6 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // If true, the sign-in screen will be shown when DNS cache and cookie
   // clean-up finish.
   bool show_when_dns_and_cookies_cleared_;
-
-  // Is focus still stolen from Gaia page?
-  bool focus_stolen_;
 
   // Has Gaia page silent load been started for the current sign-in attempt?
   bool gaia_silent_load_;

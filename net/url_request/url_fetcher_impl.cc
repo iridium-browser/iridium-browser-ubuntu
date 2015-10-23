@@ -5,7 +5,6 @@
 #include "net/url_request/url_fetcher_impl.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/sequenced_task_runner.h"
 #include "net/base/upload_data_stream.h"
 #include "net/url_request/url_fetcher_core.h"
@@ -153,6 +152,18 @@ HostPortPair URLFetcherImpl::GetSocketAddress() const {
 
 bool URLFetcherImpl::WasFetchedViaProxy() const {
   return core_->WasFetchedViaProxy();
+}
+
+bool URLFetcherImpl::WasCached() const {
+  return core_->WasCached();
+}
+
+int64_t URLFetcherImpl::GetReceivedResponseContentLength() const {
+  return core_->GetReceivedResponseContentLength();
+}
+
+int64_t URLFetcherImpl::GetTotalReceivedBytes() const {
+  return core_->GetTotalReceivedBytes();
 }
 
 void URLFetcherImpl::Start() {

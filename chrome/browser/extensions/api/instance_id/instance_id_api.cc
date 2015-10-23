@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/api/instance_id/instance_id_api.h"
 
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/services/gcm/instance_id/instance_id_profile_service.h"
 #include "chrome/browser/services/gcm/instance_id/instance_id_profile_service_factory.h"
@@ -19,6 +20,7 @@ namespace {
 // Error messages.
 const char kInvalidParameter[] = "Function was called with invalid parameters.";
 const char kDisabled[] = "Instance ID is currently disabled.";
+const char kAsyncOperationPending[] = "Asynchronous operation is pending.";
 const char kNetworkError[] = "Network error occurred.";
 const char kServerError[] = "Server error occurred.";
 const char kUnknownError[] = "Unknown error occurred.";
@@ -29,6 +31,8 @@ const char* InstanceIDResultToError(instance_id::InstanceID::Result result) {
       return kInvalidParameter;
     case instance_id::InstanceID::DISABLED:
       return kDisabled;
+    case instance_id::InstanceID::ASYNC_OPERATION_PENDING:
+      return kAsyncOperationPending;
     case instance_id::InstanceID::NETWORK_ERROR:
       return kNetworkError;
     case instance_id::InstanceID::SERVER_ERROR:
@@ -56,7 +60,10 @@ ExtensionFunction::ResponseAction InstanceIDApiFunction::Run() {
         "chrome.instanceID not supported in incognito mode"));
   }
 
-  if (!IsEnabled()) {
+  bool isInstanceIDEnabled = IsEnabled();
+  UMA_HISTOGRAM_BOOLEAN("InstanceID.Enabled", isInstanceIDEnabled);
+
+  if (!isInstanceIDEnabled) {
     return RespondNow(Error(
         InstanceIDResultToError(instance_id::InstanceID::DISABLED)));
   }
@@ -116,18 +123,8 @@ ExtensionFunction::ResponseAction InstanceIDGetTokenFunction::DoWork() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   std::map<std::string, std::string> options;
-  if (params->get_token_params.options.get()) {
-    base::DictionaryValue::Iterator iter(
-        params->get_token_params.options->additional_properties);
-    for (; !iter.IsAtEnd(); iter.Advance()) {
-      const base::StringValue* string_value = NULL;
-      if (!iter.value().GetAsString(&string_value)) {
-        return RespondNow(Error(InstanceIDResultToError(
-            instance_id::InstanceID::INVALID_PARAMETER)));
-      }
-      options[iter.key()] = string_value->GetString();
-    }
-  }
+  if (params->get_token_params.options.get())
+    options = params->get_token_params.options->additional_properties;
 
   GetInstanceID()->GetToken(
       params->get_token_params.authorized_entity,

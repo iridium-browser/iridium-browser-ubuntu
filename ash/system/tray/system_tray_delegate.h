@@ -98,6 +98,7 @@ struct ASH_EXPORT UpdateInfo {
 
 using IMEInfoList = std::vector<IMEInfo>;
 
+class CastConfigDelegate;
 class NetworkingConfigDelegate;
 class VPNDelegate;
 
@@ -185,9 +186,6 @@ class ASH_EXPORT SystemTrayDelegate {
   // Shows the settings related to network. If |guid| is not empty,
   // show the settings for the corresponding network.
   virtual void ShowNetworkSettingsForGuid(const std::string& guid);
-
-  // Shows the settings related to bluetooth.
-  virtual void ShowBluetoothSettings();
 
   // Shows settings related to multiple displays.
   virtual void ShowDisplaySettings();
@@ -283,6 +281,9 @@ class ASH_EXPORT SystemTrayDelegate {
 
   // Shows UI for changing proxy settings.
   virtual void ChangeProxySettings();
+
+  // Returns CastConfigDelegate. May return nullptr.
+  virtual CastConfigDelegate* GetCastConfigDelegate() const;
 
   // Returns NetworkingConfigDelegate. May return nullptr.
   virtual NetworkingConfigDelegate* GetNetworkingConfigDelegate() const;

@@ -11,11 +11,11 @@ binutils=c030c3cc99f3843affcf339afb01fc94a87a5487
 #
 # Three lines avoid merge conflicts.
 #
-clang=96b3da27dcefc9d152e51cf54280989b2206d789
+clang=1756cbb411142589b67bd7437ed7156c6b5042b6
 #
 # Three lines avoid merge conflicts.
 #
-llvm=d0089f0b008e03cfd141f05c80e3b628c2df75c1
+llvm=510766d08eef6c49b259a24fa8b5f6d6e7fa6071
 #
 # Three lines avoid merge conflicts.
 #
@@ -23,7 +23,7 @@ gcc=574429118e460375c377728420c43aad4a3103dc
 #
 # Three lines avoid merge conflicts.
 #
-libcxx=640116b36573795793453c2b0671b161deb9256f
+libcxx=c627a310c8986c42c828adab52f3826fceba802e
 #
 # Three lines avoid merge conflicts.
 #
@@ -31,7 +31,7 @@ libcxxabi=de05b63efeb5df83abe927c08f330c35995c82a7
 #
 # Three lines avoid merge conflicts.
 #
-nacl_newlib=8c4da477c5348743d900307ce8443da4cc2fcdb8
+nacl_newlib=373135ec5241d09138aa56603742b94b3b64ea1d
 #
 # Three lines avoid merge conflicts.
 #
@@ -39,11 +39,11 @@ llvm_test_suite=6438a2b505fa29f82eb850aed1785db1738b971c
 #
 # Three lines avoid merge conflicts.
 #
-compiler_rt=61a748a59c2ff3a8349bd895f01f35eac0fc5217
+compiler_rt=37d8c21cfedc885d411580669c82574120cccdd4
 #
 # Three lines avoid merge conflicts.
 #
-subzero=b2d5084c573ef5de15eb0e87bdde5dfba59e524a
+subzero=86ebec12680b5268fcb7082f770a26394e8b8080
 #
 # Three lines avoid merge conflicts.
 #

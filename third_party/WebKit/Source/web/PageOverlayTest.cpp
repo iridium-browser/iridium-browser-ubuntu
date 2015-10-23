@@ -14,7 +14,6 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebCanvas.h"
 #include "public/platform/WebThread.h"
-#include "public/web/WebPageOverlay.h"
 #include "public/web/WebSettings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -61,13 +60,9 @@ protected:
         webViewImpl()->resize(WebSize(viewportWidth, viewportHeight));
         webViewImpl()->layout();
         ASSERT_EQ(compositingMode == AcceleratedCompositing, webViewImpl()->isAcceleratedCompositingActive());
-        ASSERT_TRUE(!webViewImpl()->pageOverlays() || webViewImpl()->pageOverlays()->empty());
     }
 
     WebViewImpl* webViewImpl() const { return m_helper.webViewImpl(); }
-
-    template <typename OverlayType>
-    void runPageOverlayTestWithUnacceleratedCompositing();
 
     template <typename OverlayType>
     void runPageOverlayTestWithAcceleratedCompositing();
@@ -76,8 +71,8 @@ private:
     FrameTestHelpers::WebViewHelper m_helper;
 };
 
-// WebPageOverlay that uses a WebCanvas to draw a solid color.
-class SimpleCanvasOverlay : public WebPageOverlay {
+// PageOverlay that uses a WebCanvas to draw a solid color.
+class SimpleCanvasOverlay : public PageOverlay::Delegate {
 public:
     SimpleCanvasOverlay(SkColor color) : m_color(color) { }
 
@@ -96,19 +91,20 @@ private:
     SkColor m_color;
 };
 
-// WebPageOverlay that uses the underlying blink::GraphicsContext to paint a
+// PageOverlay that uses the underlying blink::GraphicsContext to paint a
 // solid color.
-class PrivateGraphicsContextOverlay : public WebPageOverlay {
+class PrivateGraphicsContextOverlay : public PageOverlay::Delegate {
 public:
     PrivateGraphicsContextOverlay(Color color) : m_color(color) { }
 
     void paintPageOverlay(WebGraphicsContext* context, const WebSize& size) override
     {
         GraphicsContext& graphicsContext = toWebGraphicsContextImpl(context)->graphicsContext();
+        if (DrawingRecorder::useCachedDrawingIfPossible(graphicsContext, *this, DisplayItem::PageOverlay))
+            return;
         FloatRect rect(0, 0, size.width, size.height);
         DrawingRecorder drawingRecorder(graphicsContext, *this, DisplayItem::PageOverlay, rect);
-        if (!drawingRecorder.canUseCachedDrawing())
-            graphicsContext.fillRect(rect, m_color);
+        graphicsContext.fillRect(rect, m_color);
     }
 
     DisplayItemClient displayItemClient() const { return toDisplayItemClient(this); }
@@ -135,54 +131,13 @@ public:
 };
 
 template <typename OverlayType>
-void PageOverlayTest::runPageOverlayTestWithUnacceleratedCompositing()
-{
-    initialize(UnacceleratedCompositing);
-
-    OverlayType overlay(SK_ColorYELLOW);
-    webViewImpl()->addPageOverlay(&overlay, 0 /* zOrder */);
-    EXPECT_TRUE(webViewImpl()->pageOverlays() && !webViewImpl()->pageOverlays()->empty());
-    webViewImpl()->layout();
-
-    MockCanvas canvas(viewportWidth, viewportHeight);
-    EXPECT_CALL(canvas, onDrawRect(_, _)).Times(AtLeast(1));
-    EXPECT_CALL(canvas, onDrawRect(SkRect::MakeWH(viewportWidth, viewportHeight), Property(&SkPaint::getColor, SK_ColorYELLOW)));
-    webViewImpl()->paint(&canvas, WebRect(0, 0, viewportWidth, viewportHeight));
-}
-
-TEST_F(PageOverlayTest, SimpleCanvasOverlay_UnacceleratedCompositing_NoSlimmingPaint)
-{
-    SlimmingPaintScope slimmingPaintEnabled(false);
-    runPageOverlayTestWithUnacceleratedCompositing<SimpleCanvasOverlay>();
-}
-
-TEST_F(PageOverlayTest, SimpleCanvasOverlay_UnacceleratedCompositing_SlimmingPaint)
-{
-    SlimmingPaintScope slimmingPaintEnabled(true);
-    runPageOverlayTestWithUnacceleratedCompositing<SimpleCanvasOverlay>();
-}
-
-TEST_F(PageOverlayTest, PrivateGraphicsContextOverlay_UnacceleratedCompositing_NoSlimmingPaint)
-{
-    SlimmingPaintScope slimmingPaintEnabled(false);
-    runPageOverlayTestWithUnacceleratedCompositing<PrivateGraphicsContextOverlay>();
-}
-
-TEST_F(PageOverlayTest, PrivateGraphicsContextOverlay_UnacceleratedCompositing_SlimmingPaint)
-{
-    SlimmingPaintScope slimmingPaintEnabled(true);
-    runPageOverlayTestWithUnacceleratedCompositing<PrivateGraphicsContextOverlay>();
-}
-
-template <typename OverlayType>
 void PageOverlayTest::runPageOverlayTestWithAcceleratedCompositing()
 {
     initialize(AcceleratedCompositing);
     webViewImpl()->layerTreeView()->setViewportSize(WebSize(viewportWidth, viewportHeight));
 
-    OverlayType overlay(SK_ColorYELLOW);
-    webViewImpl()->addPageOverlay(&overlay, 0 /* zOrder */);
-    EXPECT_TRUE(webViewImpl()->pageOverlays() && !webViewImpl()->pageOverlays()->empty());
+    OwnPtr<PageOverlay> pageOverlay = PageOverlay::create(webViewImpl(), new OverlayType(SK_ColorYELLOW));
+    pageOverlay->update();
     webViewImpl()->layout();
 
     // Ideally, we would get results from the compositor that showed that this
@@ -193,20 +148,22 @@ void PageOverlayTest::runPageOverlayTestWithAcceleratedCompositing()
     EXPECT_CALL(canvas, onDrawRect(_, _)).Times(AtLeast(0));
     EXPECT_CALL(canvas, onDrawRect(SkRect::MakeWH(viewportWidth, viewportHeight), Property(&SkPaint::getColor, SK_ColorYELLOW)));
 
-    GraphicsLayer* graphicsLayer = webViewImpl()->pageOverlays()->graphicsLayerForTesting();
+    GraphicsLayer* graphicsLayer = pageOverlay->graphicsLayer();
+    WebRect rect(0, 0, viewportWidth, viewportHeight);
     if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
         // If slimming paint is on, we paint the layer with a null canvas to get
         // a display list, and then replay that onto the mock canvas for
         // examination. This is about as close to the real path as we can easily
         // get.
         GraphicsContext graphicsContext(graphicsLayer->displayItemList());
-        graphicsLayer->paint(graphicsContext, WebRect(0, 0, viewportWidth, viewportHeight));
+        graphicsLayer->paint(graphicsContext, rect);
 
-        OwnPtr<GraphicsContext> replayContext = GraphicsContext::deprecatedCreateWithCanvas(&canvas);
-        graphicsLayer->displayItemList()->commitNewDisplayItemsAndReplay(*replayContext);
+        graphicsContext.beginRecording(IntRect(rect));
+        graphicsLayer->displayItemList()->commitNewDisplayItemsAndReplay(graphicsContext);
+        graphicsContext.endRecording()->playback(&canvas);
     } else {
         OwnPtr<GraphicsContext> graphicsContext = GraphicsContext::deprecatedCreateWithCanvas(&canvas);
-        graphicsLayer->paint(*graphicsContext, WebRect(0, 0, viewportWidth, viewportHeight));
+        graphicsLayer->paint(*graphicsContext, rect);
     }
 }
 

@@ -4,7 +4,6 @@ if (${ARCH} STREQUAL "x86_64")
   set(
     BN_ARCH_SOURCES
 
-    asm/x86_64-gcc.c
     x86_64-mont.${ASM_EXT}
     x86_64-mont5.${ASM_EXT}
     rsaz-x86_64.${ASM_EXT}
@@ -38,7 +37,9 @@ add_library(
   OBJECT
 
   add.c
+  asm/x86_64-gcc.c
   bn.c
+  bn_asn1.c
   cmp.c
   convert.c
   ctx.c
@@ -70,6 +71,8 @@ add_executable(
   bn_test
 
   bn_test.cc
+
+  $<TARGET_OBJECTS:test_support>
 )
 
 target_link_libraries(bn_test crypto)

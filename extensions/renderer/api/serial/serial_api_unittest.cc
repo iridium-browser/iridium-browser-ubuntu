@@ -436,14 +436,13 @@ class SerialApiTest : public ApiTestBase {
 
   void CreateSerialService(
       mojo::InterfaceRequest<device::serial::SerialService> request) {
-    mojo::BindToRequest(new device::SerialServiceImpl(
-                            new device::SerialConnectionFactory(
-                                base::Bind(&SerialApiTest::GetIoHandler,
-                                           base::Unretained(this)),
-                                base::ThreadTaskRunnerHandle::Get()),
-                            scoped_ptr<device::SerialDeviceEnumerator>(
-                                new FakeSerialDeviceEnumerator)),
-                        &request);
+    new device::SerialServiceImpl(
+        new device::SerialConnectionFactory(
+            base::Bind(&SerialApiTest::GetIoHandler, base::Unretained(this)),
+            base::ThreadTaskRunnerHandle::Get()),
+        scoped_ptr<device::SerialDeviceEnumerator>(
+            new FakeSerialDeviceEnumerator),
+        request.Pass());
   }
 
   DISALLOW_COPY_AND_ASSIGN(SerialApiTest);
@@ -601,6 +600,36 @@ TEST_F(SerialApiTest, ReceiveErrorDeviceLost) {
   io_handler_ =
       new ReceiveErrorTestIoHandler(device::serial::RECEIVE_ERROR_DEVICE_LOST);
   RunTest("serial_unittest.js", "testReceiveErrorDeviceLost");
+}
+
+TEST_F(SerialApiTest, ReceiveErrorBreak) {
+  io_handler_ =
+      new ReceiveErrorTestIoHandler(device::serial::RECEIVE_ERROR_BREAK);
+  RunTest("serial_unittest.js", "testReceiveErrorBreak");
+}
+
+TEST_F(SerialApiTest, ReceiveErrorFrameError) {
+  io_handler_ =
+      new ReceiveErrorTestIoHandler(device::serial::RECEIVE_ERROR_FRAME_ERROR);
+  RunTest("serial_unittest.js", "testReceiveErrorFrameError");
+}
+
+TEST_F(SerialApiTest, ReceiveErrorOverrun) {
+  io_handler_ =
+      new ReceiveErrorTestIoHandler(device::serial::RECEIVE_ERROR_OVERRUN);
+  RunTest("serial_unittest.js", "testReceiveErrorOverrun");
+}
+
+TEST_F(SerialApiTest, ReceiveErrorBufferOverflow) {
+  io_handler_ = new ReceiveErrorTestIoHandler(
+      device::serial::RECEIVE_ERROR_BUFFER_OVERFLOW);
+  RunTest("serial_unittest.js", "testReceiveErrorBufferOverflow");
+}
+
+TEST_F(SerialApiTest, ReceiveErrorParityError) {
+  io_handler_ =
+      new ReceiveErrorTestIoHandler(device::serial::RECEIVE_ERROR_PARITY_ERROR);
+  RunTest("serial_unittest.js", "testReceiveErrorParityError");
 }
 
 TEST_F(SerialApiTest, ReceiveErrorSystemError) {

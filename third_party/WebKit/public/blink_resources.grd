@@ -4,7 +4,6 @@
     <output filename="grit/blink_resources.h" type="rc_header">
       <emit emit_type='prepend'></emit>
     </output>
-    <output filename="blink_resources.rc" type="rc_all" />
     <output filename="blink_resources.pak" type="data_package" />
   </outputs>
   <release seq="1">
@@ -16,6 +15,7 @@
       <if expr="is_android">
         <include name="IDR_UASTYLE_THEME_CHROMIUM_ANDROID_CSS" file="../Source/core/css/themeChromiumAndroid.css" type="BINDATA"/>
         <include name="IDR_UASTYLE_MEDIA_CONTROLS_ANDROID_CSS" file="../Source/core/css/mediaControlsAndroid.css" type="BINDATA"/>
+        <include name="IDR_UASTYLE_MEDIA_CONTROLS_ANDROID_NEW_CSS" file="../Source/core/css/mediaControlsAndroidNew.css" type="BINDATA"/>
       </if>
       <if expr="not is_win">
         <include name="IDR_UASTYLE_THEME_CHROMIUM_LINUX_CSS" file="../Source/core/css/themeChromiumLinux.css" type="BINDATA"/>
@@ -28,16 +28,16 @@
       <include name="IDR_UASTYLE_THEME_WIN_CSS" file="../Source/core/css/themeWin.css" type="BINDATA"/>
       <include name="IDR_UASTYLE_THEME_WIN_QUIRKS_CSS" file="../Source/core/css/themeWinQuirks.css" type="BINDATA"/>
       <include name="IDR_UASTYLE_SVG_CSS" file="../Source/core/css/svg.css" type="BINDATA"/>
-      <include name="IDR_UASTYLE_NAVIGATION_TRANSITIONS_CSS" file="../Source/core/css/navigationTransitions.css" type="BINDATA"/>
       <include name="IDR_UASTYLE_MATHML_CSS" file="../Source/core/css/mathml.css" type="BINDATA"/>
       <include name="IDR_UASTYLE_MEDIA_CONTROLS_CSS" file="../Source/core/css/mediaControls.css" type="BINDATA"/>
+      <include name="IDR_UASTYLE_MEDIA_CONTROLS_NEW_CSS" file="../Source/core/css/mediaControlsNew.css" type="BINDATA"/>
       <include name="IDR_UASTYLE_FULLSCREEN_CSS" file="../Source/core/css/fullscreen.css" type="BINDATA"/>
       <include name="IDR_UASTYLE_XHTMLMP_CSS" file="../Source/core/css/xhtmlmp.css" type="BINDATA"/>
       <include name="IDR_UASTYLE_VIEWPORT_ANDROID_CSS" file="../Source/core/css/viewportAndroid.css" type="BINDATA"/>
 
       <include name="IDR_INSPECTOR_OVERLAY_PAGE_HTML" file="../Source/core/inspector/InspectorOverlayPage.html" type="BINDATA"/>
       <include name="IDR_INSPECTOR_INJECTED_SCRIPT_SOURCE_JS" file="../Source/core/inspector/InjectedScriptSource.js" type="BINDATA"/>
-      <include name="IDR_INSPECTOR_DEBUGGER_SCRIPT_SOURCE_JS" file="../Source/bindings/core/v8/DebuggerScript.js" type="BINDATA"/>
+      <include name="IDR_INSPECTOR_DEBUGGER_SCRIPT_SOURCE_JS" file="../Source/core/inspector/DebuggerScript.js" type="BINDATA"/>
       <include name="IDR_PRIVATE_SCRIPT_DOCUMENTEXECCOMMAND_JS" file="../Source/core/editing/js/DocumentExecCommand.js" type="BINDATA"/>
       <include name="IDR_PRIVATE_SCRIPT_DOCUMENTXMLTREEVIEWER_CSS" file="../Source/core/xml/DocumentXMLTreeViewer.css" type="BINDATA"/>
       <include name="IDR_PRIVATE_SCRIPT_DOCUMENTXMLTREEVIEWER_JS" file="../Source/core/xml/DocumentXMLTreeViewer.js" type="BINDATA"/>
@@ -57,10 +57,10 @@
         <include name="IDR_LIST_PICKER_CSS" file="../Source/web/resources/listPicker.css" type="BINDATA"/>
         <include name="IDR_LIST_PICKER_JS" file="../Source/web/resources/listPicker.js" type="BINDATA"/>
       </if>
-      <if expr="pp_ifdef('use_concatenated_impulse_responses')">
+      <if expr="use_concatenated_impulse_responses">
         <include name="IDR_AUDIO_SPATIALIZATION_COMPOSITE" file="../Source/platform/audio/resources/Composite.wav" type="BINDATA"/>
       </if>
-      <if expr="not pp_ifdef('use_concatenated_impulse_responses')">
+      <if expr="not use_concatenated_impulse_responses">
         <include name="IDR_AUDIO_SPATIALIZATION_T000_P000" file="..\Source\platform\audio\resources\IRC_Composite_C_R0195_T000_P000.wav" type="BINDATA"/>
         <include name="IDR_AUDIO_SPATIALIZATION_T000_P015" file="..\Source\platform\audio\resources\IRC_Composite_C_R0195_T000_P015.wav" type="BINDATA"/>
         <include name="IDR_AUDIO_SPATIALIZATION_T000_P030" file="..\Source\platform\audio\resources\IRC_Composite_C_R0195_T000_P030.wav" type="BINDATA"/>

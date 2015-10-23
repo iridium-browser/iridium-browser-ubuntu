@@ -11,14 +11,6 @@
  */
 var VIDEO_PLAYER_APP_ID = 'jcgeabjmjgoblfofpppfkcoakmfobdko';
 
-/**
- * Extension ID of Files.app.
- * @type {string}
- * @const
- */
-var FILE_MANAGER_EXTENSIONS_ID = 'hhaomjibdihmijegdhdafkllkbggdgoj';
-
-var remoteCallFilesApp = new RemoteCallFilesApp(FILE_MANAGER_EXTENSIONS_ID);
 var remoteCallVideoPlayer = new RemoteCall(VIDEO_PLAYER_APP_ID);
 
 /**
@@ -27,9 +19,9 @@ var remoteCallVideoPlayer = new RemoteCall(VIDEO_PLAYER_APP_ID);
  * @param {string} testVolumeName Test volume name passed to the addEntries
  *     function. Either 'drive' or 'local'.
  * @param {VolumeManagerCommon.VolumeType} volumeType Volume type.
- * @param {Array.<TestEntryInfo>} entries Entries to be parepared and passed to
+ * @param {Array<TestEntryInfo>} entries Entries to be parepared and passed to
  *     the application.
- * @param {Array.<TestEntryInfo>=} opt_selected Entries to be selected. Should
+ * @param {Array<TestEntryInfo>=} opt_selected Entries to be selected. Should
  *     be a sub-set of the entries argument.
  * @return {Promise} Promise to be fulfilled with the video player element.
  */
@@ -45,7 +37,7 @@ function launch(testVolumeName, volumeType, entries, opt_selected) {
   var appWindow = null;
   return entriesPromise.then(function(urls) {
     return remoteCallVideoPlayer.callRemoteTestUtil(
-        'openVideoPlayer', null, [urls, 0]);
+        'openVideoPlayer', null, [urls]);
   }).then(function(windowId) {
     appWindow = windowId;
     return remoteCallVideoPlayer.waitForElement(appWindow, 'body');
@@ -62,30 +54,23 @@ function launch(testVolumeName, volumeType, entries, opt_selected) {
 }
 
 /**
- * Verifies if there are no Javascript errors in any of the app windows.
- * @param {function()} Completion callback.
+ * Opens video player with a single video.
+ * @param {string} volumeName Test volume name passed to the addEntries
+ *     function. Either 'drive' or 'local'.
+ * @param {VolumeManagerCommon.VolumeType} volumeType Volume type.
+ * @param {TestEntryInfo} entry File to be opened.
+ * @return {Promise} Promise to be fulfilled with the video player element.
  */
-function checkIfNoErrorsOccured(callback) {
-  var countPromise = remoteCallVideoPlayer.callRemoteTestUtil(
-      'getErrorCount', null, []);
-  countPromise.then(function(count) {
-    chrome.test.assertEq(0, count, 'The error count is not 0.');
-    callback();
-  });
-}
+function openSingleVideo(volumeName, volumeType, entry) {
+  var entries = [entry];
+  return launch(volumeName, volumeType, entries).then(function(args) {
+    var videoPlayer = args[1];
 
-/**
- * Adds check of chrome.test to the end of the given promise.
- * @param {Promise} promise Promise.
- */
-function testPromise(promise) {
-  promise.then(function() {
-    return new Promise(checkIfNoErrorsOccured);
-  }).then(chrome.test.callbackPass(function() {
-    // The callbacPass is necessary to avoid prematurely finishing tests.
-    // Don't put chrome.test.succeed() here to avoid doubled success log.
-  }), function(error) {
-    chrome.test.fail(error.stack || error);
+    chrome.test.assertTrue('first-video' in videoPlayer.attributes);
+    chrome.test.assertTrue('last-video' in videoPlayer.attributes);
+    chrome.test.assertFalse('multiple' in videoPlayer.attributes);
+    chrome.test.assertFalse('disabled' in videoPlayer.attributes);
+    return args;
   });
 };
 
@@ -127,7 +112,7 @@ window.addEventListener('load', function() {
       // Specify the name of test to the test system.
       targetTest.generatedName = testCaseName;
       chrome.test.runTests([function() {
-        return testPromise(targetTest());
+        return testPromiseAndApps(targetTest(), [remoteCallVideoPlayer]);
       }]);
     }
   ];

@@ -53,14 +53,40 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #elif defined(OS_WIN)
-#include "base/win/scoped_handle.h"
 #include "chrome/test/chromedriver/keycode_text_conversion.h"
 #endif
 
 namespace {
 
 const char* const kCommonSwitches[] = {
-    "ignore-certificate-errors", "metrics-recording-only"};
+  "disable-popup-blocking",
+  "ignore-certificate-errors",
+  "metrics-recording-only"
+};
+
+const char* const kDesktopSwitches[] = {
+  "disable-hang-monitor",
+  "disable-prompt-on-repost",
+  "disable-sync",
+  "no-first-run",
+  "disable-background-networking",
+  "disable-web-resources",
+  "safebrowsing-disable-auto-update",
+  "safebrowsing-disable-download-protection",
+  "disable-client-side-phishing-detection",
+  "disable-component-update",
+  "disable-default-apps",
+  "enable-logging",
+  "log-level=0",
+  "password-store=basic",
+  "use-mock-keychain",
+  "test-type=webdriver"
+};
+
+const char* const kAndroidSwitches[] = {
+  "disable-fre",
+  "enable-remote-debugging"
+};
 
 #if defined(OS_LINUX)
 const char kEnableCrashReport[] = "enable-crash-reporter-for-testing";
@@ -105,43 +131,26 @@ Status PrepareCommandLine(uint16 port,
   base::CommandLine command(program);
   Switches switches;
 
-  for (size_t i = 0; i < arraysize(kCommonSwitches); ++i)
-    switches.SetSwitch(kCommonSwitches[i]);
-  switches.SetSwitch("disable-hang-monitor");
-  switches.SetSwitch("disable-prompt-on-repost");
-  switches.SetSwitch("disable-sync");
-  switches.SetSwitch("no-first-run");
-  switches.SetSwitch("disable-background-networking");
-  switches.SetSwitch("disable-web-resources");
-  switches.SetSwitch("safebrowsing-disable-auto-update");
-  switches.SetSwitch("safebrowsing-disable-download-protection");
-  switches.SetSwitch("disable-client-side-phishing-detection");
-  switches.SetSwitch("disable-component-update");
-  switches.SetSwitch("disable-default-apps");
-  switches.SetSwitch("enable-logging");
-  switches.SetSwitch("log-level", "0");
-  switches.SetSwitch("password-store", "basic");
-  switches.SetSwitch("use-mock-keychain");
+  for (const auto& common_switch : kCommonSwitches)
+    switches.SetUnparsedSwitch(common_switch);
+  for (const auto& desktop_switch : kDesktopSwitches)
+    switches.SetUnparsedSwitch(desktop_switch);
   switches.SetSwitch("remote-debugging-port", base::IntToString(port));
-  switches.SetSwitch("test-type", "webdriver");
-
-  for (std::set<std::string>::const_iterator iter =
-           capabilities.exclude_switches.begin();
-       iter != capabilities.exclude_switches.end();
-       ++iter) {
-    switches.RemoveSwitch(*iter);
+  for (const auto& excluded_switch : capabilities.exclude_switches) {
+    switches.RemoveSwitch(excluded_switch);
   }
   switches.SetFromSwitches(capabilities.switches);
+
   base::FilePath user_data_dir_path;
-  if (!switches.HasSwitch("user-data-dir")) {
+  if (switches.HasSwitch("user-data-dir")) {
+    user_data_dir_path = base::FilePath(
+        switches.GetSwitchValueNative("user-data-dir"));
+  } else {
     command.AppendArg("data:,");
     if (!user_data_dir->CreateUniqueTempDir())
       return Status(kUnknownError, "cannot create temp dir for user data dir");
     switches.SetSwitch("user-data-dir", user_data_dir->path().value());
     user_data_dir_path = user_data_dir->path();
-  } else {
-    user_data_dir_path = base::FilePath(
-        switches.GetSwitchValueNative("user-data-dir"));
   }
 
   Status status = internal::PrepareUserDataDir(user_data_dir_path,
@@ -183,7 +192,14 @@ Status WaitForDevToolsAndCheckVersion(
   Status status = client->Init(deadline - base::TimeTicks::Now());
   if (status.IsError())
     return status;
-  if (client->browser_info()->build_no < kMinimumSupportedChromeBuildNo) {
+
+  base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch("disable-build-check")) {
+    LOG(WARNING) << "You are using an unsupported command-line switch: "
+                    "--disable-build-check. Please don't report bugs that "
+                    "cannot be reproduced with this switch removed.";
+  } else if (client->browser_info()->build_no <
+             kMinimumSupportedChromeBuildNo) {
     return Status(kUnknownError, "Chrome version must be >= " +
         GetMinimumSupportedChromeVersion());
   }
@@ -328,25 +344,6 @@ Status LaunchDesktopChrome(
     options.fds_to_remap = &no_stderr;
   }
 #elif defined(OS_WIN)
-  // Silence chrome error message.
-  HANDLE out_read;
-  HANDLE out_write;
-  SECURITY_ATTRIBUTES sa_attr;
-
-  sa_attr.nLength = sizeof(SECURITY_ATTRIBUTES);
-  sa_attr.bInheritHandle = TRUE;
-  sa_attr.lpSecurityDescriptor = NULL;
-  if (!CreatePipe(&out_read, &out_write, &sa_attr, 0))
-      return Status(kUnknownError, "CreatePipe() - Pipe creation failed");
-  // Prevent handle leak.
-  base::win::ScopedHandle scoped_out_read(out_read);
-  base::win::ScopedHandle scoped_out_write(out_write);
-
-  options.stdout_handle = out_write;
-  options.stderr_handle = out_write;
-  options.stdin_handle = GetStdHandle(STD_INPUT_HANDLE);
-  options.inherit_handles = true;
-
   if (!SwitchToUSKeyboardLayout())
     VLOG(0) << "Can not set to US keyboard layout - Some keycodes may be"
         "interpreted incorrectly";
@@ -381,6 +378,9 @@ Status LaunchDesktopChrome(
           termination_reason = "exited abnormally";
           break;
         case base::TERMINATION_STATUS_PROCESS_WAS_KILLED:
+#if defined(OS_CHROMEOS)
+        case base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM:
+#endif
           termination_reason = "was killed";
           break;
         case base::TERMINATION_STATUS_PROCESS_CRASHED:
@@ -457,10 +457,10 @@ Status LaunchAndroidChrome(
     return status;
 
   Switches switches(capabilities.switches);
-  for (size_t i = 0; i < arraysize(kCommonSwitches); ++i)
-    switches.SetSwitch(kCommonSwitches[i]);
-  switches.SetSwitch("disable-fre");
-  switches.SetSwitch("enable-remote-debugging");
+  for (auto common_switch : kCommonSwitches)
+    switches.SetUnparsedSwitch(common_switch);
+  for (auto android_switch : kAndroidSwitches)
+    switches.SetUnparsedSwitch(android_switch);
   status = device->SetUp(capabilities.android_package,
                          capabilities.android_activity,
                          capabilities.android_process,
@@ -573,8 +573,7 @@ void ConvertHexadecimalToIDAlphabet(std::string* id) {
 std::string GenerateExtensionId(const std::string& input) {
   uint8 hash[16];
   crypto::SHA256HashString(input, hash, sizeof(hash));
-  std::string output =
-      base::StringToLowerASCII(base::HexEncode(hash, sizeof(hash)));
+  std::string output = base::ToLowerASCII(base::HexEncode(hash, sizeof(hash)));
   ConvertHexadecimalToIDAlphabet(&output);
   return output;
 }
@@ -664,7 +663,8 @@ Status ProcessExtension(const std::string& extension,
   std::string manifest_data;
   if (!base::ReadFileToString(manifest_path, &manifest_data))
     return Status(kUnknownError, "cannot read manifest");
-  scoped_ptr<base::Value> manifest_value(base::JSONReader::Read(manifest_data));
+  scoped_ptr<base::Value> manifest_value =
+      base::JSONReader::Read(manifest_data);
   base::DictionaryValue* manifest;
   if (!manifest_value || !manifest_value->GetAsDictionary(&manifest))
     return Status(kUnknownError, "invalid manifest");
@@ -692,7 +692,7 @@ Status ProcessExtension(const std::string& extension,
     }
   } else {
     manifest->SetString("key", public_key_base64);
-    base::JSONWriter::Write(manifest, &manifest_data);
+    base::JSONWriter::Write(*manifest, &manifest_data);
     if (base::WriteFile(
             manifest_path, manifest_data.c_str(), manifest_data.size()) !=
         static_cast<int>(manifest_data.size())) {
@@ -758,8 +758,8 @@ Status ProcessExtensions(const std::vector<std::string>& extensions,
   }
 
   if (extension_paths.size()) {
-    base::FilePath::StringType extension_paths_value = JoinString(
-        extension_paths, FILE_PATH_LITERAL(','));
+    base::FilePath::StringType extension_paths_value = base::JoinString(
+        extension_paths, base::FilePath::StringType(1, ','));
     UpdateExtensionSwitch(switches, "load-extension", extension_paths_value);
   }
   bg_pages->swap(bg_pages_tmp);
@@ -772,8 +772,9 @@ Status WritePrefsFile(
     const base::FilePath& path) {
   int code;
   std::string error_msg;
-  scoped_ptr<base::Value> template_value(base::JSONReader::ReadAndReturnError(
-          template_string, 0, &code, &error_msg));
+  scoped_ptr<base::Value> template_value(
+      base::JSONReader::DeprecatedReadAndReturnError(template_string, 0, &code,
+                                                     &error_msg));
   base::DictionaryValue* prefs;
   if (!template_value || !template_value->GetAsDictionary(&prefs)) {
     return Status(kUnknownError,
@@ -788,7 +789,7 @@ Status WritePrefsFile(
   }
 
   std::string prefs_str;
-  base::JSONWriter::Write(prefs, &prefs_str);
+  base::JSONWriter::Write(*prefs, &prefs_str);
   VLOG(0) << "Populating " << path.BaseName().value()
           << " file: " << PrettyPrintValue(*prefs);
   if (static_cast<int>(prefs_str.length()) != base::WriteFile(

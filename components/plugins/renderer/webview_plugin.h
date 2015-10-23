@@ -9,10 +9,12 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
+#include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/public/platform/WebCursorInfo.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/web/WebFrameClient.h"
+#include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebPlugin.h"
 #include "third_party/WebKit/public/web/WebViewClient.h"
 
@@ -25,6 +27,10 @@ class RenderView;
 struct WebPreferences;
 }
 
+namespace gfx {
+class Size;
+}
+
 // This class implements the WebPlugin interface by forwarding drawing and
 // handling input events to a WebView.
 // It can be used as a placeholder for an actual plugin, using HTML for the UI.
@@ -34,14 +40,13 @@ struct WebPreferences;
 
 class WebViewPlugin : public blink::WebPlugin,
                       public blink::WebViewClient,
-                      public blink::WebFrameClient {
+                      public blink::WebFrameClient,
+                      public content::RenderViewObserver {
  public:
   class Delegate {
    public:
-    // Bind |frame| to a Javascript object, enabling the delegate to receive
-    // callback methods from Javascript inside the WebFrame.
-    // This method is called from WebFrameClient::didClearWindowObject.
-    virtual void BindWebFrame(blink::WebFrame* frame) = 0;
+    // Called to get the V8 handle used to bind the lifetime to the frame.
+    virtual v8::Local<v8::Value> GetV8Handle(v8::Isolate*) = 0;
 
     // Called upon a context menu event.
     virtual void ShowContextMenu(const blink::WebMouseEvent&) = 0;
@@ -52,12 +57,16 @@ class WebViewPlugin : public blink::WebPlugin,
     // Called to enable JavaScript pass-through to a throttled plugin, which is
     // loaded but idle. Doesn't work for blocked plugins, which is not loaded.
     virtual v8::Local<v8::Object> GetV8ScriptableObject(v8::Isolate*) const = 0;
+
+    // Called when the unobscured rect of the plugin is updated.
+    virtual void OnUnobscuredRectUpdate(const gfx::Rect& unobscured_rect) {}
   };
 
   // Convenience method to set up a new WebViewPlugin using |preferences|
   // and displaying |html_data|. |url| should be a (fake) data:text/html URL;
   // it is only used for navigation and never actually resolved.
-  static WebViewPlugin* Create(Delegate* delegate,
+  static WebViewPlugin* Create(content::RenderView* render_view,
+                               Delegate* delegate,
                                const content::WebPreferences& preferences,
                                const std::string& html_data,
                                const GURL& url);
@@ -144,8 +153,14 @@ class WebViewPlugin : public blink::WebPlugin,
 
  private:
   friend class base::DeleteHelper<WebViewPlugin>;
-  WebViewPlugin(Delegate* delegate, const content::WebPreferences& preferences);
+  WebViewPlugin(content::RenderView* render_view,
+                Delegate* delegate,
+                const content::WebPreferences& preferences);
   virtual ~WebViewPlugin();
+
+  // content::RenderViewObserver methods:
+  void OnDestruct() override;
+  void OnZoomLevelChanged() override;
 
   // Manages its own lifetime.
   Delegate* delegate_;
@@ -168,7 +183,6 @@ class WebViewPlugin : public blink::WebPlugin,
   blink::WebString old_title_;
   bool finished_loading_;
   bool focused_;
-  bool animationNeeded_;
 };
 
 #endif  // COMPONENTS_PLUGINS_RENDERER_WEBVIEW_PLUGIN_H_

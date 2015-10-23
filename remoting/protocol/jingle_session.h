@@ -22,18 +22,14 @@
 #include "remoting/protocol/transport.h"
 #include "remoting/signaling/iq_sender.h"
 
-namespace net {
-class Socket;
-class StreamSocket;
-}  // namespace net
-
 namespace remoting {
 namespace protocol {
 
-class SecureChannelFactory;
 class ChannelMultiplexer;
 class JingleSessionManager;
 class PseudoTcpChannelFactory;
+class QuicChannelFactory;
+class SecureChannelFactory;
 
 // JingleSessionManager and JingleSession implement the subset of the
 // Jingle protocol used in Chromoting. Instances of this class are
@@ -49,11 +45,10 @@ class JingleSession : public base::NonThreadSafe,
   void SetEventHandler(Session::EventHandler* event_handler) override;
   ErrorCode error() override;
   const std::string& jid() override;
-  const CandidateSessionConfig* candidate_config() override;
   const SessionConfig& config() override;
-  void set_config(scoped_ptr<SessionConfig> config) override;
   StreamChannelFactory* GetTransportChannelFactory() override;
   StreamChannelFactory* GetMultiplexedChannelFactory() override;
+  StreamChannelFactory* GetQuicChannelFactory() override;
   void Close() override;
 
   // DatagramChannelFactory interface.
@@ -82,8 +77,7 @@ class JingleSession : public base::NonThreadSafe,
 
   // Start connection by sending session-initiate message.
   void StartConnection(const std::string& peer_jid,
-                       scoped_ptr<Authenticator> authenticator,
-                       scoped_ptr<CandidateSessionConfig> config);
+                       scoped_ptr<Authenticator> authenticator);
 
   // Passes transport info to a new |channel| in case it was received before the
   // channel was created.
@@ -159,7 +153,6 @@ class JingleSession : public base::NonThreadSafe,
 
   JingleSessionManager* session_manager_;
   std::string peer_jid_;
-  scoped_ptr<CandidateSessionConfig> candidate_config_;
   Session::EventHandler* event_handler_;
 
   std::string session_id_;
@@ -180,6 +173,7 @@ class JingleSession : public base::NonThreadSafe,
   scoped_ptr<PseudoTcpChannelFactory> pseudotcp_channel_factory_;
   scoped_ptr<SecureChannelFactory> secure_channel_factory_;
   scoped_ptr<ChannelMultiplexer> channel_multiplexer_;
+  scoped_ptr<QuicChannelFactory> quic_channel_factory_;
 
   scoped_ptr<JingleMessage> pending_transport_info_message_;
   base::OneShotTimer<JingleSession> transport_info_timer_;

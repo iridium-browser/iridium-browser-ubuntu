@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ash/shell.h"
+#include "ash/system/chromeos/devicetype_utils.h"
 #include "ash/wm/lock_state_controller.h"
 #include "base/bind.h"
 #include "base/location.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
-#include "chrome/browser/chromeos/chromeos_utils.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
 #include "chrome/browser/chromeos/login/hwid_checker.h"
@@ -48,11 +48,11 @@
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/system/system_clock.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
-#include "chrome/browser/signin/proximity_auth_facade.h"
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
@@ -71,6 +71,7 @@
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "components/login/localized_values_builder.h"
+#include "components/proximity_auth/screenlock_bridge.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
@@ -296,8 +297,8 @@ SigninScreenHandler::~SigninScreenHandler() {
     max_mode_delegate_->RemoveObserver(this);
     max_mode_delegate_.reset(NULL);
   }
-  GetScreenlockBridgeInstance()->SetLockHandler(NULL);
-  GetScreenlockBridgeInstance()->SetFocusedUser("");
+  proximity_auth::ScreenlockBridge::Get()->SetLockHandler(NULL);
+  proximity_auth::ScreenlockBridge::Get()->SetFocusedUser("");
 }
 
 // static
@@ -359,14 +360,14 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("passwordFieldAccessibleName",
                IDS_LOGIN_POD_PASSWORD_FIELD_ACCESSIBLE_NAME);
   builder->Add("signedIn", IDS_SCREEN_LOCK_ACTIVE_USER);
-  builder->Add("signinButton", IDS_LOGIN_BUTTON);
   builder->Add("launchAppButton", IDS_LAUNCH_APP_BUTTON);
   builder->Add("restart", IDS_RESTART_BUTTON);
   builder->Add("shutDown", IDS_SHUTDOWN_BUTTON);
   builder->Add("addUser", IDS_ADD_USER_BUTTON);
   builder->Add("browseAsGuest", IDS_GO_INCOGNITO_BUTTON);
   builder->Add("moreOptions", IDS_MORE_OPTIONS_BUTTON);
-  builder->Add("addSupervisedUser", IDS_CREATE_SUPERVISED_USER_MENU_LABEL);
+  builder->Add("addSupervisedUser",
+               IDS_CREATE_LEGACY_SUPERVISED_USER_MENU_LABEL);
   builder->Add("cancel", IDS_CANCEL);
   builder->Add("signOutUser", IDS_SCREEN_LOCK_SIGN_OUT);
   builder->Add("offlineLogin", IDS_OFFLINE_LOGIN_HTML);
@@ -399,7 +400,6 @@ void SigninScreenHandler::DeclareLocalizedValues(
                IDS_MULTI_PROFILES_OWNER_PRIMARY_ONLY_MSG);
 
   // Strings used by password changed dialog.
-  builder->Add("passwordChangedTitle", IDS_LOGIN_PASSWORD_CHANGED_TITLE);
   builder->Add("passwordChangedDesc", IDS_LOGIN_PASSWORD_CHANGED_DESC);
   builder->AddF("passwordChangedMoreInfo",
                 IDS_LOGIN_PASSWORD_CHANGED_MORE_INFO,
@@ -422,7 +422,7 @@ void SigninScreenHandler::DeclareLocalizedValues(
                IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_FORGOT_PASSWORD);
   builder->AddF("passwordChangedTitle",
                 IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_TITLE,
-                GetChromeDeviceType());
+                ash::GetChromeOSDeviceName());
   builder->Add("passwordChangedProceedAnywayTitle",
                IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_PROCEED_ANYWAY);
   builder->Add("passwordChangedTryAgain",
@@ -441,14 +441,16 @@ void SigninScreenHandler::DeclareLocalizedValues(
                base::string16());
   builder->AddF("removeLegacySupervisedUserWarningText",
                IDS_LOGIN_POD_LEGACY_SUPERVISED_USER_REMOVE_WARNING,
-               base::UTF8ToUTF16(chrome::kSupervisedUserManagementDisplayURL));
+               base::UTF8ToUTF16(
+                   chrome::kLegacySupervisedUserManagementDisplayURL));
   builder->Add("removeUserWarningButtonTitle",
                IDS_LOGIN_POD_USER_REMOVE_WARNING_BUTTON);
 
   if (StartupUtils::IsWebviewSigninEnabled()) {
     builder->Add("samlNotice", IDS_LOGIN_SAML_NOTICE_NEW_GAIA_FLOW);
-    builder->Add("confirmPasswordTitle",
-                 IDS_LOGIN_CONFIRM_PASSWORD_TITLE_NEW_GAIA_FLOW);
+    builder->AddF("confirmPasswordTitle",
+                  IDS_LOGIN_CONFIRM_PASSWORD_TITLE_NEW_GAIA_FLOW,
+                  ash::GetChromeOSDeviceName());
     builder->Add("confirmPasswordLabel",
                  IDS_LOGIN_CONFIRM_PASSWORD_LABEL_NEW_GAIA_FLOW);
   } else {
@@ -730,6 +732,10 @@ void SigninScreenHandler::UpdateStateInternal(NetworkError::ErrorReason reason,
     return;
   }
 
+  // Use the online login page if the user has not used the machine for awhile.
+  if (offline_login_active_)
+    gaia_screen_handler_->MonitorOfflineIdle(is_online);
+
   // Reload frame if network state is changed from {!ONLINE} -> ONLINE state.
   if (reason == NetworkError::ERROR_REASON_NETWORK_STATE_CHANGED &&
       from_not_online_to_online_transition) {
@@ -941,15 +947,6 @@ void SigninScreenHandler::ShowErrorScreen(LoginDisplay::SigninError error_id) {
 
 void SigninScreenHandler::ShowSigninUI(const std::string& email) {
   core_oobe_actor_->ShowSignInUI(email);
-}
-
-void SigninScreenHandler::ShowGaiaPasswordChanged(const std::string& username) {
-  gaia_screen_handler_->PasswordChangedFor(username);
-  gaia_screen_handler_->PopulateEmail(username);
-  core_oobe_actor_->ShowSignInUI(username);
-  CallJS("login.setAuthType", username,
-         static_cast<int>(UserSelectionScreen::ONLINE_SIGN_IN),
-         base::StringValue(""));
 }
 
 void SigninScreenHandler::ShowPasswordChangedDialog(bool show_password_error,
@@ -1281,11 +1278,20 @@ void SigninScreenHandler::HandleUpdateOfflineLogin(bool offline_login_active) {
 void SigninScreenHandler::HandleFocusPod(const std::string& user_id) {
   SetUserInputMethod(user_id, ime_state_.get());
   WallpaperManager::Get()->SetUserWallpaperDelayed(user_id);
-  GetScreenlockBridgeInstance()->SetFocusedUser(user_id);
+  proximity_auth::ScreenlockBridge::Get()->SetFocusedUser(user_id);
   if (delegate_)
     delegate_->CheckUserStatus(user_id);
   if (!test_focus_pod_callback_.is_null())
     test_focus_pod_callback_.Run();
+
+  bool use_24hour_clock = false;
+  if (user_manager::UserManager::Get()->GetKnownUserBooleanPref(
+          user_id, prefs::kUse24HourClock, &use_24hour_clock)) {
+    g_browser_process->platform_part()
+        ->GetSystemClock()
+        ->SetLastFocusedPodHourClockType(use_24hour_clock ? base::k24HourClock
+                                                          : base::k12HourClock);
+  }
 }
 
 void SigninScreenHandler::HandleGetPublicSessionKeyboardLayouts(

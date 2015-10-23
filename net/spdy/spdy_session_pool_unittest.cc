@@ -51,8 +51,8 @@ class SpdySessionPoolTest : public ::testing::Test,
 INSTANTIATE_TEST_CASE_P(NextProto,
                         SpdySessionPoolTest,
                         testing::Values(kProtoSPDY31,
-                                        kProtoSPDY4_14,
-                                        kProtoSPDY4));
+                                        kProtoHTTP2_14,
+                                        kProtoHTTP2));
 
 // A delegate that opens a new session when it is closed.
 class SessionOpeningDelegate : public SpdyStream::Delegate {
@@ -74,6 +74,8 @@ class SessionOpeningDelegate : public SpdyStream::Delegate {
   void OnDataReceived(scoped_ptr<SpdyBuffer> buffer) override {}
 
   void OnDataSent() override {}
+
+  void OnTrailers(const SpdyHeaderBlock& trailers) override {}
 
   void OnClose(int status) override {
     ignore_result(CreateFakeSpdySession(spdy_session_pool_, key_));

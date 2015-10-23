@@ -39,7 +39,8 @@ class CC_EXPORT PicturePileImpl : public RasterSource {
   // reported rasterize time (in stats_instrumentation) is the minimum measured
   // value over all runs.
   void PlaybackToCanvas(SkCanvas* canvas,
-                        const gfx::Rect& canvas_rect,
+                        const gfx::Rect& canvas_bitmap_rect,
+                        const gfx::Rect& canvas_playback_rect,
                         float contents_scale) const override;
   void PlaybackToSharedCanvas(SkCanvas* canvas,
                               const gfx::Rect& canvas_rect,
@@ -48,9 +49,10 @@ class CC_EXPORT PicturePileImpl : public RasterSource {
       const gfx::Rect& content_rect,
       float contents_scale,
       RasterSource::SolidColorAnalysis* analysis) const override;
-  void GatherPixelRefs(const gfx::Rect& content_rect,
-                       float contents_scale,
-                       std::vector<SkPixelRef*>* pixel_refs) const override;
+  void GatherPixelRefs(
+      const gfx::Rect& content_rect,
+      float contents_scale,
+      std::vector<skia::PositionPixelRef>* pixel_refs) const override;
   bool CoversRect(const gfx::Rect& content_rect,
                   float contents_scale) const override;
   void SetShouldAttemptToUseDistanceFieldText() override;
@@ -77,8 +79,12 @@ class CC_EXPORT PicturePileImpl : public RasterSource {
                      const PicturePileImpl* picture_pile);
     ~PixelRefIterator();
 
-    SkPixelRef* operator->() const { return *pixel_ref_iterator_; }
-    SkPixelRef* operator*() const { return *pixel_ref_iterator_; }
+    const skia::PositionPixelRef* operator->() const {
+      return &(*pixel_ref_iterator_);
+    }
+    const skia::PositionPixelRef& operator*() const {
+      return *pixel_ref_iterator_;
+    }
     PixelRefIterator& operator++();
     operator bool() const { return pixel_ref_iterator_; }
 
@@ -130,7 +136,7 @@ class CC_EXPORT PicturePileImpl : public RasterSource {
   typedef std::map<const Picture*, Region> PictureRegionMap;
 
   // Called when analyzing a tile. We can use AnalysisCanvas as
-  // SkDrawPictureCallback, which allows us to early out from analysis.
+  // SkPicture::AbortCallback, which allows us to early out from analysis.
   void RasterForAnalysis(skia::AnalysisCanvas* canvas,
                          const gfx::Rect& canvas_rect,
                          float contents_scale) const;
@@ -141,7 +147,7 @@ class CC_EXPORT PicturePileImpl : public RasterSource {
                        PictureRegionMap* result) const;
 
   void RasterCommon(SkCanvas* canvas,
-                    SkDrawPictureCallback* callback,
+                    SkPicture::AbortCallback* callback,
                     const gfx::Rect& canvas_rect,
                     float contents_scale) const;
 

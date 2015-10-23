@@ -10,6 +10,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_instance.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace task_management {
@@ -28,22 +29,26 @@ base::string16 AdjustTitle(const content::SiteInstance* site_instance) {
 
 }  // namespace
 
-SubframeTask::SubframeTask(content::RenderFrameHost* render_frame_host)
+SubframeTask::SubframeTask(content::RenderFrameHost* render_frame_host,
+                           content::WebContents* web_contents)
     : RendererTask(AdjustTitle(render_frame_host->GetSiteInstance()),
                    nullptr,
-                   render_frame_host->GetProcess()->GetHandle(),
+                   web_contents,
                    render_frame_host->GetProcess()) {
+  // Note that we didn't get the RenderProcessHost from the WebContents, but
+  // rather from the RenderFrameHost. Out-of-process iframes reside on
+  // different processes than that of their main frame.
 }
 
 SubframeTask::~SubframeTask() {
 }
 
-void SubframeTask::OnTitleChanged(content::NavigationEntry* entry) {
+void SubframeTask::UpdateTitle() {
   // This will be called when the title changes on the WebContents's main frame,
   // but this Task represents other frames, so we don't care.
 }
 
-void SubframeTask::OnFaviconChanged() {
+void SubframeTask::UpdateFavicon() {
   // This will be called when the favicon changes on the WebContents's main
   // frame, but this Task represents other frames, so we don't care.
 }

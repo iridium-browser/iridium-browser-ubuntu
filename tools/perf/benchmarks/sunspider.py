@@ -5,10 +5,11 @@ import collections
 import json
 import os
 
-from telemetry import benchmark
+from core import perf_benchmark
+
 from telemetry import page as page_module
-from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry import story
 from telemetry.value import list_of_scalar_values
 
 from metrics import power
@@ -125,7 +126,7 @@ class _SunspiderMeasurement(page_test.PageTest):
                     'in sunspider'))
 
 
-class Sunspider(benchmark.Benchmark):
+class Sunspider(perf_benchmark.PerfBenchmark):
   """Apple's SunSpider JavaScript benchmark.
 
   http://www.webkit.org/perf/sunspider/sunspider.html
@@ -136,11 +137,11 @@ class Sunspider(benchmark.Benchmark):
   def Name(cls):
     return 'sunspider'
 
-  def CreatePageSet(self, options):
-    ps = page_set.PageSet(
+  def CreateStorySet(self, options):
+    ps = story.StorySet(
         archive_data_file='../page_sets/data/sunspider.json',
-        file_path=os.path.abspath(__file__),
-        bucket=page_set.PARTNER_BUCKET)
-    ps.AddUserStory(page_module.Page(
+        base_dir=os.path.dirname(os.path.abspath(__file__)),
+        cloud_storage_bucket=story.PARTNER_BUCKET)
+    ps.AddStory(page_module.Page(
         _URL, ps, ps.base_dir, make_javascript_deterministic=False))
     return ps

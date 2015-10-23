@@ -9,9 +9,9 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/path_service.h"
 #include "base/sequenced_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
@@ -217,10 +217,8 @@ scoped_ptr<UserCloudPolicyManagerChromeOS>
 
   manager->Init(
       SchemaRegistryServiceFactory::GetForContext(profile)->registry());
-  manager->Connect(g_browser_process->local_state(),
-                   device_management_service,
-                   g_browser_process->system_request_context(),
-                   affiliation);
+  manager->Connect(g_browser_process->local_state(), device_management_service,
+                   g_browser_process->system_request_context());
 
   DCHECK(managers_.find(profile) == managers_.end());
   managers_[profile] = manager.get();

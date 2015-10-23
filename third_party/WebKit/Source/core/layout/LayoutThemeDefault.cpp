@@ -109,21 +109,13 @@ Color LayoutThemeDefault::systemColor(CSSValueID cssValueId) const
 // Use the Windows style sheets to match their metrics.
 String LayoutThemeDefault::extraDefaultStyleSheet()
 {
-    String legacyOptionStyle;
-    if (!RuntimeEnabledFeatures::htmlPopupMenuEnabled()) {
-        // Option font must be inherited because we depend on computing the size
-        // of the <select> based on the size of the options, and they must use
-        // the same font for that computation to be correct.
-        legacyOptionStyle = "option { font: inherit !important; }";
-    }
     return LayoutTheme::extraDefaultStyleSheet()
         + loadResourceAsASCIIString("themeWin.css")
         + loadResourceAsASCIIString("themeChromiumSkia.css")
-        + loadResourceAsASCIIString("themeChromium.css")
 #if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
         + loadResourceAsASCIIString("themeInputMultipleFields.css")
 #endif
-        + legacyOptionStyle;
+        + loadResourceAsASCIIString("themeChromium.css");
 }
 
 String LayoutThemeDefault::extraQuirksStyleSheet()
@@ -193,7 +185,7 @@ int LayoutThemeDefault::sliderTickOffsetFromTrackCenter() const
     return -16;
 }
 
-void LayoutThemeDefault::adjustSliderThumbSize(ComputedStyle& style, Element* element) const
+void LayoutThemeDefault::adjustSliderThumbSize(ComputedStyle& style) const
 {
     IntSize size = Platform::current()->themeEngine()->getSize(WebThemeEngine::PartSliderThumb);
 
@@ -253,7 +245,7 @@ void LayoutThemeDefault::setRadioSize(ComputedStyle& style) const
     setSizeIfAuto(style, size);
 }
 
-void LayoutThemeDefault::adjustInnerSpinButtonStyle(ComputedStyle& style, Element*) const
+void LayoutThemeDefault::adjustInnerSpinButtonStyle(ComputedStyle& style) const
 {
     IntSize size = Platform::current()->themeEngine()->getSize(WebThemeEngine::PartInnerSpinButton);
 
@@ -320,7 +312,7 @@ IntRect center(const IntRect& original, int width, int height)
     return IntRect(x, y, width, height);
 }
 
-void LayoutThemeDefault::adjustButtonStyle(ComputedStyle& style, Element*) const
+void LayoutThemeDefault::adjustButtonStyle(ComputedStyle& style) const
 {
     if (style.appearance() == PushButtonPart) {
         // Ignore line-height.
@@ -328,13 +320,13 @@ void LayoutThemeDefault::adjustButtonStyle(ComputedStyle& style, Element*) const
     }
 }
 
-void LayoutThemeDefault::adjustSearchFieldStyle(ComputedStyle& style, Element*) const
+void LayoutThemeDefault::adjustSearchFieldStyle(ComputedStyle& style) const
 {
     // Ignore line-height.
     style.setLineHeight(ComputedStyle::initialLineHeight());
 }
 
-void LayoutThemeDefault::adjustSearchFieldCancelButtonStyle(ComputedStyle& style, Element*) const
+void LayoutThemeDefault::adjustSearchFieldCancelButtonStyle(ComputedStyle& style) const
 {
     // Scale the button size based on the font size
     float fontScale = style.fontSize() / defaultControlFontPixelSize;
@@ -343,14 +335,14 @@ void LayoutThemeDefault::adjustSearchFieldCancelButtonStyle(ComputedStyle& style
     style.setHeight(Length(cancelButtonSize, Fixed));
 }
 
-void LayoutThemeDefault::adjustSearchFieldDecorationStyle(ComputedStyle& style, Element*) const
+void LayoutThemeDefault::adjustSearchFieldDecorationStyle(ComputedStyle& style) const
 {
     IntSize emptySize(1, 11);
     style.setWidth(Length(emptySize.width(), Fixed));
     style.setHeight(Length(emptySize.height(), Fixed));
 }
 
-void LayoutThemeDefault::adjustSearchFieldResultsDecorationStyle(ComputedStyle& style, Element*) const
+void LayoutThemeDefault::adjustSearchFieldResultsDecorationStyle(ComputedStyle& style) const
 {
     // Scale the decoration size based on the font size
     float fontScale = style.fontSize() / defaultControlFontPixelSize;
@@ -418,11 +410,6 @@ int LayoutThemeDefault::menuListInternalPadding(const ComputedStyle& style, int 
         padding += menuListArrowPadding();
 
     return padding;
-}
-
-bool LayoutThemeDefault::shouldShowPlaceholderWhenFocused() const
-{
-    return true;
 }
 
 //

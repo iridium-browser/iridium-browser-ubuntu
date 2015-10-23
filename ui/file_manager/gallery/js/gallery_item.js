@@ -210,23 +210,65 @@ Gallery.Item.prototype.createCopyName_ = function(
 };
 
 /**
+ * Returns true if the original format is writable format of Gallery.
+ * @return {boolean} True if the original format is writable format.
+ */
+Gallery.Item.prototype.isWritableFormat = function() {
+  var type = FileType.getType(this.entry_);
+  return type.type === 'image' &&
+      (type.subtype === 'JPEG' || type.subtype === 'PNG')
+};
+
+/**
+ * Returns true if the entry of item is writable.
+ * @param {!VolumeManagerWrapper} volumeManager Volume manager.
+ * @return {boolean} True if the entry of item is writable.
+ */
+Gallery.Item.prototype.isWritableFile = function(volumeManager) {
+  return this.isWritableFormat() &&
+      !this.locationInfo_.isReadOnly &&
+      !GalleryUtil.isOnMTPVolume(this.entry_, volumeManager);
+};
+
+/**
+ * Returns mime type for saving an edit of this item.
+ * @return {string} Mime type.
+ * @private
+ */
+Gallery.Item.prototype.getNewMimeType_ = function() {
+  return this.getFileName().match(/\.jpe?g$/i) || FileType.isRaw(this.entry_) ?
+      'image/jpeg' : 'image/png';
+};
+
+/**
+ * Return copy name of this item.
+ * @return {!Promise<string>} A promise which will be fulfilled with copy name.
+ */
+Gallery.Item.prototype.getCopyName = function() {
+  return new Promise(this.entry_.getParent.bind(this.entry_)
+      ).then(function(parentEntry) {
+        return new Promise(this.createCopyName_.bind(
+            this, parentEntry, this.getNewMimeType_()));
+      }.bind(this));
+};
+
+/**
  * Writes the new item content to either the existing or a new file.
  *
  * @param {!VolumeManagerWrapper} volumeManager Volume manager instance.
  * @param {!MetadataModel} metadataModel
  * @param {DirectoryEntry} fallbackDir Fallback directory in case the current
  *     directory is read only.
- * @param {boolean} overwrite Whether to overwrite the image to the item or not.
  * @param {!HTMLCanvasElement} canvas Source canvas.
+ * @param {boolean} overwrite Set true to overwrite original if it's possible.
  * @param {function(boolean)} callback Callback accepting true for success.
  */
 Gallery.Item.prototype.saveToFile = function(
-    volumeManager, metadataModel, fallbackDir, overwrite, canvas, callback) {
+    volumeManager, metadataModel, fallbackDir, canvas, overwrite, callback) {
   ImageUtil.metrics.startInterval(ImageUtil.getMetricName('SaveTime'));
 
   var name = this.getFileName();
-  var newMimeType = name.match(/\.jpe?g$/i) || FileType.isRaw(this.entry_) ?
-      'image/jpeg' : 'image/png';
+  var newMimeType = this.getNewMimeType_();
 
   var onSuccess = function(entry) {
     var locationInfo = volumeManager.getLocationInfo(entry);
@@ -333,15 +375,16 @@ Gallery.Item.prototype.saveToFile = function(
   var saveToDir = function(dir) {
     if (overwrite &&
         !this.locationInfo_.isReadOnly &&
-        !FileType.isRaw(this.entry_)) {
+        this.isWritableFormat()) {
       checkExistence(dir);
-    } else {
-      this.createCopyName_(dir, newMimeType, function(copyName) {
-        this.original_ = false;
-        name = copyName;
-        checkExistence(dir);
-      }.bind(this));
+      return;
     }
+
+    this.createCopyName_(dir, newMimeType, function(copyName) {
+      this.original_ = false;
+      name = copyName;
+      checkExistence(dir);
+    }.bind(this));
   }.bind(this);
 
   // Since in-place editing is not supported on MTP volume, Gallery.app handles

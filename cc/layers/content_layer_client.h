@@ -12,7 +12,6 @@ class SkCanvas;
 
 namespace gfx {
 class Rect;
-class RectF;
 }
 
 namespace cc {
@@ -30,14 +29,19 @@ class CC_EXPORT ContentLayerClient {
                              const gfx::Rect& clip,
                              PaintingControlSetting painting_status) = 0;
 
-  virtual void PaintContentsToDisplayList(
-      DisplayItemList* display_list,
+  virtual scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
       const gfx::Rect& clip,
       PaintingControlSetting painting_status) = 0;
 
   // If true the layer may skip clearing the background before rasterizing,
   // because it will cover any uncleared data with content.
   virtual bool FillsBoundsCompletely() const = 0;
+
+  // Returns an estimate of the current memory usage within this object,
+  // excluding memory shared with painting artifacts (i.e.,
+  // DisplayItemList). Should be invoked after PaintContentsToDisplayList,
+  // so that the result includes data cached internally during painting.
+  virtual size_t GetApproximateUnsharedMemoryUsage() const = 0;
 
  protected:
   virtual ~ContentLayerClient() {}

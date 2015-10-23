@@ -49,7 +49,6 @@ cr.define('options', function() {
     ALWAYS: 0,
     WIFI_ONLY: 1,
     NEVER: 2,
-    UNSET: 3,
     DEFAULT: 1
   };
 
@@ -109,6 +108,18 @@ cr.define('options', function() {
      * @private
      */
     initializationComplete_: false,
+
+    /**
+     * Current status of "Resolve Timezone by Geolocation" checkbox.
+     * @private {boolean}
+     */
+    resolveTimezoneByGeolocation_: false,
+
+    /**
+     * True if system timezone is managed by policy.
+     * @private {boolean}
+     */
+    systemTimezoneIsManaged_: false,
 
     /** @override */
     initializePage: function() {
@@ -295,17 +306,14 @@ cr.define('options', function() {
 
       // Device section (ChromeOS only).
       if (cr.isChromeOS) {
-        $('power-settings-button').onclick = function(evt) {
-          PageManager.showPageByName('power-overlay');
-          chrome.send('coreOptionsUserMetricsAction',
-                      ['Options_ShowPowerSettings']);
-        };
-        $('battery-button').onclick = function(evt) {
-          WebsiteSettingsManager.showWebsiteSettings('battery');
-        };
-        $('stored-data-button').onclick = function(evt) {
-          WebsiteSettingsManager.showWebsiteSettings('storage');
-        };
+        if (loadTimeData.getBoolean('showPowerStatus')) {
+          $('power-settings-link').onclick = function(evt) {
+            PageManager.showPageByName('power-overlay');
+            chrome.send('coreOptionsUserMetricsAction',
+                        ['Options_ShowPowerSettings']);
+          };
+          $('power-row').hidden = false;
+        }
         $('keyboard-settings-button').onclick = function(evt) {
           PageManager.showPageByName('keyboard-overlay');
           chrome.send('coreOptionsUserMetricsAction',
@@ -411,9 +419,12 @@ cr.define('options', function() {
         // Timezone
         if (loadTimeData.getBoolean('enableTimeZoneTrackingOption')) {
           $('resolve-timezone-by-geolocation-selection').hidden = false;
-          this.setSystemTimezoneManaged_(false);
-          $('timezone-value-select').disabled = loadTimeData.getBoolean(
+          this.resolveTimezoneByGeolocation_ = loadTimeData.getBoolean(
               'resolveTimezoneByGeolocationInitialValue');
+          this.updateTimezoneSectionState_();
+          Preferences.getInstance().addEventListener(
+              'settings.resolve_timezone_by_geolocation',
+              this.onResolveTimezoneByGeolocationChanged_.bind(this));
         }
       }
 
@@ -592,14 +603,6 @@ cr.define('options', function() {
       $('easy-unlock-enable-proximity-detection').hidden =
           !loadTimeData.getBoolean('easyUnlockProximityDetectionAllowed');
 
-      // Website Settings section.
-      if (loadTimeData.getBoolean('websiteSettingsManagerEnabled')) {
-        $('website-settings-section').hidden = false;
-        $('website-management-button').onclick = function(event) {
-          PageManager.showPageByName('websiteSettings');
-        };
-      }
-
       // Web Content section.
       $('fontSettingsCustomizeFontsButton').onclick = function(event) {
         PageManager.showPageByName('fonts');
@@ -681,6 +684,14 @@ cr.define('options', function() {
         $('accessibility-spoken-feedback-check').onchange =
             updateAccessibilitySettingsButton;
         updateAccessibilitySettingsButton();
+
+        var updateScreenMagnifierCenterFocus = function() {
+          $('accessibility-screen-magnifier-center-focus-check').disabled =
+              !$('accessibility-screen-magnifier-check').checked;
+        };
+        Preferences.getInstance().addEventListener(
+            $('accessibility-screen-magnifier-check').getAttribute('pref'),
+            updateScreenMagnifierCenterFocus);
 
         var updateDelayDropdown = function() {
           $('accessibility-autoclick-dropdown').disabled =
@@ -1654,26 +1665,44 @@ cr.define('options', function() {
     },
 
     /**
+     * This enables or disables dependent settings in timezone section.
+     * @private
+     */
+    updateTimezoneSectionState_: function() {
+      if (this.systemTimezoneIsManaged_) {
+        $('resolve-timezone-by-geolocation-selection').disabled = true;
+        $('resolve-timezone-by-geolocation').onclick = function(event) {};
+      } else {
+        this.enableElementIfPossible_(
+            getRequiredElement('resolve-timezone-by-geolocation-selection'));
+        $('resolve-timezone-by-geolocation').onclick = function(event) {
+          $('timezone-value-select').disabled = event.currentTarget.checked;
+        };
+        $('timezone-value-select').disabled =
+            this.resolveTimezoneByGeolocation_;
+      }
+    },
+
+    /**
      * This is called from chromium code when system timezone "managed" state
      * is changed. Enables or disables dependent settings.
      * @param {boolean} managed Is true when system Timezone is managed by
      *     enterprise policy. False otherwize.
      */
     setSystemTimezoneManaged_: function(managed) {
-      if (loadTimeData.getBoolean('enableTimeZoneTrackingOption')) {
-        if (managed) {
-          $('resolve-timezone-by-geolocation-selection').disabled = true;
-          $('resolve-timezone-by-geolocation').onclick = function(event) {};
-        } else {
-          this.enableElementIfPossible_(
-              getRequiredElement('resolve-timezone-by-geolocation-selection'));
-          $('resolve-timezone-by-geolocation').onclick = function(event) {
-            $('timezone-value-select').disabled = event.currentTarget.checked;
-          };
-          $('timezone-value-select').disabled =
-              $('resolve-timezone-by-geolocation').checked;
-        }
-      }
+      this.systemTimezoneIsManaged_ = managed;
+      this.updateTimezoneSectionState_();
+    },
+
+    /**
+     * This is Preferences event listener, which is called when
+     * kResolveTimezoneByGeolocation preference is changed.
+     * Enables or disables dependent settings.
+     * @param {Event} value New preference state.
+     */
+    onResolveTimezoneByGeolocationChanged_: function(value) {
+      this.resolveTimezoneByGeolocation_ = value.value.value;
+      this.updateTimezoneSectionState_();
     },
 
     /**
@@ -1754,12 +1783,7 @@ cr.define('options', function() {
     setNetworkPredictionValue_: function(pref) {
       var checkbox = $('networkPredictionOptions');
       checkbox.disabled = pref.disabled;
-      if (pref.value == NetworkPredictionOptions.UNSET) {
-        checkbox.checked = (NetworkPredictionOptions.DEFAULT !=
-            NetworkPredictionOptions.NEVER);
-      } else {
-        checkbox.checked = (pref.value != NetworkPredictionOptions.NEVER);
-      }
+      checkbox.checked = (pref.value != NetworkPredictionOptions.NEVER);
     },
 
     /**
@@ -2140,29 +2164,6 @@ cr.define('options', function() {
       else
         element.disabled = false;
     },
-
-    /**
-     * Sets the icon in the battery section.
-     * @param {string} iconData The data representing the icon to display.
-     * @private
-     */
-    setBatteryIcon_: function(iconData) {
-      $('battery-icon').style.backgroundImage = 'url(' + iconData + ')';
-      $('battery-icon').hidden = false;
-    },
-
-    /**
-     * Sets the text for the battery section.
-     * @param {string} statusText The battery status, with a relevant label.
-     * @private
-     */
-    setBatteryStatusText_: function(statusText) {
-      $('battery').hidden = !statusText.length;
-      if (statusText.length) {
-        $('battery-status').textContent = statusText;
-        chrome.send('requestBatteryIcon');
-      }
-    },
   };
 
   //Forward public APIs to private implementations.
@@ -2181,8 +2182,6 @@ cr.define('options', function() {
     'setAccountPictureManaged',
     'setWallpaperManaged',
     'setAutoOpenFileTypesDisplayed',
-    'setBatteryIcon',
-    'setBatteryStatusText',
     'setBluetoothState',
     'setCanSetTime',
     'setFontSize',

@@ -108,7 +108,8 @@ bool IsMetaElement(const WebNode& node, std::string& charset_info) {
   charset_info.erase(0, charset_info.length());
   // Check the META charset declaration.
   WebString httpEquiv = meta.getAttribute("http-equiv");
-  if (LowerCaseEqualsASCII(httpEquiv, "content-type")) {
+  if (base::LowerCaseEqualsASCII(base::StringPiece16(httpEquiv),
+                                 "content-type")) {
     std::string content = meta.getAttribute("content").utf8();
     int pos = content.find("charset", 0);
     if (pos > -1) {
@@ -779,7 +780,15 @@ class DomSerializerTests : public ContentBrowserTest,
 
 // If original contents have document type, the serialized contents also have
 // document type.
-IN_PROC_BROWSER_TEST_F(DomSerializerTests, SerializeHTMLDOMWithDocType) {
+// Disabled by ellyjones@ on 2015-05-18, see https://crbug.com/488495.
+#if defined(OS_MACOSX)
+#define MAYBE_SerializeHTMLDOMWithDocType DISABLED_SerializeHTMLDOMWithDocType
+#else
+#define MAYBE_SerializeHTMLDOMWithDocType SerializeHTMLDOMWithDocType
+#endif
+
+IN_PROC_BROWSER_TEST_F(DomSerializerTests,
+                       MAYBE_SerializeHTMLDOMWithDocType) {
   base::FilePath page_file_path =
       GetTestFilePath("dom_serializer", "youtube_1.htm");
   GURL file_url = net::FilePathToFileURL(page_file_path);
@@ -860,8 +869,16 @@ IN_PROC_BROWSER_TEST_F(DomSerializerTests, SerializeHTMLDOMWithAddingMOTW) {
 // declaration as first child of HEAD element for resolving WebKit bug:
 // http://bugs.webkit.org/show_bug.cgi?id=16621 even the original document
 // does not have META charset declaration.
+// Disabled by battre@ on 2015-05-21, see https://crbug.com/488495.
+#if defined(OS_MACOSX)
+#define MAYBE_SerializeHTMLDOMWithNoMetaCharsetInOriginalDoc \
+  DISABLED_SerializeHTMLDOMWithNoMetaCharsetInOriginalDoc
+#else
+#define MAYBE_SerializeHTMLDOMWithNoMetaCharsetInOriginalDoc \
+  SerializeHTMLDOMWithNoMetaCharsetInOriginalDoc
+#endif
 IN_PROC_BROWSER_TEST_F(DomSerializerTests,
-                       SerializeHTMLDOMWithNoMetaCharsetInOriginalDoc) {
+                       MAYBE_SerializeHTMLDOMWithNoMetaCharsetInOriginalDoc) {
   base::FilePath page_file_path =
       GetTestFilePath("dom_serializer", "youtube_1.htm");
   // Get file URL.

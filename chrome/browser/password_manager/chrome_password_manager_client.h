@@ -7,6 +7,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/prefs/pref_member.h"
 #include "components/password_manager/content/browser/content_password_manager_driver_factory.h"
 #include "components/password_manager/content/browser/credential_manager_dispatcher.h"
@@ -45,20 +47,20 @@ class ChromePasswordManagerClient
   bool IsAutomaticPasswordSavingEnabled() const override;
   bool IsPasswordManagementEnabledForCurrentPage() const override;
   bool IsSavingEnabledForCurrentPage() const override;
-  bool ShouldFilterAutofillResult(const autofill::PasswordForm& form) override;
   std::string GetSyncUsername() const override;
   bool IsSyncAccountCredential(const std::string& username,
-                               const std::string& origin) const override;
-  void AutofillResultsComputed() override;
-  bool PromptUserToSavePassword(
+                               const std::string& realm) const override;
+  bool PromptUserToSaveOrUpdatePassword(
       scoped_ptr<password_manager::PasswordFormManager> form_to_save,
-      password_manager::CredentialSourceType type) override;
+      password_manager::CredentialSourceType type,
+      bool update_password) override;
   bool PromptUserToChooseCredentials(
       ScopedVector<autofill::PasswordForm> local_forms,
       ScopedVector<autofill::PasswordForm> federated_forms,
       const GURL& origin,
       base::Callback<void(const password_manager::CredentialInfo&)> callback)
       override;
+  void ForceSavePassword() override;
   void NotifyUserAutoSignin(
       ScopedVector<autofill::PasswordForm> local_forms) override;
   void AutomaticPasswordSave(scoped_ptr<password_manager::PasswordFormManager>
@@ -79,6 +81,10 @@ class ChromePasswordManagerClient
   password_manager::PasswordManager* GetPasswordManager() override;
   autofill::AutofillManager* GetAutofillManagerForMainFrame() override;
   const GURL& GetMainFrameURL() const override;
+  bool IsUpdatePasswordUIEnabled() const override;
+  const GURL& GetLastCommittedEntryURL() const override;
+  scoped_ptr<password_manager::CredentialsFilter> CreateStoreResultFilter()
+      const override;
 
   // Hides any visible generation UI.
   void HidePasswordGenerationPopup();
@@ -103,12 +109,6 @@ class ChromePasswordManagerClient
                               autofill::AutofillClient* autofill_client);
 
  private:
-  enum AutofillForSyncCredentialsState {
-    ALLOW_SYNC_CREDENTIALS,
-    DISALLOW_SYNC_CREDENTIALS_FOR_REAUTH,
-    DISALLOW_SYNC_CREDENTIALS,
-  };
-
   friend class content::WebContentsUserData<ChromePasswordManagerClient>;
 
   // content::WebContentsObserver overrides.
@@ -132,20 +132,17 @@ class ChromePasswordManagerClient
                                 const gfx::RectF& bounds,
                                 const autofill::PasswordForm& form);
 
+  // Notify the PasswordManager that generation is available for |form|. Used
+  // for UMA stats.
+  void GenerationAvailableForForm(const autofill::PasswordForm& form);
+
   // Sends a message to the renderer with the current value of
   // |can_use_log_router_|.
   void NotifyRendererOfLoggingAvailability();
 
-  // Returns true if the last loaded page was for transactional re-auth on a
-  // Google property.
-  bool LastLoadWasTransactionalReauthPage() const;
-
   // Returns true if |url| is the reauth page for accessing the password
   // website.
   bool IsURLPasswordWebsiteReauth(const GURL& url) const;
-
-  // Sets |autofill_state_| based on experiment and flag values.
-  void SetUpAutofillSyncState();
 
   Profile* const profile_;
 
@@ -165,13 +162,6 @@ class ChromePasswordManagerClient
 
   // True if |this| is registered with some LogRouter which can accept logs.
   bool can_use_log_router_;
-
-  // How to handle the sync credential in ShouldFilterAutofillResult().
-  AutofillForSyncCredentialsState autofill_sync_state_;
-
-  // If the sync credential was filtered during autofill. Used for statistics
-  // reporting.
-  bool sync_credential_was_filtered_;
 
   // Set to false to disable password saving (will no longer ask if you
   // want to save passwords but will continue to fill passwords).

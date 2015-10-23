@@ -11,9 +11,9 @@
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/proxy_config/proxy_config_dictionary.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -27,7 +27,8 @@ namespace {
 // Determine if |proxy| is of the form "*.googlezip.net".
 bool IsGooglezipDataReductionProxy(const net::ProxyServer& proxy) {
   return proxy.is_valid() && !proxy.is_direct() &&
-         EndsWith(proxy.host_port_pair().host(), ".googlezip.net", true);
+         base::EndsWith(proxy.host_port_pair().host(), ".googlezip.net",
+                        base::CompareCase::SENSITIVE);
 }
 
 // Removes any Data Reduction Proxies like *.googlezip.net from |proxy_list|.

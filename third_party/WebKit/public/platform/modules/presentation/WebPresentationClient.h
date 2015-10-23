@@ -7,9 +7,11 @@
 
 #include "public/platform/WebCallbacks.h"
 #include "public/platform/WebCommon.h"
+#include "public/platform/WebPassOwnPtr.h"
 
 namespace blink {
 
+class WebPresentationAvailabilityObserver;
 class WebPresentationController;
 class WebPresentationSessionClient;
 class WebString;
@@ -18,7 +20,10 @@ struct WebPresentationError;
 // If session was created, callback's onSuccess() is invoked with the information about the
 // presentation session created by the embedder. Otherwise, onError() is invoked with the error code
 // and message.
-using WebPresentationSessionClientCallbacks = WebCallbacks<WebPresentationSessionClient, WebPresentationError>;
+using WebPresentationSessionClientCallbacks = WebCallbacks<WebPassOwnPtr<WebPresentationSessionClient>, const WebPresentationError&>;
+
+// Callback for .getAvailability().
+using WebPresentationAvailabilityCallbacks = WebCallbacks<bool, const WebPresentationError&>;
 
 // The implementation the embedder has to provide for the Presentation API to work.
 class WebPresentationClient {
@@ -28,13 +33,9 @@ public:
     // Passes the Blink-side delegate to the embedder.
     virtual void setController(WebPresentationController*) = 0;
 
-    // Called when the frame attaches the first event listener to or removes the
-    // last event listener from the |availablechange| event.
-    virtual void updateAvailableChangeWatched(bool watched) = 0;
-
     // Called when the frame requests to start a new session.
     // The ownership of the |callbacks| argument is transferred to the embedder.
-    virtual void startSession(const WebString& presentationUrl, const WebString& presentationId, WebPresentationSessionClientCallbacks*) = 0;
+    virtual void startSession(const WebString& presentationUrl, WebPresentationSessionClientCallbacks*) = 0;
 
     // Called when the frame requests to join an existing session.
     // The ownership of the |callbacks| argument is transferred to the embedder.
@@ -44,10 +45,33 @@ public:
     virtual void sendString(const WebString& presentationUrl, const WebString& presentationId, const WebString& message) = 0;
 
     // Called when the frame requests to send ArrayBuffer/View data to an existing session.
+    // Embedder copies the |data| and the ownership is not transferred.
     virtual void sendArrayBuffer(const WebString& presentationUrl, const WebString& presentationId, const uint8_t* data, size_t length) = 0;
 
+    // Called when the frame requests to send Blob data to an existing session.
+    // Embedder copies the |data| and the ownership is not transferred.
+    virtual void sendBlobData(const WebString& presentationUrl, const WebString& presentationId, const uint8_t* data, size_t length) = 0;
+
     // Called when the frame requests to close an existing session.
-    virtual void closeSession(const WebString& url, const WebString& presentationId) = 0;
+    virtual void closeSession(const WebString& presentationUrl, const WebString& presentationId) = 0;
+
+    // Called when the frame wants to know the availability of a presentation
+    // display for |availabilityUrl|.  The ownership of the callbacks argument
+    // is transferred to the embedder.
+    virtual void getAvailability(const WebString& availabilityUrl, WebPresentationAvailabilityCallbacks*) = 0;
+
+    // Start listening to changes in presentation displays availability. The
+    // observer will be notified in case of a change. The observer is
+    // respensible to call stopListening() before being destroyed.
+    virtual void startListening(WebPresentationAvailabilityObserver*) = 0;
+
+    // Stop listening to changes in presentation displays availability. The
+    // observer will no longer be notified in case of a change.
+    virtual void stopListening(WebPresentationAvailabilityObserver*) = 0;
+
+    // Called when a defaultRequest has been set. It sends the url associated
+    // with it for the embedder.
+    virtual void setDefaultPresentationUrl(const WebString&) = 0;
 };
 
 } // namespace blink

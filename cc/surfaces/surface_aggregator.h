@@ -29,7 +29,9 @@ class CC_SURFACES_EXPORT SurfaceAggregator {
  public:
   typedef base::hash_map<SurfaceId, int> SurfaceIndexMap;
 
-  SurfaceAggregator(SurfaceManager* manager, ResourceProvider* provider);
+  SurfaceAggregator(SurfaceManager* manager,
+                    ResourceProvider* provider,
+                    bool aggregate_only_damaged);
   ~SurfaceAggregator();
 
   scoped_ptr<CompositorFrame> Aggregate(SurfaceId surface_id);
@@ -60,25 +62,25 @@ class CC_SURFACES_EXPORT SurfaceAggregator {
                          const gfx::Transform& target_transform,
                          const ClipData& clip_rect,
                          RenderPass* dest_pass);
-  void CopySharedQuadState(const SharedQuadState* source_sqs,
-                           const gfx::Transform& target_transform,
-                           const ClipData& clip_rect,
-                           RenderPass* dest_render_pass);
-  void CopyQuadsToPass(const QuadList& source_quad_list,
-                       const SharedQuadStateList& source_shared_quad_state_list,
-                       const DrawQuad::ResourceIteratorCallback& remap,
-                       const gfx::Transform& target_transform,
-                       const ClipData& clip_rect,
-                       RenderPass* dest_pass,
-                       SurfaceId surface_id);
+  SharedQuadState* CopySharedQuadState(const SharedQuadState* source_sqs,
+                                       const gfx::Transform& target_transform,
+                                       const ClipData& clip_rect,
+                                       RenderPass* dest_render_pass);
+  void CopyQuadsToPass(
+      const QuadList& source_quad_list,
+      const SharedQuadStateList& source_shared_quad_state_list,
+      const base::hash_map<ResourceId, ResourceId>& resource_to_child_map,
+      const gfx::Transform& target_transform,
+      const ClipData& clip_rect,
+      RenderPass* dest_pass,
+      SurfaceId surface_id);
+  gfx::Rect PrewalkTree(SurfaceId surface_id);
   void CopyPasses(const DelegatedFrameData* frame_data, Surface* surface);
 
   // Remove Surfaces that were referenced before but aren't currently
   // referenced from the ResourceProvider.
   void RemoveUnreferencedChildren();
 
-  bool ValidateResources(Surface* surface,
-                         const DelegatedFrameData* frame_data);
   int ChildIdForSurface(Surface* surface);
   gfx::Rect DamageRectForSurface(const Surface* surface,
                                  const RenderPass& source,
@@ -92,6 +94,7 @@ class CC_SURFACES_EXPORT SurfaceAggregator {
       RenderPassIdAllocatorMap;
   RenderPassIdAllocatorMap render_pass_allocator_map_;
   int next_render_pass_id_;
+  const bool aggregate_only_damaged_;
 
   typedef base::hash_map<SurfaceId, int> SurfaceToResourceChildIdMap;
   SurfaceToResourceChildIdMap surface_id_to_resource_child_id_;
@@ -110,8 +113,18 @@ class CC_SURFACES_EXPORT SurfaceAggregator {
   SurfaceIndexMap previous_contained_surfaces_;
   SurfaceIndexMap contained_surfaces_;
 
+  // After surface validation, every Surface in this set is valid.
+  base::hash_set<SurfaceId> valid_surfaces_;
+
   // This is the pass list for the aggregated frame.
   RenderPassList* dest_pass_list_;
+
+  // The root damage rect of the currently-aggregating frame.
+  gfx::Rect root_damage_rect_;
+
+  // True if the frame that's currently being aggregated has copy requests.
+  // This is valid during Aggregate after PrewalkTree is called.
+  bool has_copy_requests_;
 
   // Resource list for the aggregated frame.
   TransferableResourceArray* dest_resource_list_;

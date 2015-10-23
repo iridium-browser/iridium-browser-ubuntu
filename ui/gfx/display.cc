@@ -40,8 +40,10 @@ float GetForcedDeviceScaleFactorImpl() {
     std::string value =
         base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kForceDeviceScaleFactor);
-    if (!base::StringToDouble(value, &scale_in_double))
+    if (!base::StringToDouble(value, &scale_in_double)) {
       LOG(ERROR) << "Failed to parse the default device scale factor:" << value;
+      scale_in_double = 1.0;
+    }
   }
   return static_cast<float>(scale_in_double);
 }
@@ -59,7 +61,7 @@ float Display::GetForcedDeviceScaleFactor() {
   return g_forced_device_scale_factor;
 }
 
-//static
+// static
 bool Display::HasForceDeviceScaleFactor() {
   if (g_has_forced_device_scale_factor == -1)
     g_has_forced_device_scale_factor = HasForceDeviceScaleFactorImpl();
@@ -200,12 +202,19 @@ bool Display::IsInternal() const {
 
 // static
 int64 Display::InternalDisplayId() {
+  DCHECK_NE(kInvalidDisplayID, internal_display_id_);
   return internal_display_id_;
 }
 
 // static
 void Display::SetInternalDisplayId(int64 internal_display_id) {
   internal_display_id_ = internal_display_id;
+}
+
+// static
+bool Display::IsInternalDisplayId(int64 display_id) {
+  DCHECK_NE(kInvalidDisplayID, display_id);
+  return HasInternalDisplay() && internal_display_id_ == display_id;
 }
 
 // static

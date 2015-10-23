@@ -7,6 +7,13 @@
 #   http://www.gnu.org/software/make/manual/make.html
 #
 
+ifdef ASAN
+CLANG = 1
+endif
+
+ifdef TSAN
+CLANG = 1
+endif
 
 #
 # Macros for TOOLS
@@ -14,8 +21,16 @@
 # We use the C++ compiler for everything and then use the -Wl,-as-needed flag
 # in the linker to drop libc++ unless it's actually needed.
 #
-CC ?= $(NACL_COMPILER_PREFIX) gcc
-CXX ?= $(NACL_COMPILER_PREFIX) g++
+ifdef CLANG
+CC = clang
+CXX = clang++
+endif
+
+ifdef NACL_COMPILER_PREFIX
+CC = $(NACL_COMPILER_PREFIX) $(CC)
+CXX = $(NACL_COMPILER_PREFIX) $(CXX)
+endif
+
 LINK ?= $(CXX)
 AR ?= ar
 ARFLAGS = -crs
@@ -44,6 +59,15 @@ HOST_LDFLAGS ?= -Wl,-map -Wl,$(OUTDIR)/$(TARGET).map
 HOST_CFLAGS += -I$(NACL_SDK_ROOT)/include/linux
 endif
 
+ifdef ASAN
+HOST_CFLAGS += -fsanitize=address
+HOST_LDFLAGS += -pie -fsanitize=address
+endif
+
+ifdef TSAN
+HOST_CFLAGS += -fsanitize=thread
+HOST_LDFLAGS += -pie -fsanitize=thread
+endif
 
 #
 # Individual Macros
@@ -54,14 +78,14 @@ endif
 define C_COMPILER_RULE
 -include $(call SRC_TO_DEP,$(1))
 $(call SRC_TO_OBJ,$(1)): $(1) $(TOP_MAKE) | $(dir $(call SRC_TO_OBJ,$(1)))dir.stamp
-	$(call LOG,CC  ,$$@,$(CC) -o $$@ -c $$< -fPIC $(POSIX_CFLAGS) $(HOST_CFLAGS) $(CFLAGS) $(2))
+	$(call LOG,CC  ,$$@,$(CC) -o $$@ -c $$< $(POSIX_CFLAGS) $(HOST_CFLAGS) $(CFLAGS) $(2))
 	@$(FIXDEPS) $(call SRC_TO_DEP_PRE_FIXUP,$(1))
 endef
 
 define CXX_COMPILER_RULE
 -include $(call SRC_TO_DEP,$(1))
 $(call SRC_TO_OBJ,$(1)): $(1) $(TOP_MAKE) | $(dir $(call SRC_TO_OBJ,$(1)))dir.stamp
-	$(call LOG,CXX ,$$@,$(CXX) -o $$@ -c $$< -fPIC $(POSIX_CFLAGS) $(HOST_CFLAGS) $(CXXFLAGS) $(2))
+	$(call LOG,CXX ,$$@,$(CXX) -o $$@ -c $$< $(POSIX_CFLAGS) $(HOST_CFLAGS) $(CXXFLAGS) $(2))
 	@$(FIXDEPS) $(call SRC_TO_DEP_PRE_FIXUP,$(1))
 endef
 
@@ -99,11 +123,11 @@ endef
 # $2 = List of source files
 #
 define LIB_RULE
-$(STAMPDIR)/$(1).stamp: $(LIBDIR)/$(OSNAME)_host/$(CONFIG)/lib$(1).a
+$(STAMPDIR)/$(1).stamp: $(LIBDIR)/$(OSNAME)_host/$(CONFIG_DIR)/lib$(1).a
 	@echo "TOUCHED $$@" > $(STAMPDIR)/$(1).stamp
 
-all: $(LIBDIR)/$(OSNAME)_host/$(CONFIG)/lib$(1).a
-$(LIBDIR)/$(OSNAME)_host/$(CONFIG)/lib$(1).a: $(foreach src,$(2),$(call SRC_TO_OBJ,$(src)))
+all: $(LIBDIR)/$(OSNAME)_host/$(CONFIG_DIR)/lib$(1).a
+$(LIBDIR)/$(OSNAME)_host/$(CONFIG_DIR)/lib$(1).a: $(foreach src,$(2),$(call SRC_TO_OBJ,$(src)))
 	$(MKDIR) -p $$(dir $$@)
 	$(RM) -f $$@
 	$(call LOG,LIB,$$@,$(AR) $(ARFLAGS) $$@ $$^)
@@ -124,13 +148,13 @@ ifdef STANDALONE
 define LINKER_RULE
 all: $(1)
 $(1): $(2) $(foreach dep,$(4),$(STAMPDIR)/$(dep).stamp)
-	$(call LOG,LINK,$$@,$(LINK) -o $(1) $(2) $(HOST_LDFLAGS) $(LDFLAGS) $(foreach path,$(5),-L$(path)/$(OSNAME)_host)/$(CONFIG) $(foreach lib,$(3),-l$(lib)) $(6))
+	$(call LOG,LINK,$$@,$(LINK) -o $(1) $(2) $(HOST_LDFLAGS) $(LDFLAGS) $(foreach path,$(5),-L$(path)/$(OSNAME)_host/$(CONFIG_DIR) -L$(path)/$(OSNAME)_host/$(CONFIG)) $(foreach lib,$(3),-l$(lib)) $(6))
 endef
 else
 define LINKER_RULE
 all: $(1)
 $(1): $(2) $(foreach dep,$(4),$(STAMPDIR)/$(dep).stamp)
-	$(call LOG,LINK,$$@,$(LINK) -shared -o $(1) $(2) $(HOST_LDFLAGS) $(LDFLAGS) $(foreach path,$(5),-L$(path)/$(OSNAME)_host)/$(CONFIG) $(foreach lib,$(3),-l$(lib)) $(6))
+	$(call LOG,LINK,$$@,$(LINK) -shared -o $(1) $(2) $(HOST_LDFLAGS) $(LDFLAGS) $(foreach path,$(5),-L$(path)/$(OSNAME)_host/$(CONFIG_DIR) -L$(path)/$(OSNAME)_host/$(CONFIG)) $(foreach lib,$(3),-l$(lib)) $(6))
 endef
 endif
 

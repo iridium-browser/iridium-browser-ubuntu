@@ -13,16 +13,19 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/containers/mru_cache.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -83,6 +86,9 @@ const int Predictor::kTypicalSpeculativeGroupSize = 8;
 const int Predictor::kMaxSpeculativeResolveQueueDelayMs =
     (kExpectedResolutionTimeMs * Predictor::kTypicalSpeculativeGroupSize) /
     Predictor::kMaxSpeculativeParallelResolves;
+
+// The default value of the credentials flag when preconnecting.
+static bool kAllowCredentialsOnPreconnectByDefault = true;
 
 static int g_max_queueing_delay_ms =
     Predictor::kMaxSpeculativeResolveQueueDelayMs;
@@ -262,8 +268,9 @@ void Predictor::AnticipateOmniboxUrl(const GURL& url, bool preconnectable) {
           return;  // We've done a preconnect recently.
         last_omnibox_preconnect_ = now;
         const int kConnectionsNeeded = 1;
-        PreconnectUrl(
-            CanonicalizeUrl(url), GURL(), motivation, kConnectionsNeeded);
+        PreconnectUrl(CanonicalizeUrl(url), GURL(), motivation,
+                      kAllowCredentialsOnPreconnectByDefault,
+                      kConnectionsNeeded);
         return;  // Skip pre-resolution, since we'll open a connection.
       }
     } else {
@@ -302,8 +309,8 @@ void Predictor::PreconnectUrlAndSubresources(const GURL& url,
 
   UrlInfo::ResolutionMotivation motivation(UrlInfo::EARLY_LOAD_MOTIVATED);
   const int kConnectionsNeeded = 1;
-  PreconnectUrl(CanonicalizeUrl(url), first_party_for_cookies,
-                motivation, kConnectionsNeeded);
+  PreconnectUrl(CanonicalizeUrl(url), first_party_for_cookies, motivation,
+                kConnectionsNeeded, kAllowCredentialsOnPreconnectByDefault);
   PredictFrameSubresources(url.GetWithEmptyPath(), first_party_for_cookies);
 }
 
@@ -498,10 +505,10 @@ struct RightToLeftStringSorter {
   // "http://com.google.www/xyz".
   static std::string ReverseComponents(const GURL& url) {
     // Reverse the components in the hostname.
-    std::vector<std::string> parts;
-    base::SplitString(url.host(), '.', &parts);
+    std::vector<std::string> parts = base::SplitString(
+        url.host(), ".", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     std::reverse(parts.begin(), parts.end());
-    std::string reversed_host = JoinString(parts, '.');
+    std::string reversed_host = base::JoinString(parts, ".");
 
     // Return the new URL.
     GURL::Replacements url_components;
@@ -837,19 +844,20 @@ void Predictor::SaveDnsPrefetchStateForNextStartupAndTrim(
 void Predictor::PreconnectUrl(const GURL& url,
                               const GURL& first_party_for_cookies,
                               UrlInfo::ResolutionMotivation motivation,
+                              bool allow_credentials,
                               int count) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    PreconnectUrlOnIOThread(url, first_party_for_cookies, motivation, count);
+    PreconnectUrlOnIOThread(url, first_party_for_cookies, motivation,
+                            allow_credentials, count);
   } else {
     BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&Predictor::PreconnectUrlOnIOThread,
-                   base::Unretained(this), url, first_party_for_cookies,
-                   motivation, count));
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&Predictor::PreconnectUrlOnIOThread, base::Unretained(this),
+                   url, first_party_for_cookies, motivation, allow_credentials,
+                   count));
   }
 }
 
@@ -857,6 +865,7 @@ void Predictor::PreconnectUrlOnIOThread(
     const GURL& original_url,
     const GURL& first_party_for_cookies,
     UrlInfo::ResolutionMotivation motivation,
+    bool allow_credentials,
     int count) {
   // Skip the HSTS redirect.
   GURL url = GetHSTSRedirectOnIOThread(original_url);
@@ -866,11 +875,8 @@ void Predictor::PreconnectUrlOnIOThread(
         url, first_party_for_cookies, motivation, count);
   }
 
-  PreconnectOnIOThread(url,
-                       first_party_for_cookies,
-                       motivation,
-                       count,
-                       url_request_context_getter_.get());
+  PreconnectOnIOThread(url, first_party_for_cookies, motivation, count,
+                       url_request_context_getter_.get(), allow_credentials);
 }
 
 void Predictor::PredictFrameSubresources(const GURL& url,
@@ -938,7 +944,8 @@ void Predictor::PrepareFrameSubresources(const GURL& original_url,
     // provide a more carefully estimated preconnection count.
     if (preconnect_enabled_) {
       PreconnectUrlOnIOThread(url, first_party_for_cookies,
-                              UrlInfo::SELF_REFERAL_MOTIVATED, 2);
+                              UrlInfo::SELF_REFERAL_MOTIVATED,
+                              kAllowCredentialsOnPreconnectByDefault, 2);
     }
     return;
   }
@@ -963,7 +970,8 @@ void Predictor::PrepareFrameSubresources(const GURL& original_url,
       if (url.host() == future_url->first.host())
         ++count;
       PreconnectUrlOnIOThread(future_url->first, first_party_for_cookies,
-                              motivation, count);
+                              motivation,
+                              kAllowCredentialsOnPreconnectByDefault, count);
     } else if (connection_expectation > kDNSPreresolutionWorthyExpectedValue) {
       evalution = PRERESOLUTION;
       future_url->second.preresolution_increment();
@@ -1142,10 +1150,9 @@ void Predictor::PostIncrementalTrimTask() {
     return;
   const TimeDelta kDurationBetweenTrimmingIncrements =
       TimeDelta::FromSeconds(kDurationBetweenTrimmingIncrementsSeconds);
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&Predictor::IncrementalTrimReferrers,
-                 weak_factory_->GetWeakPtr(), false),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&Predictor::IncrementalTrimReferrers,
+                            weak_factory_->GetWeakPtr(), false),
       kDurationBetweenTrimmingIncrements);
 }
 

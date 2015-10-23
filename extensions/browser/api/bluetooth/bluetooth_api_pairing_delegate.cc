@@ -15,14 +15,14 @@
 
 namespace extensions {
 
-namespace bt_private = core_api::bluetooth_private;
+namespace bt_private = api::bluetooth_private;
 
 namespace {
 
 void PopulatePairingEvent(const device::BluetoothDevice* device,
                           bt_private::PairingEventType type,
                           bt_private::PairingEvent* out) {
-  core_api::bluetooth::BluetoothDeviceToApiDevice(*device, &out->device);
+  api::bluetooth::BluetoothDeviceToApiDevice(*device, &out->device);
   out->pairing = type;
 }
 
@@ -102,8 +102,9 @@ void BluetoothApiPairingDelegate::DispatchPairingEvent(
     const bt_private::PairingEvent& pairing_event) {
   scoped_ptr<base::ListValue> args =
       bt_private::OnPairing::Create(pairing_event);
-  scoped_ptr<Event> event(
-      new Event(bt_private::OnPairing::kEventName, args.Pass()));
+  scoped_ptr<Event> event(new Event(events::BLUETOOTH_PRIVATE_ON_PAIRING,
+                                    bt_private::OnPairing::kEventName,
+                                    args.Pass()));
   EventRouter::Get(browser_context_)
       ->DispatchEventToExtension(extension_id_, event.Pass());
 }

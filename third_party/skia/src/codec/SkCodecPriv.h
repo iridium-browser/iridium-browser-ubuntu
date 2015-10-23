@@ -30,10 +30,67 @@
 #define COMPUTE_RESULT_ALPHA                    \
     SkSwizzler::GetResult(zeroAlpha, maxAlpha);
 
+static inline bool valid_alpha(SkAlphaType dstAlpha, SkAlphaType srcAlpha) {
+    // Check for supported alpha types
+    if (srcAlpha != dstAlpha) {
+        if (kOpaque_SkAlphaType == srcAlpha) {
+            // If the source is opaque, we must decode to opaque
+            return false;
+        }
+
+        // The source is not opaque
+        switch (dstAlpha) {
+            case kPremul_SkAlphaType:
+            case kUnpremul_SkAlphaType:
+                // The source is not opaque, so either of these is okay
+                break;
+            default:
+                // We cannot decode a non-opaque image to opaque (or unknown)
+                return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * Most of our codecs support the same conversions:
+ * - profileType must be the same
+ * - opaque only to opaque (and 565 only if opaque)
+ * - premul to unpremul and vice versa
+ * - always support N32
+ * - otherwise match the src color type
+ */
+static bool conversion_possible(const SkImageInfo& dst, const SkImageInfo& src) {
+    if (dst.profileType() != src.profileType()) {
+        return false;
+    }
+
+    // Ensure the alpha type is valid
+    if (!valid_alpha(dst.alphaType(), src.alphaType())) {
+        return false;
+    }
+
+    // Check for supported color types
+    switch (dst.colorType()) {
+        case kN32_SkColorType:
+            return true;
+        case kRGB_565_SkColorType:
+            return src.alphaType() == kOpaque_SkAlphaType;
+        default:
+            return dst.colorType() == src.colorType();
+    }
+}
+
+/*
+ * If there is a color table, get a pointer to the colors, otherwise return NULL
+ */
+static const SkPMColor* get_color_ptr(SkColorTable* colorTable) {
+     return NULL != colorTable ? colorTable->readColors() : NULL;
+}
+
 /*
  *
  * Copy the codec color table back to the client when kIndex8 color type is requested
- *
  */
 static inline void copy_color_table(const SkImageInfo& dstInfo, SkColorTable* colorTable,
         SkPMColor* inputColorPtr, int* inputColorCount) {
@@ -41,32 +98,26 @@ static inline void copy_color_table(const SkImageInfo& dstInfo, SkColorTable* co
         SkASSERT(NULL != inputColorPtr);
         SkASSERT(NULL != inputColorCount);
         SkASSERT(NULL != colorTable);
-        sk_memcpy32(inputColorPtr, colorTable->readColors(), *inputColorCount);
+        memcpy(inputColorPtr, colorTable->readColors(), *inputColorCount * 4);
     }
 }
 
 /*
- *
  * Compute row bytes for an image using pixels per byte
- *
  */
 static inline size_t compute_row_bytes_ppb(int width, uint32_t pixelsPerByte) {
     return (width + pixelsPerByte - 1) / pixelsPerByte;
 }
 
 /*
- *
  * Compute row bytes for an image using bytes per pixel
- *
  */
 static inline size_t compute_row_bytes_bpp(int width, uint32_t bytesPerPixel) {
     return width * bytesPerPixel;
 }
 
 /*
- *
  * Compute row bytes for an image
- *
  */
 static inline size_t compute_row_bytes(int width, uint32_t bitsPerPixel) {
     if (bitsPerPixel < 16) {
@@ -81,20 +132,16 @@ static inline size_t compute_row_bytes(int width, uint32_t bitsPerPixel) {
 }
 
 /*
- *
  * Get a byte from a buffer
  * This method is unsafe, the caller is responsible for performing a check
- *
  */
 static inline uint8_t get_byte(uint8_t* buffer, uint32_t i) {
     return buffer[i];
 }
 
 /*
- *
  * Get a short from a buffer
  * This method is unsafe, the caller is responsible for performing a check
- *
  */
 static inline uint16_t get_short(uint8_t* buffer, uint32_t i) {
     uint16_t result;
@@ -107,10 +154,8 @@ static inline uint16_t get_short(uint8_t* buffer, uint32_t i) {
 }
 
 /*
- *
  * Get an int from a buffer
  * This method is unsafe, the caller is responsible for performing a check
- *
  */
 static inline uint32_t get_int(uint8_t* buffer, uint32_t i) {
     uint32_t result;

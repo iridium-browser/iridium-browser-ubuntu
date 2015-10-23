@@ -18,13 +18,15 @@ void SyncBackendHostMock::Initialize(
     scoped_ptr<base::Thread> sync_thread,
     const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
     const GURL& service_url,
+    const std::string& sync_user_agent,
     const syncer::SyncCredentials& credentials,
     bool delete_sync_data_folder,
     scoped_ptr<syncer::SyncManagerFactory> sync_manager_factory,
-    scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
-    syncer::ReportUnrecoverableErrorFunction
-        report_unrecoverable_error_function,
-    syncer::NetworkResources* network_resources) {
+    const syncer::WeakHandle<syncer::UnrecoverableErrorHandler>&
+        unrecoverable_error_handler,
+    const base::Closure& report_unrecoverable_error_function,
+    syncer::NetworkResources* network_resources,
+    scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state) {
   frontend->OnBackendInitialized(
       syncer::WeakHandle<syncer::JsBackend>(),
       syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
@@ -75,9 +77,9 @@ syncer::UserShare* SyncBackendHostMock::GetUserShare() const {
   return NULL;
 }
 
-scoped_ptr<syncer::SyncContextProxy>
+scoped_ptr<syncer_v2::SyncContextProxy>
 SyncBackendHostMock::GetSyncContextProxy() {
-  return scoped_ptr<syncer::SyncContextProxy>();
+  return scoped_ptr<syncer_v2::SyncContextProxy>();
 }
 
 SyncBackendHost::Status SyncBackendHostMock::GetDetailedStatus() {
@@ -94,7 +96,7 @@ bool SyncBackendHostMock::HasUnsyncedItems() const {
 }
 
 bool SyncBackendHostMock::IsNigoriEnabled() const {
- return false;
+ return true;
 }
 
 syncer::PassphraseType SyncBackendHostMock::GetPassphraseType() const {
@@ -119,6 +121,8 @@ base::MessageLoop* SyncBackendHostMock::GetSyncLoopForTesting() {
   return NULL;
 }
 
+void SyncBackendHostMock::RefreshTypesForTest(syncer::ModelTypeSet types) {}
+
 void SyncBackendHostMock::RequestBufferedProtocolEventsAndEnableForwarding() {}
 
 void SyncBackendHostMock::DisableProtocolEventForwarding() {}
@@ -136,5 +140,9 @@ void SyncBackendHostMock::set_fail_initial_download(bool should_fail) {
   fail_initial_download_ = should_fail;
 }
 
-}  // namespace browser_sync
+void SyncBackendHostMock::ClearServerData(
+    const syncer::SyncManager::ClearServerDataCallback& callback) {
+  NOTIMPLEMENTED();
+}
 
+}  // namespace browser_sync

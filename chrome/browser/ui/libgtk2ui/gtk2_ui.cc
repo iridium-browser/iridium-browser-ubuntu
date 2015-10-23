@@ -44,15 +44,18 @@
 #include "third_party/skia/include/core/SkShader.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/display.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/linux_ui/window_button_order_observer.h"
+#include "ui/views/resources/grit/views_resources.h"
 
 #if defined(USE_GCONF)
 #include "chrome/browser/ui/libgtk2ui/gconf_listener.h"
@@ -969,6 +972,13 @@ void Gtk2UI::LoadGtkValues() {
       GdkColorToSkColor(entry_style->base[GTK_STATE_ACTIVE]);
   inactive_selection_fg_color_ =
       GdkColorToSkColor(entry_style->text[GTK_STATE_ACTIVE]);
+
+  colors_[ThemeProperties::COLOR_THROBBER_SPINNING] =
+      NativeThemeGtk2::instance()->GetSystemColor(
+          ui::NativeTheme::kColorId_ThrobberSpinningColor);
+  colors_[ThemeProperties::COLOR_THROBBER_WAITING] =
+      NativeThemeGtk2::instance()->GetSystemColor(
+          ui::NativeTheme::kColorId_ThrobberWaitingColor);
 }
 
 GdkColor Gtk2UI::BuildFrameColors(GtkStyle* frame_style) {
@@ -1379,8 +1389,9 @@ void Gtk2UI::UpdateDefaultFont(const PangoFontDescription* desc) {
   // Use gfx::FontRenderParams to select a family and determine the rendering
   // settings.
   gfx::FontRenderParamsQuery query;
-  base::SplitString(pango_font_description_get_family(desc), ',',
-                    &query.families);
+  query.families = base::SplitString(pango_font_description_get_family(desc),
+                                     ",", base::TRIM_WHITESPACE,
+                                     base::SPLIT_WANT_ALL);
 
   if (pango_font_description_get_size_is_absolute(desc)) {
     // If the size is absolute, it's specified in Pango units. There are
@@ -1424,6 +1435,8 @@ void Gtk2UI::UpdateDeviceScaleFactor(float device_scale_factor) {
 }
 
 float Gtk2UI::GetDeviceScaleFactor() const {
+  if (gfx::Display::HasForceDeviceScaleFactor())
+    return gfx::Display::GetForcedDeviceScaleFactor();
   const int kCSSDefaultDPI = 96;
   float scale = GetDPI() / kCSSDefaultDPI;
   // Round to 1 decimal, e.g. to 1.4.

@@ -6,6 +6,7 @@
 #include "modules/device_orientation/DeviceMotionController.h"
 
 #include "core/dom/Document.h"
+#include "core/frame/OriginsUsingFeatures.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "modules/EventModules.h"
@@ -54,7 +55,8 @@ void DeviceMotionController::didAddEventListener(LocalDOMWindow* window, const A
         if (document().isPrivilegedContext(errorMessage)) {
             UseCounter::count(document().frame(), UseCounter::DeviceMotionSecureOrigin);
         } else {
-            UseCounter::count(document().frame(), UseCounter::DeviceMotionInsecureOrigin);
+            UseCounter::countDeprecation(document().frame(), UseCounter::DeviceMotionInsecureOrigin);
+            OriginsUsingFeatures::countAnyWorld(document(), OriginsUsingFeatures::Feature::DeviceMotionInsecureOrigin);
             if (document().frame()->settings()->strictPowerfulFeatureRestrictions())
                 return;
         }

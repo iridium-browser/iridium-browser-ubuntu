@@ -6,7 +6,6 @@
 
 #include <vector>
 
-#include "chrome/browser/accessibility/ax_tree_id_registry.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -29,26 +28,32 @@ AXTreeSourceAura::~AXTreeSourceAura() {
 
 void AXTreeSourceAura::DoDefault(int32 id) {
   AXAuraObjWrapper* obj = AXAuraObjCache::GetInstance()->Get(id);
-  CHECK(obj);
-  obj->DoDefault();
+  if (obj)
+    obj->DoDefault();
 }
 
 void AXTreeSourceAura::Focus(int32 id) {
   AXAuraObjWrapper* obj = AXAuraObjCache::GetInstance()->Get(id);
-  CHECK(obj);
-  obj->Focus();
+  if (obj)
+    obj->Focus();
 }
 
 void AXTreeSourceAura::MakeVisible(int32 id) {
   AXAuraObjWrapper* obj = AXAuraObjCache::GetInstance()->Get(id);
-  CHECK(obj);
-  obj->MakeVisible();
+  if (obj)
+    obj->MakeVisible();
 }
 
 void AXTreeSourceAura::SetSelection(int32 id, int32 start, int32 end) {
   AXAuraObjWrapper* obj = AXAuraObjCache::GetInstance()->Get(id);
-  CHECK(obj);
-  obj->SetSelection(start, end);
+  if (obj)
+    obj->SetSelection(start, end);
+}
+
+void AXTreeSourceAura::ShowContextMenu(int32 id) {
+  AXAuraObjWrapper* obj = AXAuraObjCache::GetInstance()->Get(id);
+  if (obj)
+    obj->ShowContextMenu();
 }
 
 AXAuraObjWrapper* AXTreeSourceAura::GetRoot() const {
@@ -104,10 +109,7 @@ void AXTreeSourceAura::SerializeNode(AXAuraObjWrapper* node,
         static_cast<views::WebView*>(view)->GetWebContents();
     content::RenderFrameHost* rfh = contents->GetMainFrame();
     if (rfh) {
-      int process_id = rfh->GetProcess()->GetID();
-      int routing_id = rfh->GetRoutingID();
-      int ax_tree_id = AXTreeIDRegistry::GetInstance()->GetOrCreateAXTreeID(
-          process_id, routing_id);
+      int ax_tree_id = rfh->GetAXTreeID();
       out_data->AddIntAttribute(ui::AX_ATTR_CHILD_TREE_ID, ax_tree_id);
     }
   }

@@ -236,16 +236,8 @@ std::string BrowserDistribution::GetSafeBrowsingName() {
   return "chromium";
 }
 
-std::string BrowserDistribution::GetNetworkStatsServer() const {
-  return "";
-}
-
 base::string16 BrowserDistribution::GetDistributionData(HKEY root_key) {
   return L"";
-}
-
-base::string16 BrowserDistribution::GetUninstallLinkName() {
-  return L"Uninstall Chromium";
 }
 
 base::string16 BrowserDistribution::GetUninstallRegPath() {

@@ -138,7 +138,7 @@ class SpellcheckHunspellDictionary
   std::string language_;
 
   // Whether to use the platform spellchecker instead of Hunspell.
-  bool use_platform_spellchecker_;
+  bool use_browser_spellchecker_;
 
   // Used for downloading the dictionary file. SpellcheckHunspellDictionary does
   // not hold a reference, and it is only valid to use it on the UI thread.
@@ -150,7 +150,7 @@ class SpellcheckHunspellDictionary
   SpellcheckService* spellcheck_service_;
 
   // Observers of Hunspell dictionary events.
-  ObserverList<Observer> observers_;
+  base::ObserverList<Observer> observers_;
 
   // Status of the dictionary download.
   DownloadStatus download_status_;

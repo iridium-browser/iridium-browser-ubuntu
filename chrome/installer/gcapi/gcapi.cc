@@ -58,14 +58,9 @@ const wchar_t kChromeRegClientsKey[] =
 const wchar_t kChromeRegClientStateKey[] =
     L"Software\\Google\\Update\\ClientState\\"
     L"{8A69D345-D564-463c-AFF1-A69D9E530F96}";
-const wchar_t kChromeRegClientStateMediumKey[] =
-    L"Software\\Google\\Update\\ClientStateMedium\\"
-    L"{8A69D345-D564-463c-AFF1-A69D9E530F96}";
 
 const wchar_t kGCAPITempKey[] = L"Software\\Google\\GCAPITemp";
 
-const wchar_t kChromeRegLaunchCmd[] = L"InstallerSuccessLaunchCmdLine";
-const wchar_t kChromeRegLastLaunchCmd[] = L"LastInstallerSuccessLaunchCmdLine";
 const wchar_t kChromeRegVersion[] = L"pv";
 const wchar_t kNoChromeOfferUntil[] =
     L"SOFTWARE\\Google\\No Chrome Offer Until";
@@ -256,7 +251,7 @@ WindowsVersion GetWindowsVersion() {
 // Windows API are not available. We always invoke this function after checking
 // that current OS is Vista or later.
 bool VerifyAdminGroup() {
-  SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
+  SID_IDENTIFIER_AUTHORITY NtAuthority = {SECURITY_NT_AUTHORITY};
   PSID Group;
   BOOL check = ::AllocateAndInitializeSid(&NtAuthority, 2,
                                           SECURITY_BUILTIN_DOMAIN_RID,
@@ -366,9 +361,10 @@ BOOL CALLBACK ChromeWindowEnumProc(HWND hwnd, LPARAM lparam) {
 
   if (!params->shunted_hwnds.count(hwnd) &&
       ::GetClassName(hwnd, window_class, arraysize(window_class)) &&
-      StartsWith(window_class, kChromeWindowClassPrefix, false) &&
-      ::SetWindowPos(hwnd, params->window_insert_after, params->x,
-                     params->y, params->width, params->height, params->flags)) {
+      base::StartsWith(window_class, kChromeWindowClassPrefix,
+                       base::CompareCase::INSENSITIVE_ASCII) &&
+      ::SetWindowPos(hwnd, params->window_insert_after, params->x, params->y,
+                     params->width, params->height, params->flags)) {
     params->shunted_hwnds.insert(hwnd);
     params->success = true;
   }

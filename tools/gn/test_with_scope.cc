@@ -8,24 +8,12 @@
 #include "tools/gn/parser.h"
 #include "tools/gn/tokenizer.h"
 
-namespace {
-
-void SetCommandForTool(const std::string& cmd, Tool* tool) {
-  Err err;
-  SubstitutionPattern command;
-  command.Parse(cmd, nullptr, &err);
-  CHECK(!err.has_error())
-      << "Couldn't parse \"" << cmd << "\", " << "got " << err.message();
-  tool->set_command(command);
-}
-
-}  // namespace
-
 TestWithScope::TestWithScope()
     : build_settings_(),
       settings_(&build_settings_, std::string()),
       toolchain_(&settings_, Label(SourceDir("//toolchain/"), "default")),
-      scope_(&settings_) {
+      scope_(&settings_),
+      scope_progammatic_provider_(&scope_, true) {
   build_settings_.SetBuildDir(SourceDir("//out/Debug/"));
   build_settings_.set_print_callback(
       base::Bind(&TestWithScope::AppendPrintOutput, base::Unretained(this)));
@@ -37,6 +25,14 @@ TestWithScope::TestWithScope()
 }
 
 TestWithScope::~TestWithScope() {
+}
+
+Label TestWithScope::ParseLabel(const std::string& str) const {
+  Err err;
+  Label result = Label::Resolve(SourceDir("//"), toolchain_.label(),
+                                Value(nullptr, str), &err);
+  CHECK(!err.has_error());
+  return result;
 }
 
 // static
@@ -124,6 +120,16 @@ void TestWithScope::SetupToolchain(Toolchain* toolchain) {
   toolchain->ToolchainSetupComplete();
 }
 
+// static
+void TestWithScope::SetCommandForTool(const std::string& cmd, Tool* tool) {
+  Err err;
+  SubstitutionPattern command;
+  command.Parse(cmd, nullptr, &err);
+  CHECK(!err.has_error())
+      << "Couldn't parse \"" << cmd << "\", " << "got " << err.message();
+  tool->set_command(command);
+}
+
 void TestWithScope::AppendPrintOutput(const std::string& str) {
   print_output_.append(str);
 }
@@ -138,4 +144,16 @@ TestParseInput::TestParseInput(const std::string& input)
 }
 
 TestParseInput::~TestParseInput() {
+}
+
+TestTarget::TestTarget(TestWithScope& setup,
+                       const std::string& label_string,
+                       Target::OutputType type)
+    : Target(setup.settings(), setup.ParseLabel(label_string)) {
+  visibility().SetPublic();
+  set_output_type(type);
+  SetToolchain(setup.toolchain());
+}
+
+TestTarget::~TestTarget() {
 }

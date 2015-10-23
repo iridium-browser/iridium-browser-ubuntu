@@ -20,6 +20,7 @@ class WebContents;
 namespace views {
 class LabelButton;
 class TableView;
+class View;
 }
 
 namespace chrome {
@@ -33,6 +34,11 @@ class CertificateSelector : public views::DialogDelegateView,
                             public views::ButtonListener,
                             public views::TableViewObserver {
  public:
+  // Indicates if the dialog can be successfully shown.
+  // TODO(davidben): Remove this when the certificate selector prompt is moved
+  // to the WebContentsDelegate. https://crbug.com/456255.
+  static bool CanShow(content::WebContents* web_contents);
+
   class CertificateTableModel;
 
   // |web_contents| must not be null.
@@ -65,10 +71,14 @@ class CertificateSelector : public views::DialogDelegateView,
   void OnDoubleClick() override;
 
  protected:
+  // The dimensions of the certificate selector table view, in pixels.
+  static const int kTableViewWidth;
+  static const int kTableViewHeight;
+
   // Initializes the dialog. |text| is shown above the list of certificates
   // and is supposed to explain to the user what the implication of the
   // certificate selection is.
-  void InitWithText(const base::string16& text);
+  void InitWithText(scoped_ptr<views::View> text_label);
 
  private:
   const net::CertificateList certificates_;

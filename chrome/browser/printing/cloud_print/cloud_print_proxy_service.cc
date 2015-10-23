@@ -12,14 +12,15 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/profiles/profile.h"
@@ -132,7 +133,7 @@ void CloudPrintProxyService::GetPrinters(const PrintersCallback& callback) {
   if (!list_path.empty()) {
     std::string printers_json;
     base::ReadFileToString(list_path, &printers_json);
-    scoped_ptr<base::Value> value(base::JSONReader::Read(printers_json));
+    scoped_ptr<base::Value> value = base::JSONReader::Read(printers_json);
     base::ListValue* list = NULL;
     std::vector<std::string> printers;
     if (value && value->GetAsList(&list) && list) {
@@ -144,8 +145,8 @@ void CloudPrintProxyService::GetPrinters(const PrintersCallback& callback) {
     }
     UMA_HISTOGRAM_COUNTS_10000("CloudPrint.AvailablePrintersList",
                                printers.size());
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::Bind(callback, printers));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback, printers));
   } else {
     InvokeServiceTask(
         base::Bind(&CloudPrintProxyService::GetCloudPrintProxyPrinters,

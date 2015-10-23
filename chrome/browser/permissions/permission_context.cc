@@ -8,11 +8,13 @@
 #include "chrome/browser/geolocation/geolocation_permission_context_factory.h"
 #include "chrome/browser/media/midi_permission_context.h"
 #include "chrome/browser/media/midi_permission_context_factory.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/notifications/notification_permission_context.h"
+#include "chrome/browser/notifications/notification_permission_context_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/push_messaging/push_messaging_permission_context.h"
 #include "chrome/browser/push_messaging/push_messaging_permission_context_factory.h"
+#include "chrome/browser/storage/durable_storage_permission_context.h"
+#include "chrome/browser/storage/durable_storage_permission_context_factory.h"
 #include "content/public/browser/permission_type.h"
 
 #if defined(OS_ANDROID) || defined(OS_CHROMEOS)
@@ -20,26 +22,33 @@
 #include "chrome/browser/media/protected_media_identifier_permission_context_factory.h"
 #endif
 
+using content::PermissionType;
+
 // static
-PermissionContextBase* PermissionContext::Get(
-    Profile* profile,
-    content::PermissionType permission_type) {
+PermissionContextBase* PermissionContext::Get(Profile* profile,
+                                              PermissionType permission_type) {
   // NOTE: the factories used in this method have to stay in sync with
   // ::GetFactories() below.
   switch (permission_type) {
-    case content::PermissionType::GEOLOCATION:
+    case PermissionType::GEOLOCATION:
       return GeolocationPermissionContextFactory::GetForProfile(profile);
-    case content::PermissionType::NOTIFICATIONS:
-      return DesktopNotificationServiceFactory::GetForProfile(profile);
-    case content::PermissionType::MIDI_SYSEX:
+    case PermissionType::MIDI_SYSEX:
       return MidiPermissionContextFactory::GetForProfile(profile);
-    case content::PermissionType::PUSH_MESSAGING:
+    case PermissionType::NOTIFICATIONS:
+      return NotificationPermissionContextFactory::GetForProfile(profile);
+    case PermissionType::PUSH_MESSAGING:
       return PushMessagingPermissionContextFactory::GetForProfile(profile);
 #if defined(OS_ANDROID) || defined(OS_CHROMEOS)
-    case content::PermissionType::PROTECTED_MEDIA_IDENTIFIER:
+    case PermissionType::PROTECTED_MEDIA_IDENTIFIER:
       return ProtectedMediaIdentifierPermissionContextFactory::GetForProfile(
           profile);
 #endif
+    case content::PermissionType::DURABLE_STORAGE:
+      return DurableStoragePermissionContextFactory::GetForProfile(profile);
+    case PermissionType::MIDI:
+      // PermissionType::MIDI is a valid permission but does not have a
+      // permission context. It has a constant value instead.
+      break;
     default:
       NOTREACHED() << "No PermissionContext associated with "
                    << static_cast<int>(permission_type);
@@ -56,13 +65,14 @@ const std::list<KeyedServiceBaseFactory*>& PermissionContext::GetFactories() {
 
   if (factories.empty()) {
     factories.push_back(GeolocationPermissionContextFactory::GetInstance());
-    factories.push_back(DesktopNotificationServiceFactory::GetInstance());
     factories.push_back(MidiPermissionContextFactory::GetInstance());
+    factories.push_back(NotificationPermissionContextFactory::GetInstance());
     factories.push_back(PushMessagingPermissionContextFactory::GetInstance());
 #if defined(OS_ANDROID) || defined(OS_CHROMEOS)
     factories.push_back(
         ProtectedMediaIdentifierPermissionContextFactory::GetInstance());
 #endif
+    factories.push_back(DurableStoragePermissionContextFactory::GetInstance());
   }
 
   return factories;

@@ -36,19 +36,19 @@
 
 namespace blink {
 
-class AudioContext;
+class AbstractAudioContext;
 class HTMLMediaElement;
 
 class MediaElementAudioSourceHandler final : public AudioHandler {
 public:
     static PassRefPtr<MediaElementAudioSourceHandler> create(AudioNode&, HTMLMediaElement&);
-    virtual ~MediaElementAudioSourceHandler();
+    ~MediaElementAudioSourceHandler() override;
 
     HTMLMediaElement* mediaElement() { return m_mediaElement.get(); }
 
     // AudioHandler
-    virtual void dispose() override;
-    virtual void process(size_t framesToProcess) override;
+    void dispose() override;
+    void process(size_t framesToProcess) override;
 
     // Helpers for AudioSourceProviderClient implementation of
     // MediaElementAudioSourceNode.
@@ -60,7 +60,7 @@ public:
 private:
     MediaElementAudioSourceHandler(AudioNode&, HTMLMediaElement&);
     // As an audio source, we will never propagate silence.
-    virtual bool propagatesSilence() const override { return false; }
+    bool propagatesSilence() const override { return false; }
 
     // Must be called only on the audio thread.
     bool passesCORSAccessCheck();
@@ -102,7 +102,7 @@ class MediaElementAudioSourceNode final : public AudioSourceNode, public AudioSo
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(MediaElementAudioSourceNode);
 public:
-    static MediaElementAudioSourceNode* create(AudioContext&, HTMLMediaElement&);
+    static MediaElementAudioSourceNode* create(AbstractAudioContext&, HTMLMediaElement&);
     DECLARE_VIRTUAL_TRACE();
     MediaElementAudioSourceHandler& mediaElementAudioSourceHandler() const;
 
@@ -115,7 +115,7 @@ public:
     void unlock() override;
 
 private:
-    MediaElementAudioSourceNode(AudioContext&, HTMLMediaElement&);
+    MediaElementAudioSourceNode(AbstractAudioContext&, HTMLMediaElement&);
 };
 
 } // namespace blink

@@ -53,7 +53,7 @@ class CORE_EXPORT AnimationTimeline : public RefCountedWillBeGarbageCollectedFin
     DEFINE_WRAPPERTYPEINFO();
 public:
     class PlatformTiming : public NoBaseWillBeGarbageCollectedFinalized<PlatformTiming> {
-
+        WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(PlatformTiming);
     public:
         // Calls AnimationTimeline's wake() method after duration seconds.
         virtual void wakeAfter(double duration) = 0;
@@ -93,7 +93,8 @@ public:
     void pauseAnimationsForTesting(double);
 
     void setOutdatedAnimation(Animation*);
-    bool hasOutdatedAnimation() const;
+    void clearOutdatedAnimation(Animation*);
+    bool hasOutdatedAnimation() const { return m_outdatedAnimationCount > 0; }
     bool needsAnimationTimingUpdate();
 
     void setPlaybackRate(double);
@@ -116,6 +117,7 @@ private:
     RawPtrWillBeMember<Document> m_document;
     double m_zeroTime;
     bool m_zeroTimeInitialized;
+    unsigned m_outdatedAnimationCount;
     // Animations which will be updated on the next frame
     // i.e. current, in effect, or had timing changed
     WillBeHeapHashSet<RefPtrWillBeMember<Animation>> m_animationsNeedingUpdate;
@@ -140,9 +142,9 @@ private:
             ASSERT(m_timeline);
         }
 
-        virtual void wakeAfter(double duration) override;
-        virtual void cancelWake() override;
-        virtual void serviceOnNextFrame() override;
+        void wakeAfter(double duration) override;
+        void cancelWake() override;
+        void serviceOnNextFrame() override;
 
         void timerFired(Timer<AnimationTimelineTiming>*) { m_timeline->wake(); }
 

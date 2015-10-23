@@ -25,7 +25,7 @@ void Log(Arguments* args) {
     args->ThrowError();
     return;
   }
-  std::cout << JoinString(messages, ' ') << std::endl;
+  std::cout << base::JoinString(messages, " ") << std::endl;
 }
 
 WrapperInfo g_wrapper_info = { kEmbedderNativeGin };
@@ -43,7 +43,7 @@ v8::Local<v8::Value> Console::GetModule(v8::Isolate* isolate) {
         .Build();
     data->SetObjectTemplate(&g_wrapper_info, templ);
   }
-  return templ->NewInstance();
+  return templ->NewInstance(isolate->GetCurrentContext()).ToLocalChecked();
 }
 
 }  // namespace gin

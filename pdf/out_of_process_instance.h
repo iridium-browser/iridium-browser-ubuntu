@@ -20,7 +20,6 @@
 #include "ppapi/c/private/ppp_pdf.h"
 #include "ppapi/cpp/dev/printing_dev.h"
 #include "ppapi/cpp/dev/scriptable_object_deprecated.h"
-#include "ppapi/cpp/dev/selection_dev.h"
 #include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/input_event.h"
@@ -39,7 +38,6 @@ namespace chrome_pdf {
 class OutOfProcessInstance : public pp::Instance,
                              public pp::Find_Private,
                              public pp::Printing_Dev,
-                             public pp::Selection_Dev,
                              public PaintManager::Client,
                              public PDFEngine::Client,
                              public PreviewModeClient::Client {
@@ -76,9 +74,6 @@ class OutOfProcessInstance : public pp::Instance,
   virtual pp::Var GetLinkAtPosition(const pp::Point& point);
   virtual void GetPrintPresetOptionsFromDocument(
       PP_PdfPrintPresetOptions_Dev* options);
-
-  // PPP_Selection_Dev implementation.
-  pp::Var GetSelectedText(bool html) override;
 
   void FlushCallback(int32_t result);
   void DidOpen(int32_t result);
@@ -171,12 +166,6 @@ class OutOfProcessInstance : public pp::Instance,
   // Creates a URL loader and allows it to access all urls, i.e. not just the
   // frame's origin.
   pp::URLLoader CreateURLLoaderInternal();
-
-  // Figure out the initial page to display based on #page=N and #nameddest=foo
-  // in the |url_|.
-  // Returns -1 if there is no valid fragment. The returned value is 0-based,
-  // whereas page=N is 1-based.
-  int GetInitialPage(const std::string& url);
 
   void FormDidOpen(int32_t result);
 
@@ -343,6 +332,12 @@ class OutOfProcessInstance : public pp::Instance,
 
   // The background color of the PDF viewer.
   uint32 background_color_;
+
+  // The blank space above the first page of the document reserved for the
+  // toolbar.
+  int top_toolbar_height_;
+
+  DISALLOW_COPY_AND_ASSIGN(OutOfProcessInstance);
 };
 
 }  // namespace chrome_pdf

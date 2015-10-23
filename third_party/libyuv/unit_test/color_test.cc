@@ -27,14 +27,16 @@ namespace libyuv {
 #define ERROR_G 1
 #define ERROR_B 3
 #define ERROR_FULL 6
+#define ERROR_J420 4
 #else
 #define ERROR_R 1
 #define ERROR_G 1
 #define ERROR_B 3
 #define ERROR_FULL 5
+#define ERROR_J420 3
 #endif
 
-#define TESTCS(TESTNAME, YUVTOARGB, ARGBTOYUV, HS1, HS, HN, DIFF, CDIFF)       \
+#define TESTCS(TESTNAME, YUVTOARGB, ARGBTOYUV, HS1, HS, HN, DIFF)              \
 TEST_F(libyuvTest, TESTNAME) {                                                 \
   const int kPixels = benchmark_width_ * benchmark_height_;                    \
   const int kHalfPixels = ((benchmark_width_ + 1) / 2) *                       \
@@ -93,7 +95,7 @@ TEST_F(libyuvTest, TESTNAME) {                                                 \
             temp_v, (benchmark_width_ + 1) / 2,                                \
             benchmark_width_, benchmark_height_);                              \
                                                                                \
-  MaskCpuFlags(disable_cpu_flags_);                                                             \
+  MaskCpuFlags(disable_cpu_flags_);                                            \
   YUVTOARGB(temp_y, benchmark_width_,                                          \
             temp_u, (benchmark_width_ + 1) / 2,                                \
             temp_v, (benchmark_width_ + 1) / 2,                                \
@@ -110,7 +112,7 @@ TEST_F(libyuvTest, TESTNAME) {                                                 \
   }                                                                            \
   /* Test C and SIMD match. */                                                 \
   for (int i = 0; i < kPixels * 4; ++i) {                                      \
-    EXPECT_NEAR(dst_pixels_c[i], dst_pixels_opt[i], CDIFF);                    \
+    EXPECT_EQ(dst_pixels_c[i], dst_pixels_opt[i]);                             \
   }                                                                            \
   /* Test SIMD is close to original. */                                        \
   for (int i = 0; i < kPixels * 4; ++i) {                                      \
@@ -129,10 +131,10 @@ TEST_F(libyuvTest, TESTNAME) {                                                 \
   free_aligned_buffer_64(dst_pixels_c);                                        \
 }                                                                              \
 
-TESTCS(TestI420, I420ToARGB, ARGBToI420, 1, 2, benchmark_width_, ERROR_FULL, 0)
-TESTCS(TestI422, I422ToARGB, ARGBToI422, 0, 1, 0, ERROR_FULL, 0)
-TESTCS(TestJ420, J420ToARGB, ARGBToJ420, 1, 2, benchmark_width_, 3, 0)
-TESTCS(TestJ422, J422ToARGB, ARGBToJ422, 0, 1, 0, 3, 0)
+TESTCS(TestI420, I420ToARGB, ARGBToI420, 1, 2, benchmark_width_, ERROR_FULL)
+TESTCS(TestI422, I422ToARGB, ARGBToI422, 0, 1, 0, ERROR_FULL)
+TESTCS(TestJ420, J420ToARGB, ARGBToJ420, 1, 2, benchmark_width_, ERROR_J420)
+TESTCS(TestJ422, J422ToARGB, ARGBToJ422, 0, 1, 0, 3)
 
 static void YUVToRGB(int y, int u, int v, int* r, int* g, int* b) {
   const int kWidth = 16;
@@ -435,7 +437,7 @@ TEST_F(libyuvTest, TestGreyYUV) {
   }
 }
 
-void PrintHistogram(int rh[256], int gh[256], int bh[256]) {
+static void PrintHistogram(int rh[256], int gh[256], int bh[256]) {
   int i;
   printf("hist");
   for (i = 0; i < 256; ++i) {

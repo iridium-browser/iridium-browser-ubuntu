@@ -9,9 +9,8 @@ import sys
 
 from mopy.android import AndroidShell
 from mopy.config import Config
-from mopy.paths import Paths
 
-USAGE = ("android_mojo_shell.py [<shell-and-app-args>] [<mojo-app>]")
+USAGE = ('android_mojo_shell.py [<shell-and-app-args>] [<mojo-app>]')
 
 def main():
   logging.basicConfig()
@@ -24,28 +23,29 @@ def main():
   debug_group.add_argument('--release', help='Release build', default=False,
                            dest='debug', action='store_false')
   parser.add_argument('--target-cpu', help='CPU architecture to run for.',
-                      choices=['x64', 'x86', 'arm'])
-  parser.add_argument('--origin', help='Origin for mojo: URLs.',
-                      default='localhost')
-  parser.add_argument('--target-device', help='Device to run on.')
-  launcher_args, args = parser.parse_known_args()
+                      choices=['x64', 'x86', 'arm'], default='arm')
+  parser.add_argument('--device', help='Serial number of the target device.')
+  parser.add_argument('--verbose', default=False, action='store_true')
+  parser.add_argument('--apk', help='Name of the APK to run.',
+                      default='MojoRunner.apk')
+  runner_args, args = parser.parse_known_args()
+
+  logger = logging.getLogger()
+  logging.basicConfig(stream=sys.stdout, format='%(levelname)s:%(message)s')
+  logger.setLevel(logging.DEBUG if runner_args.verbose else logging.WARNING)
+  logger.debug('Initialized logging: level=%s' % logger.level)
 
   config = Config(target_os=Config.OS_ANDROID,
-                  target_cpu=launcher_args.target_cpu,
-                  is_debug=launcher_args.debug,
-                  apk_name="MojoRunner.apk")
-  paths = Paths(config)
-  shell = AndroidShell(paths.target_mojo_shell_path, paths.build_dir,
-                       paths.adb_path, launcher_args.target_device)
-
-  extra_shell_args = shell.PrepareShellRun(launcher_args.origin)
-  args.extend(extra_shell_args)
-
-  shell.CleanLogs()
+                  target_cpu=runner_args.target_cpu,
+                  is_debug=runner_args.debug,
+                  is_verbose=runner_args.verbose,
+                  apk_name=runner_args.apk)
+  shell = AndroidShell(config)
+  shell.InitShell(runner_args.device)
   p = shell.ShowLogs()
-  shell.StartShell(args, sys.stdout, p.terminate)
+  shell.StartActivity('MojoShellActivity', args, sys.stdout, p.terminate)
   return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
   sys.exit(main())

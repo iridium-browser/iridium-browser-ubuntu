@@ -60,6 +60,23 @@ function TaskController(
   this.createTask_ = createTask;
 
   /**
+   * @private {boolean}
+   */
+  this.canExecuteDefaultAction_ = false;
+
+  /**
+   * @private {boolean}
+   */
+  this.canExecuteOpenWith_ = false;
+
+  /**
+   * @private {!cr.ui.Command}
+   * @const
+   */
+  this.defaultActionCommand_ = assertInstanceof(
+      document.querySelector('#default-action'), cr.ui.Command);
+
+  /**
    * @type {!cr.ui.Command}
    * @const
    * @private
@@ -69,8 +86,6 @@ function TaskController(
 
   ui.taskMenuButton.addEventListener(
       'select', this.onTaskItemClicked_.bind(this));
-  ui.fileContextMenu.defaultActionMenuItem.addEventListener(
-      'activate', this.onActionMenuItemActivated_.bind(this));
   this.selectionHandler_.addEventListener(
       FileSelectionHandler.EventType.CHANGE,
       this.onSelectionChanged_.bind(this));
@@ -180,12 +195,11 @@ TaskController.prototype.onTaskItemClicked_ = function(event) {
  * @private
  */
 TaskController.prototype.changeDefaultTask_ = function(selection, task) {
-  // TODO(mtomasz): Move conversion from entry to url to custom bindings.
-  // crbug.com/345527.
   chrome.fileManagerPrivate.setDefaultTask(
       task.taskId,
-      util.entriesToURLs(selection.entries),
-      selection.mimeTypes);
+      selection.entries,
+      selection.mimeTypes,
+      util.checkAPIError);
   this.metadataUpdateController_.refreshCurrentDirectoryMetadata();
 
   // Update task menu button unless the task button was updated other selection.
@@ -198,11 +212,9 @@ TaskController.prototype.changeDefaultTask_ = function(selection, task) {
 };
 
 /**
- * Handles activate event of action menu item.
- *
- * @private
+ * Executes default action.
  */
-TaskController.prototype.onActionMenuItemActivated_ = function() {
+TaskController.prototype.executeDefaultAction = function() {
   var tasks = this.selectionHandler_.selection.tasks;
   if (tasks)
     tasks.execute(this.ui_.fileContextMenu.defaultActionMenuItem.taskId);
@@ -258,7 +270,7 @@ TaskController.prototype.openSuggestAppsDialog =
  * from metadata. If it fails, this falls back to obtain the MIME type from its
  * content or name.
  *
- * @param {Entry} entry An entry to obtain its mime type.
+ * @param {!Entry} entry An entry to obtain its mime type.
  * @return {!Promise}
  * @private
  */
@@ -269,7 +281,7 @@ TaskController.prototype.getMimeType_ = function(entry) {
           return properties[0].contentMimeType;
         return new Promise(function(fulfill, reject) {
           chrome.fileManagerPrivate.getMimeType(
-              entry.toURL(), function(mimeType) {
+              entry, function(mimeType) {
                 if (!chrome.runtime.lastError)
                   fulfill(mimeType);
                 else
@@ -322,9 +334,25 @@ TaskController.prototype.onSelectionChangeThrottled_ = function() {
 };
 
 /**
+ * Returns whether default action command can be executed or not.
+ * @return {boolean} True if default action command is executable.
+ */
+TaskController.prototype.canExecuteDefaultAction = function() {
+  return this.canExecuteDefaultAction_;
+};
+
+/**
+ * Returns whether open with command can be executed or not.
+ * @return {boolean} True if open with command is executable.
+ */
+TaskController.prototype.canExecuteOpenWith = function() {
+  return this.canExecuteOpenWith_;
+};
+
+/**
  * Updates action menu item to match passed task items.
  *
- * @param {!Array.<!Object>} items List of items.
+ * @param {!Array<!Object>} items List of items.
  * @private
  */
 TaskController.prototype.updateContextMenuActionItems_ = function(items) {
@@ -351,15 +379,13 @@ TaskController.prototype.updateContextMenuActionItems_ = function(items) {
     this.ui_.fileContextMenu.defaultActionMenuItem.taskId = actionItem.taskId;
   }
 
-  this.ui_.fileContextMenu.defaultActionMenuItem.hidden = items.length !== 1;
+  this.canExecuteDefaultAction_ = items.length === 1;
+  this.defaultActionCommand_.canExecuteChange(this.ui_.listContainer.element);
 
-  // When multiple tasks are available, show them in open with.
-  this.openWithCommand_.canExecuteChange();
-  this.openWithCommand_.setHidden(items.length < 2);
-  this.openWithCommand_.disabled = items.length < 2;
+  this.canExecuteOpenWith_ = items.length > 1;
+  this.openWithCommand_.canExecuteChange(this.ui_.listContainer.element);
 
-  // Hide default action separator when there does not exist available task.
-  this.ui_.fileContextMenu.defaultActionSeparator.hidden = items.length === 0;
+  this.ui_.fileContextMenu.actionItemsSeparator.hidden = items.length === 0;
 };
 
 /**

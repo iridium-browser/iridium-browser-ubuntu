@@ -10,15 +10,24 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8ThrowException.h"
 #include "core/dom/DOMArrayBuffer.h"
+#include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/fetch/FetchUtils.h"
 #include "core/fileapi/Blob.h"
+#include "core/frame/Frame.h"
+#include "core/frame/SubresourceIntegrity.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "core/inspector/InspectorInstrumentation.h"
 #include "core/loader/ThreadableLoader.h"
 #include "core/loader/ThreadableLoaderClient.h"
+#include "core/page/ChromeClient.h"
+#include "core/page/Page.h"
 #include "modules/fetch/Body.h"
 #include "modules/fetch/BodyStreamBuffer.h"
+#include "modules/fetch/CompositeDataConsumerHandle.h"
+#include "modules/fetch/DataConsumerHandleUtil.h"
+#include "modules/fetch/FetchFormDataConsumerHandle.h"
 #include "modules/fetch/FetchRequestData.h"
 #include "modules/fetch/Response.h"
 #include "modules/fetch/ResponseInit.h"
@@ -28,13 +37,24 @@
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/WebURLRequest.h"
 #include "wtf/HashSet.h"
+#include "wtf/Vector.h"
+#include "wtf/text/WTFString.h"
 
 namespace blink {
+
+namespace {
+
+bool IsRedirectStatusCode(int statusCode)
+{
+    return (statusCode == 301 || statusCode == 302 || statusCode == 303 || statusCode == 307 || statusCode == 308);
+}
+
+} // namespace
 
 class FetchManager::Loader final : public NoBaseWillBeGarbageCollectedFinalized<FetchManager::Loader>, public ThreadableLoaderClient, public ContextLifecycleObserver {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(FetchManager::Loader);
 public:
-    static PassOwnPtrWillBeRawPtr<Loader> create(ExecutionContext* executionContext, FetchManager* fetchManager, PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver, FetchRequestData* request)
+    static PassOwnPtrWillBeRawPtr<Loader> create(ExecutionContext* executionContext, FetchManager* fetchManager, ScriptPromiseResolver* resolver, FetchRequestData* request)
     {
         return adoptPtrWillBeNoop(new Loader(executionContext, fetchManager, resolver, request));
     }
@@ -43,82 +63,129 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
     void didReceiveResponse(unsigned long, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
-    void didReceiveData(const char*, unsigned) override;
     void didFinishLoading(unsigned long, double) override;
     void didFail(const ResourceError&) override;
     void didFailAccessControlCheck(const ResourceError&) override;
     void didFailRedirectCheck() override;
 
     void start();
-    void cancel();
     void dispose();
 
-private:
-    class Canceller : public BodyStreamBuffer::Canceller {
+    class SRIVerifier final : public GarbageCollectedFinalized<SRIVerifier>, public WebDataConsumerHandle::Client {
     public:
-        explicit Canceller(Loader* loader) : m_loader(loader) { }
-        void cancel() override
+        // SRIVerifier takes ownership of |handle| and |response|.
+        // |updater| must be garbage collected. The other arguments
+        // all must have the lifetime of the give loader.
+        SRIVerifier(PassOwnPtr<WebDataConsumerHandle> handle, CompositeDataConsumerHandle::Updater* updater, Response* response, FetchManager::Loader* loader, String integrityMetadata, const KURL& url)
+            : m_handle(handle)
+            , m_updater(updater)
+            , m_response(response)
+            , m_loader(loader)
+            , m_integrityMetadata(integrityMetadata)
+            , m_url(url)
+            , m_finished(false)
         {
-            if (m_loader)
-                m_loader->cancel();
+            m_reader = m_handle->obtainReader(this);
         }
 
-#if !ENABLE(OILPAN)
-        // FIXME: This function should go away once Oilpan is shipped.
-        void disconnect() { m_loader = nullptr; }
-#endif
-
-        DEFINE_INLINE_VIRTUAL_TRACE()
+        void didGetReadable() override
         {
+            ASSERT(m_reader);
+            ASSERT(m_loader);
+            ASSERT(m_response);
+
+            WebDataConsumerHandle::Result r = WebDataConsumerHandle::Ok;
+            while (r == WebDataConsumerHandle::Ok) {
+                const void* buffer;
+                size_t size;
+                r = m_reader->beginRead(&buffer, WebDataConsumerHandle::FlagNone, &size);
+                if (r == WebDataConsumerHandle::Ok) {
+                    m_buffer.append(static_cast<const char*>(buffer), size);
+                    m_reader->endRead(size);
+                }
+            }
+            if (r == WebDataConsumerHandle::ShouldWait)
+                return;
+            String errorMessage = "Unknown error occurred while trying to verify integrity.";
+            m_finished = true;
+            if (r == WebDataConsumerHandle::Done) {
+                if (SubresourceIntegrity::CheckSubresourceIntegrity(m_integrityMetadata, String(m_buffer.data(), m_buffer.size()), m_url, *m_loader->document(), errorMessage)) {
+                    m_updater->update(FetchFormDataConsumerHandle::create(m_buffer.data(), m_buffer.size()));
+                    m_loader->m_resolver->resolve(m_response);
+                    m_loader->m_resolver.clear();
+                    // FetchManager::Loader::didFinishLoading() can
+                    // be called before didGetReadable() is called
+                    // when the data is ready. In that case,
+                    // didFinishLoading() doesn't clean up and call
+                    // notifyFinished(), so it is necessary to
+                    // explicitly finish the loader here.
+                    if (m_loader->m_didFinishLoading)
+                        m_loader->loadSucceeded();
+                    return;
+                }
+            }
+            m_updater->update(createUnexpectedErrorDataConsumerHandle());
+            m_loader->performNetworkError(errorMessage);
+        }
+
+        bool isFinished() const { return m_finished; }
+
+        DEFINE_INLINE_TRACE()
+        {
+            visitor->trace(m_updater);
+            visitor->trace(m_response);
             visitor->trace(m_loader);
-            BodyStreamBuffer::Canceller::trace(visitor);
         }
-
     private:
-        // |m_loader| is a raw ptr in non-oilpan circumstance to avoid
-        // circular reference. It will be cleared when the loader is destructed.
-        RawPtrWillBeMember<Loader> m_loader;
+        OwnPtr<WebDataConsumerHandle> m_handle;
+        Member<CompositeDataConsumerHandle::Updater> m_updater;
+        Member<Response> m_response;
+        RawPtrWillBeMember<FetchManager::Loader> m_loader;
+        String m_integrityMetadata;
+        KURL m_url;
+        OwnPtr<WebDataConsumerHandle::Reader> m_reader;
+        Vector<char> m_buffer;
+        bool m_finished;
     };
 
-
-    Loader(ExecutionContext*, FetchManager*, PassRefPtrWillBeRawPtr<ScriptPromiseResolver>, FetchRequestData*);
+private:
+    Loader(ExecutionContext*, FetchManager*, ScriptPromiseResolver*, FetchRequestData*);
 
     void performBasicFetch();
     void performNetworkError(const String& message);
     void performHTTPFetch(bool corsFlag, bool corsPreflightFlag);
     void failed(const String& message);
     void notifyFinished();
+    Document* document() const;
+    void loadSucceeded();
 
     RawPtrWillBeMember<FetchManager> m_fetchManager;
-    RefPtrWillBeMember<ScriptPromiseResolver> m_resolver;
+    PersistentWillBeMember<ScriptPromiseResolver> m_resolver;
     PersistentWillBeMember<FetchRequestData> m_request;
-    PersistentWillBeMember<BodyStreamBuffer> m_responseBuffer;
     RefPtr<ThreadableLoader> m_loader;
-    // Hold as a member in order to call |disconnect|. This member can be
-    // eliminated once Oilpan is shipped.
-    PersistentWillBeMember<Canceller> m_canceller;
     bool m_failed;
     bool m_finished;
+    int m_responseHttpStatusCode;
+    PersistentWillBeMember<SRIVerifier> m_integrityVerifier;
+    bool m_didFinishLoading;
 };
 
-FetchManager::Loader::Loader(ExecutionContext* executionContext, FetchManager* fetchManager, PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver, FetchRequestData* request)
+FetchManager::Loader::Loader(ExecutionContext* executionContext, FetchManager* fetchManager, ScriptPromiseResolver* resolver, FetchRequestData* request)
     : ContextLifecycleObserver(executionContext)
     , m_fetchManager(fetchManager)
     , m_resolver(resolver)
     , m_request(request)
-    , m_canceller(new Canceller(this))
     , m_failed(false)
     , m_finished(false)
+    , m_responseHttpStatusCode(0)
+    , m_integrityVerifier(nullptr)
+    , m_didFinishLoading(false)
 {
 }
 
 FetchManager::Loader::~Loader()
 {
     ASSERT(!m_loader);
-#if !ENABLE(OILPAN)
-    // FIXME: This should go away once Oilpan is shipped.
-    m_canceller->disconnect();
-#endif
 }
 
 DEFINE_TRACE(FetchManager::Loader)
@@ -126,15 +193,16 @@ DEFINE_TRACE(FetchManager::Loader)
     visitor->trace(m_fetchManager);
     visitor->trace(m_resolver);
     visitor->trace(m_request);
-    visitor->trace(m_responseBuffer);
-    visitor->trace(m_canceller);
+    visitor->trace(m_integrityVerifier);
     ContextLifecycleObserver::trace(visitor);
 }
 
 void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
-    // FIXME: Use |handle|.
-    ASSERT_UNUSED(handle, !handle);
+    ASSERT(handle);
+
+    m_responseHttpStatusCode = response.httpStatusCode();
+
     // Recompute the tainting if the request was redirected to a different
     // origin.
     if (!SecurityOrigin::create(response.url())->isSameSchemeHostPort(m_request->origin().get())) {
@@ -151,8 +219,13 @@ void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceRespo
             break;
         }
     }
-    m_responseBuffer = new BodyStreamBuffer(m_canceller);
-    FetchResponseData* responseData = FetchResponseData::createWithBuffer(m_responseBuffer);
+
+    FetchResponseData* responseData = nullptr;
+    CompositeDataConsumerHandle::Updater* updater = nullptr;
+    if (m_request->integrity().isEmpty())
+        responseData = FetchResponseData::createWithBuffer(new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle)));
+    else
+        responseData = FetchResponseData::createWithBuffer(new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(CompositeDataConsumerHandle::create(createWaitingDataConsumerHandle(), &updater))));
     responseData->setStatus(response.httpStatusCode());
     responseData->setStatusMessage(response.httpStatusText());
     for (auto& it : response.httpHeaderFields())
@@ -160,52 +233,106 @@ void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceRespo
     responseData->setURL(response.url());
     responseData->setMIMEType(response.mimeType());
 
-    FetchResponseData* taintedResponse = responseData;
-    switch (m_request->tainting()) {
-    case FetchRequestData::BasicTainting:
-        taintedResponse = responseData->createBasicFilteredResponse();
-        break;
-    case FetchRequestData::CORSTainting:
-        taintedResponse = responseData->createCORSFilteredResponse();
-        break;
-    case FetchRequestData::OpaqueTainting:
-        taintedResponse = responseData->createOpaqueFilteredResponse();
-        break;
+    FetchResponseData* taintedResponse = nullptr;
+
+    if (IsRedirectStatusCode(m_responseHttpStatusCode)) {
+        Vector<String> locations;
+        responseData->headerList()->getAll("location", locations);
+        if (locations.size() > 1) {
+            performNetworkError("Multiple Location header.");
+            return;
+        }
+        if (locations.size() == 1) {
+            KURL locationURL(m_request->url(), locations[0]);
+            if (!locationURL.isValid()) {
+                performNetworkError("Invalid Location header.");
+                return;
+            }
+            ASSERT(m_request->redirect() == WebURLRequest::FetchRedirectModeManual);
+            taintedResponse = responseData->createOpaqueRedirectFilteredResponse();
+        }
+        // When the location header doesn't exist, we don't treat the response
+        // as a redirect response, and execute tainting.
     }
+    if (!taintedResponse) {
+        switch (m_request->tainting()) {
+        case FetchRequestData::BasicTainting:
+            taintedResponse = responseData->createBasicFilteredResponse();
+            break;
+        case FetchRequestData::CORSTainting:
+            taintedResponse = responseData->createCORSFilteredResponse();
+            break;
+        case FetchRequestData::OpaqueTainting:
+            taintedResponse = responseData->createOpaqueFilteredResponse();
+            break;
+        }
+    }
+
     Response* r = Response::create(m_resolver->executionContext(), taintedResponse);
     r->headers()->setGuard(Headers::ImmutableGuard);
-    m_resolver->resolve(r);
-    m_resolver.clear();
-}
 
-void FetchManager::Loader::didReceiveData(const char* data, unsigned size)
-{
-    m_responseBuffer->write(DOMArrayBuffer::create(data, size));
+    if (m_request->integrity().isEmpty()) {
+        m_resolver->resolve(r);
+        m_resolver.clear();
+    } else {
+        ASSERT(!m_integrityVerifier);
+        m_integrityVerifier = new SRIVerifier(handle, updater, r, this, m_request->integrity(), response.url());
+    }
 }
 
 void FetchManager::Loader::didFinishLoading(unsigned long, double)
 {
-    ASSERT(m_responseBuffer);
-    ASSERT(!m_failed);
-    m_responseBuffer->close();
-    m_responseBuffer.clear();
-    m_finished = true;
-    notifyFinished();
+    m_didFinishLoading = true;
+    // If there is an integrity verifier, and it has not already finished, it
+    // will take care of finishing the load or performing a network error when
+    // verification is complete.
+    if (m_integrityVerifier && !m_integrityVerifier->isFinished())
+        return;
+
+    loadSucceeded();
 }
 
 void FetchManager::Loader::didFail(const ResourceError& error)
 {
-    failed("Fetch API cannot load " + error.failingURL() + ". " + error.localizedDescription());
+    if (error.isCancellation() || error.isTimeout() || error.domain() != errorDomainBlinkInternal)
+        failed(String());
+    else
+        failed("Fetch API cannot load " + error.failingURL() + ". " + error.localizedDescription());
 }
 
 void FetchManager::Loader::didFailAccessControlCheck(const ResourceError& error)
 {
-    failed("Fetch API cannot load " + error.failingURL() + ". " + error.localizedDescription());
+    if (error.isCancellation() || error.isTimeout() || error.domain() != errorDomainBlinkInternal)
+        failed(String());
+    else
+        failed("Fetch API cannot load " + error.failingURL() + ". " + error.localizedDescription());
 }
 
 void FetchManager::Loader::didFailRedirectCheck()
 {
     failed("Fetch API cannot load " + m_request->url().string() + ". Redirect failed.");
+}
+
+Document* FetchManager::Loader::document() const
+{
+    if (executionContext()->isDocument()) {
+        return toDocument(executionContext());
+    }
+    return nullptr;
+}
+
+void FetchManager::Loader::loadSucceeded()
+{
+    ASSERT(!m_failed);
+
+    m_finished = true;
+
+    if (document() && document()->frame() && document()->frame()->page()
+        && m_responseHttpStatusCode >= 200 && m_responseHttpStatusCode < 300) {
+        document()->frame()->page()->chromeClient().ajaxSucceeded(document()->frame());
+    }
+    InspectorInstrumentation::didFinishFetch(executionContext(), this, m_request->method(), m_request->url().string());
+    notifyFinished();
 }
 
 void FetchManager::Loader::start()
@@ -244,7 +371,7 @@ void FetchManager::Loader::start()
     //    URL flag is set"
     // "- |request|'s url's scheme is 'about'"
     // Note we don't support to call this method with |CORS flag|.
-    if ((SecurityOrigin::create(m_request->url())->isSameSchemeHostPort(m_request->origin().get()))
+    if ((SecurityOrigin::create(m_request->url())->isSameSchemeHostPortAndSuborigin(m_request->origin().get()))
         || (m_request->url().protocolIsData() && m_request->sameOriginDataURLFlag())
         || (m_request->url().protocolIsAbout())) {
         // "The result of performing a basic fetch using request."
@@ -299,29 +426,6 @@ void FetchManager::Loader::start()
     performHTTPFetch(true, false);
 }
 
-void FetchManager::Loader::cancel()
-{
-    m_finished = true;
-    if (m_loader) {
-        m_loader->cancel();
-        m_loader.clear();
-    }
-    if (m_responseBuffer) {
-        m_responseBuffer->close();
-        m_responseBuffer.clear();
-    }
-    if (m_resolver) {
-        // Note: In the current implementation this branch is never taken
-        // because this function can be called only through the body stream.
-        ScriptState* scriptState = m_resolver->scriptState();
-        ScriptState::Scope scope(scriptState);
-        m_resolver->reject(V8ThrowException::createTypeError(scriptState->isolate(), "fetch is cancelled"));
-        m_resolver.clear();
-    }
-
-    notifyFinished();
-}
-
 void FetchManager::Loader::dispose()
 {
     // Prevent notification
@@ -368,13 +472,12 @@ void FetchManager::Loader::performHTTPFetch(bool corsFlag, bool corsPreflightFla
     }
 
     if (m_request->method() != "GET" && m_request->method() != "HEAD") {
-        RefPtr<BlobDataHandle> blobDataHandle = m_request->blobDataHandle();
-        if (blobDataHandle.get()) {
-            RefPtr<FormData> httpBody(FormData::create());
-            httpBody->appendBlob(blobDataHandle->uuid(), blobDataHandle);
-            request.setHTTPBody(httpBody);
+        if (m_request->buffer()->hasBody()) {
+            request.setHTTPBody(m_request->buffer()->drainAsFormData());
         }
     }
+    request.setFetchRedirectMode(m_request->redirect());
+    request.setUseStreamOnResponse(true);
 
     // "2. Append `Referer`/empty byte sequence, if |HTTPRequest|'s |referrer|
     // is none, and `Referer`/|HTTPRequest|'s referrer, serialized and utf-8
@@ -420,6 +523,7 @@ void FetchManager::Loader::performHTTPFetch(bool corsFlag, bool corsPreflightFla
         threadableLoaderOptions.crossOriginRequestPolicy = UseAccessControl;
         break;
     }
+    InspectorInstrumentation::willStartFetch(executionContext(), this);
     m_loader = ThreadableLoader::create(*executionContext(), this, request, threadableLoaderOptions, resourceLoaderOptions);
     if (!m_loader)
         performNetworkError("Can't create ThreadableLoader");
@@ -430,17 +534,16 @@ void FetchManager::Loader::failed(const String& message)
     if (m_failed || m_finished)
         return;
     m_failed = true;
-    executionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, message));
-    if (m_responseBuffer) {
-        m_responseBuffer->error(DOMException::create(NetworkError, "Failed to fetch"));
-        m_responseBuffer.clear();
-    } else if (m_resolver) {
+    if (!message.isEmpty())
+        executionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, message));
+    if (m_resolver) {
         if (!m_resolver->executionContext() || m_resolver->executionContext()->activeDOMObjectsAreStopped())
             return;
         ScriptState* state = m_resolver->scriptState();
         ScriptState::Scope scope(state);
         m_resolver->reject(V8ThrowException::createTypeError(state->isolate(), "Failed to fetch"));
     }
+    InspectorInstrumentation::didFailFetch(executionContext(), this);
     notifyFinished();
 }
 
@@ -466,12 +569,12 @@ FetchManager::~FetchManager()
 
 ScriptPromise FetchManager::fetch(ScriptState* scriptState, FetchRequestData* request)
 {
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     request->setContext(WebURLRequest::RequestContextFetch);
 
-    OwnPtrWillBeRawPtr<Loader> ownLoader = Loader::create(m_executionContext, this, resolver.release(), request);
+    OwnPtrWillBeRawPtr<Loader> ownLoader = Loader::create(m_executionContext, this, resolver, request);
     Loader* loader = m_loaders.add(ownLoader.release()).storedValue->get();
     loader->start();
     return promise;

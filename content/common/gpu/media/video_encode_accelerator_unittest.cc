@@ -17,7 +17,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
-#include "base/sys_byteorder.h"
+#include "base/threading/thread.h"
+#include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "content/common/gpu/media/video_accelerator_unittest_helpers.h"
@@ -25,6 +26,7 @@
 #include "media/base/bitstream_buffer.h"
 #include "media/base/test_data_util.h"
 #include "media/filters/h264_parser.h"
+#include "media/filters/ivf_parser.h"
 #include "media/video/fake_video_encode_accelerator.h"
 #include "media/video/video_encode_accelerator.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -46,7 +48,7 @@ using media::VideoEncodeAccelerator;
 namespace content {
 namespace {
 
-const media::VideoFrame::Format kInputFormat = media::VideoFrame::I420;
+const media::VideoPixelFormat kInputFormat = media::PIXEL_FORMAT_I420;
 
 // Arbitrarily chosen to add some depth to the pipeline.
 const unsigned int kNumOutputBuffers = 4;
@@ -111,26 +113,6 @@ bool g_fake_encoder = false;
 // Environment to store test stream data for all test cases.
 class VideoEncodeAcceleratorTestEnvironment;
 VideoEncodeAcceleratorTestEnvironment* g_env;
-
-struct IvfFileHeader {
-  char signature[4];     // signature: 'DKIF'
-  uint16_t version;      // version (should be 0)
-  uint16_t header_size;  // size of header in bytes
-  uint32_t fourcc;       // codec FourCC (e.g., 'VP80')
-  uint16_t width;        // width in pixels
-  uint16_t height;       // height in pixels
-  uint32_t framerate;    // frame rate per seconds
-  uint32_t timescale;    // time scale. For example, if framerate is 30 and
-                         // timescale is 2, the unit of IvfFrameHeader.timestamp
-                         // is 2/30 seconds.
-  uint32_t num_frames;   // number of frames in file
-  uint32_t unused;       // unused
-} __attribute__((packed));
-
-struct IvfFrameHeader {
-  uint32_t frame_size;  // Size of frame in bytes (not including the header)
-  uint64_t timestamp;   // 64-bit presentation timestamp
-} __attribute__((packed));
 
 // The number of frames to be encoded. This variable is set by the switch
 // "--num_frames_to_encode". Ignored if 0.
@@ -251,8 +233,8 @@ static void CreateAlignedInputStreamFile(const gfx::Size& coded_size,
   // the VEA; each row of visible_bpl bytes in the original file needs to be
   // copied into a row of coded_bpl bytes in the aligned file.
   for (size_t i = 0; i < num_planes; i++) {
-    size_t size =
-        media::VideoFrame::PlaneAllocationSize(kInputFormat, i, coded_size);
+    const size_t size =
+        media::VideoFrame::PlaneSize(kInputFormat, i, coded_size).GetArea();
     test_stream->aligned_plane_size.push_back(Align64Bytes(size));
     test_stream->aligned_buffer_size += test_stream->aligned_plane_size.back();
 
@@ -262,7 +244,7 @@ static void CreateAlignedInputStreamFile(const gfx::Size& coded_size,
         i, kInputFormat, test_stream->visible_size.width());
     visible_plane_rows[i] = media::VideoFrame::Rows(
         i, kInputFormat, test_stream->visible_size.height());
-    size_t padding_rows =
+    const size_t padding_rows =
         media::VideoFrame::Rows(i, kInputFormat, coded_size.height()) -
         visible_plane_rows[i];
     padding_sizes[i] = padding_rows * coded_bpl[i] + Align64Bytes(size) - size;
@@ -322,14 +304,16 @@ static void CreateAlignedInputStreamFile(const gfx::Size& coded_size,
 static void ParseAndReadTestStreamData(const base::FilePath::StringType& data,
                                        ScopedVector<TestStream>* test_streams) {
   // Split the string to individual test stream data.
-  std::vector<base::FilePath::StringType> test_streams_data;
-  base::SplitString(data, ';', &test_streams_data);
+  std::vector<base::FilePath::StringType> test_streams_data = base::SplitString(
+      data, base::FilePath::StringType(1, ';'),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   CHECK_GE(test_streams_data.size(), 1U) << data;
 
   // Parse each test stream data and read the input file.
   for (size_t index = 0; index < test_streams_data.size(); ++index) {
-    std::vector<base::FilePath::StringType> fields;
-    base::SplitString(test_streams_data[index], ':', &fields);
+    std::vector<base::FilePath::StringType> fields = base::SplitString(
+        test_streams_data[index], base::FilePath::StringType(1, ':'),
+        base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     CHECK_GE(fields.size(), 4U) << data;
     CHECK_LE(fields.size(), 9U) << data;
     TestStream* test_stream = new TestStream();
@@ -743,6 +727,9 @@ class VEAClient : public VideoEncodeAccelerator::Client {
 
   scoped_ptr<StreamValidator> validator_;
 
+  // The time when the first frame is submitted for encode.
+  base::TimeTicks first_frame_start_time_;
+
   // The time when the last encoded frame is ready.
   base::TimeTicks last_frame_ready_time_;
 
@@ -940,8 +927,8 @@ void VEAClient::UpdateTestStreamData(bool mid_stream_bitrate_switch,
 }
 
 double VEAClient::frames_per_second() {
-  CHECK(!encode_start_time_.empty());
-  base::TimeDelta duration = last_frame_ready_time_ - encode_start_time_[0];
+  CHECK_NE(num_encoded_frames_, 0UL);
+  base::TimeDelta duration = last_frame_ready_time_ - first_frame_start_time_;
   return num_encoded_frames_ / duration.InSecondsF();
 }
 
@@ -957,11 +944,6 @@ void VEAClient::RequireBitstreamBuffers(unsigned int input_count,
   num_frames_to_encode_ = test_stream_->num_frames;
   if (g_num_frames_to_encode > 0)
     num_frames_to_encode_ = g_num_frames_to_encode;
-
-  // Speed up vector insertion.
-  encode_start_time_.reserve(num_frames_to_encode_);
-  if (g_env->needs_encode_latency())
-    encode_latencies_.reserve(num_frames_to_encode_);
 
   // We may need to loop over the stream more than once if more frames than
   // provided is required for bitrate tests.
@@ -1097,7 +1079,8 @@ scoped_refptr<media::VideoFrame> VEAClient::PrepareInputFrame(off_t position,
           frame_data_v,
           base::TimeDelta().FromMilliseconds(
               next_input_id_ * base::Time::kMillisecondsPerSecond /
-              current_framerate_),
+              current_framerate_));
+  frame->AddDestructionObserver(
           media::BindToCurrentLoop(
               base::Bind(&VEAClient::InputNoLongerNeededCallback,
                          base::Unretained(this),
@@ -1145,8 +1128,14 @@ void VEAClient::FeedEncoderWithOneInput() {
     ++num_keyframes_requested_;
   }
 
-  CHECK_EQ(input_id, static_cast<int32>(encode_start_time_.size()));
-  encode_start_time_.push_back(base::TimeTicks::Now());
+  if (input_id == 0) {
+    first_frame_start_time_ = base::TimeTicks::Now();
+  }
+
+  if (g_env->needs_encode_latency()) {
+    CHECK_EQ(input_id, static_cast<int32>(encode_start_time_.size()));
+    encode_start_time_.push_back(base::TimeTicks::Now());
+  }
   encoder_->Encode(video_frame, force_keyframe);
 }
 
@@ -1195,8 +1184,7 @@ bool VEAClient::HandleEncodedFrame(bool keyframe) {
   // kMaxKeyframeDelay frames after the frame, for which we requested
   // it, comes back encoded.
   if (keyframe) {
-    if (num_keyframes_requested_ > 0 &&
-        num_encoded_frames_ > next_keyframe_at_) {
+    if (num_keyframes_requested_ > 0) {
       --num_keyframes_requested_;
       next_keyframe_at_ += keyframe_period_;
     }
@@ -1279,23 +1267,21 @@ void VEAClient::VerifyStreamProperties() {
 }
 
 void VEAClient::WriteIvfFileHeader() {
-  IvfFileHeader header;
+  media::IvfFileHeader header = {};
 
-  memset(&header, 0, sizeof(header));
-  header.signature[0] = 'D';
-  header.signature[1] = 'K';
-  header.signature[2] = 'I';
-  header.signature[3] = 'F';
+  memcpy(header.signature, media::kIvfHeaderSignature,
+         sizeof(header.signature));
   header.version = 0;
-  header.header_size = base::ByteSwapToLE16(sizeof(header));
-  header.fourcc = base::ByteSwapToLE32(0x30385056);  // VP80
-  header.width = base::ByteSwapToLE16(
-      base::checked_cast<uint16_t>(test_stream_->visible_size.width()));
-  header.height = base::ByteSwapToLE16(
-      base::checked_cast<uint16_t>(test_stream_->visible_size.height()));
-  header.framerate = base::ByteSwapToLE32(requested_framerate_);
-  header.timescale = base::ByteSwapToLE32(1);
-  header.num_frames = base::ByteSwapToLE32(num_frames_to_encode_);
+  header.header_size = sizeof(header);
+  header.fourcc = 0x30385056;  // VP80
+  header.width =
+      base::checked_cast<uint16_t>(test_stream_->visible_size.width());
+  header.height =
+      base::checked_cast<uint16_t>(test_stream_->visible_size.height());
+  header.timebase_denum = requested_framerate_;
+  header.timebase_num = 1;
+  header.num_frames = num_frames_to_encode_;
+  header.ByteSwap();
 
   EXPECT_TRUE(base::AppendToFile(
       base::FilePath::FromUTF8Unsafe(test_stream_->out_filename),
@@ -1303,11 +1289,11 @@ void VEAClient::WriteIvfFileHeader() {
 }
 
 void VEAClient::WriteIvfFrameHeader(int frame_index, size_t frame_size) {
-  IvfFrameHeader header;
+  media::IvfFrameHeader header = {};
 
-  memset(&header, 0, sizeof(header));
-  header.frame_size = base::ByteSwapToLE32(frame_size);
-  header.timestamp = base::ByteSwapToLE64(frame_index);
+  header.frame_size = frame_size;
+  header.timestamp = frame_index;
+  header.ByteSwap();
   EXPECT_TRUE(base::AppendToFile(
       base::FilePath::FromUTF8Unsafe(test_stream_->out_filename),
       reinterpret_cast<char*>(&header), sizeof(header)));
@@ -1326,16 +1312,16 @@ void VEAClient::WriteIvfFrameHeader(int frame_index, size_t frame_size) {
 // - If true, switch framerate mid-stream.
 class VideoEncodeAcceleratorTest
     : public ::testing::TestWithParam<
-          Tuple<int, bool, int, bool, bool, bool, bool>> {};
+          base::Tuple<int, bool, int, bool, bool, bool, bool>> {};
 
 TEST_P(VideoEncodeAcceleratorTest, TestSimpleEncode) {
-  size_t num_concurrent_encoders = get<0>(GetParam());
-  const bool save_to_file = get<1>(GetParam());
-  const unsigned int keyframe_period = get<2>(GetParam());
-  const bool force_bitrate = get<3>(GetParam());
-  const bool test_perf = get<4>(GetParam());
-  const bool mid_stream_bitrate_switch = get<5>(GetParam());
-  const bool mid_stream_framerate_switch = get<6>(GetParam());
+  size_t num_concurrent_encoders = base::get<0>(GetParam());
+  const bool save_to_file = base::get<1>(GetParam());
+  const unsigned int keyframe_period = base::get<2>(GetParam());
+  const bool force_bitrate = base::get<3>(GetParam());
+  const bool test_perf = base::get<4>(GetParam());
+  const bool mid_stream_bitrate_switch = base::get<5>(GetParam());
+  const bool mid_stream_framerate_switch = base::get<6>(GetParam());
 
   ScopedVector<ClientStateNotification<ClientState> > notes;
   ScopedVector<VEAClient> clients;
@@ -1393,39 +1379,40 @@ TEST_P(VideoEncodeAcceleratorTest, TestSimpleEncode) {
 INSTANTIATE_TEST_CASE_P(
     SimpleEncode,
     VideoEncodeAcceleratorTest,
-    ::testing::Values(MakeTuple(1, true, 0, false, false, false, false)));
+    ::testing::Values(base::MakeTuple(1, true, 0, false, false, false, false)));
 
 INSTANTIATE_TEST_CASE_P(
     EncoderPerf,
     VideoEncodeAcceleratorTest,
-    ::testing::Values(MakeTuple(1, false, 0, false, true, false, false)));
+    ::testing::Values(base::MakeTuple(1, false, 0, false, true, false, false)));
 
 INSTANTIATE_TEST_CASE_P(
     ForceKeyframes,
     VideoEncodeAcceleratorTest,
-    ::testing::Values(MakeTuple(1, false, 10, false, false, false, false)));
+    ::testing::Values(base::MakeTuple(1, false, 10, false, false, false,
+                                      false)));
 
 INSTANTIATE_TEST_CASE_P(
     ForceBitrate,
     VideoEncodeAcceleratorTest,
-    ::testing::Values(MakeTuple(1, false, 0, true, false, false, false)));
+    ::testing::Values(base::MakeTuple(1, false, 0, true, false, false, false)));
 
 INSTANTIATE_TEST_CASE_P(
     MidStreamParamSwitchBitrate,
     VideoEncodeAcceleratorTest,
-    ::testing::Values(MakeTuple(1, false, 0, true, false, true, false)));
+    ::testing::Values(base::MakeTuple(1, false, 0, true, false, true, false)));
 
 INSTANTIATE_TEST_CASE_P(
     MidStreamParamSwitchFPS,
     VideoEncodeAcceleratorTest,
-    ::testing::Values(MakeTuple(1, false, 0, true, false, false, true)));
+    ::testing::Values(base::MakeTuple(1, false, 0, true, false, false, true)));
 
 INSTANTIATE_TEST_CASE_P(
     MultipleEncoders,
     VideoEncodeAcceleratorTest,
-    ::testing::Values(MakeTuple(3, false, 0, false, false, false, false),
-                      MakeTuple(3, false, 0, true, false, false, true),
-                      MakeTuple(3, false, 0, true, false, true, false)));
+    ::testing::Values(base::MakeTuple(3, false, 0, false, false, false, false),
+                      base::MakeTuple(3, false, 0, true, false, false, true),
+                      base::MakeTuple(3, false, 0, true, false, true, false)));
 
 // TODO(posciak): more tests:
 // - async FeedEncoderWithOutput

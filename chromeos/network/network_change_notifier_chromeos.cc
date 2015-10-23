@@ -6,8 +6,10 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/network/network_change_notifier_chromeos.h"
 #include "chromeos/network/network_event_log.h"
@@ -52,7 +54,10 @@ void NetworkChangeNotifierChromeos::DnsConfigService::OnNetworkChange() {
 NetworkChangeNotifierChromeos::NetworkChangeNotifierChromeos()
     : NetworkChangeNotifier(NetworkChangeCalculatorParamsChromeos()),
       connection_type_(CONNECTION_NONE),
-      message_loop_(base::MessageLoopProxy::current()),
+      max_bandwidth_mbps_(
+          NetworkChangeNotifier::GetMaxBandwidthForConnectionSubtype(
+              SUBTYPE_NONE)),
+      task_runner_(base::ThreadTaskRunnerHandle::Get()),
       weak_ptr_factory_(this) {
   poll_callback_ = base::Bind(&NetworkChangeNotifierChromeos::PollForState,
                               weak_ptr_factory_.GetWeakPtr());
@@ -93,8 +98,12 @@ NetworkChangeNotifierChromeos::GetCurrentConnectionType() const {
   // |this|, to allow PollForState() to modify our cached state.
   // TODO(gauravsh): Figure out why we would have missed this notification.
   if (connection_type_ == CONNECTION_NONE)
-    message_loop_->PostTask(FROM_HERE, poll_callback_);
+    task_runner_->PostTask(FROM_HERE, poll_callback_);
   return connection_type_;
+}
+
+double NetworkChangeNotifierChromeos::GetCurrentMaxBandwidth() const {
+  return max_bandwidth_mbps_;
 }
 
 void NetworkChangeNotifierChromeos::SuspendDone(
@@ -109,9 +118,10 @@ void NetworkChangeNotifierChromeos::DefaultNetworkChanged(
   bool connection_type_changed = false;
   bool ip_address_changed = false;
   bool dns_changed = false;
+  bool max_bandwidth_changed = false;
 
-  UpdateState(default_network, &connection_type_changed,
-              &ip_address_changed, &dns_changed);
+  UpdateState(default_network, &connection_type_changed, &ip_address_changed,
+              &dns_changed, &max_bandwidth_changed);
 
   if (connection_type_changed)
     NetworkChangeNotifier::NotifyObserversOfConnectionTypeChange();
@@ -119,16 +129,22 @@ void NetworkChangeNotifierChromeos::DefaultNetworkChanged(
     NetworkChangeNotifier::NotifyObserversOfIPAddressChange();
   if (dns_changed)
     dns_config_service_->OnNetworkChange();
+  if (max_bandwidth_changed)
+    NetworkChangeNotifier::NotifyObserversOfMaxBandwidthChange(
+        max_bandwidth_mbps_);
 }
 
 void NetworkChangeNotifierChromeos::UpdateState(
     const chromeos::NetworkState* default_network,
     bool* connection_type_changed,
     bool* ip_address_changed,
-    bool* dns_changed) {
+    bool* dns_changed,
+    bool* max_bandwidth_changed) {
   *connection_type_changed = false;
   *ip_address_changed = false;
   *dns_changed = false;
+  *max_bandwidth_changed = false;
+
   if (!default_network || !default_network->IsConnectedState()) {
     // If we lost a default network, we must update our state and notify
     // observers, otherwise we have nothing to do.
@@ -137,7 +153,9 @@ void NetworkChangeNotifierChromeos::UpdateState(
       *ip_address_changed = true;
       *dns_changed = true;
       *connection_type_changed = true;
+      *max_bandwidth_changed = true;
       connection_type_ = CONNECTION_NONE;
+      max_bandwidth_mbps_ = GetMaxBandwidthForConnectionSubtype(SUBTYPE_NONE);
       service_path_.clear();
       ip_address_.clear();
       dns_servers_.clear();
@@ -193,9 +211,8 @@ void NetworkChangeNotifierChromeos::UpdateState(
     NET_LOG_EVENT(
         "NCNDefaultDNSServerChanged",
         base::StringPrintf(
-            "%s -> %s",
-            JoinString(dns_servers_, ",").c_str(),
-            JoinString(default_network->dns_servers(), ",").c_str()));
+            "%s -> %s", base::JoinString(dns_servers_, ",").c_str(),
+            base::JoinString(default_network->dns_servers(), ",").c_str()));
     *dns_changed = true;
   }
 
@@ -203,6 +220,12 @@ void NetworkChangeNotifierChromeos::UpdateState(
   service_path_ = default_network->path();
   ip_address_ = default_network->ip_address();
   dns_servers_ = default_network->dns_servers();
+  double old_max_bandwidth = max_bandwidth_mbps_;
+  max_bandwidth_mbps_ =
+      GetMaxBandwidthForConnectionSubtype(GetConnectionSubtype(
+          default_network->type(), default_network->network_technology()));
+  if (max_bandwidth_mbps_ != old_max_bandwidth)
+    *max_bandwidth_changed = true;
 }
 
 // static
@@ -234,6 +257,38 @@ NetworkChangeNotifierChromeos::ConnectionTypeFromShill(
   } else {
     return CONNECTION_2G;  // Default cellular type is 2G.
   }
+}
+
+// static
+net::NetworkChangeNotifier::ConnectionSubtype
+NetworkChangeNotifierChromeos::GetConnectionSubtype(
+    const std::string& type,
+    const std::string& technology) {
+  if (type != shill::kTypeCellular)
+    return SUBTYPE_UNKNOWN;
+
+  if (technology == shill::kNetworkTechnology1Xrtt)
+    return SUBTYPE_1XRTT;
+  if (technology == shill::kNetworkTechnologyEvdo)
+    return SUBTYPE_EVDO_REV_0;
+  if (technology == shill::kNetworkTechnologyGsm)
+    return SUBTYPE_GSM;
+  if (technology == shill::kNetworkTechnologyGprs)
+    return SUBTYPE_GPRS;
+  if (technology == shill::kNetworkTechnologyEdge)
+    return SUBTYPE_EDGE;
+  if (technology == shill::kNetworkTechnologyUmts)
+    return SUBTYPE_UMTS;
+  if (technology == shill::kNetworkTechnologyHspa)
+    return SUBTYPE_HSPA;
+  if (technology == shill::kNetworkTechnologyHspaPlus)
+    return SUBTYPE_HSPAP;
+  if (technology == shill::kNetworkTechnologyLte)
+    return SUBTYPE_LTE;
+  if (technology == shill::kNetworkTechnologyLteAdvanced)
+    return SUBTYPE_LTE_ADVANCED;
+
+  return SUBTYPE_UNKNOWN;
 }
 
 // static

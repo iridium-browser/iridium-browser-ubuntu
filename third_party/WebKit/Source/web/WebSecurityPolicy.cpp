@@ -76,6 +76,11 @@ void WebSecurityPolicy::registerURLSchemeAsCORSEnabled(const WebString& scheme)
     SchemeRegistry::registerURLSchemeAsCORSEnabled(scheme);
 }
 
+void WebSecurityPolicy::registerURLSchemeAsAllowingServiceWorkers(const WebString& scheme)
+{
+    SchemeRegistry::registerURLSchemeAsAllowingServiceWorkers(scheme);
+}
+
 void WebSecurityPolicy::registerURLSchemeAsBypassingContentSecurityPolicy(const WebString& scheme)
 {
     SchemeRegistry::registerURLSchemeAsBypassingContentSecurityPolicy(scheme);
@@ -84,6 +89,11 @@ void WebSecurityPolicy::registerURLSchemeAsBypassingContentSecurityPolicy(const 
 void WebSecurityPolicy::registerURLSchemeAsBypassingContentSecurityPolicy(const WebString& scheme, PolicyAreas policyAreas)
 {
     SchemeRegistry::registerURLSchemeAsBypassingContentSecurityPolicy(scheme, static_cast<SchemeRegistry::PolicyAreas>(policyAreas));
+}
+
+void WebSecurityPolicy::registerURLSchemeAsFirstPartyWhenTopLevel(const WebString& scheme)
+{
+    SchemeRegistry::registerURLSchemeAsFirstPartyWhenTopLevel(scheme);
 }
 
 void WebSecurityPolicy::registerURLSchemeAsEmptyDocument(const WebString& scheme)

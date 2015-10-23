@@ -8,7 +8,9 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_sync_data.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
+#include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -18,6 +20,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -30,6 +33,7 @@ using content::BrowserThread;
 using extensions::Extension;
 using extensions::ExtensionRegistry;
 using extensions::ExtensionPrefs;
+using extensions::ExtensionSyncData;
 
 class ExtensionDisabledGlobalErrorTest : public ExtensionBrowserTest {
  protected:
@@ -144,6 +148,27 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, Uninstall) {
   ASSERT_FALSE(GetExtensionDisabledGlobalError());
 }
 
+// Tests uninstalling a disabled extension with an uninstall dialog.
+IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, UninstallFromDialog) {
+  extensions::ScopedTestDialogAutoConfirm auto_confirm(
+      extensions::ScopedTestDialogAutoConfirm::ACCEPT);
+  const Extension* extension = InstallAndUpdateIncreasingPermissionsExtension();
+  ASSERT_TRUE(extension);
+  std::string extension_id = extension->id();
+  GlobalErrorWithStandardBubble* error =
+      static_cast<GlobalErrorWithStandardBubble*>(
+          GetExtensionDisabledGlobalError());
+  ASSERT_TRUE(error);
+
+  // The "cancel" button is the uninstall button on the browser.
+  error->BubbleViewCancelButtonPressed(browser());
+  content::RunAllBlockingPoolTasksUntilIdle();
+
+  EXPECT_FALSE(registry_->GetExtensionById(extension_id,
+                                           ExtensionRegistry::EVERYTHING));
+  EXPECT_FALSE(GetExtensionDisabledGlobalError());
+}
+
 // Tests that no error appears if the user disabled the extension.
 IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, UserDisabled) {
   const Extension* extension = InstallIncreasingPermissionExtensionV1();
@@ -162,7 +187,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest,
   ExtensionSyncService* sync_service = ExtensionSyncService::Get(
       browser()->profile());
   extensions::ExtensionSyncData sync_data =
-      sync_service->GetExtensionSyncData(*extension);
+      sync_service->CreateSyncData(*extension);
   UninstallExtension(extension_id);
   extension = NULL;
 
@@ -186,7 +211,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest,
   service_->updater()->set_default_check_params(params);
 
   // Sync is replacing an older version, so it pends.
-  EXPECT_FALSE(sync_service->ProcessExtensionSyncData(sync_data));
+  EXPECT_FALSE(sync_service->ApplySyncData(sync_data));
 
   WaitForExtensionInstall();
   content::RunAllBlockingPoolTasksUntilIdle();
@@ -237,7 +262,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, RemoteInstall) {
                                          syncer::AttachmentIdList(),
                                          syncer::AttachmentServiceProxy());
   // Sync is installing a new extension, so it pends.
-  EXPECT_FALSE(sync_service->ProcessExtensionSyncData(
+  EXPECT_FALSE(sync_service->ApplySyncData(
       *extensions::ExtensionSyncData::CreateFromSyncData(sync_data)));
 
   WaitForExtensionInstall();

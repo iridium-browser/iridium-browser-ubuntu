@@ -13,33 +13,14 @@ namespace extensions {
 ExtensionsGuestViewContainer::ExtensionsGuestViewContainer(
     content::RenderFrame* render_frame)
     : GuestViewContainer(render_frame),
-      destruction_isolate_(nullptr),
       element_resize_isolate_(nullptr),
       weak_ptr_factory_(this) {
 }
 
 ExtensionsGuestViewContainer::~ExtensionsGuestViewContainer() {
-  // Call the destruction callback, if one is registered.
-  if (!destruction_callback_.IsEmpty()) {
-    v8::HandleScope handle_scope(destruction_isolate_);
-    v8::Local<v8::Function> callback = v8::Local<v8::Function>::New(
-        destruction_isolate_, destruction_callback_);
-    v8::Local<v8::Context> context = callback->CreationContext();
-    if (context.IsEmpty())
-      return;
-
-    v8::Context::Scope context_scope(context);
-    blink::WebScopedMicrotaskSuppression suppression;
-
-    callback->Call(context->Global(), 0 /* argc */, nullptr);
-  }
 }
 
-void ExtensionsGuestViewContainer::RegisterDestructionCallback(
-    v8::Local<v8::Function> callback,
-    v8::Isolate* isolate) {
-  destruction_callback_.Reset(isolate, callback);
-  destruction_isolate_ = isolate;
+void ExtensionsGuestViewContainer::OnDestroy(bool embedder_frame_destroyed) {
 }
 
 void ExtensionsGuestViewContainer::RegisterElementResizeCallback(

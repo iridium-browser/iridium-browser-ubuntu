@@ -1,0 +1,40 @@
+<link rel="import" href="chrome://resources/polymer/v1_0/polymer/polymer.html">
+<link rel="import" href="chrome://md-settings/appearance_page/appearance_page.html">
+<link rel="import" href="chrome://md-settings/search_page/search_page.html">
+<link rel="import" href="chrome://md-settings/settings_page/settings_section.html">
+
+<if expr="chromeos">
+<link rel="import" href="chrome://md-settings/internet_page/internet_page.html">
+<link rel="import" href="chrome://md-settings/users_page/users_page.html">
+</if>
+
+<dom-module id="cr-settings-basic-page">
+  <template>
+<if expr="chromeos">
+    <cr-settings-section route="internet" icon="settings-ethernet"
+        i18n-values="page-title:internetPageTitle">
+      <cr-settings-internet-page></cr-settings-internet-page>
+    </cr-settings-section>
+</if>
+    <cr-settings-section route="appearance" icon="home"
+        i18n-values="page-title:appearancePageTitle">
+      <cr-settings-appearance-page prefs="{{prefs}}">
+      </cr-settings-appearance-page>
+    </cr-settings-section>
+
+    <cr-settings-section route="search" icon="search"
+        i18n-values="page-title:searchPageTitle"
+        expanded="{{searchExpanded}}" expand-container="{{expandContainer}}">
+      <cr-settings-search-page in-subpage="{{searchExpanded}}">
+      </cr-settings-search-page>
+    </cr-settings-section>
+
+<if expr="chromeos">
+    <cr-settings-section route="users" icon="person"
+        i18n-values="page-title:usersPageTitle">
+      <cr-settings-users-page prefs="{{prefs}}"></cr-settings-users-page>
+    </cr-settings-section>
+</if>
+  </template>
+  <script src="basic_page.js"></script>
+</dom-module>

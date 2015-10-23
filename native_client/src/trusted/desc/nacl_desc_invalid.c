@@ -61,6 +61,11 @@ static struct NaClDescVtbl const kNaClDescInvalidVtbl = {
   NaClDescPReadNotImplemented,
   NaClDescPWriteNotImplemented,
   NaClDescFstatNotImplemented,
+  NaClDescFchdirNotImplemented,
+  NaClDescFchmodNotImplemented,
+  NaClDescFsyncNotImplemented,
+  NaClDescFdatasyncNotImplemented,
+  NaClDescFtruncateNotImplemented,
   NaClDescGetdentsNotImplemented,
   NaClDescInvalidExternalizeSize,
   NaClDescInvalidExternalize,
@@ -143,10 +148,8 @@ struct NaClDescInvalid const *NaClDescInvalidMake(void) {
 }
 
 int NaClDescInvalidInternalize(struct NaClDesc               **baseptr,
-                               struct NaClDescXferState      *xfer,
-                               struct NaClDescQuotaInterface *quota_interface) {
+                               struct NaClDescXferState      *xfer) {
   UNREFERENCED_PARAMETER(xfer);
-  UNREFERENCED_PARAMETER(quota_interface);
 
   *baseptr = (struct NaClDesc *) NaClDescInvalidMake();
 

@@ -53,7 +53,9 @@ HttpAuthHandlerRegistryFactory* HttpAuthHandlerFactory::CreateDefault(
   registry_factory->RegisterSchemeFactory(
       "digest", new HttpAuthHandlerDigest::Factory());
 
-#if defined(USE_KERBEROS)
+// On Android Chrome needs an account type configured to enable Kerberos,
+// so the default factory should not include Kerberos.
+#if defined(USE_KERBEROS) && !defined(OS_ANDROID)
   HttpAuthHandlerNegotiate::Factory* negotiate_factory =
       new HttpAuthHandlerNegotiate::Factory();
 #if defined(OS_POSIX)
@@ -63,7 +65,7 @@ HttpAuthHandlerRegistryFactory* HttpAuthHandlerFactory::CreateDefault(
 #endif
   negotiate_factory->set_host_resolver(host_resolver);
   registry_factory->RegisterSchemeFactory("negotiate", negotiate_factory);
-#endif  // defined(USE_KERBEROS)
+#endif  // defined(USE_KERBEROS) && !defined(OS_ANDROID)
 
   HttpAuthHandlerNTLM::Factory* ntlm_factory =
       new HttpAuthHandlerNTLM::Factory();
@@ -104,7 +106,7 @@ void HttpAuthHandlerRegistryFactory::SetURLSecurityManager(
 void HttpAuthHandlerRegistryFactory::RegisterSchemeFactory(
     const std::string& scheme,
     HttpAuthHandlerFactory* factory) {
-  std::string lower_scheme = base::StringToLowerASCII(scheme);
+  std::string lower_scheme = base::ToLowerASCII(scheme);
   FactoryMap::iterator it = factory_map_.find(lower_scheme);
   if (it != factory_map_.end()) {
     delete it->second;
@@ -117,7 +119,7 @@ void HttpAuthHandlerRegistryFactory::RegisterSchemeFactory(
 
 HttpAuthHandlerFactory* HttpAuthHandlerRegistryFactory::GetSchemeFactory(
     const std::string& scheme) const {
-  std::string lower_scheme = base::StringToLowerASCII(scheme);
+  std::string lower_scheme = base::ToLowerASCII(scheme);
   FactoryMap::const_iterator it = factory_map_.find(lower_scheme);
   if (it == factory_map_.end()) {
     return NULL;                  // |scheme| is not registered.
@@ -131,6 +133,7 @@ HttpAuthHandlerRegistryFactory* HttpAuthHandlerRegistryFactory::Create(
     URLSecurityManager* security_manager,
     HostResolver* host_resolver,
     const std::string& gssapi_library_name,
+    const std::string& auth_android_negotiate_account_type,
     bool negotiate_disable_cname_lookup,
     bool negotiate_enable_port) {
   HttpAuthHandlerRegistryFactory* registry_factory =
@@ -154,7 +157,9 @@ HttpAuthHandlerRegistryFactory* HttpAuthHandlerRegistryFactory::Create(
   if (IsSupportedScheme(supported_schemes, "negotiate")) {
     HttpAuthHandlerNegotiate::Factory* negotiate_factory =
         new HttpAuthHandlerNegotiate::Factory();
-#if defined(OS_POSIX)
+#if defined(OS_ANDROID)
+    negotiate_factory->set_library(&auth_android_negotiate_account_type);
+#elif defined(OS_POSIX)
     negotiate_factory->set_library(
         new GSSAPISharedLibrary(gssapi_library_name));
 #elif defined(OS_WIN)
@@ -185,7 +190,7 @@ int HttpAuthHandlerRegistryFactory::CreateAuthHandler(
     handler->reset();
     return ERR_INVALID_RESPONSE;
   }
-  std::string lower_scheme = base::StringToLowerASCII(scheme);
+  std::string lower_scheme = base::ToLowerASCII(scheme);
   FactoryMap::iterator it = factory_map_.find(lower_scheme);
   if (it == factory_map_.end()) {
     handler->reset();

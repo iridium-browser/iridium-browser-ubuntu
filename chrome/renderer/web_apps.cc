@@ -39,7 +39,7 @@ namespace {
 
 // Sizes a single size (the width or height) from a 'sizes' attribute. A size
 // matches must match the following regex: [1-9][0-9]*.
-int ParseSingleIconSize(const base::string16& text) {
+int ParseSingleIconSize(const base::StringPiece16& text) {
   // Size must not start with 0, and be between 0 and 9.
   if (text.empty() || !(text[0] >= L'1' && text[0] <= L'9'))
     return 0;
@@ -59,8 +59,9 @@ int ParseSingleIconSize(const base::string16& text) {
 // [1-9][0-9]*x[1-9][0-9]*.
 // If the input couldn't be parsed, a size with a width/height == 0 is returned.
 gfx::Size ParseIconSize(const base::string16& text) {
-  std::vector<base::string16> sizes;
-  base::SplitStringDontTrim(text, L'x', &sizes);
+  std::vector<base::StringPiece16> sizes = base::SplitStringPiece(
+      text, base::string16(1, 'x'),
+      base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
   if (sizes.size() != 2)
     return gfx::Size();
 
@@ -99,10 +100,11 @@ bool ParseIconSizes(const base::string16& text,
                     std::vector<gfx::Size>* sizes,
                     bool* is_any) {
   *is_any = false;
-  std::vector<base::string16> size_strings;
-  base::SplitStringAlongWhitespace(text, &size_strings);
+  std::vector<base::string16> size_strings = base::SplitString(
+      text, base::kWhitespaceASCIIAs16,
+      base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   for (size_t i = 0; i < size_strings.size(); ++i) {
-    if (EqualsASCII(size_strings[i], "any")) {
+    if (base::EqualsASCII(size_strings[i], "any")) {
       *is_any = true;
     } else {
       gfx::Size size = ParseIconSize(size_strings[i]);
@@ -152,11 +154,11 @@ void ParseWebAppFromWebDocument(WebFrame* frame,
       bool bookmark_apps_enabled = !base::CommandLine::ForCurrentProcess()->
           HasSwitch(switches::kDisableNewBookmarkApps);
 #endif
-      if (LowerCaseEqualsASCII(rel, "icon") ||
-          LowerCaseEqualsASCII(rel, "shortcut icon") ||
+      if (base::LowerCaseEqualsASCII(rel, "icon") ||
+          base::LowerCaseEqualsASCII(rel, "shortcut icon") ||
           (bookmark_apps_enabled &&
-           (LowerCaseEqualsASCII(rel, "apple-touch-icon") ||
-            LowerCaseEqualsASCII(rel, "apple-touch-icon-precomposed")))) {
+           (base::LowerCaseEqualsASCII(rel, "apple-touch-icon") ||
+            base::LowerCaseEqualsASCII(rel, "apple-touch-icon-precomposed")))) {
         AddInstallIcon(elem, &app_info->icons);
       }
     } else if (elem.hasHTMLTagName("meta") && elem.hasAttribute("name")) {
@@ -173,10 +175,12 @@ void ParseWebAppFromWebDocument(WebFrame* frame,
         if (!app_info->app_url.is_valid())
           app_info->app_url = GURL();
       } else if (name == "mobile-web-app-capable" &&
-                 LowerCaseEqualsASCII(content, "yes")) {
+                 base::LowerCaseEqualsASCII(base::StringPiece16(content),
+                                            "yes")) {
         app_info->mobile_capable = WebApplicationInfo::MOBILE_CAPABLE;
       } else if (name == "apple-mobile-web-app-capable" &&
-                 LowerCaseEqualsASCII(content, "yes") &&
+                 base::LowerCaseEqualsASCII(
+                     base::StringPiece16(content), "yes") &&
                  app_info->mobile_capable ==
                      WebApplicationInfo::MOBILE_CAPABLE_UNSPECIFIED) {
         app_info->mobile_capable = WebApplicationInfo::MOBILE_CAPABLE_APPLE;

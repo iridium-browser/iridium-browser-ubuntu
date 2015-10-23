@@ -68,9 +68,10 @@ remoting.Toolbar.prototype.createOptionsMenu = function() {
   return new remoting.OptionsMenu(
       document.getElementById('send-ctrl-alt-del'),
       document.getElementById('send-print-screen'),
+      document.getElementById('map-right-ctrl-to-meta'),
       document.getElementById('screen-resize-to-client'),
       document.getElementById('screen-shrink-to-fit'),
-      document.getElementById('new-connection'),
+      document.getElementById('new-window'),
       document.getElementById('toggle-full-screen'),
       null,
       null);

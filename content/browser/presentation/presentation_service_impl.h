@@ -6,10 +6,13 @@
 #define CONTENT_BROWSER_PRESENTATION_PRESENTATION_SERVICE_IMPL_H_
 
 #include <deque>
+#include <map>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
+#include "base/containers/scoped_ptr_map.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
@@ -86,8 +89,9 @@ class CONTENT_EXPORT PresentationServiceImpl
                            MaxPendingStartSessionRequests);
   FRIEND_TEST_ALL_PREFIXES(PresentationServiceImplTest,
                            MaxPendingJoinSessionRequests);
-
-  // Maximum number of queued StartSession or JoinSession requests.
+  FRIEND_TEST_ALL_PREFIXES(PresentationServiceImplTest,
+                           ListenForSessionStateChange);
+  // Maximum number of pending JoinSession requests at any given time.
   static const int kMaxNumQueuedSessionRequests = 10;
 
   using DefaultSessionMojoCallback =
@@ -100,23 +104,23 @@ class CONTENT_EXPORT PresentationServiceImpl
   using SendMessageMojoCallback = mojo::Callback<void(bool)>;
 
   // Listener implementation owned by PresentationServiceImpl. An instance of
-  // this is created when an |onavailablechange| handler is added.
+  // this is created when PresentationRequest.getAvailability() is resolved.
   // The instance receives screen availability results from the embedder and
   // propagates results back to PresentationServiceImpl.
   class CONTENT_EXPORT ScreenAvailabilityListenerImpl
       : public PresentationScreenAvailabilityListener {
    public:
     ScreenAvailabilityListenerImpl(
-        const std::string& presentation_url,
+        const std::string& availability_url,
         PresentationServiceImpl* service);
     ~ScreenAvailabilityListenerImpl() override;
 
     // PresentationScreenAvailabilityListener implementation.
-    std::string GetPresentationUrl() const override;
+    std::string GetAvailabilityUrl() const override;
     void OnScreenAvailabilityChanged(bool available) override;
 
    private:
-    const std::string presentation_url_;
+    const std::string availability_url_;
     PresentationServiceImpl* const service_;
   };
 
@@ -158,27 +162,6 @@ class CONTENT_EXPORT PresentationServiceImpl
     DISALLOW_COPY_AND_ASSIGN(NewSessionMojoCallbackWrapper);
   };
 
-  // Context for a queued StartSession request.
-  class CONTENT_EXPORT StartSessionRequest {
-   public:
-    StartSessionRequest(const std::string& presentation_url,
-                        const std::string& presentation_id,
-                        const NewSessionMojoCallback& callback);
-    ~StartSessionRequest();
-
-    scoped_ptr<NewSessionMojoCallbackWrapper> PassCallback();
-
-    const std::string& presentation_url() const { return presentation_url_; }
-    const std::string& presentation_id() const { return presentation_id_; }
-
-   private:
-    const std::string presentation_url_;
-    const std::string presentation_id_;
-    scoped_ptr<NewSessionMojoCallbackWrapper> callback_wrapper_;
-
-    DISALLOW_COPY_AND_ASSIGN(StartSessionRequest);
-  };
-
   // |render_frame_host|: The RFH this instance is associated with.
   // |web_contents|: The WebContents to observe.
   // |delegate|: Where Presentation API requests are delegated to. Not owned
@@ -189,32 +172,28 @@ class CONTENT_EXPORT PresentationServiceImpl
       PresentationServiceDelegate* delegate);
 
   // PresentationService implementation.
-  void SetDefaultPresentationURL(
-      const mojo::String& presentation_url,
-      const mojo::String& presentation_id) override;
+  void SetDefaultPresentationURL(const mojo::String& url) override;
   void SetClient(presentation::PresentationServiceClientPtr client) override;
-  void ListenForScreenAvailability() override;
-  void StopListeningForScreenAvailability() override;
+  void ListenForScreenAvailability(const mojo::String& url) override;
+  void StopListeningForScreenAvailability(const mojo::String& url) override;
   void ListenForDefaultSessionStart(
       const DefaultSessionMojoCallback& callback) override;
   void StartSession(
       const mojo::String& presentation_url,
-      const mojo::String& presentation_id,
       const NewSessionMojoCallback& callback) override;
   void JoinSession(
       const mojo::String& presentation_url,
       const mojo::String& presentation_id,
       const NewSessionMojoCallback& callback) override;
-  void SendSessionMessage(
-      presentation::SessionMessagePtr session_message,
-      const SendMessageMojoCallback& callback) override;
+  void SendSessionMessage(presentation::PresentationSessionInfoPtr session_info,
+                          presentation::SessionMessagePtr session_message,
+                          const SendMessageMojoCallback& callback) override;
   void CloseSession(
       const mojo::String& presentation_url,
       const mojo::String& presentation_id) override;
-  void ListenForSessionStateChange(
-      const SessionStateCallback& callback) override;
+  void ListenForSessionStateChange() override;
   void ListenForSessionMessages(
-      const SessionMessagesCallback& callback) override;
+      presentation::PresentationSessionInfoPtr session) override;
 
   // Creates a binding between this object and |request|.
   void Bind(mojo::InterfaceRequest<presentation::PresentationService> request);
@@ -244,10 +223,6 @@ class CONTENT_EXPORT PresentationServiceImpl
       presentation::PresentationSessionInfoPtr session,
       presentation::PresentationErrorPtr error);
 
-  // Creates a new screen availability listener for |presentation_url| and
-  // registers it with |delegate_|. Replaces the existing listener if any.
-  void ResetScreenAvailabilityListener(const std::string& presentation_url);
-
   // Removes all listeners and resets default presentation URL on this instance
   // and informs the PresentationServiceDelegate of such.
   void Reset();
@@ -267,28 +242,24 @@ class CONTENT_EXPORT PresentationServiceImpl
   void OnJoinSessionError(
       int request_session_id,
       const PresentationError& error);
-  void OnSendMessageCallback();
-
-  // Requests delegate to start a session.
-  void DoStartSession(scoped_ptr<StartSessionRequest> request);
+  void OnSendMessageCallback(bool sent);
 
   // Passed to embedder's implementation of PresentationServiceDelegate for
   // later invocation when session messages arrive.
-  // For optimization purposes, this method will empty the messages
-  // passed to it.
   void OnSessionMessages(
-      scoped_ptr<ScopedVector<PresentationSessionMessage>> messages);
-
-  // Removes the head of the queue (which represents the request that has just
-  // been processed).
-  // Checks if there are any queued StartSession requests and if so, executes
-  // the first one in the queue.
-  void HandleQueuedStartSessionRequests();
+      const content::PresentationSessionInfo& session,
+      const ScopedVector<PresentationSessionMessage>& messages,
+      bool pass_ownership);
 
   // Associates a JoinSession |callback| with a unique request ID and
   // stores it in a map.
   // Returns a positive value on success.
   int RegisterJoinSessionCallback(const NewSessionMojoCallback& callback);
+
+  // Invoked by the embedder's PresentationServiceDelegate when a
+  // presentation session's state has changed.
+  void OnSessionStateChanged(const PresentationSessionInfo& session_info,
+                             PresentationSessionState session_state);
 
   // Returns true if this object is associated with |render_frame_host|.
   bool FrameMatches(content::RenderFrameHost* render_frame_host) const;
@@ -302,14 +273,10 @@ class CONTENT_EXPORT PresentationServiceImpl
   presentation::PresentationServiceClientPtr client_;
 
   std::string default_presentation_url_;
-  std::string default_presentation_id_;
 
-  scoped_ptr<ScreenAvailabilityListenerImpl> screen_availability_listener_;
-
-  // We only allow one StartSession request to be processed at a time.
-  // StartSession requests are queued here. When a request has been processed,
-  // it is removed from head of the queue.
-  std::deque<linked_ptr<StartSessionRequest>> queued_start_session_requests_;
+  using ScreenAvailabilityListenerMap =
+    base::ScopedPtrMap<std::string, scoped_ptr<ScreenAvailabilityListenerImpl>>;
+  ScreenAvailabilityListenerMap screen_availability_listeners_;
 
   // For StartSession requests.
   // Set to a positive value when a StartSession request is being processed.

@@ -38,6 +38,9 @@
 #include "public/web/WebFrameWidget.h"
 #include "public/web/WebInputEvent.h"
 #include "web/PageWidgetDelegate.h"
+#include "web/WebLocalFrameImpl.h"
+#include "web/WebViewImpl.h"
+#include "wtf/Assertions.h"
 #include "wtf/HashSet.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/RefCounted.h"
@@ -52,14 +55,12 @@ class UserGestureToken;
 class WebCompositorAnimationTimeline;
 class WebLayer;
 class WebLayerTreeView;
-class WebLocalFrameImpl;
 class WebMouseEvent;
 class WebMouseWheelEvent;
-class WebViewImpl;
 
-class WebFrameWidgetImpl final : public WebFrameWidget
-    , public PageWidgetEventHandler
-    , public RefCounted<WebFrameWidgetImpl> {
+class WebFrameWidgetImpl final : public RefCountedWillBeGarbageCollectedFinalized<WebFrameWidgetImpl>
+    , public WebFrameWidget
+    , public PageWidgetEventHandler {
 public:
     static WebFrameWidgetImpl* create(WebWidgetClient*, WebLocalFrame*);
     static HashSet<WebFrameWidgetImpl*>& allInstances();
@@ -69,18 +70,16 @@ public:
     WebSize size() override;
     void willStartLiveResize() override;
     void resize(const WebSize&) override;
+    void resizeVisualViewport(const WebSize&) override;
     void resizePinchViewport(const WebSize&) override;
     void willEndLiveResize() override;
-    void willEnterFullScreen() override;
     void didEnterFullScreen() override;
-    void willExitFullScreen() override;
     void didExitFullScreen() override;
     void beginFrame(const WebBeginFrameArgs&) override;
     void layout() override;
     void paint(WebCanvas*, const WebRect&) override;
     void layoutAndPaintAsync(WebLayoutAndPaintAsyncCallback*) override;
     void compositeAndReadbackAsync(WebCompositeAndReadbackAsyncCallback*) override;
-    bool isTrackingRepaints() const override;
     void themeChanged() override;
     bool handleInputEvent(const WebInputEvent&) override;
     void setCursorVisibilityState(bool isVisible) override;
@@ -139,7 +138,7 @@ public:
 
     // Returns the page object associated with this widget. This may be null when
     // the page is shutting down, but will be valid at all other times.
-    Page* page() const { return m_page; }
+    Page* page() const { return view()->page(); }
 
     WebLayerTreeView* layerTreeView() const { return m_layerTreeView; }
 
@@ -149,9 +148,15 @@ public:
         ScrollDirection*,
         ScrollGranularity*);
 
+    DECLARE_TRACE();
+
 private:
     friend class WebFrameWidget; // For WebFrameWidget::create.
+#if ENABLE(OILPAN)
+    friend class GarbageCollectedFinalized<WebFrameWidgetImpl>;
+#else
     friend class WTF::RefCounted<WebFrameWidgetImpl>;
+#endif
 
     explicit WebFrameWidgetImpl(WebWidgetClient*, WebLocalFrame*);
     ~WebFrameWidgetImpl();
@@ -180,16 +185,18 @@ private:
     bool handleKeyEvent(const WebKeyboardEvent&) override;
     bool handleCharEvent(const WebKeyboardEvent&) override;
 
+    WebViewImpl* view() const { return m_localRoot->viewImpl(); }
+
     WebWidgetClient* m_client;
 
     // WebFrameWidget is associated with a subtree of the frame tree, corresponding to a maximal
     // connected tree of LocalFrames. This member points to the root of that subtree.
-    WebLocalFrameImpl* m_localRoot;
+    RawPtrWillBeMember<WebLocalFrameImpl> m_localRoot;
 
     WebSize m_size;
 
     // If set, the (plugin) node which has mouse capture.
-    RefPtrWillBePersistent<Node> m_mouseCaptureNode;
+    RefPtrWillBeMember<Node> m_mouseCaptureNode;
     RefPtr<UserGestureToken> m_mouseCaptureGestureToken;
 
     WebLayerTreeView* m_layerTreeView;
@@ -198,17 +205,18 @@ private:
     bool m_isAcceleratedCompositingActive;
     bool m_layerTreeViewClosed;
 
-    // FIXME: The lifetimes of these objects relative to the WebFrameWidget are not clear,
-    // and it might be better to replace them with lookups based on the localRoot.
-    WebViewImpl* m_webView;
-    Page* m_page;
-
     bool m_suppressNextKeypressEvent;
 
     bool m_ignoreInputEvents;
 
     static const WebInputEvent* m_currentInputEvent;
+
+#if ENABLE(OILPAN)
+    SelfKeepAlive<WebFrameWidgetImpl> m_selfKeepAlive;
+#endif
 };
+
+DEFINE_TYPE_CASTS(WebFrameWidgetImpl, WebFrameWidget, widget, widget->forSubframe(), widget.forSubframe());
 
 } // namespace blink
 

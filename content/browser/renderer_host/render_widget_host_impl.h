@@ -176,6 +176,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // Sets the View of this RenderWidgetHost.
   void SetView(RenderWidgetHostViewBase* view);
 
+  RenderWidgetHostDelegate* delegate() const { return delegate_; }
+
   int surface_id() const { return surface_id_; }
 
   bool empty() const { return current_size_.IsEmpty(); }
@@ -302,19 +304,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
 
   void CancelUpdateTextDirection();
 
-  // Notifies the renderer whether or not the input method attached to this
-  // process is activated.
-  // When the input method is activated, a renderer process sends IPC messages
-  // to notify the status of its composition node. (This message is mainly used
-  // for notifying the position of the input cursor so that the browser can
-  // display input method windows under the cursor.)
-  void SetInputMethodActive(bool activate);
-
-  // Notifies the renderer changes of IME candidate window state.
-  void CandidateWindowShown();
-  void CandidateWindowUpdated();
-  void CandidateWindowHidden();
-
   // Update the composition node of the renderer (or WebKit).
   // WebKit has a special node (a composition node) for input method to change
   // its text without affecting any other DOM nodes. When the input method
@@ -355,10 +344,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
 
   bool ignore_input_events() const {
     return ignore_input_events_;
-  }
-
-  bool input_method_active() const {
-    return input_method_active_;
   }
 
   // Whether forwarded WebInputEvents should be ignored.  True if either
@@ -460,8 +445,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // subsystem.
   int64 GetLatencyComponentId() const;
 
-  base::TimeDelta GetEstimatedBrowserCompositeTime() const;
-
   static void CompositorFrameDrawn(
       const std::vector<ui::LatencyInfo>& latency_info);
 
@@ -482,6 +465,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl
 #if defined(OS_WIN)
   gfx::NativeViewAccessible GetParentNativeViewAccessible();
 #endif
+
+  void set_renderer_initialized(bool renderer_initialized) {
+    renderer_initialized_ = renderer_initialized;
+  }
 
  protected:
   RenderWidgetHostImpl* AsRenderWidgetHostImpl() override;
@@ -558,10 +545,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
     return --in_flight_event_count_;
   }
 
-  void set_renderer_initialized(bool renderer_initialized) {
-    renderer_initialized_ = renderer_initialized;
-  }
-
   bool renderer_initialized() const { return renderer_initialized_; }
 
   // The View associated with the RenderViewHost. The lifetime of this object
@@ -608,10 +591,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   virtual void OnFocus();
   virtual void OnBlur();
   void OnSetCursor(const WebCursor& cursor);
-  void OnTextInputTypeChanged(ui::TextInputType type,
-                              ui::TextInputMode input_mode,
-                              bool can_compose_inline,
-                              int flags);
+  void OnTextInputStateChanged(
+      const ViewHostMsg_TextInputState_Params& params);
 
   void OnImeCompositionRangeChanged(
       const gfx::Range& range,
@@ -659,8 +640,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   void DidStopFlinging() override;
 
   // InputAckHandler
-  void OnKeyboardEventAck(const NativeWebKeyboardEvent& event,
+  void OnKeyboardEventAck(const NativeWebKeyboardEventWithLatencyInfo& event,
                           InputEventAckState ack_result) override;
+  void OnMouseEventAck(const MouseEventWithLatencyInfo& event,
+                       InputEventAckState ack_result) override;
   void OnWheelEventAck(const MouseWheelEventWithLatencyInfo& event,
                        InputEventAckState ack_result) override;
   void OnTouchEventAck(const TouchEventWithLatencyInfo& event,
@@ -769,9 +752,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
 
   // Set to true if we shouldn't send input events from the render widget.
   bool ignore_input_events_;
-
-  // Indicates whether IME is active.
-  bool input_method_active_;
 
   // Set when we update the text direction of the selected input element.
   bool text_direction_updated_;

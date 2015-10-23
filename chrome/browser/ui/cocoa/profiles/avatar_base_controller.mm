@@ -7,13 +7,13 @@
 #include "base/mac/foundation_util.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
+#include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
-#include "chrome/browser/signin/signin_header_helper.h"
-#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/profiles/profile_window.h"
+#include "chrome/browser/profiles/profiles_state.h"
+#include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -131,11 +131,16 @@ class ProfileInfoUpdateObserver : public ProfileInfoCacheObserver,
 }
 
 - (void)dealloc {
+  [self browserWillBeDestroyed];
+  [super dealloc];
+}
+
+- (void)browserWillBeDestroyed {
   [[NSNotificationCenter defaultCenter]
       removeObserver:self
                 name:NSWindowWillCloseNotification
               object:[menuController_ window]];
-  [super dealloc];
+  browser_ = nullptr;
 }
 
 - (NSButton*)buttonView {
@@ -218,9 +223,15 @@ class ProfileInfoUpdateObserver : public ProfileInfoCacheObserver,
   ProfileMetrics::LogProfileOpenMethod(ProfileMetrics::ICON_AVATAR_BUBBLE);
 }
 
+- (BOOL)isCtrlPressed {
+  return [NSEvent modifierFlags] & NSControlKeyMask ? YES : NO;
+}
+
 - (IBAction)buttonClicked:(id)sender {
   BrowserWindow::AvatarBubbleMode mode =
       BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT;
+  if ([self isCtrlPressed])
+    mode = BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH;
 
   [self showAvatarBubbleAnchoredAt:button_
                           withMode:mode

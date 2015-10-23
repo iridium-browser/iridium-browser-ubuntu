@@ -1,4 +1,4 @@
-  {{ MANIFEST_KEY_FOR_UNOFFICIAL_BUILD }}
+  "key": "{{ MANIFEST_KEY }}",
   "name": "{{APP_NAME}}",
   "description": "{{APP_DESCRIPTION}}",
   "version": "{{ FULL_APP_VERSION }}",
@@ -6,9 +6,13 @@
   "default_locale": "en",
   "app": {
     "background": {
-      "scripts": ["ar_background.js", "platform.js"]
+      "page": "arv_background.html"
     }
   },
+  "import": [{
+      "id": "koejkfhmphamcgafjmkellhnekdkopod"
+    }
+  ],
   "icons": {
     "128": "icon128.png",
     "48": "icon48.png",
@@ -23,6 +27,7 @@
     "{{ OAUTH2_ACCOUNTS_HOST }}/*",
     "{{ OAUTH2_API_BASE_URL }}/*",
     "{{ TALK_GADGET_HOST }}/talkgadget/*",
+    {{ CLOUD_PRINT_URL }}
     "app.window.shape",
     "clipboardRead",
     "clipboardWrite",
@@ -31,6 +36,7 @@
     "fullscreen",
     "https://relay.google.com/*",
     "identity",
+    "metricsPrivate",
     "pointerLock",
     "storage",
     {
@@ -41,7 +47,8 @@
         "resolve-host",
         "network-state"
       ]
-    }
+    },
+    "webview"
   ],
   "sockets": {
     "tcp": {
@@ -51,9 +58,14 @@
   "oauth2": {
     "client_id": "{{ REMOTING_IDENTITY_API_CLIENT_ID }}",
     "scopes": [
-      "https://www.googleapis.com/auth/appremoting.runapplication https://www.googleapis.com/auth/googletalk https://www.googleapis.com/auth/userinfo#email https://www.googleapis.com/auth/userinfo.profile {{ OAUTH_GDRIVE_SCOPE }}"
+      {{ OAUTH_CLOUD_PRINT_SCOPE }}
+      {{ OAUTH_GDRIVE_SCOPE }}
+      "https://www.googleapis.com/auth/appremoting.runapplication",
+      "https://www.googleapis.com/auth/googletalk",
+      "https://www.googleapis.com/auth/userinfo#email",
+      "https://www.googleapis.com/auth/userinfo.profile"
     ]
   },
   "sandbox": {
-    "pages": [ "wcs_sandbox.html" ]
+    "pages": [ "arv_wcs_sandbox.html" ]
   }

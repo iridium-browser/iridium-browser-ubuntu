@@ -5,6 +5,7 @@
 #include "cc/output/latency_info_swap_promise.h"
 
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 
 namespace {
 ui::LatencyComponentType DidNotSwapReasonToLatencyComponentType(
@@ -33,7 +34,7 @@ LatencyInfoSwapPromise::~LatencyInfoSwapPromise() {
 }
 
 void LatencyInfoSwapPromise::DidSwap(CompositorFrameMetadata* metadata) {
-  DCHECK(!latency_.terminated);
+  DCHECK(!latency_.terminated());
   metadata->latency_info.push_back(latency_);
 }
 
@@ -46,7 +47,16 @@ void LatencyInfoSwapPromise::DidNotSwap(DidNotSwapReason reason) {
 }
 
 int64 LatencyInfoSwapPromise::TraceId() const {
-  return latency_.trace_id;
+  return latency_.trace_id();
+}
+
+// Trace the original LatencyInfo of a LatencyInfoSwapPromise
+void LatencyInfoSwapPromise::OnCommit() {
+  TRACE_EVENT_WITH_FLOW1("input,benchmark",
+                         "LatencyInfo.Flow",
+                         TRACE_ID_DONT_MANGLE(TraceId()),
+                         TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT,
+                         "step", "HandleInputEventMainCommit");
 }
 
 }  // namespace cc

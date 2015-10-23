@@ -136,32 +136,13 @@ scoped_ptr<AutofillProfile> ConstructCompleteProfile() {
   profile->set_use_count(7);
   profile->set_use_date(base::Time::FromTimeT(1423182152));
 
-  std::vector<base::string16> names;
-  names.push_back(ASCIIToUTF16("John K. Doe, Jr."));
-  names.push_back(ASCIIToUTF16("Jane Luise Smith MD"));
-  profile->SetRawMultiInfo(NAME_FULL, names);
-  names.clear();
-  names.push_back(ASCIIToUTF16("John"));
-  names.push_back(ASCIIToUTF16("Jane"));
-  profile->SetRawMultiInfo(NAME_FIRST, names);
-  names.clear();
-  names.push_back(ASCIIToUTF16("K."));
-  names.push_back(ASCIIToUTF16("Luise"));
-  profile->SetRawMultiInfo(NAME_MIDDLE, names);
-  names.clear();
-  names.push_back(ASCIIToUTF16("Doe"));
-  names.push_back(ASCIIToUTF16("Smith"));
-  profile->SetRawMultiInfo(NAME_LAST, names);
+  profile->SetRawInfo(NAME_FULL, ASCIIToUTF16("John K. Doe, Jr."));
+  profile->SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
+  profile->SetRawInfo(NAME_MIDDLE, ASCIIToUTF16("K."));
+  profile->SetRawInfo(NAME_LAST, ASCIIToUTF16("Doe"));
 
-  std::vector<base::string16> emails;
-  emails.push_back(ASCIIToUTF16("user@example.com"));
-  emails.push_back(ASCIIToUTF16("superuser@example.org"));
-  profile->SetRawMultiInfo(EMAIL_ADDRESS, emails);
-
-  std::vector<base::string16> phones;
-  phones.push_back(ASCIIToUTF16("1.800.555.1234"));
-  phones.push_back(ASCIIToUTF16("1.866.650.0000"));
-  profile->SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, phones);
+  profile->SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("user@example.com"));
+  profile->SetRawInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16("1.800.555.1234"));
 
   profile->SetRawInfo(ADDRESS_HOME_STREET_ADDRESS,
                       ASCIIToUTF16("123 Fake St.\n"
@@ -199,16 +180,9 @@ syncer::SyncData ConstructCompleteSyncData() {
   specifics->add_name_last("Doe");
   specifics->add_name_full("John K. Doe, Jr.");
 
-  specifics->add_name_first("Jane");
-  specifics->add_name_middle("Luise");
-  specifics->add_name_last("Smith");
-  specifics->add_name_full("Jane Luise Smith MD");
-
   specifics->add_email_address("user@example.com");
-  specifics->add_email_address("superuser@example.org");
 
   specifics->add_phone_home_whole_number("1.800.555.1234");
-  specifics->add_phone_home_whole_number("1.866.650.0000");
 
   specifics->set_address_home_line1("123 Fake St.");
   specifics->set_address_home_line2("Apt. 42");
@@ -614,155 +588,62 @@ TEST_F(AutofillProfileSyncableServiceTest, UpdateField) {
   EXPECT_EQ(profile.GetRawInfo(COMPANY_NAME), ASCIIToUTF16(company2));
 }
 
-TEST_F(AutofillProfileSyncableServiceTest, UpdateMultivaluedField) {
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
-
-  std::vector<base::string16> values;
-  values.push_back(ASCIIToUTF16("1@1.com"));
-  values.push_back(ASCIIToUTF16("2@1.com"));
-  profile.SetRawMultiInfo(EMAIL_ADDRESS, values);
-
-  ::google::protobuf::RepeatedPtrField<std::string> specifics_fields;
-  specifics_fields.AddAllocated(new std::string("2@1.com"));
-  specifics_fields.AddAllocated(new std::string("3@1.com"));
-
-  EXPECT_TRUE(AutofillProfileSyncableService::UpdateMultivaluedField(
-      EMAIL_ADDRESS, specifics_fields, &profile));
-  profile.GetRawMultiInfo(EMAIL_ADDRESS, &values);
-  ASSERT_TRUE(values.size() == 2);
-  EXPECT_EQ(values[0], ASCIIToUTF16("2@1.com"));
-  EXPECT_EQ(values[1], ASCIIToUTF16("3@1.com"));
-
-  EXPECT_FALSE(AutofillProfileSyncableService::UpdateMultivaluedField(
-      EMAIL_ADDRESS, specifics_fields, &profile));
-  profile.GetRawMultiInfo(EMAIL_ADDRESS, &values);
-  ASSERT_EQ(values.size(), 2U);
-  EXPECT_EQ(values[0], ASCIIToUTF16("2@1.com"));
-  EXPECT_EQ(values[1], ASCIIToUTF16("3@1.com"));
-  EXPECT_TRUE(AutofillProfileSyncableService::UpdateMultivaluedField(
-      EMAIL_ADDRESS, ::google::protobuf::RepeatedPtrField<std::string>(),
-      &profile));
-  profile.GetRawMultiInfo(EMAIL_ADDRESS, &values);
-  ASSERT_EQ(values.size(), 1U);  // Always have at least an empty string.
-  EXPECT_EQ(values[0], ASCIIToUTF16(""));
-}
-
 TEST_F(AutofillProfileSyncableServiceTest, MergeProfile) {
   AutofillProfile profile1(kGuid1, kHttpOrigin);
   profile1.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("111 First St."));
 
-  std::vector<base::string16> values;
-  values.push_back(ASCIIToUTF16("1@1.com"));
-  values.push_back(ASCIIToUTF16("2@1.com"));
-  profile1.SetRawMultiInfo(EMAIL_ADDRESS, values);
-
   AutofillProfile profile2(kGuid2, kHttpsOrigin);
   profile2.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("111 First St."));
 
-  // |values| now is [ "1@1.com", "2@1.com", "3@1.com" ].
-  values.push_back(ASCIIToUTF16("3@1.com"));
-  profile2.SetRawMultiInfo(EMAIL_ADDRESS, values);
+  profile1.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("1@1.com"));
+  profile2.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("1@1.com"));
 
-  values.clear();
-  values.push_back(ASCIIToUTF16("John"));
-  profile1.SetRawMultiInfo(NAME_FIRST, values);
-  values.push_back(ASCIIToUTF16("Jane"));
-  profile2.SetRawMultiInfo(NAME_FIRST, values);
+  profile1.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
+  profile2.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
 
-  values.clear();
-  values.push_back(ASCIIToUTF16("Doe"));
-  profile1.SetRawMultiInfo(NAME_LAST, values);
-  values.push_back(ASCIIToUTF16("Other"));
-  profile2.SetRawMultiInfo(NAME_LAST, values);
+  profile1.SetRawInfo(NAME_LAST, ASCIIToUTF16("Doe"));
+  profile2.SetRawInfo(NAME_LAST, ASCIIToUTF16("Doe"));
 
-  values.clear();
-  values.push_back(ASCIIToUTF16("650234567"));
-  profile2.SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, values);
+  profile2.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16("650234567"));
 
   profile1.set_language_code("en");
 
-  EXPECT_FALSE(AutofillProfileSyncableService::MergeProfile(profile2,
-                                                            &profile1,
+  EXPECT_FALSE(AutofillProfileSyncableService::MergeProfile(profile2, &profile1,
                                                             "en-US"));
 
   // The more recent use_date is maintained and synced back.
   profile2.set_use_date(base::Time::FromTimeT(30));
   profile1.set_use_date(base::Time::FromTimeT(25));
-  EXPECT_FALSE(AutofillProfileSyncableService::MergeProfile(profile2,
-                                                            &profile1,
+  EXPECT_FALSE(AutofillProfileSyncableService::MergeProfile(profile2, &profile1,
                                                             "en-US"));
   EXPECT_EQ(base::Time::FromTimeT(30), profile1.use_date());
   profile1.set_use_date(base::Time::FromTimeT(35));
-  EXPECT_TRUE(AutofillProfileSyncableService::MergeProfile(profile2,
-                                                           &profile1,
+  EXPECT_TRUE(AutofillProfileSyncableService::MergeProfile(profile2, &profile1,
                                                            "en-US"));
   EXPECT_EQ(base::Time::FromTimeT(35), profile1.use_date());
 
-  profile1.GetRawMultiInfo(NAME_FIRST, &values);
-  ASSERT_EQ(values.size(), 2U);
-  EXPECT_EQ(values[0], ASCIIToUTF16("John"));
-  EXPECT_EQ(values[1], ASCIIToUTF16("Jane"));
-
-  profile1.GetRawMultiInfo(NAME_LAST, &values);
-  ASSERT_EQ(values.size(), 2U);
-  EXPECT_EQ(values[0], ASCIIToUTF16("Doe"));
-  EXPECT_EQ(values[1], ASCIIToUTF16("Other"));
-
-  profile1.GetRawMultiInfo(EMAIL_ADDRESS, &values);
-  ASSERT_EQ(values.size(), 3U);
-  EXPECT_EQ(values[0], ASCIIToUTF16("1@1.com"));
-  EXPECT_EQ(values[1], ASCIIToUTF16("2@1.com"));
-  EXPECT_EQ(values[2], ASCIIToUTF16("3@1.com"));
-
-  profile1.GetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, &values);
-  ASSERT_EQ(values.size(), 1U);
-  EXPECT_EQ(values[0], ASCIIToUTF16("650234567"));
+  EXPECT_EQ(ASCIIToUTF16("John"), profile1.GetRawInfo(NAME_FIRST));
+  EXPECT_EQ(ASCIIToUTF16("Doe"), profile1.GetRawInfo(NAME_LAST));
+  EXPECT_EQ(ASCIIToUTF16("1@1.com"), profile1.GetRawInfo(EMAIL_ADDRESS));
+  EXPECT_EQ(ASCIIToUTF16("650234567"),
+            profile1.GetRawInfo(PHONE_HOME_WHOLE_NUMBER));
 
   EXPECT_EQ(profile2.origin(), profile1.origin());
 
   AutofillProfile profile3(kGuid3, kHttpOrigin);
   profile3.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("111 First St."));
-
-  values.clear();
-  values.push_back(ASCIIToUTF16("Jane"));
-  profile3.SetRawMultiInfo(NAME_FIRST, values);
-
-  values.clear();
-  values.push_back(ASCIIToUTF16("Doe"));
-  profile3.SetRawMultiInfo(NAME_LAST, values);
+  profile3.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Jane"));
+  profile3.SetRawInfo(NAME_LAST, ASCIIToUTF16("Doe"));
 
   EXPECT_TRUE(AutofillProfileSyncableService::MergeProfile(profile3,
                                                            &profile1,
                                                            "en-US"));
 
-  profile1.GetRawMultiInfo(NAME_FIRST, &values);
-  ASSERT_EQ(values.size(), 3U);
-  EXPECT_EQ(values[0], ASCIIToUTF16("John"));
-  EXPECT_EQ(values[1], ASCIIToUTF16("Jane"));
-  EXPECT_EQ(values[2], ASCIIToUTF16("Jane"));
-
-  profile1.GetRawMultiInfo(NAME_LAST, &values);
-  ASSERT_EQ(values.size(), 3U);
-  EXPECT_EQ(values[0], ASCIIToUTF16("Doe"));
-  EXPECT_EQ(values[1], ASCIIToUTF16("Other"));
-  EXPECT_EQ(values[2], ASCIIToUTF16("Doe"));
-
-  // Middle name should have three entries as well.
-  profile1.GetRawMultiInfo(NAME_MIDDLE, &values);
-  ASSERT_EQ(values.size(), 3U);
-  EXPECT_TRUE(values[0].empty());
-  EXPECT_TRUE(values[1].empty());
-  EXPECT_TRUE(values[2].empty());
-
-  profile1.GetRawMultiInfo(EMAIL_ADDRESS, &values);
-  ASSERT_EQ(values.size(), 3U);
-  EXPECT_EQ(values[0], ASCIIToUTF16("1@1.com"));
-  EXPECT_EQ(values[1], ASCIIToUTF16("2@1.com"));
-  EXPECT_EQ(values[2], ASCIIToUTF16("3@1.com"));
-
-  profile1.GetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, &values);
-  ASSERT_EQ(values.size(), 1U);
-  EXPECT_EQ(values[0], ASCIIToUTF16("650234567"));
+  EXPECT_EQ(ASCIIToUTF16("Jane"), profile1.GetRawInfo(NAME_FIRST));
+  EXPECT_EQ(ASCIIToUTF16("Doe"), profile1.GetRawInfo(NAME_LAST));
+  EXPECT_EQ(ASCIIToUTF16("1@1.com"), profile1.GetRawInfo(EMAIL_ADDRESS));
+  EXPECT_EQ(ASCIIToUTF16("650234567"),
+            profile1.GetRawInfo(PHONE_HOME_WHOLE_NUMBER));
 }
 
 // Ensure that all profile fields are able to be synced up from the client to
@@ -1174,8 +1055,7 @@ TEST_F(AutofillProfileSyncableServiceTest, EmptySyncPreservesFullName) {
 
   // Local autofill profile has a full name.
   AutofillProfile profile(kGuid1, kHttpsOrigin);
-  profile.SetInfo(AutofillType(NAME_FULL),
-                  ASCIIToUTF16("John Jacob Smith, Jr"), "en-US");
+  profile.SetRawInfo(NAME_FULL, ASCIIToUTF16("John Jacob Smith, Jr"));
   profiles_from_web_db.push_back(new AutofillProfile(profile));
 
   // Remote data does not have a full name value.
@@ -1358,6 +1238,25 @@ TEST_F(AutofillProfileSyncableServiceTest, ClientOverwritesUsageStats) {
   EXPECT_EQ(30, result_specifics.use_date());
 
   autofill_syncable_service_.StopSyncing(syncer::AUTOFILL_PROFILE);
+}
+
+// Server profile updates should be ignored.
+TEST_F(AutofillProfileSyncableServiceTest, IgnoreServerProfileUpdate) {
+  EXPECT_CALL(autofill_syncable_service_, LoadAutofillData(_))
+      .Times(1)
+      .WillOnce(Return(true));
+  EXPECT_CALL(autofill_syncable_service_, SaveChangesToWebData(_))
+      .Times(1)
+      .WillOnce(Return(true));
+  autofill_syncable_service_.MergeDataAndStartSyncing(
+      syncer::AUTOFILL_PROFILE, syncer::SyncDataList(),
+      make_scoped_ptr(new TestSyncChangeProcessor),
+      scoped_ptr<syncer::SyncErrorFactory>(new syncer::SyncErrorFactoryMock()));
+  AutofillProfile server_profile(AutofillProfile::SERVER_PROFILE, "server-id");
+
+  // Should not crash:
+  autofill_syncable_service_.AutofillProfileChanged(AutofillProfileChange(
+      AutofillProfileChange::UPDATE, server_profile.guid(), &server_profile));
 }
 
 }  // namespace autofill

@@ -114,13 +114,19 @@ DEFAULT_OPTIONS = {
 # that use _MockRunTests.
 _MockResultsGenerator = (x for x in [])
 
+def _MakeMockRunTests(bisect_mode_is_return_code=False):
+  def _MockRunTests(*args, **kwargs):  # pylint: disable=unused-argument
+    return _FakeTestResult(
+        _MockResultsGenerator.next(), bisect_mode_is_return_code)
 
-def _MockRunTests(*args, **kwargs):  # pylint: disable=unused-argument
-  return _FakeTestResult(_MockResultsGenerator.next())
+  return _MockRunTests
 
 
-def _FakeTestResult(values):
-  result_dict = {'mean': 0.0, 'std_err': 0.0, 'std_dev': 0.0, 'values': values}
+def _FakeTestResult(values, bisect_mode_is_return_code):
+  mean = 0.0
+  if bisect_mode_is_return_code:
+    mean = 0 if (all(v == 0 for v in values)) else 1
+  result_dict = {'mean': mean, 'std_err': 0.0, 'std_dev': 0.0, 'values': values}
   success_code = 0
   return (result_dict, success_code)
 
@@ -279,65 +285,6 @@ class BisectPerfRegressionTest(unittest.TestCase):
     self._AssertParseResult([], '{}kb')
     self._AssertParseResult([], '{XYZ}kb')
 
-  def _AssertCompatibleCommand(
-      self, expected_command, original_command, revision, target_platform):
-    """Tests the modification of the command that might be done.
-
-    This modification to the command is done in order to get a Telemetry
-    command that works; before some revisions, the browser name that Telemetry
-    expects is different in some cases, but we want it to work anyway.
-
-    Specifically, only for android:
-      After r276628, only android-chrome-shell works.
-      Prior to r274857, only android-chromium-testshell works.
-      In the range [274857, 276628], both work.
-    """
-    bisect_options = bisect_perf_regression.BisectOptions()
-    bisect_options.output_buildbot_annotations = None
-    bisect_instance = bisect_perf_regression.BisectPerformanceMetrics(
-        bisect_options, os.getcwd())
-    bisect_instance.opts.target_platform = target_platform
-    git_revision = source_control.ResolveToRevision(
-        revision, 'chromium', bisect_utils.DEPOT_DEPS_NAME, 100)
-    depot = 'chromium'
-    command = bisect_instance.GetCompatibleCommand(
-        original_command, git_revision, depot)
-    self.assertEqual(expected_command, command)
-
-  def testGetCompatibleCommand_ChangeToTestShell(self):
-    # For revisions <= r274857, only android-chromium-testshell is used.
-    self._AssertCompatibleCommand(
-        'tools/perf/run_benchmark -v --browser=android-chromium-testshell foo',
-        'tools/perf/run_benchmark -v --browser=android-chrome-shell foo',
-        274857, 'android')
-
-  def testGetCompatibleCommand_ChangeToShell(self):
-    # For revisions >= r276728, only android-chrome-shell can be used.
-    self._AssertCompatibleCommand(
-        'tools/perf/run_benchmark -v --browser=android-chrome-shell foo',
-        'tools/perf/run_benchmark -v --browser=android-chromium-testshell foo',
-        276628, 'android')
-
-  def testGetCompatibleCommand_NoChange(self):
-    # For revisions < r276728, android-chromium-testshell can be used.
-    self._AssertCompatibleCommand(
-        'tools/perf/run_benchmark -v --browser=android-chromium-testshell foo',
-        'tools/perf/run_benchmark -v --browser=android-chromium-testshell foo',
-        274858, 'android')
-    # For revisions > r274857, android-chrome-shell can be used.
-    self._AssertCompatibleCommand(
-        'tools/perf/run_benchmark -v --browser=android-chrome-shell foo',
-        'tools/perf/run_benchmark -v --browser=android-chrome-shell foo',
-        274858, 'android')
-
-  def testGetCompatibleCommand_NonAndroidPlatform(self):
-    # In most cases, there's no need to change Telemetry command.
-    # For revisions >= r276728, only android-chrome-shell can be used.
-    self._AssertCompatibleCommand(
-        'tools/perf/run_benchmark -v --browser=release foo',
-        'tools/perf/run_benchmark -v --browser=release foo',
-        276628, 'chromium')
-
   # This method doesn't reference self; it fails if an error is thrown.
   # pylint: disable=R0201
   def testDryRun(self):
@@ -375,7 +322,7 @@ class BisectPerfRegressionTest(unittest.TestCase):
     _MockResultsGenerator = (r for r in results)
     bisect_class = bisect_perf_regression.BisectPerformanceMetrics
     original_run_tests = bisect_class.RunPerformanceTestAndParseResults
-    bisect_class.RunPerformanceTestAndParseResults = _MockRunTests
+    bisect_class.RunPerformanceTestAndParseResults = _MakeMockRunTests()
 
     try:
       dry_run_results = _GenericDryRun(_GetExtendedOptions(0, 0, False))
@@ -387,8 +334,9 @@ class BisectPerfRegressionTest(unittest.TestCase):
       bisect_class.RunPerformanceTestAndParseResults = original_run_tests
 
     # If the job was aborted, there should be a warning about it.
-    assert [w for w in dry_run_results.warnings
-            if 'could not reproduce the regression' in w]
+    self.assertTrue(
+        any('did not clearly reproduce a regression' in w
+            for w in dry_run_results.warnings))
     return True
 
   def testBisectAbortedOnClearNonRegression(self):
@@ -405,6 +353,36 @@ class BisectPerfRegressionTest(unittest.TestCase):
 
   def testBisectNotAborted_MultipleValues(self):
     self.assertFalse(self._CheckAbortsEarly(MULTIPLE_VALUES))
+
+  def _CheckAbortsEarlyForReturnCode(self, results):
+    """Returns True if the bisect job would abort early in return code mode."""
+    global _MockResultsGenerator
+    _MockResultsGenerator = (r for r in results)
+    bisect_class = bisect_perf_regression.BisectPerformanceMetrics
+    original_run_tests = bisect_class.RunPerformanceTestAndParseResults
+    bisect_class.RunPerformanceTestAndParseResults = _MakeMockRunTests(True)
+    options = dict(DEFAULT_OPTIONS)
+    options.update({'bisect_mode': 'return_code'})
+    try:
+      dry_run_results = _GenericDryRun(options)
+    except StopIteration:
+      # If StopIteration was raised, that means that the next value after
+      # the first two values was requested, so the job was not aborted.
+      return False
+    finally:
+      bisect_class.RunPerformanceTestAndParseResults = original_run_tests
+
+    # If the job was aborted, there should be a warning about it.
+    if ('known good and known bad revisions returned same' in
+        dry_run_results.abort_reason):
+      return True
+    return False
+
+  def testBisectAbortOn_SameReturnCode(self):
+    self.assertTrue(self._CheckAbortsEarlyForReturnCode([[0,0,0], [0,0,0]]))
+
+  def testBisectNotAbortedOn_DifferentReturnCode(self):
+    self.assertFalse(self._CheckAbortsEarlyForReturnCode([[1,1,1], [0,0,0]]))
 
   def testGetCommitPosition(self):
     cp_git_rev = '7017a81991de983e12ab50dfc071c70e06979531'

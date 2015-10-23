@@ -90,8 +90,13 @@ bool ResolveStringFromCommandLineInput(
                                Value(nullptr, input), &err);
   if (err.has_error()) {
     // Not a valid label, assume this must be a file.
+    err = Err();
     file_matches->push_back(current_dir.ResolveRelativeFile(
-        input, setup->build_settings().root_path_utf8()));
+        Value(nullptr, input), &err, setup->build_settings().root_path_utf8()));
+    if (err.has_error()) {
+      err.PrintToStdout();
+      return false;
+    }
     return true;
   }
 
@@ -106,7 +111,11 @@ bool ResolveStringFromCommandLineInput(
   } else {
     // Not an item, assume this must be a file.
     file_matches->push_back(current_dir.ResolveRelativeFile(
-        input, setup->build_settings().root_path_utf8()));
+        Value(nullptr, input), &err, setup->build_settings().root_path_utf8()));
+    if (err.has_error()) {
+      err.PrintToStdout();
+      return false;
+    }
   }
 
   return true;
@@ -362,6 +371,7 @@ const CommandInfoMap& GetCommands() {
     INSERT_COMMAND(Format)
     INSERT_COMMAND(Help)
     INSERT_COMMAND(Ls)
+    INSERT_COMMAND(Path)
     INSERT_COMMAND(Refs)
 
     #undef INSERT_COMMAND
@@ -396,7 +406,7 @@ const Target* ResolveTargetFromCommandLineString(
     Err(Location(), "Not a target.",
         "The \"" + label.GetUserVisibleName(false) + "\" thing\n"
         "is not a target. Somebody should probably implement this command for "
-        "other\nitem types.");
+        "other\nitem types.").PrintToStdout();
     return nullptr;
   }
 

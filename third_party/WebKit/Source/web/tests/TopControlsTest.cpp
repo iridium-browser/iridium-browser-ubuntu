@@ -40,13 +40,10 @@
 #include "public/web/WebSettings.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/tests/FrameTestHelpers.h"
-
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
+namespace blink {
 
 // These tests cover top controls scrolling on main-thread.
 // The animation for completing a partial show/hide is done in compositor so
@@ -62,7 +59,7 @@ public:
         registerMockedHttpURLLoad("iframe-scrolling-inner.html");
     }
 
-    ~TopControlsTest()
+    ~TopControlsTest() override
     {
         Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
     }
@@ -116,7 +113,7 @@ public:
 
     WebViewImpl* webViewImpl() const { return m_helper.webViewImpl(); }
     LocalFrame* frame() const { return m_helper.webViewImpl()->mainFrameImpl()->frame(); }
-    PinchViewport& pinchViewport() const { return m_helper.webViewImpl()->page()->frameHost().pinchViewport(); }
+    VisualViewport& visualViewport() const { return m_helper.webViewImpl()->page()->frameHost().visualViewport(); }
 
 private:
     std::string m_baseURL;
@@ -199,7 +196,7 @@ TEST_F(TopControlsTest, MAYBE(ScrollDownThenUp))
     // initialize top controls to be shown and position page at 100px.
     webView->setTopControlsHeight(50.f, true);
     webView->topControls().setShownRatio(1);
-    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 100));
+    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 100), ProgrammaticScroll);
 
     webView->handleInputEvent(generateEvent(WebInputEvent::GestureScrollBegin));
     EXPECT_FLOAT_EQ(50.f, webView->topControls().contentOffset());
@@ -237,7 +234,7 @@ TEST_F(TopControlsTest, MAYBE(ScrollUpThenDown))
     // initialize top controls to be hidden and position page at 100px.
     webView->setTopControlsHeight(50.f, false);
     webView->topControls().setShownRatio(0);
-    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 100));
+    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 100), ProgrammaticScroll);
 
     webView->handleInputEvent(generateEvent(WebInputEvent::GestureScrollBegin));
     EXPECT_FLOAT_EQ(0.f, webView->topControls().contentOffset());
@@ -351,7 +348,7 @@ TEST_F(TopControlsTest, MAYBE(ScrollableSubregionScrollFirst))
     WebViewImpl* webView = initialize("overflow-scrolling.html");
     webView->setTopControlsHeight(50.f, true);
     webView->topControls().setShownRatio(1);
-    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 50));
+    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 50), ProgrammaticScroll);
 
     // Test scroll down
     // Scroll down should scroll the overflow div first but top controls and main frame should not scroll.
@@ -393,7 +390,7 @@ TEST_F(TopControlsTest, MAYBE(ScrollableIframeScrollFirst))
     WebViewImpl* webView = initialize("iframe-scrolling.html");
     webView->setTopControlsHeight(50.f, true);
     webView->topControls().setShownRatio(1);
-    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 50));
+    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 50), ProgrammaticScroll);
 
     // Test scroll down
     // Scroll down should scroll the iframe first but top controls and main frame should not scroll.
@@ -456,7 +453,7 @@ TEST_F(TopControlsTest, MAYBE(ZeroHeightMeansNoEffect))
     WebViewImpl* webView = initialize();
     webView->setTopControlsHeight(0, false);
     webView->topControls().setShownRatio(0);
-    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 100));
+    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 100), ProgrammaticScroll);
 
     EXPECT_FLOAT_EQ(0.f, webView->topControls().contentOffset());
 
@@ -479,28 +476,28 @@ TEST_F(TopControlsTest, MAYBE(ScrollUpPastLimitDoesNotHide))
     // Initialize top controls to be shown
     webView->setTopControlsHeight(50.f, true);
     webView->topControls().setShownRatio(1);
-    // Use 2x scale so that both pinch viewport and frameview are scrollable
+    // Use 2x scale so that both visual viewport and frameview are scrollable
     webView->setPageScaleFactor(2.0);
 
-    // Fully scroll frameview but pinchviewport remains scrollable
-    webView->setMainFrameScrollOffset(WebPoint(0, 10000));
-    pinchViewport().setLocation(FloatPoint(0, 0));
+    // Fully scroll frameview but visualviewport remains scrollable
+    webView->mainFrame()->setScrollOffset(WebSize(0, 10000));
+    visualViewport().setLocation(FloatPoint(0, 0));
     verticalScroll(-10.f);
     EXPECT_FLOAT_EQ(40, webView->topControls().contentOffset());
 
     webView->topControls().setShownRatio(1);
-    // Fully scroll pinch veiwport but frameview remains scrollable
-    webView->setMainFrameScrollOffset(WebPoint(0, 0));
-    pinchViewport().setLocation(FloatPoint(0, 10000));
+    // Fully scroll visual veiwport but frameview remains scrollable
+    webView->mainFrame()->setScrollOffset(WebSize(0, 0));
+    visualViewport().setLocation(FloatPoint(0, 10000));
     verticalScroll(-20.f);
     EXPECT_FLOAT_EQ(30, webView->topControls().contentOffset());
 
     webView->topControls().setShownRatio(1);
-    // Fully scroll both frameview and pinch viewort
-    webView->setMainFrameScrollOffset(WebPoint(0, 10000));
-    pinchViewport().setLocation(FloatPoint(0, 10000));
+    // Fully scroll both frameview and visual viewport
+    webView->mainFrame()->setScrollOffset(WebSize(0, 10000));
+    visualViewport().setLocation(FloatPoint(0, 10000));
     verticalScroll(-30.f);
-    // Top controls should not move because neither frameview nor pinch viewport
+    // Top controls should not move because neither frameview nor visual viewport
     // are scrollable
     EXPECT_FLOAT_EQ(50.f, webView->topControls().contentOffset());
 }
@@ -510,7 +507,7 @@ TEST_F(TopControlsTest, MAYBE(StateConstraints))
 {
     WebViewImpl* webView = initialize();
     webView->setTopControlsHeight(50.f, false);
-    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 100));
+    frame()->view()->scrollableArea()->setScrollPosition(IntPoint(0, 100), ProgrammaticScroll);
 
     // Setting permitted state should not change content offset
     webView->updateTopControlsState(WebTopControlsShown, WebTopControlsShown, false);
@@ -552,4 +549,4 @@ TEST_F(TopControlsTest, MAYBE(StateConstraints))
     EXPECT_POINT_EQ(IntPoint(0, 90), frame()->view()->scrollPosition());
 }
 
-} // namespace
+} // namespace blink

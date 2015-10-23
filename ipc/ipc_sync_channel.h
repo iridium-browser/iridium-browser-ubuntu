@@ -5,8 +5,9 @@
 #ifndef IPC_IPC_SYNC_CHANNEL_H_
 #define IPC_IPC_SYNC_CHANNEL_H_
 
-#include <string>
 #include <deque>
+#include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -15,6 +16,7 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sync_message.h"
+#include "ipc/ipc_sync_message_filter.h"
 
 namespace base {
 class WaitableEvent;
@@ -68,13 +70,17 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
   // Creates and initializes a sync channel. If create_pipe_now is specified,
   // the channel will be initialized synchronously.
   // The naming pattern follows IPC::Channel.
+  // TODO(erikchen): Remove default parameter for |broker|. It exists only to
+  // make the upcoming refactor decomposable into smaller CLs.
+  // http://crbug.com/493414.
   static scoped_ptr<SyncChannel> Create(
       const IPC::ChannelHandle& channel_handle,
       IPC::Channel::Mode mode,
       Listener* listener,
       const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner,
       bool create_pipe_now,
-      base::WaitableEvent* shutdown_event);
+      base::WaitableEvent* shutdown_event,
+      AttachmentBroker* broker = nullptr);
 
   static scoped_ptr<SyncChannel> Create(
       scoped_ptr<ChannelFactory> factory,
@@ -111,6 +117,11 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
   // Incoming messages belonging to the kRestrictDispatchGroup_None group (the
   // default) will be dispatched in any case.
   void SetRestrictDispatchChannelGroup(int group);
+
+  // Creates a new IPC::SyncMessageFilter and adds it to this SyncChannel.
+  // This should be used instead of directly constructing a new
+  // SyncMessageFilter.
+  scoped_refptr<IPC::SyncMessageFilter> CreateSyncMessageFilter();
 
  protected:
   class ReceivedSyncMsgQueue;
@@ -223,9 +234,15 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
   // Starts the dispatch watcher.
   void StartWatching();
 
+  // ChannelProxy overrides:
+  void OnChannelInit() override;
+
   // Used to signal events between the IPC and listener threads.
   base::WaitableEventWatcher dispatch_watcher_;
   base::WaitableEventWatcher::EventCallback dispatch_watcher_callback_;
+
+  // Tracks SyncMessageFilters created before complete channel initialization.
+  std::vector<scoped_refptr<SyncMessageFilter>> pre_init_sync_message_filters_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncChannel);
 };

@@ -30,8 +30,7 @@ namespace cc {
 LayerTreePixelTest::LayerTreePixelTest()
     : pixel_comparator_(new ExactPixelComparator(true)),
       test_type_(PIXEL_TEST_GL),
-      pending_texture_mailbox_callbacks_(0),
-      impl_side_painting_(true) {
+      pending_texture_mailbox_callbacks_(0) {
 }
 
 LayerTreePixelTest::~LayerTreePixelTest() {}
@@ -119,7 +118,8 @@ void LayerTreePixelTest::AfterTest() {
 
 scoped_refptr<SolidColorLayer> LayerTreePixelTest::CreateSolidColorLayer(
     const gfx::Rect& rect, SkColor color) {
-  scoped_refptr<SolidColorLayer> layer = SolidColorLayer::Create();
+  scoped_refptr<SolidColorLayer> layer =
+      SolidColorLayer::Create(layer_settings());
   layer->SetIsDrawable(true);
   layer->SetBounds(rect.size());
   layer->SetPosition(rect.origin());
@@ -176,7 +176,8 @@ scoped_refptr<SolidColorLayer> LayerTreePixelTest::
 
 scoped_refptr<TextureLayer> LayerTreePixelTest::CreateTextureLayer(
     const gfx::Rect& rect, const SkBitmap& bitmap) {
-  scoped_refptr<TextureLayer> layer = TextureLayer::CreateForMailbox(NULL);
+  scoped_refptr<TextureLayer> layer =
+      TextureLayer::CreateForMailbox(layer_settings(), NULL);
   layer->SetIsDrawable(true);
   layer->SetBounds(rect.size());
   layer->SetPosition(rect.origin());
@@ -201,7 +202,7 @@ void LayerTreePixelTest::RunPixelTest(
   readback_target_ = NULL;
   ref_file_ = file_name;
   bool threaded = true;
-  RunTest(threaded, false, impl_side_painting_);
+  RunTest(threaded, false);
 }
 
 void LayerTreePixelTest::RunSingleThreadedPixelTest(
@@ -213,7 +214,7 @@ void LayerTreePixelTest::RunSingleThreadedPixelTest(
   readback_target_ = NULL;
   ref_file_ = file_name;
   bool threaded = false;
-  RunTest(threaded, false, impl_side_painting_);
+  RunTest(threaded, false);
 }
 
 void LayerTreePixelTest::RunPixelTestWithReadbackTarget(
@@ -225,11 +226,11 @@ void LayerTreePixelTest::RunPixelTestWithReadbackTarget(
   content_root_ = content_root;
   readback_target_ = target;
   ref_file_ = file_name;
-  RunTest(true, false, impl_side_painting_);
+  RunTest(true, false);
 }
 
 void LayerTreePixelTest::SetupTree() {
-  scoped_refptr<Layer> root = Layer::Create();
+  scoped_refptr<Layer> root = Layer::Create(layer_settings());
   root->SetBounds(content_root_->bounds());
   root->AddChild(content_root_);
   layer_tree_host()->SetRootLayer(root);
@@ -378,6 +379,12 @@ void LayerTreePixelTest::CopyBitmapToTextureMailboxAsTexture(
                  base::Unretained(this),
                  base::Passed(&context),
                  texture_id));
+}
+
+void LayerTreePixelTest::Finish() {
+  scoped_ptr<gpu::GLInProcessContext> context = CreateTestInProcessContext();
+  GLES2Interface* gl = context->GetImplementation();
+  gl->Finish();
 }
 
 }  // namespace cc

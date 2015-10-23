@@ -71,11 +71,17 @@ const int kMoveAttachedInitialDelay = 600;
 // Delay for moving tabs after the initial delay has passed.
 const int kMoveAttachedSubsequentDelay = 300;
 
-const int kHorizontalMoveThreshold = 16;  // Pixels.
+const int kHorizontalMoveThreshold = 16;  // DIPs.
 
 // Distance from the next/previous stacked before before we consider the tab
 // close enough to trigger moving.
 const int kStackedDistance = 36;
+
+// A dragged window is forced to be a bit smaller than maximized bounds during a
+// drag. This prevents the dragged browser widget from getting maximized at
+// creation and makes it easier to drag tabs out of a restored window that had
+// maximized size.
+const int kMaximizedWindowInset = 10;  // DIPs.
 
 #if defined(USE_ASH)
 void SetWindowPositionManaged(gfx::NativeWindow window, bool value) {
@@ -676,7 +682,7 @@ void TabDragController::MoveAttachedToNextStackedIndex(
 void TabDragController::MoveAttachedToPreviousStackedIndex(
     const gfx::Point& point_in_screen) {
   int index = attached_tabstrip_->touch_layout_->active_index();
-  if (index <= attached_tabstrip_->GetMiniTabCount())
+  if (index <= attached_tabstrip_->GetPinnedTabCount())
     return;
 
   GetModel(attached_tabstrip_)->MoveSelectedTabsTo(index - 1);
@@ -1230,7 +1236,7 @@ bool TabDragController::ShouldDragToNextStackedTab(
 bool TabDragController::ShouldDragToPreviousStackedTab(
     const gfx::Rect& dragged_bounds,
     int index) const {
-  if (index - 1 < attached_tabstrip_->GetMiniTabCount() ||
+  if (index - 1 < attached_tabstrip_->GetPinnedTabCount() ||
       !attached_tabstrip_->touch_layout_->IsStacked(index - 1) ||
       (mouse_move_direction_ & kMovedMouseLeft) == 0)
     return false;
@@ -1640,6 +1646,20 @@ gfx::Rect TabDragController::CalculateDraggedBrowserBounds(
   gfx::Point center(0, source->height() / 2);
   views::View::ConvertPointToWidget(source, &center);
   gfx::Rect new_bounds(source->GetWidget()->GetRestoredBounds());
+
+  gfx::Rect work_area =
+      screen_->GetDisplayNearestPoint(last_point_in_screen_).work_area();
+  if (new_bounds.size().width() >= work_area.size().width() &&
+      new_bounds.size().height() >= work_area.size().height()) {
+    new_bounds = work_area;
+    new_bounds.Inset(kMaximizedWindowInset, kMaximizedWindowInset,
+                     kMaximizedWindowInset, kMaximizedWindowInset);
+    // Behave as if the |source| was maximized at the start of a drag since this
+    // is consistent with a browser window creation logic in case of windows
+    // that are as large as the |work_area|.
+    was_source_maximized_ = true;
+  }
+
   if (source->GetWidget()->IsMaximized()) {
     // If the restore bounds is really small, we don't want to honor it
     // (dragging a really small window looks wrong), instead make sure the new

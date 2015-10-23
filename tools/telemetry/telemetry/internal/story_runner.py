@@ -8,16 +8,18 @@ import os
 import sys
 import time
 
+from catapult_base import cloud_storage
 from telemetry.core import exceptions
-from telemetry.core import wpr_modes
 from telemetry.internal.actions import page_action
+from telemetry.internal.results import results_options
+from telemetry.internal.util import exception_formatter
+from telemetry import page
 from telemetry.page import page_test
-from telemetry.results import results_options
-from telemetry.story import story_filter
-from telemetry.util import cloud_storage
-from telemetry.util import exception_formatter
+from telemetry import story as story_module
+from telemetry.util import wpr_modes
 from telemetry.value import failure
 from telemetry.value import skip
+from telemetry.web_perf import story_test
 
 
 class ArchiveError(Exception):
@@ -25,7 +27,7 @@ class ArchiveError(Exception):
 
 
 def AddCommandLineArgs(parser):
-  story_filter.StoryFilter.AddCommandLineArgs(parser)
+  story_module.StoryFilter.AddCommandLineArgs(parser)
   results_options.AddResultsOptions(parser)
 
   # Page set options
@@ -54,7 +56,7 @@ def AddCommandLineArgs(parser):
                     help='Ignore @Disabled and @Enabled restrictions.')
 
 def ProcessCommandLineArgs(parser, args):
-  story_filter.StoryFilter.ProcessCommandLineArgs(parser, args)
+  story_module.StoryFilter.ProcessCommandLineArgs(parser, args)
   results_options.ProcessCommandLineArgs(parser, args)
 
   # Page set options
@@ -64,24 +66,22 @@ def ProcessCommandLineArgs(parser, args):
     parser.error('--pageset-repeat must be a positive integer.')
 
 
-def _RunUserStoryAndProcessErrorIfNeeded(expectations, user_story, results,
-                                         state):
+def _RunStoryAndProcessErrorIfNeeded(story, results, state, test):
   def ProcessError():
-    if expectation == 'fail':
-      msg = 'Expected exception while running %s' % user_story.display_name
-      exception_formatter.PrintFormattedException(msg=msg)
-    else:
-      msg = 'Exception while running %s' % user_story.display_name
-      results.AddValue(failure.FailureValue(user_story, sys.exc_info()))
+    results.AddValue(failure.FailureValue(story, sys.exc_info()))
   try:
-    expectation = None
-    state.WillRunUserStory(user_story)
-    expectation, skip_value = state.GetTestExpectationAndSkipValue(expectations)
-    if expectation == 'skip':
-      assert skip_value
-      results.AddValue(skip_value)
+    if isinstance(test, story_test.StoryTest):
+      test.WillRunStory(state.platform)
+    state.WillRunStory(story)
+    if not state.CanRunStory(story):
+      results.AddValue(skip.SkipValue(
+          story,
+          'Skipped because story is not supported '
+          '(SharedState.CanRunStory() returns False).'))
       return
-    state.RunUserStory(results)
+    state.RunStory(results)
+    if isinstance(test, story_test.StoryTest):
+      test.Measure(state.platform, results)
   except (page_test.Failure, exceptions.TimeoutException,
           exceptions.LoginException, exceptions.ProfilingException):
     ProcessError()
@@ -90,106 +90,107 @@ def _RunUserStoryAndProcessErrorIfNeeded(expectations, user_story, results,
     raise
   except page_action.PageActionNotSupported as e:
     results.AddValue(
-        skip.SkipValue(user_story, 'Unsupported page action: %s' % e))
+        skip.SkipValue(story, 'Unsupported page action: %s' % e))
   except Exception:
     results.AddValue(
         failure.FailureValue(
-            user_story, sys.exc_info(), 'Unhandlable exception raised.'))
+            story, sys.exc_info(), 'Unhandlable exception raised.'))
     raise
-  else:
-    if expectation == 'fail':
-      logging.warning(
-          '%s was expected to fail, but passed.\n', user_story.display_name)
   finally:
-    has_existing_exception = sys.exc_info() is not None
+    has_existing_exception = (sys.exc_info() != (None, None, None))
     try:
-      state.DidRunUserStory(results)
+      state.DidRunStory(results)
+      # if state.DidRunStory raises exception, things are messed up badly and we
+      # do not need to run test.DidRunStory at that point.
+      if isinstance(test, story_test.StoryTest):
+        test.DidRunStory(state.platform)
+      else:
+        test.DidRunPage(state.platform)
     except Exception:
       if not has_existing_exception:
         raise
       # Print current exception and propagate existing exception.
       exception_formatter.PrintFormattedException(
-          msg='Exception from DidRunUserStory: ')
+          msg='Exception raised when cleaning story run: ')
 
-class UserStoryGroup(object):
+
+class StoryGroup(object):
   def __init__(self, shared_state_class):
     self._shared_state_class = shared_state_class
-    self._user_stories = []
+    self._stories = []
 
   @property
   def shared_state_class(self):
     return self._shared_state_class
 
   @property
-  def user_stories(self):
-    return self._user_stories
+  def stories(self):
+    return self._stories
 
-  def AddUserStory(self, user_story):
-    assert (user_story.shared_state_class is
+  def AddStory(self, story):
+    assert (story.shared_state_class is
             self._shared_state_class)
-    self._user_stories.append(user_story)
+    self._stories.append(story)
 
 
-def StoriesGroupedByStateClass(user_story_set, allow_multiple_groups):
-  """ Returns a list of user story groups which each contains user stories with
+def StoriesGroupedByStateClass(story_set, allow_multiple_groups):
+  """ Returns a list of story groups which each contains stories with
   the same shared_state_class.
 
   Example:
-    Assume A1, A2, A3 are user stories with same shared user story class, and
+    Assume A1, A2, A3 are stories with same shared story class, and
     similar for B1, B2.
-    If their orders in user story set is A1 A2 B1 B2 A3, then the grouping will
+    If their orders in story set is A1 A2 B1 B2 A3, then the grouping will
     be [A1 A2] [B1 B2] [A3].
 
-  It's purposefully done this way to make sure that order of user
-  stories are the same of that defined in user_story_set. It's recommended that
-  user stories with the same states should be arranged next to each others in
-  user story sets to reduce the overhead of setting up & tearing down the
-  shared user story state.
+  It's purposefully done this way to make sure that order of
+  stories are the same of that defined in story_set. It's recommended that
+  stories with the same states should be arranged next to each others in
+  story sets to reduce the overhead of setting up & tearing down the
+  shared story state.
   """
-  user_story_groups = []
-  user_story_groups.append(
-      UserStoryGroup(user_story_set[0].shared_state_class))
-  for user_story in user_story_set:
-    if (user_story.shared_state_class is not
-        user_story_groups[-1].shared_state_class):
+  story_groups = []
+  story_groups.append(
+      StoryGroup(story_set[0].shared_state_class))
+  for story in story_set:
+    if (story.shared_state_class is not
+        story_groups[-1].shared_state_class):
       if not allow_multiple_groups:
-        raise ValueError('This UserStorySet is only allowed to have one '
+        raise ValueError('This StorySet is only allowed to have one '
                          'SharedState but contains the following '
                          'SharedState classes: %s, %s.\n Either '
                          'remove the extra SharedStates or override '
                          'allow_mixed_story_states.' % (
-                         user_story_groups[-1].shared_state_class,
-                         user_story.shared_state_class))
-      user_story_groups.append(
-          UserStoryGroup(user_story.shared_state_class))
-    user_story_groups[-1].AddUserStory(user_story)
-  return user_story_groups
+                         story_groups[-1].shared_state_class,
+                         story.shared_state_class))
+      story_groups.append(
+          StoryGroup(story.shared_state_class))
+    story_groups[-1].AddStory(story)
+  return story_groups
 
 
-def Run(test, user_story_set, expectations, finder_options, results,
-        max_failures=None):
+def Run(test, story_set, finder_options, results, max_failures=None):
   """Runs a given test against a given page_set with the given options.
 
   Stop execution for unexpected exceptions such as KeyboardInterrupt.
-  We "white list" certain exceptions for which the user story runner
-  can continue running the remaining user stories.
+  We "white list" certain exceptions for which the story runner
+  can continue running the remaining stories.
   """
   # Filter page set based on options.
-  user_stories = filter(story_filter.StoryFilter.IsSelected,
-                              user_story_set)
+  stories = filter(story_module.StoryFilter.IsSelected, story_set)
 
-  if (not finder_options.use_live_sites and user_story_set.bucket and
+  if (not finder_options.use_live_sites and story_set.bucket and
       finder_options.browser_options.wpr_mode != wpr_modes.WPR_RECORD):
-    serving_dirs = user_story_set.serving_dirs
+    serving_dirs = story_set.serving_dirs
     for directory in serving_dirs:
       cloud_storage.GetFilesInDirectoryIfChanged(directory,
-                                                 user_story_set.bucket)
+                                                 story_set.bucket)
     if not _UpdateAndCheckArchives(
-        user_story_set.archive_data_file, user_story_set.wpr_archive_info,
-        user_stories):
+        story_set.archive_data_file, story_set.wpr_archive_info,
+        stories):
       return
 
-  if not user_stories:
+  if not stories:
     return
 
   # Effective max failures gives priority to command-line flag value.
@@ -197,24 +198,23 @@ def Run(test, user_story_set, expectations, finder_options, results,
   if effective_max_failures is None:
     effective_max_failures = max_failures
 
-  user_story_groups = StoriesGroupedByStateClass(
-      user_stories,
-      user_story_set.allow_mixed_story_states)
+  story_groups = StoriesGroupedByStateClass(
+      stories,
+      story_set.allow_mixed_story_states)
 
-  for group in user_story_groups:
+  for group in story_groups:
     state = None
     try:
       for _ in xrange(finder_options.pageset_repeat):
-        for user_story in group.user_stories:
+        for story in group.stories:
           for _ in xrange(finder_options.page_repeat):
             if not state:
               state = group.shared_state_class(
-                  test, finder_options, user_story_set)
-            results.WillRunPage(user_story)
+                  test, finder_options, story_set)
+            results.WillRunPage(story)
             try:
               _WaitForThermalThrottlingIfNeeded(state.platform)
-              _RunUserStoryAndProcessErrorIfNeeded(
-                  expectations, user_story, results, state)
+              _RunStoryAndProcessErrorIfNeeded(story, results, state, test)
             except exceptions.Error:
               # Catch all Telemetry errors to give the story a chance to retry.
               # The retry is enabled by tearing down the state and creating
@@ -231,7 +231,7 @@ def Run(test, user_story_set, expectations, finder_options, results,
               try:
                 if state:
                   _CheckThermalThrottling(state.platform)
-                results.DidRunPage(user_story)
+                results.DidRunPage(story)
               except Exception:
                 if not has_existing_exception:
                   raise
@@ -255,19 +255,66 @@ def Run(test, user_story_set, expectations, finder_options, results,
               msg='Exception from TearDownState:')
 
 
+def RunBenchmark(benchmark, finder_options):
+  """Run this test with the given options.
+
+  Returns:
+    The number of failure values (up to 254) or 255 if there is an uncaught
+    exception.
+  """
+  benchmark.CustomizeBrowserOptions(finder_options.browser_options)
+
+  pt = benchmark.CreatePageTest(finder_options)
+  pt.__name__ = benchmark.__class__.__name__
+
+  if hasattr(benchmark, '_disabled_strings'):
+    # pylint: disable=protected-access
+    pt._disabled_strings = benchmark._disabled_strings
+  if hasattr(benchmark, '_enabled_strings'):
+    # pylint: disable=protected-access
+    pt._enabled_strings = benchmark._enabled_strings
+
+  stories = benchmark.CreateStorySet(finder_options)
+  if isinstance(pt, page_test.PageTest):
+    if any(not isinstance(p, page.Page) for p in stories.stories):
+      raise Exception(
+          'PageTest must be used with StorySet containing only '
+          'telemetry.page.Page stories.')
+
+  benchmark_metadata = benchmark.GetMetadata()
+  with results_options.CreateResults(
+      benchmark_metadata, finder_options,
+      benchmark.ValueCanBeAddedPredicate) as results:
+    try:
+      Run(pt, stories, finder_options, results, benchmark.max_failures)
+      return_code = min(254, len(results.failures))
+    except Exception:
+      exception_formatter.PrintFormattedException()
+      return_code = 255
+
+    try:
+      bucket = cloud_storage.BUCKET_ALIASES[finder_options.upload_bucket]
+      if finder_options.upload_results:
+        results.UploadTraceFilesToCloud(bucket)
+        results.UploadProfilingFilesToCloud(bucket)
+    finally:
+      results.PrintSummary()
+  return return_code
+
+
 def _UpdateAndCheckArchives(archive_data_file, wpr_archive_info,
-                            filtered_user_stories):
-  """Verifies that all user stories are local or have WPR archives.
+                            filtered_stories):
+  """Verifies that all stories are local or have WPR archives.
 
   Logs warnings and returns False if any are missing.
   """
-  # Report any problems with the entire user story set.
-  if any(not user_story.is_local for user_story in filtered_user_stories):
+  # Report any problems with the entire story set.
+  if any(not story.is_local for story in filtered_stories):
     if not archive_data_file:
-      logging.error('The user story set is missing an "archive_data_file" '
+      logging.error('The story set is missing an "archive_data_file" '
                     'property.\nTo run from live sites pass the flag '
                     '--use-live-sites.\nTo create an archive file add an '
-                    'archive_data_file property to the user story set and then '
+                    'archive_data_file property to the story set and then '
                     'run record_wpr.')
       raise ArchiveError('No archive data file.')
     if not wpr_archive_info:
@@ -278,42 +325,42 @@ def _UpdateAndCheckArchives(archive_data_file, wpr_archive_info,
       raise ArchiveError('No archive info file.')
     wpr_archive_info.DownloadArchivesIfNeeded()
 
-  # Report any problems with individual user story.
-  user_stories_missing_archive_path = []
-  user_stories_missing_archive_data = []
-  for user_story in filtered_user_stories:
-    if not user_story.is_local:
-      archive_path = wpr_archive_info.WprFilePathForUserStory(user_story)
+  # Report any problems with individual story.
+  stories_missing_archive_path = []
+  stories_missing_archive_data = []
+  for story in filtered_stories:
+    if not story.is_local:
+      archive_path = wpr_archive_info.WprFilePathForStory(story)
       if not archive_path:
-        user_stories_missing_archive_path.append(user_story)
+        stories_missing_archive_path.append(story)
       elif not os.path.isfile(archive_path):
-        user_stories_missing_archive_data.append(user_story)
-  if user_stories_missing_archive_path:
+        stories_missing_archive_data.append(story)
+  if stories_missing_archive_path:
     logging.error(
-        'The user story set archives for some user stories do not exist.\n'
-        'To fix this, record those user stories using record_wpr.\n'
+        'The story set archives for some stories do not exist.\n'
+        'To fix this, record those stories using record_wpr.\n'
         'To ignore this warning and run against live sites, '
         'pass the flag --use-live-sites.')
     logging.error(
-        'User stories without archives: %s',
-        ', '.join(user_story.display_name
-                  for user_story in user_stories_missing_archive_path))
-  if user_stories_missing_archive_data:
+        'stories without archives: %s',
+        ', '.join(story.display_name
+                  for story in stories_missing_archive_path))
+  if stories_missing_archive_data:
     logging.error(
-        'The user story set archives for some user stories are missing.\n'
+        'The story set archives for some stories are missing.\n'
         'Someone forgot to check them in, uploaded them to the '
         'wrong cloud storage bucket, or they were deleted.\n'
-        'To fix this, record those user stories using record_wpr.\n'
+        'To fix this, record those stories using record_wpr.\n'
         'To ignore this warning and run against live sites, '
         'pass the flag --use-live-sites.')
     logging.error(
-        'User stories missing archives: %s',
-        ', '.join(user_story.display_name
-                  for user_story in user_stories_missing_archive_data))
-  if user_stories_missing_archive_path or user_stories_missing_archive_data:
-    raise ArchiveError('Archive file is missing user stories.')
-  # Only run valid user stories if no problems with the user story set or
-  # individual user stories.
+        'stories missing archives: %s',
+        ', '.join(story.display_name
+                  for story in stories_missing_archive_data))
+  if stories_missing_archive_path or stories_missing_archive_data:
+    raise ArchiveError('Archive file is missing stories.')
+  # Only run valid stories if no problems with the story set or
+  # individual stories.
   return True
 
 

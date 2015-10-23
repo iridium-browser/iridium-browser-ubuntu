@@ -252,8 +252,8 @@ td.missingReference {
 Result <span id="time-memory" class="checkbox"><span class="checked">Time</span><span>Memory</span></span>
 Reference <span id="reference" class="checkbox"></span>
 Style <span id="scatter-line" class="checkbox"><span class="checked">Scatter</span><span>Line</span></span>
-<span class="checkbox"><span class="checked" id="undelete">Undelete</span></span>
-Run Telemetry with --reset-results to clear all runs
+<span class="checkbox"><span class="checked" id="undelete">Undelete</span></span><br>
+Run your test with --reset-results to clear all runs
 </div>
 <table id="container"></table>
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.6.4/jquery.min.js"></script>
@@ -280,32 +280,38 @@ var PADDING_UNDER_GRAPH = 5;
 var INDENTATION = 40;
 
 function TestResult(metric, values, associatedRun) {
-    if (values[0] instanceof Array) {
-        var flattenedValues = [];
-        for (var i = 0; i < values.length; i++)
-            flattenedValues = flattenedValues.concat(values[i]);
-        values = flattenedValues;
-    }
+    if (values) {
+        if (values[0] instanceof Array) {
+            var flattenedValues = [];
+            for (var i = 0; i < values.length; i++)
+                flattenedValues = flattenedValues.concat(values[i]);
+            values = flattenedValues;
+        }
 
-    if (jQuery.type(values[0]) === 'string') {
-        try {
-            var current = JSON.parse(values[0]);
-            if (current.params.type === 'HISTOGRAM') {
-                this.histogramValues = current;
-                // Histogram results have no values (per se). Instead we calculate
-                // the values from the histogram bins.
-                var values = [];
-                var buckets = current.buckets
-                for (var i = 0; i < buckets.length; i++) {
-                    var bucket = buckets[i];
-                    var bucket_mean = (bucket.high + bucket.low) / 2;
-                    for (var b = 0; b < bucket.count; b++) {
-                        values.push(bucket_mean);
+        if (jQuery.type(values[0]) === 'string') {
+            try {
+                var current = JSON.parse(values[0]);
+                if (current.params.type === 'HISTOGRAM') {
+                    this.histogramValues = current;
+                    // Histogram results have no values (per se). Instead we calculate
+                    // the values from the histogram bins.
+                    var values = [];
+                    var buckets = current.buckets
+                    for (var i = 0; i < buckets.length; i++) {
+                        var bucket = buckets[i];
+                        var bucket_mean = (bucket.high + bucket.low) / 2;
+                        for (var b = 0; b < bucket.count; b++) {
+                            values.push(bucket_mean);
+                        }
                     }
                 }
             }
+            catch (e) {
+                console.error(e, e.stack);
+            }
         }
-        catch (e) { /* ignore, assume not a JSON string */ }
+    } else {
+        values = [];
     }
 
     this.test = function () { return metric; }
@@ -337,25 +343,17 @@ function TestResult(metric, values, associatedRun) {
 
 function TestRun(entry) {
     this.id = function() { return entry['buildTime'].replace(/[:.-]/g,''); }
-    this.revision = function () { return entry['revision']; }
     this.label = function () {
         if (labelKey in localStorage)
             return localStorage[labelKey];
-        if (entry['label'])
-            return entry['label'];
-        return 'r' + this.revision();
+        return entry['label'];
     }
     this.setLabel = function(label) { localStorage[labelKey] = label; }
     this.isHidden = function() { return localStorage[hiddenKey]; }
     this.hide = function() { localStorage[hiddenKey] = true; }
     this.show = function() { localStorage.removeItem(hiddenKey); }
     this.description = function() {
-        var label = this.label();
-        if (label != 'r' + this.revision())
-            label = ' ' + label;
-        else
-            label = '';
-        return new Date(entry['buildTime']).toLocaleString() + '\n' + entry['platform'] + ' r' + entry['revision'] + label;
+        return new Date(entry['buildTime']).toLocaleString() + '\n' + entry['platform'] + ' ' + this.label();
     }
 
     var labelKey = 'telemetry_label_' + this.id();
@@ -1257,7 +1255,7 @@ TableRow.prototype.markupForRun = function(result, referenceResult) {
     if (isNaN(result.confidenceIntervalDeltaRatio())) {
         // Don't bother showing +- Nan as it is meaningless
         confidence = '';
-    } else { 
+    } else {
         confidence = '&plusmn; ' + formatPercentage(result.confidenceIntervalDeltaRatio());
     }
 
@@ -1303,7 +1301,7 @@ TableRow.prototype.openRow = function() {
         var child = this.children[0];
         if (child.isImportant) {
           // ... and it is important (i.e. the summary row) just open it when
-          // parent is opened to save needless clicking 
+          // parent is opened to save needless clicking
           child.openRow();
         }
     }

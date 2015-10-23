@@ -35,9 +35,12 @@ class StreamTexture : public gfx::GLImage,
   // gfx::GLImage implementation:
   void Destroy(bool have_context) override;
   gfx::Size GetSize() override;
+  unsigned GetInternalFormat() override;
   bool BindTexImage(unsigned target) override;
   void ReleaseTexImage(unsigned target) override;
-  bool CopyTexImage(unsigned target) override;
+  bool CopyTexSubImage(unsigned target,
+                       const gfx::Point& offset,
+                       const gfx::Rect& rect) override;
   void WillUseTexImage() override;
   void DidUseTexImage() override {}
   void WillModifyTexImage() override {}
@@ -47,6 +50,9 @@ class StreamTexture : public gfx::GLImage,
                             gfx::OverlayTransform transform,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect) override;
+  void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
+                    uint64_t process_tracing_id,
+                    const std::string& dump_name) override;
 
   // GpuCommandBufferStub::DestructionObserver implementation.
   void OnWillDestroyStub() override;

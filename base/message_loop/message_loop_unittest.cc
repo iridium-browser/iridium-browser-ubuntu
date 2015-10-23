@@ -10,12 +10,12 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy_impl.h"
 #include "base/message_loop/message_loop_test.h"
 #include "base/pending_task.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/test_simple_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
@@ -119,7 +119,7 @@ void RunTest_PostDelayedTask_SharedTimer_SubPump() {
       Bind(&RecordRunTimeFunc, &run_time, &num_tasks),
       TimeDelta::FromSeconds(1000));
 
-  // This slightly delayed task should run from within SubPumpFunc).
+  // This slightly delayed task should run from within SubPumpFunc.
   loop.PostDelayedTask(
       FROM_HERE,
       Bind(&PostQuitMessage, 0),
@@ -600,7 +600,7 @@ void RunTest_WaitForIO() {
   TestIOHandler handler2(kPipeName2, callback2_called.Get(), true);
   thread_loop->PostTask(FROM_HERE, Bind(&TestIOHandler::Init,
                                               Unretained(&handler1)));
-  // TODO(ajwong): Do we really need such long Sleeps in ths function?
+  // TODO(ajwong): Do we really need such long Sleeps in this function?
   // Make sure the thread runs and sleeps for lack of work.
   TimeDelta delay = TimeDelta::FromMilliseconds(100);
   PlatformThread::Sleep(delay);
@@ -645,7 +645,7 @@ TEST(MessageLoopTest, PostDelayedTask_SharedTimer_SubPump) {
   RunTest_PostDelayedTask_SharedTimer_SubPump();
 }
 
-// This test occasionally hangs http://crbug.com/44567
+// This test occasionally hangs. See http://crbug.com/44567.
 TEST(MessageLoopTest, DISABLED_RecursiveDenial2) {
   RunTest_RecursiveDenial2(MessageLoop::TYPE_DEFAULT);
   RunTest_RecursiveDenial2(MessageLoop::TYPE_UI);
@@ -653,7 +653,7 @@ TEST(MessageLoopTest, DISABLED_RecursiveDenial2) {
 }
 
 TEST(MessageLoopTest, RecursiveSupport2) {
-  // This test requires a UI loop
+  // This test requires a UI loop.
   RunTest_RecursiveSupport2(MessageLoop::TYPE_UI);
 }
 #endif  // defined(OS_WIN)
@@ -1011,5 +1011,27 @@ TEST(MessageLoopTest, AlwaysHaveUserMessageWhenNesting) {
   ASSERT_TRUE(UnregisterClass(MAKEINTATOM(atom), instance));
 }
 #endif  // defined(OS_WIN)
+
+TEST(MessageLoopTest, SetTaskRunner) {
+  MessageLoop loop;
+  scoped_refptr<SingleThreadTaskRunner> new_runner(new TestSimpleTaskRunner());
+
+  loop.SetTaskRunner(new_runner);
+  EXPECT_EQ(new_runner, loop.task_runner());
+  EXPECT_EQ(new_runner, ThreadTaskRunnerHandle::Get());
+}
+
+TEST(MessageLoopTest, OriginalRunnerWorks) {
+  MessageLoop loop;
+  scoped_refptr<SingleThreadTaskRunner> new_runner(new TestSimpleTaskRunner());
+  scoped_refptr<SingleThreadTaskRunner> original_runner(loop.task_runner());
+  loop.SetTaskRunner(new_runner);
+
+  scoped_refptr<Foo> foo(new Foo());
+  original_runner->PostTask(FROM_HERE,
+                            Bind(&Foo::Test1ConstRef, foo.get(), "a"));
+  loop.RunUntilIdle();
+  EXPECT_EQ(1, foo->test_count());
+}
 
 }  // namespace base

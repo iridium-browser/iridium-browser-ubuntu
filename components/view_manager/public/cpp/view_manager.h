@@ -16,8 +16,7 @@ class View;
 // is made every time an app is embedded.
 class ViewManager {
  public:
-  // Returns the URL of the application that embedded this application.
-  virtual const std::string& GetEmbedderURL() const = 0;
+  virtual ~ViewManager() {}
 
   // Returns the root of this connection.
   virtual View* GetRoot() = 0;
@@ -33,8 +32,8 @@ class ViewManager {
   // are initially hidden, use SetVisible(true) to show.
   virtual View* CreateView() = 0;
 
- protected:
-  virtual ~ViewManager() {}
+  // Set view_manager.mojom for details.
+  virtual void SetEmbedRoot() = 0;
 };
 
 }  // namespace mojo

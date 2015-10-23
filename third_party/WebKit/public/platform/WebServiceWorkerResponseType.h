@@ -7,13 +7,19 @@
 
 namespace blink {
 
+// FIXME: This header is temporarily kept around not to break builds, but
+// should be removed once chromium-side change is landed.
+// If you make changes in this file please make sure you have the same changes
+// in public/platform/modules/serviceworker/WebServiceWorkerResponseType.h
+// until then.
 enum WebServiceWorkerResponseType {
     WebServiceWorkerResponseTypeBasic,
     WebServiceWorkerResponseTypeCORS,
     WebServiceWorkerResponseTypeDefault,
     WebServiceWorkerResponseTypeError,
     WebServiceWorkerResponseTypeOpaque,
-    WebServiceWorkerResponseTypeLast = WebServiceWorkerResponseTypeOpaque
+    WebServiceWorkerResponseTypeOpaqueRedirect,
+    WebServiceWorkerResponseTypeLast = WebServiceWorkerResponseTypeOpaqueRedirect
 };
 
 } // namespace blink

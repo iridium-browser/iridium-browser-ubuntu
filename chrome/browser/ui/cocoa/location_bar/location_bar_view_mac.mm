@@ -28,7 +28,6 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/translate_service.h"
-#include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/content_settings/content_setting_bubble_cocoa.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
@@ -37,7 +36,6 @@
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/location_bar/content_setting_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/ev_bubble_decoration.h"
-#import "chrome/browser/ui/cocoa/location_bar/generated_credit_card_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/keyword_hint_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_icon_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/manage_passwords_decoration.h"
@@ -50,12 +48,12 @@
 #import "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
-#import "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "chrome/browser/ui/toolbar/chrome_toolbar_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#import "components/omnibox/browser/omnibox_popup_model.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/translate/core/browser/language_state.h"
@@ -90,7 +88,7 @@ LocationBarViewMac::LocationBarViewMac(AutocompleteTextField* field,
                                        Profile* profile,
                                        Browser* browser)
     : LocationBar(profile),
-      OmniboxEditController(command_updater),
+      ChromeOmniboxEditController(command_updater),
       omnibox_view_(new OmniboxViewMac(this, profile, command_updater, field)),
       field_(field),
       location_icon_decoration_(new LocationIconDecoration(this)),
@@ -102,8 +100,6 @@ LocationBarViewMac::LocationBarViewMac(AutocompleteTextField* field,
       zoom_decoration_(new ZoomDecoration(this)),
       keyword_hint_decoration_(new KeywordHintDecoration()),
       mic_search_decoration_(new MicSearchDecoration(command_updater)),
-      generated_credit_card_decoration_(
-          new GeneratedCreditCardDecoration(this)),
       manage_passwords_decoration_(
           new ManagePasswordsDecoration(command_updater, this)),
       browser_(browser),
@@ -220,10 +216,6 @@ bool LocationBarViewMac::ShowPageActionPopup(
 
 void LocationBarViewMac::UpdateOpenPDFInReaderPrompt() {
   // Not implemented on Mac.
-}
-
-void LocationBarViewMac::UpdateGeneratedCreditCardView() {
-  generated_credit_card_decoration_->Update();
 }
 
 void LocationBarViewMac::SaveStateToContents(WebContents* contents) {
@@ -366,11 +358,6 @@ NSPoint LocationBarViewMac::GetPageInfoBubblePoint() const {
   }
 }
 
-NSPoint LocationBarViewMac::GetGeneratedCreditCardBubblePoint() const {
-  return
-      [field_ bubblePointForDecoration:generated_credit_card_decoration_.get()];
-}
-
 void LocationBarViewMac::OnDecorationsChanged() {
   // TODO(shess): The field-editor frame and cursor rects should not
   // change, here.
@@ -395,7 +382,6 @@ void LocationBarViewMac::Layout() {
   [cell addRightDecoration:star_decoration_.get()];
   [cell addRightDecoration:translate_decoration_.get()];
   [cell addRightDecoration:zoom_decoration_.get()];
-  [cell addRightDecoration:generated_credit_card_decoration_.get()];
   [cell addRightDecoration:manage_passwords_decoration_.get()];
 
   // Note that display order is right to left.
@@ -428,14 +414,16 @@ void LocationBarViewMac::Layout() {
   }
 
   const bool is_keyword_hint = omnibox_view_->model()->is_keyword_hint();
+  ChromeToolbarModel* chrome_toolbar_model =
+      static_cast<ChromeToolbarModel*>(GetToolbarModel());
   if (!keyword.empty() && !is_keyword_hint) {
     // Switch from location icon to keyword mode.
     location_icon_decoration_->SetVisible(false);
     selected_keyword_decoration_->SetVisible(true);
     selected_keyword_decoration_->SetKeyword(short_name, is_extension_keyword);
     selected_keyword_decoration_->SetImage(GetKeywordImage(keyword));
-  } else if ((GetToolbarModel()->GetSecurityLevel(false) ==
-              ConnectionSecurityHelper::EV_SECURE)) {
+  } else if (chrome_toolbar_model->GetSecurityLevel(false) ==
+             connection_security::EV_SECURE) {
     // Switch from location icon to show the EV bubble instead.
     location_icon_decoration_->SetVisible(false);
     ev_bubble_decoration_->SetVisible(true);
@@ -522,12 +510,15 @@ void LocationBarViewMac::Update(const WebContents* contents) {
   RefreshPageActionDecorations();
   RefreshContentSettingsDecorations();
   UpdateMicSearchDecorationVisibility();
-  UpdateGeneratedCreditCardView();
   if (contents)
     omnibox_view_->OnTabChanged(contents);
   else
     omnibox_view_->Update();
   OnChanged();
+}
+
+void LocationBarViewMac::UpdateWithoutTabRestore() {
+  Update(nullptr);
 }
 
 void LocationBarViewMac::OnChanged() {
@@ -555,21 +546,16 @@ void LocationBarViewMac::ShowURL() {
   omnibox_view_->ShowURL();
 }
 
-InstantController* LocationBarViewMac::GetInstant() {
-  return browser_->instant_controller() ?
-      browser_->instant_controller()->instant() : NULL;
-}
-
-WebContents* LocationBarViewMac::GetWebContents() {
-  return browser_->tab_strip_model()->GetActiveWebContents();
-}
-
 ToolbarModel* LocationBarViewMac::GetToolbarModel() {
   return browser_->toolbar_model();
 }
 
 const ToolbarModel* LocationBarViewMac::GetToolbarModel() const {
   return browser_->toolbar_model();
+}
+
+WebContents* LocationBarViewMac::GetWebContents() {
+  return browser_->tab_strip_model()->GetActiveWebContents();
 }
 
 NSImage* LocationBarViewMac::GetKeywordImage(const base::string16& keyword) {

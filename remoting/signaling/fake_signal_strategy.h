@@ -42,6 +42,8 @@ class FakeSignalStrategy : public SignalStrategy,
   // Connects current FakeSignalStrategy to receive messages from |peer|.
   void ConnectTo(FakeSignalStrategy* peer);
 
+  void SetLocalJid(const std::string& jid);
+
   // SignalStrategy interface.
   void Connect() override;
   void Disconnect() override;
@@ -70,7 +72,7 @@ class FakeSignalStrategy : public SignalStrategy,
 
   std::string jid_;
   PeerCallback peer_callback_;
-  ObserverList<Listener, true> listeners_;
+  base::ObserverList<Listener, true> listeners_;
 
   int last_id_;
 

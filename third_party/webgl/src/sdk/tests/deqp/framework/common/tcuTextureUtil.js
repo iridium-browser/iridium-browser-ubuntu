@@ -6,7 +6,7 @@
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * You may obtain a tcuTextureUtil.copy of the License at
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
  *
@@ -34,21 +34,14 @@ var DE_ASSERT = function(x) {
         throw new Error('Assert failed');
 };
 
+/**
+ * @param {number} t
+ * @param {number} minVal
+ * @param {number} maxVal
+ * @return {number}
+ */
 tcuTextureUtil.linearInterpolate = function(t, minVal, maxVal) {
     return minVal + (maxVal - minVal) * t;
-};
-
-/**
- * Enums for tcuTextureUtil.TextureChannelClass
- * @enum {number}
- */
-tcuTextureUtil.TextureChannelClass = {
-
-        SIGNED_FIXED_POINT: 0,
-        UNSIGNED_FIXED_POINT: 1,
-        SIGNED_INTEGER: 2,
-        UNSIGNED_INTEGER: 3,
-        FLOATING_POINT: 4
 };
 
 /** tcuTextureUtil.linearChannelToSRGB
@@ -66,6 +59,29 @@ tcuTextureUtil.linearChannelToSRGB = function(cl) {
         return 1.0;
 };
 
+/**
+ * Convert sRGB to linear colorspace
+ * @param {Array<number>} cs
+ * @return {Array<number>}
+ */
+tcuTextureUtil.sRGBToLinear = function(cs) {
+    return [tcuTextureUtil.sRGBChannelToLinear(cs[0]),
+            tcuTextureUtil.sRGBChannelToLinear(cs[1]),
+            tcuTextureUtil.sRGBChannelToLinear(cs[2]),
+            cs[3]];
+};
+
+/**
+ * @param {number} cs
+ * @return {number}
+ */
+ tcuTextureUtil.sRGBChannelToLinear = function(cs) {
+    if (cs <= 0.04045)
+        return cs / 12.92;
+    else
+        return Math.pow((cs + 0.055) / 1.055, 2.4);
+};
+
 /** tcuTextureUtil.linearToSRGB
  * @param {Array<number>} cl
  * @return {Array<number>}
@@ -76,37 +92,6 @@ tcuTextureUtil.linearToSRGB = function(cl) {
             tcuTextureUtil.linearChannelToSRGB(cl[2]),
             cl[3]
             ];
-};
-
-tcuTextureUtil.getTextureChannelClass = function(channelType) {
-
-    switch (channelType) {
-
-    case tcuTexture.ChannelType.SNORM_INT8: return tcuTextureUtil.TextureChannelClass.SIGNED_FIXED_POINT;
-    case tcuTexture.ChannelType.SNORM_INT16: return tcuTextureUtil.TextureChannelClass.SIGNED_FIXED_POINT;
-    case tcuTexture.ChannelType.UNORM_INT8: return tcuTextureUtil.TextureChannelClass.UNSIGNED_FIXED_POINT;
-    case tcuTexture.ChannelType.UNORM_INT16: return tcuTextureUtil.TextureChannelClass.UNSIGNED_FIXED_POINT;
-    case tcuTexture.ChannelType.UNORM_SHORT_565: return tcuTextureUtil.TextureChannelClass.UNSIGNED_FIXED_POINT;
-    case tcuTexture.ChannelType.UNORM_SHORT_555: return tcuTextureUtil.TextureChannelClass.UNSIGNED_FIXED_POINT;
-    case tcuTexture.ChannelType.UNORM_SHORT_4444: return tcuTextureUtil.TextureChannelClass.UNSIGNED_FIXED_POINT;
-    case tcuTexture.ChannelType.UNORM_SHORT_5551: return tcuTextureUtil.TextureChannelClass.UNSIGNED_FIXED_POINT;
-    case tcuTexture.ChannelType.UNORM_INT_101010: return tcuTextureUtil.TextureChannelClass.UNSIGNED_FIXED_POINT;
-    case tcuTexture.ChannelType.UNORM_INT_1010102_REV: return tcuTextureUtil.TextureChannelClass.UNSIGNED_FIXED_POINT;
-    case tcuTexture.ChannelType.UNSIGNED_INT_1010102_REV: return tcuTextureUtil.TextureChannelClass.UNSIGNED_INTEGER;
-    case tcuTexture.ChannelType.UNSIGNED_INT_11F_11F_10F_REV: return tcuTextureUtil.TextureChannelClass.FLOATING_POINT;
-    case tcuTexture.ChannelType.UNSIGNED_INT_999_E5_REV: return tcuTextureUtil.TextureChannelClass.FLOATING_POINT;
-    case tcuTexture.ChannelType.SIGNED_INT8: return tcuTextureUtil.TextureChannelClass.SIGNED_INTEGER;
-    case tcuTexture.ChannelType.SIGNED_INT16: return tcuTextureUtil.TextureChannelClass.SIGNED_INTEGER;
-    case tcuTexture.ChannelType.SIGNED_INT32: return tcuTextureUtil.TextureChannelClass.SIGNED_INTEGER;
-    case tcuTexture.ChannelType.UNSIGNED_INT8: return tcuTextureUtil.TextureChannelClass.UNSIGNED_INTEGER;
-    case tcuTexture.ChannelType.UNSIGNED_INT16: return tcuTextureUtil.TextureChannelClass.UNSIGNED_INTEGER;
-    case tcuTexture.ChannelType.UNSIGNED_INT32: return tcuTextureUtil.TextureChannelClass.UNSIGNED_INTEGER;
-    case tcuTexture.ChannelType.HALF_FLOAT: return tcuTextureUtil.TextureChannelClass.FLOATING_POINT;
-    case tcuTexture.ChannelType.FLOAT: return tcuTextureUtil.TextureChannelClass.FLOATING_POINT;
-
-    default: throw new Error('Unrecognized channel type: ' + channelType);
-    }
-
 };
 
 /**
@@ -138,7 +123,31 @@ tcuTextureUtil.getSubregion = function(access, x, y, z, width, height, depth) {
         });
 };
 
-tcuTextureUtil.fillWithComponentGradients2D = function(/*const PixelBufferAccess&*/ access, /*const Vec4&*/ minVal, /*const Vec4&*/ maxVal) {
+/**
+ * @param {tcuTexture.PixelBufferAccess} access
+ * @param {Array<number>} minVal
+ * @param {Array<number>} maxVal
+ */
+tcuTextureUtil.fillWithComponentGradients1D = function(access, minVal, maxVal) {
+    DE_ASSERT(access.getHeight() == 1);
+    for (var x = 0; x < access.getWidth(); x++) {
+        var s = (x + 0.5) / access.getWidth();
+
+        var r = tcuTextureUtil.linearInterpolate(s, minVal[0], maxVal[0]);
+        var g = tcuTextureUtil.linearInterpolate(s, minVal[1], maxVal[1]);
+        var b = tcuTextureUtil.linearInterpolate(s, minVal[2], maxVal[2]);
+        var a = tcuTextureUtil.linearInterpolate(s, minVal[3], maxVal[3]);
+
+        access.setPixel([r, g, b, a], x, 0);
+    }
+};
+
+/**
+ * @param {tcuTexture.PixelBufferAccess} access
+ * @param {Array<number>} minVal
+ * @param {Array<number>} maxVal
+ */
+tcuTextureUtil.fillWithComponentGradients2D = function(access, minVal, maxVal) {
     for (var y = 0; y < access.getHeight(); y++) {
         for (var x = 0; x < access.getWidth(); x++) {
             var s = (x + 0.5) / access.getWidth();
@@ -154,7 +163,12 @@ tcuTextureUtil.fillWithComponentGradients2D = function(/*const PixelBufferAccess
     }
 };
 
-tcuTextureUtil.fillWithComponentGradients3D = function(/*const PixelBufferAccess&*/ dst, /*const Vec4&*/ minVal, /*const Vec4&*/ maxVal) {
+/**
+ * @param {tcuTexture.PixelBufferAccess} dst
+ * @param {Array<number>} minVal
+ * @param {Array<number>} maxVal
+ */
+tcuTextureUtil.fillWithComponentGradients3D = function(dst, minVal, maxVal) {
     for (var z = 0; z < dst.getDepth(); z++) {
         for (var y = 0; y < dst.getHeight(); y++) {
             for (var x = 0; x < dst.getWidth(); x++) {
@@ -172,10 +186,14 @@ tcuTextureUtil.fillWithComponentGradients3D = function(/*const PixelBufferAccess
     }
 };
 
-tcuTextureUtil.fillWithComponentGradients = function(/*const PixelBufferAccess&*/ access, /*const Vec4&*/ minVal, /*const Vec4&*/ maxVal) {
+/**
+ * @param {tcuTexture.PixelBufferAccess} access
+ * @param {Array<number>} minVal
+ * @param {Array<number>} maxVal
+ */
+tcuTextureUtil.fillWithComponentGradients = function(access, minVal, maxVal) {
     if (access.getHeight() == 1 && access.getDepth() == 1)
-        throw new Error('Inimplemented');
-        //fillWithComponentGradients1D(access, minVal, maxVal);
+        tcuTextureUtil.fillWithComponentGradients1D(access, minVal, maxVal);
     else if (access.getDepth() == 1)
         tcuTextureUtil.fillWithComponentGradients2D(access, minVal, maxVal);
     else
@@ -185,15 +203,23 @@ tcuTextureUtil.fillWithComponentGradients = function(/*const PixelBufferAccess&*
 /**
  * Create tcuTextureUtil.TextureFormatInfo.
  * @constructor
+ * @param {Array<number>} valueMin
+ * @param {Array<number>} valueMax
+ * @param {Array<number>} lookupScale
+ * @param {Array<number>} lookupBias
  */
 tcuTextureUtil.TextureFormatInfo = function(valueMin, valueMax, lookupScale, lookupBias) {
-    this.valueMin = valueMin;
-    this.valueMax = valueMax;
-    this.lookupScale = lookupScale;
-    this.lookupBias = lookupBias;
+    /** @type {Array<number>} */ this.valueMin = valueMin;
+    /** @type {Array<number>} */ this.valueMax = valueMax;
+    /** @type {Array<number>} */ this.lookupScale = lookupScale;
+    /** @type {Array<number>} */ this.lookupBias = lookupBias;
 };
 
-/*static Vec2*/ tcuTextureUtil.getChannelValueRange = function(/*TextureFormat::ChannelType*/ channelType) {
+/**
+ * @param {?tcuTexture.ChannelType} channelType
+ * @return {Array<number>}
+ */
+tcuTextureUtil.getChannelValueRange = function(channelType) {
     var cMin = 0;
     var cMax = 0;
 
@@ -258,15 +284,18 @@ tcuTextureUtil.select = function(a, b, cond) {
     return dst;
 };
 
-/*--------------------------------------------------------------------*//*!
- * \brief Get standard parameters for testing texture format
+/**
+ * Get standard parameters for testing texture format
  *
  * Returns tcuTextureUtil.TextureFormatInfo that describes good parameters for exercising
  * given TextureFormat. Parameters include value ranges per channel and
  * suitable lookup scaling and bias in order to reduce result back to
  * 0..1 range.
- *//*--------------------------------------------------------------------*/
-/*tcuTextureUtil.TextureFormatInfo*/ tcuTextureUtil.getTextureFormatInfo = function(/*const TextureFormat&*/ format) {
+ *
+ * @param {tcuTexture.TextureFormat} format
+ * @return {tcuTextureUtil.TextureFormatInfo}
+ */
+tcuTextureUtil.getTextureFormatInfo = function(format) {
     // Special cases.
     if (format.isEqual(new tcuTexture.TextureFormat(tcuTexture.ChannelOrder.RGBA, tcuTexture.ChannelType.UNSIGNED_INT_1010102_REV)))
         return new tcuTextureUtil.TextureFormatInfo([0, 0, 0, 0],
@@ -313,7 +342,7 @@ tcuTextureUtil.select = function(a, b, cond) {
 };
 
 /** tcuTextureUtil.getChannelBitDepth
- * @param {tcuTexture.ChannelType} channelType
+ * @param {?tcuTexture.ChannelType} channelType
  * @return {Array<number>}
  */
 tcuTextureUtil.getChannelBitDepth = function(channelType) {
@@ -490,7 +519,7 @@ tcuTextureUtil.getTextureFormatMantissaBitDepth = function(format) {
 };
 
 /**
- * @param {tcuTexture.ChannelType} channelType
+ * @param {?tcuTexture.ChannelType} channelType
  * @return {Array<number>}
  */
 tcuTextureUtil.getChannelMantissaBitDepth = function(channelType) {
@@ -522,14 +551,13 @@ tcuTextureUtil.getChannelMantissaBitDepth = function(channelType) {
         case tcuTexture.ChannelType.UNSIGNED_INT_11F_11F_10F_REV: return [6, 6, 5, 0];
         case tcuTexture.ChannelType.FLOAT_UNSIGNED_INT_24_8_REV: return [23, 0, 0, 8];
         default:
-            DE_ASSERT(false);
-            return [0, 0, 0, 0];
+            throw new Error('Invalid channelType: ' + channelType);
     }
 };
 
 /**
  * @param {tcuTexture.PixelBufferAccess} dst
- * @param {tcuTexture.PixelBufferAccess} src
+ * @param {tcuTexture.ConstPixelBufferAccess} src
  */
 tcuTextureUtil.copy = function(dst, src) {
     var width = dst.getWidth();
@@ -538,16 +566,16 @@ tcuTextureUtil.copy = function(dst, src) {
 
     DE_ASSERT(src.getWidth() == width && src.getHeight() == height && src.getDepth() == depth);
 
-    if (src.getFormat() == dst.getFormat()) {
+    if (src.getFormat().isEqual(dst.getFormat())) {
         var srcData = src.getDataPtr();
         var dstData = dst.getDataPtr();
 
         dstData.set(srcData);
     } else {
-        var srcClass = tcuTextureUtil.getTextureChannelClass(src.getFormat().type);
-        var dstClass = tcuTextureUtil.getTextureChannelClass(dst.getFormat().type);
-        var srcIsInt = srcClass == tcuTextureUtil.TextureChannelClass.SIGNED_INTEGER || srcClass == tcuTextureUtil.TextureChannelClass.UNSIGNED_INTEGER;
-        var dstIsInt = dstClass == tcuTextureUtil.TextureChannelClass.SIGNED_INTEGER || dstClass == tcuTextureUtil.TextureChannelClass.UNSIGNED_INTEGER;
+        var srcClass = tcuTexture.getTextureChannelClass(src.getFormat().type);
+        var dstClass = tcuTexture.getTextureChannelClass(dst.getFormat().type);
+        var srcIsInt = srcClass == tcuTexture.TextureChannelClass.SIGNED_INTEGER || srcClass == tcuTexture.TextureChannelClass.UNSIGNED_INTEGER;
+        var dstIsInt = dstClass == tcuTexture.TextureChannelClass.SIGNED_INTEGER || dstClass == tcuTexture.TextureChannelClass.UNSIGNED_INTEGER;
 
         if (srcIsInt && dstIsInt) {
             for (var z = 0; z < depth; z++)
@@ -561,6 +589,85 @@ tcuTextureUtil.copy = function(dst, src) {
                 dst.setPixel(src.getPixel(x, y, z), x, y, z);
         }
     }
+};
+
+/**
+ * @param {tcuTexture.ConstPixelBufferAccess} access
+ */
+tcuTextureUtil.estimatePixelValueRange = function(access) {
+    var format = access.getFormat();
+
+    switch (format.type) {
+        case tcuTexture.ChannelType.UNORM_INT8:
+        case tcuTexture.ChannelType.UNORM_INT16:
+            // Normalized unsigned formats.
+            return [
+                [0, 0, 0, 0],
+                [1, 1, 1, 1]
+            ];
+
+        case tcuTexture.ChannelType.SNORM_INT8:
+        case tcuTexture.ChannelType.SNORM_INT16:
+            // Normalized signed formats.
+            return [
+                [-1, -1, -1, -1],
+                [1, 1, 1, 1]
+            ];
+
+        default:
+            // \note Samples every 4/8th pixel.
+            var minVal = [Infinity, Infinity, Infinity, Infinity];
+            var maxVal = [-Infinity, -Infinity, -Infinity, -Infinity];
+
+            for (var z = 0; z < access.getDepth(); z += 2) {
+                for (var y = 0; y < access.getHeight(); y += 2) {
+                    for (var x = 0; x < access.getWidth(); x += 2) {
+                        var p = access.getPixel(x, y, z);
+
+                        minVal[0] = Math.min(minVal[0], p[0]);
+                        minVal[1] = Math.min(minVal[1], p[1]);
+                        minVal[2] = Math.min(minVal[2], p[2]);
+                        minVal[3] = Math.min(minVal[3], p[3]);
+
+                        maxVal[0] = Math.max(maxVal[0], p[0]);
+                        maxVal[1] = Math.max(maxVal[1], p[1]);
+                        maxVal[2] = Math.max(maxVal[2], p[2]);
+                        maxVal[3] = Math.max(maxVal[3], p[3]);
+                    }
+                }
+            }
+            return [minVal, maxVal];
+    }
+};
+
+/**
+ * @param {tcuTexture.ConstPixelBufferAccess} access
+ * @return {{scale: Array<number>, bias: Array<number>}}
+ */
+tcuTextureUtil.computePixelScaleBias = function(access) {
+    var limits = tcuTextureUtil.estimatePixelValueRange(access);
+    var minVal = limits[0];
+    var maxVal = limits[1];
+
+    var scale = [1, 1, 1, 1];
+    var bias = [0, 0, 0, 0];
+
+    var eps = 0.0001;
+
+    for (var c = 0; c < 4; c++) {
+        if (maxVal[c] - minVal[c] < eps) {
+            scale[c] = (maxVal[c] < eps) ? 1 : (1 / maxVal[c]);
+            bias[c] = (c == 3) ? (1 - maxVal[c] * scale[c]) : (0 - minVal[c] * scale[c]);
+        } else {
+            scale[c] = 1 / (maxVal[c] - minVal[c]);
+            bias[c] = 0 - minVal[c] * scale[c];
+        }
+    }
+
+    return {
+        scale: scale,
+        bias: bias
+    };
 };
 
 });

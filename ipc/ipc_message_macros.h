@@ -8,7 +8,7 @@
 // header file.  Most of the time, the system can automatically generate all
 // of messaging mechanism from these definitions, but sometimes some manual
 // coding is required.  In these cases, you will also have an XXX_messages.cc
-// implemation file as well.
+// implementation file as well.
 //
 // The senders of your messages will include your XXX_messages.h file to
 // get the full set of definitions they need to send your messages.
@@ -33,7 +33,7 @@
 // in /chrome/common), but there are circumstances where you may add a
 // new one.
 //
-// In the rare cicrucmstances where you can't re-use an existing file,
+// In the rare circumstances where you can't re-use an existing file,
 // your YYY_message_generator.cc file for a component YYY would contain
 // the following code:
 //     // Get basic type definitions.
@@ -72,7 +72,7 @@
 // The XXX_messages.h file will be multiply-included by the
 // YYY_message_generator.cc file, so your XXX_messages file can't be
 // guarded in the usual manner.  Ideally, there will be no need for any
-// inclusion guard, since the XXX_messages.h file should consist soley
+// inclusion guard, since the XXX_messages.h file should consist solely
 // of inclusions of other headers (which are self-guarding) and IPC
 // macros (which are multiply evaluating).
 //
@@ -87,7 +87,7 @@
 //
 // It is generally a bad idea to have type definitions in a XXX_messages.h
 // file; most likely the typedef will then be used in the message, as opposed
-// to the struct iself.  Later, an IPC message dispatcher wil need to call
+// to the struct itself.  Later, an IPC message dispatcher will need to call
 // a function taking that type, and that function is declared in some other
 // header.  Thus, in order to get the type definition, the other header
 // would have to include the XXX_messages.h file, violating the rule above
@@ -105,7 +105,7 @@
 // class type declaration to avoid pulling in a long chain of headers is
 // acceptable when your XXX_messages.h header is being included by the
 // message sending caller's code, but not when the YYY_message_generator.c
-// is building the messages. In addtion, due to the multiple inclusion
+// is building the messages. In addition, due to the multiple inclusion
 // restriction, these type ought to be guarded.  Follow a convention like:
 //      #ifndef SOME_GUARD_MACRO
 //      #define SOME_GUARD_MACRO
@@ -132,7 +132,7 @@
 // IPC_STRUCT_MEMBER() is only permitted inside matching calls to
 // IPC_STRUCT_BEGIN() / IPC_STRUCT_END(). There is also an
 // IPC_STRUCT_BEGIN_WITH_PARENT(), which behaves like IPC_STRUCT_BEGIN(),
-// but also accomodates structs that inherit from other structs.
+// but also accommodates structs that inherit from other structs.
 //
 // Externally-defined structs are registered with IPC_STRUCT_TRAITS_BEGIN(),
 // IPC_STRUCT_TRAITS_MEMBER(), and IPC_STRUCT_TRAITS_END() macros. These
@@ -457,7 +457,7 @@
                        void (T::*func)(P*, TA)) {                             \
     Schema::Param p;                                                          \
     if (Read(msg, &p)) {                                                      \
-      (obj->*func)(parameter, get<0>(p));                                     \
+      (obj->*func)(parameter, base::get<0>(p));                               \
       return true;                                                            \
     }                                                                         \
     return false;                                                             \
@@ -469,7 +469,7 @@
                        void (T::*func)(P*, TA, TB)) {                         \
     Schema::Param p;                                                          \
     if (Read(msg, &p)) {                                                      \
-      (obj->*func)(parameter, get<0>(p), get<1>(p));                          \
+      (obj->*func)(parameter, base::get<0>(p), base::get<1>(p));              \
       return true;                                                            \
     }                                                                         \
     return false;                                                             \
@@ -481,7 +481,8 @@
                        void (T::*func)(P*, TA, TB, TC)) {                     \
     Schema::Param p;                                                          \
     if (Read(msg, &p)) {                                                      \
-      (obj->*func)(parameter, get<0>(p), get<1>(p), get<2>(p));               \
+      (obj->*func)(parameter, base::get<0>(p), base::get<1>(p),               \
+                   base::get<2>(p));                                          \
       return true;                                                            \
     }                                                                         \
     return false;                                                             \
@@ -494,7 +495,8 @@
                        void (T::*func)(P*, TA, TB, TC, TD)) {                 \
     Schema::Param p;                                                          \
     if (Read(msg, &p)) {                                                      \
-      (obj->*func)(parameter, get<0>(p), get<1>(p), get<2>(p), get<3>(p));    \
+      (obj->*func)(parameter, base::get<0>(p), base::get<1>(p),               \
+                   base::get<2>(p), base::get<3>(p));                         \
       return true;                                                            \
     }                                                                         \
     return false;                                                             \
@@ -507,8 +509,8 @@
                        void (T::*func)(P*, TA, TB, TC, TD, TE)) {             \
     Schema::Param p;                                                          \
     if (Read(msg, &p)) {                                                      \
-      (obj->*func)(parameter, get<0>(p), get<1>(p), get<2>(p), get<3>(p),     \
-                   get<4>(p));                                                \
+      (obj->*func)(parameter, base::get<0>(p), base::get<1>(p),               \
+                   base::get<2>(p), base::get<3>(p), base::get<4>(p));        \
       return true;                                                            \
     }                                                                         \
     return false;                                                             \
@@ -636,7 +638,7 @@
     static bool ReadSendParam(const Message* msg, Schema::SendParam* p);      \
     static bool ReadReplyParam(                                               \
         const Message* msg,                                                   \
-        TupleTypes<ReplyParam>::ValueTuple* p);                               \
+        base::TupleTypes<ReplyParam>::ValueTuple* p);                         \
     static void Log(std::string* name, const Message* msg, std::string* l);   \
     IPC_SYNC_MESSAGE_METHODS_##out_cnt                                        \
   };
@@ -658,7 +660,7 @@
     static bool ReadSendParam(const Message* msg, Schema::SendParam* p);      \
     static bool ReadReplyParam(                                               \
         const Message* msg,                                                   \
-        TupleTypes<ReplyParam>::ValueTuple* p);                               \
+        base::TupleTypes<ReplyParam>::ValueTuple* p);                         \
     static void Log(std::string* name, const Message* msg, std::string* l);   \
     IPC_SYNC_MESSAGE_METHODS_##out_cnt                                        \
   };
@@ -711,8 +713,9 @@
   bool msg_class::ReadSendParam(const Message* msg, Schema::SendParam* p) {   \
     return Schema::ReadSendParam(msg, p);                                     \
   }                                                                           \
-  bool msg_class::ReadReplyParam(const Message* msg,                          \
-                                 TupleTypes<ReplyParam>::ValueTuple* p) {     \
+  bool msg_class::ReadReplyParam(                                             \
+      const Message* msg,                                                     \
+      base::TupleTypes<ReplyParam>::ValueTuple* p) {                          \
     return Schema::ReadReplyParam(msg, p);                                    \
   }
 
@@ -731,8 +734,9 @@
   bool msg_class::ReadSendParam(const Message* msg, Schema::SendParam* p) {   \
     return Schema::ReadSendParam(msg, p);                                     \
   }                                                                           \
-  bool msg_class::ReadReplyParam(const Message* msg,                          \
-                                 TupleTypes<ReplyParam>::ValueTuple* p) {     \
+  bool msg_class::ReadReplyParam(                                             \
+      const Message* msg,                                                     \
+      base::TupleTypes<ReplyParam>::ValueTuple* p) {                          \
     return Schema::ReadReplyParam(msg, p);                                    \
   }
 
@@ -766,12 +770,12 @@
     if (!msg || !l)                                                     \
       return;                                                           \
     if (msg->is_sync()) {                                               \
-      TupleTypes<Schema::SendParam>::ValueTuple p;                      \
+      base::TupleTypes<Schema::SendParam>::ValueTuple p;                \
       if (Schema::ReadSendParam(msg, &p))                               \
         IPC::LogParam(p, l);                                            \
       AddOutputParamsToLog(msg, l);                                     \
     } else {                                                            \
-      TupleTypes<Schema::ReplyParam>::ValueTuple p;                     \
+      base::TupleTypes<Schema::ReplyParam>::ValueTuple p;               \
       if (Schema::ReadReplyParam(msg, &p))                              \
         IPC::LogParam(p, l);                                            \
     }                                                                   \
@@ -816,33 +820,38 @@
 #define IPC_TYPE_OUT_1(t1)                  t1* arg6
 #define IPC_TYPE_OUT_2(t1, t2)              t1* arg6, t2* arg7
 #define IPC_TYPE_OUT_3(t1, t2, t3)          t1* arg6, t2* arg7, t3* arg8
-#define IPC_TYPE_OUT_4(t1, t2, t3, t4)      t1* arg6, t2* arg7, t3* arg8, t4* arg9
+#define IPC_TYPE_OUT_4(t1, t2, t3, t4)      t1* arg6, t2* arg7, t3* arg8, \
+                                            t4* arg9
 
-#define IPC_TUPLE_IN_0()                    Tuple<>
-#define IPC_TUPLE_IN_1(t1)                  Tuple<t1>
-#define IPC_TUPLE_IN_2(t1, t2)              Tuple<t1, t2>
-#define IPC_TUPLE_IN_3(t1, t2, t3)          Tuple<t1, t2, t3>
-#define IPC_TUPLE_IN_4(t1, t2, t3, t4)      Tuple<t1, t2, t3, t4>
-#define IPC_TUPLE_IN_5(t1, t2, t3, t4, t5)  Tuple<t1, t2, t3, t4, t5>
+#define IPC_TUPLE_IN_0()                    base::Tuple<>
+#define IPC_TUPLE_IN_1(t1)                  base::Tuple<t1>
+#define IPC_TUPLE_IN_2(t1, t2)              base::Tuple<t1, t2>
+#define IPC_TUPLE_IN_3(t1, t2, t3)          base::Tuple<t1, t2, t3>
+#define IPC_TUPLE_IN_4(t1, t2, t3, t4)      base::Tuple<t1, t2, t3, t4>
+#define IPC_TUPLE_IN_5(t1, t2, t3, t4, t5)  base::Tuple<t1, t2, t3, t4, t5>
 
-#define IPC_TUPLE_OUT_0()                   Tuple<>
-#define IPC_TUPLE_OUT_1(t1)                 Tuple<t1&>
-#define IPC_TUPLE_OUT_2(t1, t2)             Tuple<t1&, t2&>
-#define IPC_TUPLE_OUT_3(t1, t2, t3)         Tuple<t1&, t2&, t3&>
-#define IPC_TUPLE_OUT_4(t1, t2, t3, t4)     Tuple<t1&, t2&, t3&, t4&>
+#define IPC_TUPLE_OUT_0()                   base::Tuple<>
+#define IPC_TUPLE_OUT_1(t1)                 base::Tuple<t1&>
+#define IPC_TUPLE_OUT_2(t1, t2)             base::Tuple<t1&, t2&>
+#define IPC_TUPLE_OUT_3(t1, t2, t3)         base::Tuple<t1&, t2&, t3&>
+#define IPC_TUPLE_OUT_4(t1, t2, t3, t4)     base::Tuple<t1&, t2&, t3&, t4&>
 
-#define IPC_NAME_IN_0()                     MakeTuple()
-#define IPC_NAME_IN_1(t1)                   MakeRefTuple(arg1)
-#define IPC_NAME_IN_2(t1, t2)               MakeRefTuple(arg1, arg2)
-#define IPC_NAME_IN_3(t1, t2, t3)           MakeRefTuple(arg1, arg2, arg3)
-#define IPC_NAME_IN_4(t1, t2, t3, t4)       MakeRefTuple(arg1, arg2, arg3, arg4)
-#define IPC_NAME_IN_5(t1, t2, t3, t4, t5)   MakeRefTuple(arg1, arg2, arg3, arg4, arg5)
+#define IPC_NAME_IN_0()                     base::MakeTuple()
+#define IPC_NAME_IN_1(t1)                   base::MakeRefTuple(arg1)
+#define IPC_NAME_IN_2(t1, t2)               base::MakeRefTuple(arg1, arg2)
+#define IPC_NAME_IN_3(t1, t2, t3)           base::MakeRefTuple(arg1, arg2, arg3)
+#define IPC_NAME_IN_4(t1, t2, t3, t4)       base::MakeRefTuple(arg1, arg2, \
+                                                               arg3, arg4)
+#define IPC_NAME_IN_5(t1, t2, t3, t4, t5)   base::MakeRefTuple(arg1, arg2, \
+                                                               arg3, arg4, arg5)
 
-#define IPC_NAME_OUT_0()                    MakeTuple()
-#define IPC_NAME_OUT_1(t1)                  MakeRefTuple(*arg6)
-#define IPC_NAME_OUT_2(t1, t2)              MakeRefTuple(*arg6, *arg7)
-#define IPC_NAME_OUT_3(t1, t2, t3)          MakeRefTuple(*arg6, *arg7, *arg8)
-#define IPC_NAME_OUT_4(t1, t2, t3, t4)      MakeRefTuple(*arg6, *arg7, *arg8, *arg9)
+#define IPC_NAME_OUT_0()                    base::MakeTuple()
+#define IPC_NAME_OUT_1(t1)                  base::MakeRefTuple(*arg6)
+#define IPC_NAME_OUT_2(t1, t2)              base::MakeRefTuple(*arg6, *arg7)
+#define IPC_NAME_OUT_3(t1, t2, t3)          base::MakeRefTuple(*arg6, *arg7, \
+                                                               *arg8)
+#define IPC_NAME_OUT_4(t1, t2, t3, t4)      base::MakeRefTuple(*arg6, *arg7, \
+                                                               *arg8, *arg9)
 
 // There are places where the syntax requires a comma if there are input args,
 // if there are input args and output args, or if there are input args or

@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/hash.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
@@ -70,22 +71,26 @@ InputMethodCategory GetInputMethodCategory(const std::string& input_method_id,
       extension_ime_util::GetComponentIDByInputMethodID(input_method_id);
   InputMethodCategory category = INPUT_METHOD_CATEGORY_UNKNOWN;
   char ch = 0;
-  if (StartsWithASCII(component_id, "xkb:", true)) {
+  if (base::StartsWith(component_id, "xkb:", base::CompareCase::SENSITIVE)) {
     ch = component_id[4];
     category = INPUT_METHOD_CATEGORY_XKB;
-  } else if (StartsWithASCII(component_id, "zh-", true)) {
+  } else if (base::StartsWith(component_id, "zh-",
+                              base::CompareCase::SENSITIVE)) {
     size_t pos = component_id.find("-t-i0-");
     if (pos > 0)
       pos += 6;
     ch = component_id[pos];
     category = INPUT_METHOD_CATEGORY_ZH;
-  } else if (StartsWithASCII(component_id, "nacl_mozc_", true)) {
+  } else if (base::StartsWith(component_id, "nacl_mozc_",
+                              base::CompareCase::SENSITIVE)) {
     ch = component_id[10];
     category = INPUT_METHOD_CATEGORY_JA;
-  } else if (StartsWithASCII(component_id, "hangul_", true)) {
+  } else if (base::StartsWith(component_id, "hangul_",
+                              base::CompareCase::SENSITIVE)) {
     ch = component_id[7];
     category = INPUT_METHOD_CATEGORY_KO;
-  } else if (StartsWithASCII(component_id, "vkd_", true)) {
+  } else if (base::StartsWith(component_id, "vkd_",
+                              base::CompareCase::SENSITIVE)) {
     ch = component_id[4];
     category = INPUT_METHOD_CATEGORY_M17N;
   } else if (component_id.find("-t-i0-") > 0) {
@@ -601,12 +606,13 @@ void InputMethodManagerImpl::StateImpl::SetInputMethodLoginDefaultFromVPD(
   if (layout.empty())
     return;
 
-  std::vector<std::string> layouts;
-  base::SplitString(layout, ',', &layouts);
+  std::vector<std::string> layouts = base::SplitString(
+      layout, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   manager_->MigrateInputMethods(&layouts);
 
   PrefService* prefs = g_browser_process->local_state();
-  prefs->SetString(prefs::kHardwareKeyboardLayout, JoinString(layouts, ","));
+  prefs->SetString(prefs::kHardwareKeyboardLayout,
+                   base::JoinString(layouts, ","));
 
   // This asks the file thread to save the prefs (i.e. doesn't block).
   // The latest values of Local State reside in memory so we can safely
@@ -857,25 +863,6 @@ InputMethodManagerImpl::InputMethodManagerImpl(
   const InputMethodDescriptors& descriptors =
       component_extension_ime_manager_->GetAllIMEAsInputMethodDescriptor();
   util_.ResetInputMethods(descriptors);
-
-  // Initializes the stat id map.
-  std::map<int, std::vector<std::string> > buckets;
-  for (InputMethodDescriptors::const_iterator it = descriptors.begin();
-       it != descriptors.end(); ++it) {
-    char first_char;
-    int cat_id = static_cast<int>(
-        GetInputMethodCategory(it->id(), &first_char));
-    int key = cat_id * 1000 + first_char;
-    buckets[key].push_back(it->id());
-  }
-  for (std::map<int, std::vector<std::string>>::iterator i =
-       buckets.begin(); i != buckets.end(); ++i) {
-    std::sort(i->second.begin(), i->second.end());
-    for (size_t j = 0; j < i->second.size() && j < 100; ++j) {
-      int key = i->first * 100 + j;
-      stat_id_map_[i->second[j]] = key;
-    }
-  }
 }
 
 InputMethodManagerImpl::~InputMethodManagerImpl() {
@@ -888,8 +875,8 @@ void InputMethodManagerImpl::RecordInputMethodUsage(
   UMA_HISTOGRAM_ENUMERATION("InputMethod.Category",
                             GetInputMethodCategory(input_method_id),
                             INPUT_METHOD_CATEGORY_MAX);
-  UMA_HISTOGRAM_SPARSE_SLOWLY("InputMethod.ID",
-                              stat_id_map_[input_method_id]);
+  UMA_HISTOGRAM_SPARSE_SLOWLY(
+      "InputMethod.ID2", static_cast<int32_t>(base::Hash(input_method_id)));
 }
 
 void InputMethodManagerImpl::AddObserver(
@@ -1105,10 +1092,18 @@ scoped_refptr<InputMethodManager::State> InputMethodManagerImpl::CreateNewState(
     Profile* profile) {
   StateImpl* new_state = new StateImpl(this, profile);
 
-  // Active IM should be set to owner's default.
+  // Active IM should be set to owner/user's default.
   PrefService* prefs = g_browser_process->local_state();
-  const std::string initial_input_method_id =
-      prefs->GetString(chromeos::language_prefs::kPreferredKeyboardLayout);
+  PrefService* user_prefs = profile ? profile->GetPrefs() : nullptr;
+  std::string initial_input_method_id;
+  if (user_prefs) {
+    initial_input_method_id =
+        user_prefs->GetString(prefs::kLanguageCurrentInputMethod);
+  }
+  if (initial_input_method_id.empty()) {
+    initial_input_method_id =
+        prefs->GetString(chromeos::language_prefs::kPreferredKeyboardLayout);
+  }
 
   const InputMethodDescriptor* descriptor =
       GetInputMethodUtil()->GetInputMethodDescriptorFromId(

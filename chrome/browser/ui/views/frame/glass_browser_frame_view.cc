@@ -10,7 +10,6 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
@@ -18,6 +17,7 @@
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/image_operations.h"
@@ -30,6 +30,7 @@
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/win/hwnd_util.h"
 #include "ui/views/window/client_view.h"
 
@@ -291,8 +292,9 @@ void GlassBrowserFrameView::ButtonPressed(views::Button* sender,
   if (sender == new_avatar_button()) {
     BrowserWindow::AvatarBubbleMode mode =
         BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT;
-    if (event.IsMouseEvent() &&
-        static_cast<const ui::MouseEvent&>(event).IsRightMouseButton()) {
+    if ((event.IsMouseEvent() &&
+         static_cast<const ui::MouseEvent&>(event).IsRightMouseButton()) ||
+        (event.type() == ui::ET_GESTURE_LONG_PRESS)) {
       mode = BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH;
     }
     browser_view()->ShowAvatarBubbleFromAvatarButton(

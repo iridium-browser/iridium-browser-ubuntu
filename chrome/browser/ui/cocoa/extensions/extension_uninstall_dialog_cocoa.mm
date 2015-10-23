@@ -49,14 +49,14 @@ void ExtensionUninstallDialogCocoa::Show() {
   NSButton* cancelButton = [alert addButtonWithTitle:l10n_util::GetNSString(
       IDS_CANCEL)];
   // Default to accept when triggered via chrome://extensions page.
-  if (triggering_extension_) {
+  if (triggering_extension()) {
     [continueButton setKeyEquivalent:@""];
     [cancelButton setKeyEquivalent:@"\r"];
   }
 
   [alert setMessageText:base::SysUTF8ToNSString(GetHeadingText())];
   [alert setAlertStyle:NSWarningAlertStyle];
-  [alert setIcon:gfx::NSImageFromImageSkia(icon_)];
+  [alert setIcon:gfx::NSImageFromImageSkia(icon())];
 
   base::scoped_nsobject<NSButton> reportAbuseCheckbox;
   if (ShouldShowReportAbuseCheckbox()) {
@@ -71,14 +71,10 @@ void ExtensionUninstallDialogCocoa::Show() {
   if ([alert runModal] == NSAlertFirstButtonReturn) {
     bool report_abuse_checked =
         reportAbuseCheckbox.get() && [reportAbuseCheckbox state] == NSOnState;
-    if (report_abuse_checked)
-      HandleReportAbuse();
     OnDialogClosed(report_abuse_checked ?
         CLOSE_ACTION_UNINSTALL_AND_REPORT_ABUSE : CLOSE_ACTION_UNINSTALL);
-    delegate_->ExtensionUninstallAccepted();
   } else {
     OnDialogClosed(CLOSE_ACTION_CANCELED);
-    delegate_->ExtensionUninstallCanceled();
   }
 }
 

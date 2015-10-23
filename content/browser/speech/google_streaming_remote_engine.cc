@@ -36,7 +36,6 @@ const char kWebServiceBaseUrl[] =
     "https://www.google.com/speech-api/full-duplex/v1";
 const char kDownstreamUrl[] = "/down?";
 const char kUpstreamUrl[] = "/up?";
-const AudioEncoder::Codec kDefaultAudioCodec = AudioEncoder::CODEC_FLAC;
 
 // This matches the maximum maxAlternatives value supported by the server.
 const uint32 kMaxMaxAlternatives = 30;
@@ -294,9 +293,8 @@ GoogleStreamingRemoteEngine::ConnectBothStreams(const FSMEventArgs&) {
   DCHECK(!upstream_fetcher_.get());
   DCHECK(!downstream_fetcher_.get());
 
-  encoder_.reset(AudioEncoder::Create(kDefaultAudioCodec,
-                                      config_.audio_sample_rate,
-                                      config_.audio_num_bits_per_sample));
+  encoder_.reset(new AudioEncoder(config_.audio_sample_rate,
+                                  config_.audio_num_bits_per_sample));
   DCHECK(encoder_.get());
   const std::string request_key = GenerateRequestKey();
 
@@ -306,8 +304,7 @@ GoogleStreamingRemoteEngine::ConnectBothStreams(const FSMEventArgs&) {
                            !config_.auth_token.empty() &&
                            !config_.auth_scope.empty());
   if (use_framed_post_data_) {
-    preamble_encoder_.reset(AudioEncoder::Create(
-        kDefaultAudioCodec,
+    preamble_encoder_.reset(new AudioEncoder(
         config_.preamble->sample_rate,
         config_.preamble->sample_depth * 8));
   }
@@ -320,7 +317,7 @@ GoogleStreamingRemoteEngine::ConnectBothStreams(const FSMEventArgs&) {
   downstream_args.push_back("output=pb");
   GURL downstream_url(std::string(kWebServiceBaseUrl) +
                       std::string(kDownstreamUrl) +
-                      JoinString(downstream_args, '&'));
+                      base::JoinString(downstream_args, "&"));
 
   downstream_fetcher_ = URLFetcher::Create(
       kDownstreamUrlFetcherIdForTesting, downstream_url, URLFetcher::GET, this);
@@ -347,10 +344,16 @@ GoogleStreamingRemoteEngine::ConnectBothStreams(const FSMEventArgs&) {
     upstream_args.push_back("maxAlternatives=" +
                             base::UintToString(max_alternatives));
   }
-  upstream_args.push_back("client=chromium");
+  upstream_args.push_back("app=chromium");
   if (!config_.hardware_info.empty()) {
     upstream_args.push_back(
         "xhw=" + net::EscapeQueryParamValue(config_.hardware_info, true));
+  }
+  for (const SpeechRecognitionGrammar& grammar : config_.grammars) {
+    std::string grammar_value(
+        base::DoubleToString(grammar.weight) + ":" + grammar.url);
+    upstream_args.push_back(
+        "grammar=" + net::EscapeQueryParamValue(grammar_value, true));
   }
   if (config_.continuous)
     upstream_args.push_back("continuous");
@@ -365,21 +368,21 @@ GoogleStreamingRemoteEngine::ConnectBothStreams(const FSMEventArgs&) {
   if (use_framed_post_data_) {
     std::string audio_format;
     if (preamble_encoder_)
-      audio_format = preamble_encoder_->mime_type() + ",";
-    audio_format += encoder_->mime_type();
+      audio_format = preamble_encoder_->GetMimeType() + ",";
+    audio_format += encoder_->GetMimeType();
     upstream_args.push_back(
         "audioFormat=" + net::EscapeQueryParamValue(audio_format, true));
   }
   GURL upstream_url(std::string(kWebServiceBaseUrl) +
                     std::string(kUpstreamUrl) +
-                    JoinString(upstream_args, '&'));
+                    base::JoinString(upstream_args, "&"));
 
   upstream_fetcher_ = URLFetcher::Create(kUpstreamUrlFetcherIdForTesting,
                                          upstream_url, URLFetcher::POST, this);
   if (use_framed_post_data_)
     upstream_fetcher_->SetChunkedUpload("application/octet-stream");
   else
-    upstream_fetcher_->SetChunkedUpload(encoder_->mime_type());
+    upstream_fetcher_->SetChunkedUpload(encoder_->GetMimeType());
   upstream_fetcher_->SetRequestContext(url_context_.get());
   upstream_fetcher_->SetReferrer(config_.origin_url);
   upstream_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
@@ -514,7 +517,7 @@ GoogleStreamingRemoteEngine::CloseUpstreamAndWaitForResults(
   size_t sample_count =
       config_.audio_sample_rate * kAudioPacketIntervalMs / 1000;
   scoped_refptr<AudioChunk> dummy_chunk = new AudioChunk(
-      sample_count * sizeof(int16), encoder_->bits_per_sample() / 8);
+      sample_count * sizeof(int16), encoder_->GetBitsPerSample() / 8);
   encoder_->Encode(*dummy_chunk.get());
   encoder_->Flush();
   scoped_refptr<AudioChunk> encoded_dummy_data =

@@ -29,6 +29,7 @@
 // To use, derive your test base class from RenderViewHostImplTestHarness.
 
 struct FrameHostMsg_DidCommitProvisionalLoad_Params;
+struct ViewHostMsg_TextInputState_Params;
 
 namespace gfx {
 class Rect;
@@ -39,6 +40,7 @@ namespace content {
 class SiteInstance;
 class TestRenderFrameHost;
 class TestWebContents;
+struct FrameReplicationState;
 
 // Utility function to initialize FrameHostMsg_DidCommitProvisionalLoad_Params
 // with given parameters.
@@ -98,10 +100,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   void Focus() override {}
   void SetIsLoading(bool is_loading) override {}
   void UpdateCursor(const WebCursor& cursor) override {}
-  void TextInputTypeChanged(ui::TextInputType type,
-                            ui::TextInputMode input_mode,
-                            bool can_compose_inline,
-                            int flags) override {}
+  void TextInputStateChanged(
+      const ViewHostMsg_TextInputState_Params& params) override {}
   void ImeCancelComposition() override {}
   void ImeCompositionRangeChanged(
       const gfx::Range& range,
@@ -226,18 +226,24 @@ class TestRenderViewHost
     delete_counter_ = delete_counter;
   }
 
-  // The opener route id passed to CreateRenderView().
-  int opener_route_id() const { return opener_route_id_; }
+  // The opener frame route id passed to CreateRenderView().
+  int opener_frame_route_id() const { return opener_frame_route_id_; }
 
   // RenderWidgetHost overrides (same value, but in the Mock* type)
   MockRenderProcessHost* GetProcess() const override;
 
+  bool CreateTestRenderView(const base::string16& frame_name,
+                            int opener_frame_route_id,
+                            int proxy_route_id,
+                            int32 max_page_id,
+                            bool window_was_created_with_opener) override;
+
   // RenderViewHost overrides --------------------------------------------------
 
-  bool CreateRenderView(const base::string16& frame_name,
-                        int opener_route_id,
+  bool CreateRenderView(int opener_frame_route_id,
                         int proxy_route_id,
                         int32 max_page_id,
+                        const FrameReplicationState& replicated_frame_state,
                         bool window_was_created_with_opener) override;
   bool IsFullscreenGranted() const override;
 
@@ -263,8 +269,8 @@ class TestRenderViewHost
   // See set_delete_counter() above. May be NULL.
   int* delete_counter_;
 
-  // See opener_route_id() above.
-  int opener_route_id_;
+  // See opener_frame_route_id() above.
+  int opener_frame_route_id_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRenderViewHost);
 };

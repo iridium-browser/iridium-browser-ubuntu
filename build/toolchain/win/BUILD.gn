@@ -39,11 +39,35 @@ if (vc_bin_dir == "") {
   vc_bin_dir = toolchain_data.vc_bin_dir
 }
 
+if (use_goma) {
+  goma_prefix = "$goma_dir/gomacc.exe "
+} else {
+  goma_prefix = ""
+}
+
 # This value will be inherited in the toolchain below.
 concurrent_links = exec_script("../get_concurrent_links.py", [], "value")
 
+# Copy the VS runtime DLL for the default toolchain the root build directory so
+# things will run.
+if (current_toolchain == default_toolchain) {
+  if (is_debug) {
+    configuration_name = "Debug"
+  } else {
+    configuration_name = "Release"
+  }
+  exec_script("../../vs_toolchain.py",
+              [
+                "copy_dlls",
+                rebase_path(root_build_dir),
+                configuration_name,
+                target_cpu,
+              ])
+}
+
 # Parameters:
 #  current_cpu: current_cpu to pass as a build arg
+#  current_os: current_os to pass as a build arg
 #  environment: File name of environment file.
 template("msvc_toolchain") {
   if (defined(invoker.concurrent_links)) {
@@ -52,26 +76,7 @@ template("msvc_toolchain") {
 
   env = invoker.environment
 
-  if (is_debug) {
-    configuration = "Debug"
-  } else {
-    configuration = "Release"
-  }
-  exec_script("../../vs_toolchain.py",
-              [
-                "copy_dlls",
-                rebase_path(root_build_dir),
-                configuration,
-                invoker.current_cpu,
-              ])
-
-  if (use_goma) {
-    goma_prefix = "$goma_dir/gomacc.exe "
-  } else {
-    goma_prefix = ""
-  }
-
-  cl = "${goma_prefix}\"${vc_bin_dir}/cl.exe\""
+  cl = invoker.cl
 
   toolchain(target_name) {
     # Make these apply to all tools below.
@@ -80,18 +85,20 @@ template("msvc_toolchain") {
 
     tool("cc") {
       rspfile = "{{output}}.rsp"
+      precompiled_header_type = "msvc"
       pdbname = "{{target_out_dir}}/{{target_output_name}}_c.pdb"
       command = "ninja -t msvc -e $env -- $cl /nologo /showIncludes /FC @$rspfile /c {{source}} /Fo{{output}} /Fd$pdbname"
       depsformat = "msvc"
       description = "CC {{output}}"
       outputs = [
-        "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.obj",
+        "{{target_out_dir}}/{{target_output_name}}/{{source_name_part}}.obj",
       ]
       rspfile_content = "{{defines}} {{include_dirs}} {{cflags}} {{cflags_c}}"
     }
 
     tool("cxx") {
       rspfile = "{{output}}.rsp"
+      precompiled_header_type = "msvc"
 
       # The PDB name needs to be different between C and C++ compiled files.
       pdbname = "{{target_out_dir}}/{{target_output_name}}_cc.pdb"
@@ -99,7 +106,7 @@ template("msvc_toolchain") {
       depsformat = "msvc"
       description = "CXX {{output}}"
       outputs = [
-        "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.obj",
+        "{{target_out_dir}}/{{target_output_name}}/{{source_name_part}}.obj",
       ]
       rspfile_content = "{{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}}"
     }
@@ -107,7 +114,7 @@ template("msvc_toolchain") {
     tool("rc") {
       command = "$python_path gyp-win-tool rc-wrapper $env rc.exe {{defines}} {{include_dirs}} /fo{{output}} {{source}}"
       outputs = [
-        "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.res",
+        "{{target_out_dir}}/{{target_output_name}}/{{source_name_part}}.res",
       ]
       description = "RC {{output}}"
     }
@@ -118,7 +125,7 @@ template("msvc_toolchain") {
       command = "$python_path gyp-win-tool asm-wrapper $env ml.exe {{defines}} {{include_dirs}} /safeseh /c /Fo {{output}} {{source}}"
       description = "ASM {{output}}"
       outputs = [
-        "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.obj",
+        "{{target_out_dir}}/{{target_output_name}}/{{source_name_part}}.obj",
       ]
     }
 
@@ -140,8 +147,7 @@ template("msvc_toolchain") {
 
     tool("solink") {
       dllname = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"  # e.g. foo.dll
-      libname =
-          "{{root_out_dir}}/{{target_output_name}}{{output_extension}}.lib"  # e.g. foo.dll.lib
+      libname = "${dllname}.lib"  # e.g. foo.dll.lib
       rspfile = "${dllname}.rsp"
 
       link_command = "$python_path gyp-win-tool link-wrapper $env False link.exe /nologo /IMPLIB:$libname /DLL /OUT:$dllname /PDB:${dllname}.pdb @$rspfile"
@@ -159,6 +165,11 @@ template("msvc_toolchain") {
       ]
       link_output = libname
       depend_output = libname
+
+      # Since the above commands only updates the .lib file when it changes, ask
+      # Ninja to check if the timestamp actually changed to know if downstream
+      # dependencies should be recompiled.
+      restat = true
 
       # The use of inputs_newline is to work around a fixed per-line buffer
       # size in the linker.
@@ -201,6 +212,10 @@ template("msvc_toolchain") {
     # passed to the build. They are ignored when this is the default toolchain.
     toolchain_args() {
       current_cpu = invoker.current_cpu
+      if (defined(invoker.is_clang)) {
+        is_clang = invoker.is_clang
+      }
+      current_os = invoker.current_os
     }
   }
 }
@@ -210,17 +225,56 @@ template("msvc_toolchain") {
 # Right now only one of these can be enabled at a time because the
 # runtime libraries get copied to root_build_dir and would collide.
 if (current_cpu == "x86") {
-  msvc_toolchain("32") {
+  msvc_toolchain("x86") {
     environment = "environment.x86"
-
     current_cpu = "x86"
+    cl = "${goma_prefix}\"${vc_bin_dir}/cl.exe\""
+    is_clang = false
+  }
+  msvc_toolchain("clang_x86") {
+    environment = "environment.x86"
+    current_cpu = "x86"
+    prefix = rebase_path("//third_party/llvm-build/Release+Asserts/bin",
+                         root_build_dir)
+    cl = "${goma_prefix}$prefix/clang-cl.exe"
+    current_os = "win"
+    is_clang = true
   }
 }
 
 if (current_cpu == "x64") {
-  msvc_toolchain("64") {
+  msvc_toolchain("x64") {
     environment = "environment.x64"
-
     current_cpu = "x64"
+    cl = "${goma_prefix}\"${vc_bin_dir}/cl.exe\""
+    is_clang = false
   }
+  msvc_toolchain("clang_x64") {
+    environment = "environment.x64"
+    current_cpu = "x64"
+    prefix = rebase_path("//third_party/llvm-build/Release+Asserts/bin",
+                         root_build_dir)
+    cl = "${goma_prefix}$prefix/clang-cl.exe"
+    current_os = "win"
+    is_clang = true
+  }
+}
+
+# WinRT toolchains
+msvc_toolchain("winrt_x86") {
+  environment = "environment.winrt_x86"
+  cl = "${goma_prefix}\"${vc_bin_dir}/cl.exe\""
+  is_clang = false
+
+  current_cpu = "x86"
+  current_os = current_os
+}
+
+msvc_toolchain("winrt_x64") {
+  environment = "environment.winrt_x64"
+  cl = "${goma_prefix}\"${vc_bin_dir}/cl.exe\""
+  is_clang = false
+
+  current_cpu = "x64"
+  current_os = current_os
 }

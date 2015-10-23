@@ -7,15 +7,12 @@
 #include <string>
 
 #include "base/files/file_util.h"
-#include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_change.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_delegate.h"
-#include "chrome/browser/chromeos/drive/job_scheduler.h"
-#include "chrome/browser/chromeos/drive/resource_metadata.h"
-#include "content/public/browser/browser_thread.h"
+#include "components/drive/drive.pb.h"
+#include "components/drive/file_change.h"
+#include "components/drive/job_scheduler.h"
+#include "components/drive/resource_metadata.h"
 #include "net/base/mime_util.h"
-
-using content::BrowserThread;
 
 namespace drive {
 namespace file_system {
@@ -78,18 +75,17 @@ CreateFileOperation::CreateFileOperation(
       delegate_(delegate),
       metadata_(metadata),
       weak_ptr_factory_(this) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 CreateFileOperation::~CreateFileOperation() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
 }
 
 void CreateFileOperation::CreateFile(const base::FilePath& file_path,
                                      bool is_exclusive,
                                      const std::string& mime_type,
                                      const FileOperationCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   ResourceEntry* entry = new ResourceEntry;
@@ -115,7 +111,7 @@ void CreateFileOperation::CreateFileAfterUpdateLocalState(
     bool is_exclusive,
     ResourceEntry* entry,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error == FILE_ERROR_EXISTS) {
@@ -129,8 +125,8 @@ void CreateFileOperation::CreateFileAfterUpdateLocalState(
 
     // Notify delegate if the file was newly created.
     FileChange changed_file;
-    changed_file.Update(
-        file_path, FileChange::FILE_TYPE_FILE, FileChange::ADD_OR_UPDATE);
+    changed_file.Update(file_path, FileChange::FILE_TYPE_FILE,
+                        FileChange::CHANGE_TYPE_ADD_OR_UPDATE);
     delegate_->OnFileChangedByOperation(changed_file);
     // Synchronize in the background.
     delegate_->OnEntryUpdatedByOperation(ClientContext(BACKGROUND),

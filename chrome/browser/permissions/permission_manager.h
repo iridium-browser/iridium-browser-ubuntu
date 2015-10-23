@@ -17,6 +17,7 @@ class Profile;
 
 namespace content {
 enum class PermissionType;
+class WebContents;
 };  // namespace content
 
 class PermissionManager : public KeyedService,
@@ -29,13 +30,13 @@ class PermissionManager : public KeyedService,
   // content::PermissionManager implementation.
   void RequestPermission(
       content::PermissionType permission,
-      content::WebContents* web_contents,
+      content::RenderFrameHost* render_frame_host,
       int request_id,
       const GURL& requesting_origin,
       bool user_gesture,
       const base::Callback<void(content::PermissionStatus)>& callback) override;
   void CancelPermissionRequest(content::PermissionType permission,
-                               content::WebContents* web_contents,
+                               content::RenderFrameHost* render_frame_host,
                                int request_id,
                                const GURL& requesting_origin) override;
   void ResetPermission(content::PermissionType permission,
@@ -58,6 +59,10 @@ class PermissionManager : public KeyedService,
  private:
   struct Subscription;
   using SubscriptionsMap = IDMap<Subscription, IDMapOwnPointer>;
+
+  // Not all WebContents are able to display permission requests. If the PBM
+  // is required but missing for |web_contents|, don't pass along the request.
+  bool IsPermissionBubbleManagerMissing(content::WebContents* web_contents);
 
   // content_settings::Observer implementation.
   void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,

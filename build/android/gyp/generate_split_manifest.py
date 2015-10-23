@@ -9,8 +9,8 @@ Given the manifest file for the main APK, generates an AndroidManifest.xml with
 the value required for a Split APK (package, versionCode, etc).
 """
 
-import lxml.etree
 import optparse
+import xml.etree.ElementTree
 
 from util import build_utils
 
@@ -19,6 +19,7 @@ MANIFEST_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
     xmlns:android="http://schemas.android.com/apk/res/android"
     package="%(package)s"
     split="%(split)s">
+  <uses-sdk android:minSdkVersion="21" />
   <application android:hasCode="%(has_code)s">
   </application>
 </manifest>
@@ -65,8 +66,8 @@ def Build(main_manifest, split, has_code):
     The XML split manifest as a string
   """
 
-  doc = lxml.etree.fromstring(main_manifest)
-  package = doc.xpath('/manifest/@package')[0]
+  doc = xml.etree.ElementTree.fromstring(main_manifest)
+  package = doc.get('package')
 
   return MANIFEST_TEMPLATE % {
       'package': package,
@@ -89,7 +90,7 @@ def main():
   if options.depfile:
     build_utils.WriteDepfile(
         options.depfile,
-        [main_manifest] + build_utils.GetPythonDependencies())
+        [options.main_manifest] + build_utils.GetPythonDependencies())
 
 
 if __name__ == '__main__':

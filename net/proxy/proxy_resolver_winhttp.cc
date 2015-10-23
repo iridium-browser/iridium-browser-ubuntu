@@ -7,7 +7,6 @@
 #include <windows.h>
 #include <winhttp.h>
 
-#include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "net/base/net_errors.h"
@@ -30,6 +29,28 @@ static void FreeInfo(WINHTTP_PROXY_INFO* info) {
     GlobalFree(info->lpszProxyBypass);
 }
 
+static Error WinHttpErrorToNetError(DWORD win_http_error) {
+  switch (win_http_error) {
+    case ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR:
+    case ERROR_WINHTTP_INTERNAL_ERROR:
+    case ERROR_WINHTTP_INCORRECT_HANDLE_TYPE:
+      return ERR_FAILED;
+    case ERROR_WINHTTP_LOGIN_FAILURE:
+      return ERR_PROXY_AUTH_UNSUPPORTED;
+    case ERROR_WINHTTP_BAD_AUTO_PROXY_SCRIPT:
+      return ERR_PAC_SCRIPT_FAILED;
+    case ERROR_WINHTTP_INVALID_URL:
+    case ERROR_WINHTTP_OPERATION_CANCELLED:
+    case ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT:
+    case ERROR_WINHTTP_UNRECOGNIZED_SCHEME:
+      return ERR_PAC_STATUS_NOT_OK;
+    case ERROR_NOT_ENOUGH_MEMORY:
+      return ERR_INSUFFICIENT_RESOURCES;
+    default:
+      return ERR_FAILED;
+  }
+}
+
 class ProxyResolverWinHttp : public ProxyResolver {
  public:
   ProxyResolverWinHttp(
@@ -46,11 +67,6 @@ class ProxyResolverWinHttp : public ProxyResolver {
 
   LoadState GetLoadState(RequestHandle request) const override;
 
-  void CancelSetPacScript() override;
-
-  int SetPacScript(const scoped_refptr<ProxyResolverScriptData>& script_data,
-                   const CompletionCallback& /*callback*/) override;
-
  private:
   bool OpenWinHttpSession();
   void CloseWinHttpSession();
@@ -65,8 +81,7 @@ class ProxyResolverWinHttp : public ProxyResolver {
 
 ProxyResolverWinHttp::ProxyResolverWinHttp(
     const scoped_refptr<ProxyResolverScriptData>& script_data)
-    : ProxyResolver(false /*expects_pac_bytes*/),
-      session_handle_(NULL),
+    : session_handle_(NULL),
       pac_url_(script_data->type() == ProxyResolverScriptData::TYPE_AUTO_DETECT
                    ? GURL("http://wpad/wpad.dat")
                    : script_data->url()) {
@@ -123,7 +138,7 @@ int ProxyResolverWinHttp::GetProxyForURL(const GURL& query_url,
           ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR == error) {
         CloseWinHttpSession();
       }
-      return ERR_FAILED;  // TODO(darin): Bug 1189288: translate error code.
+      return WinHttpErrorToNetError(error);
     }
   }
 
@@ -167,17 +182,6 @@ void ProxyResolverWinHttp::CancelRequest(RequestHandle request) {
 LoadState ProxyResolverWinHttp::GetLoadState(RequestHandle request) const {
   NOTREACHED();
   return LOAD_STATE_IDLE;
-}
-
-void ProxyResolverWinHttp::CancelSetPacScript() {
-  NOTREACHED();
-}
-
-int ProxyResolverWinHttp::SetPacScript(
-    const scoped_refptr<ProxyResolverScriptData>& script_data,
-    const CompletionCallback& /*callback*/) {
-  NOTREACHED();
-  return ERR_NOT_IMPLEMENTED;
 }
 
 bool ProxyResolverWinHttp::OpenWinHttpSession() {

@@ -5,8 +5,6 @@
 #include <assert.h>  // For assert
 #include <limits.h>  // For LONG_MIN, LONG_MAX.
 
-#include "src/v8.h"
-
 #if V8_TARGET_ARCH_PPC
 
 #include "src/base/bits.h"
@@ -14,7 +12,7 @@
 #include "src/bootstrapper.h"
 #include "src/codegen.h"
 #include "src/cpu-profiler.h"
-#include "src/debug.h"
+#include "src/debug/debug.h"
 #include "src/runtime/runtime.h"
 
 namespace v8 {
@@ -103,14 +101,15 @@ void MacroAssembler::CallJSEntry(Register target) {
 
 int MacroAssembler::CallSize(Address target, RelocInfo::Mode rmode,
                              Condition cond) {
-  return (2 + kMovInstructions) * kInstrSize;
+  Operand mov_operand = Operand(reinterpret_cast<intptr_t>(target), rmode);
+  return (2 + instructions_required_for_mov(ip, mov_operand)) * kInstrSize;
 }
 
 
 int MacroAssembler::CallSizeNotPredictableCodeSize(Address target,
                                                    RelocInfo::Mode rmode,
                                                    Condition cond) {
-  return (2 + kMovInstructions) * kInstrSize;
+  return (2 + kMovInstructionsNoConstantPool) * kInstrSize;
 }
 
 
@@ -175,23 +174,10 @@ void MacroAssembler::Call(Handle<Code> code, RelocInfo::Mode rmode,
 }
 
 
-void MacroAssembler::Ret(Condition cond) {
-  DCHECK(cond == al);
-  blr();
-}
-
-
-void MacroAssembler::Drop(int count, Condition cond) {
-  DCHECK(cond == al);
+void MacroAssembler::Drop(int count) {
   if (count > 0) {
     Add(sp, sp, count * kPointerSize, r0);
   }
-}
-
-
-void MacroAssembler::Ret(int drop, Condition cond) {
-  Drop(drop, cond);
-  Ret(cond);
 }
 
 
@@ -236,30 +222,59 @@ void MacroAssembler::Move(DoubleRegister dst, DoubleRegister src) {
 }
 
 
-void MacroAssembler::MultiPush(RegList regs) {
+void MacroAssembler::MultiPush(RegList regs, Register location) {
   int16_t num_to_push = NumberOfBitsSet(regs);
   int16_t stack_offset = num_to_push * kPointerSize;
 
-  subi(sp, sp, Operand(stack_offset));
-  for (int16_t i = kNumRegisters - 1; i >= 0; i--) {
+  subi(location, location, Operand(stack_offset));
+  for (int16_t i = Register::kNumRegisters - 1; i >= 0; i--) {
     if ((regs & (1 << i)) != 0) {
       stack_offset -= kPointerSize;
-      StoreP(ToRegister(i), MemOperand(sp, stack_offset));
+      StoreP(ToRegister(i), MemOperand(location, stack_offset));
     }
   }
 }
 
 
-void MacroAssembler::MultiPop(RegList regs) {
+void MacroAssembler::MultiPop(RegList regs, Register location) {
   int16_t stack_offset = 0;
 
-  for (int16_t i = 0; i < kNumRegisters; i++) {
+  for (int16_t i = 0; i < Register::kNumRegisters; i++) {
     if ((regs & (1 << i)) != 0) {
-      LoadP(ToRegister(i), MemOperand(sp, stack_offset));
+      LoadP(ToRegister(i), MemOperand(location, stack_offset));
       stack_offset += kPointerSize;
     }
   }
-  addi(sp, sp, Operand(stack_offset));
+  addi(location, location, Operand(stack_offset));
+}
+
+
+void MacroAssembler::MultiPushDoubles(RegList dregs, Register location) {
+  int16_t num_to_push = NumberOfBitsSet(dregs);
+  int16_t stack_offset = num_to_push * kDoubleSize;
+
+  subi(location, location, Operand(stack_offset));
+  for (int16_t i = DoubleRegister::kNumRegisters - 1; i >= 0; i--) {
+    if ((dregs & (1 << i)) != 0) {
+      DoubleRegister dreg = DoubleRegister::from_code(i);
+      stack_offset -= kDoubleSize;
+      stfd(dreg, MemOperand(location, stack_offset));
+    }
+  }
+}
+
+
+void MacroAssembler::MultiPopDoubles(RegList dregs, Register location) {
+  int16_t stack_offset = 0;
+
+  for (int16_t i = 0; i < DoubleRegister::kNumRegisters; i++) {
+    if ((dregs & (1 << i)) != 0) {
+      DoubleRegister dreg = DoubleRegister::from_code(i);
+      lfd(dreg, MemOperand(location, stack_offset));
+      stack_offset += kDoubleSize;
+    }
+  }
+  addi(location, location, Operand(stack_offset));
 }
 
 
@@ -496,7 +511,7 @@ void MacroAssembler::RememberedSetHelper(Register object,  // For debug tests.
     beq(&done, cr0);
   } else {
     DCHECK(and_then == kReturnAtEnd);
-    beq(&done, cr0);
+    Ret(eq, cr0);
   }
   mflr(r0);
   push(r0);
@@ -513,19 +528,35 @@ void MacroAssembler::RememberedSetHelper(Register object,  // For debug tests.
 
 void MacroAssembler::PushFixedFrame(Register marker_reg) {
   mflr(r0);
-  if (marker_reg.is_valid()) {
-    Push(r0, fp, cp, marker_reg);
+  if (FLAG_enable_embedded_constant_pool) {
+    if (marker_reg.is_valid()) {
+      Push(r0, fp, kConstantPoolRegister, cp, marker_reg);
+    } else {
+      Push(r0, fp, kConstantPoolRegister, cp);
+    }
   } else {
-    Push(r0, fp, cp);
+    if (marker_reg.is_valid()) {
+      Push(r0, fp, cp, marker_reg);
+    } else {
+      Push(r0, fp, cp);
+    }
   }
 }
 
 
 void MacroAssembler::PopFixedFrame(Register marker_reg) {
-  if (marker_reg.is_valid()) {
-    Pop(r0, fp, cp, marker_reg);
+  if (FLAG_enable_embedded_constant_pool) {
+    if (marker_reg.is_valid()) {
+      Pop(r0, fp, kConstantPoolRegister, cp, marker_reg);
+    } else {
+      Pop(r0, fp, kConstantPoolRegister, cp);
+    }
   } else {
-    Pop(r0, fp, cp);
+    if (marker_reg.is_valid()) {
+      Pop(r0, fp, cp, marker_reg);
+    } else {
+      Pop(r0, fp, cp);
+    }
   }
   mtlr(r0);
 }
@@ -651,11 +682,37 @@ void MacroAssembler::ConvertDoubleToInt64(const DoubleRegister double_input,
 }
 
 
+void MacroAssembler::LoadConstantPoolPointerRegisterFromCodeTargetAddress(
+    Register code_target_address) {
+  lwz(kConstantPoolRegister,
+      MemOperand(code_target_address,
+                 Code::kConstantPoolOffset - Code::kHeaderSize));
+  add(kConstantPoolRegister, kConstantPoolRegister, code_target_address);
+}
+
+
+void MacroAssembler::LoadConstantPoolPointerRegister(Register base,
+                                                     int code_start_delta) {
+  add_label_offset(kConstantPoolRegister, base, ConstantPoolPosition(),
+                   code_start_delta);
+}
+
+
+void MacroAssembler::LoadConstantPoolPointerRegister() {
+  mov_label_addr(kConstantPoolRegister, ConstantPoolPosition());
+}
+
+
 void MacroAssembler::StubPrologue(int prologue_offset) {
   LoadSmiLiteral(r11, Smi::FromInt(StackFrame::STUB));
   PushFixedFrame(r11);
   // Adjust FP to point to saved FP.
   addi(fp, sp, Operand(StandardFrameConstants::kFixedFrameSizeFromFp));
+  if (FLAG_enable_embedded_constant_pool) {
+    // ip contains prologue address
+    LoadConstantPoolPointerRegister(ip, -prologue_offset);
+    set_constant_pool_available(true);
+  }
 }
 
 
@@ -688,13 +745,26 @@ void MacroAssembler::Prologue(bool code_pre_aging, int prologue_offset) {
       }
     }
   }
+  if (FLAG_enable_embedded_constant_pool) {
+    // ip contains prologue address
+    LoadConstantPoolPointerRegister(ip, -prologue_offset);
+    set_constant_pool_available(true);
+  }
 }
 
 
 void MacroAssembler::EnterFrame(StackFrame::Type type,
                                 bool load_constant_pool_pointer_reg) {
-  LoadSmiLiteral(ip, Smi::FromInt(type));
-  PushFixedFrame(ip);
+  if (FLAG_enable_embedded_constant_pool && load_constant_pool_pointer_reg) {
+    PushFixedFrame();
+    // This path should not rely on ip containing code entry.
+    LoadConstantPoolPointerRegister();
+    LoadSmiLiteral(ip, Smi::FromInt(type));
+    push(ip);
+  } else {
+    LoadSmiLiteral(ip, Smi::FromInt(type));
+    PushFixedFrame(ip);
+  }
   // Adjust FP to point to saved FP.
   addi(fp, sp, Operand(StandardFrameConstants::kFixedFrameSizeFromFp));
 
@@ -704,6 +774,7 @@ void MacroAssembler::EnterFrame(StackFrame::Type type,
 
 
 int MacroAssembler::LeaveFrame(StackFrame::Type type, int stack_adjustment) {
+  ConstantPoolUnavailableScope constant_pool_unavailable(this);
   // r3: preserved
   // r4: preserved
   // r5: preserved
@@ -713,6 +784,13 @@ int MacroAssembler::LeaveFrame(StackFrame::Type type, int stack_adjustment) {
   int frame_ends;
   LoadP(r0, MemOperand(fp, StandardFrameConstants::kCallerPCOffset));
   LoadP(ip, MemOperand(fp, StandardFrameConstants::kCallerFPOffset));
+  if (FLAG_enable_embedded_constant_pool) {
+    const int exitOffset = ExitFrameConstants::kConstantPoolOffset;
+    const int standardOffset = StandardFrameConstants::kConstantPoolOffset;
+    const int offset =
+        ((type == StackFrame::EXIT) ? exitOffset : standardOffset);
+    LoadP(kConstantPoolRegister, MemOperand(fp, offset));
+  }
   mtlr(r0);
   frame_ends = pc_offset();
   Add(sp, fp, StandardFrameConstants::kCallerSPOffset + stack_adjustment, r0);
@@ -759,6 +837,10 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space) {
     li(r8, Operand::Zero());
     StoreP(r8, MemOperand(fp, ExitFrameConstants::kSPOffset));
   }
+  if (FLAG_enable_embedded_constant_pool) {
+    StoreP(kConstantPoolRegister,
+           MemOperand(fp, ExitFrameConstants::kConstantPoolOffset));
+  }
   mov(r8, Operand(CodeObject()));
   StoreP(r8, MemOperand(fp, ExitFrameConstants::kCodeOffset));
 
@@ -770,7 +852,7 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space) {
 
   // Optionally save all volatile double registers.
   if (save_doubles) {
-    SaveFPRegs(sp, 0, DoubleRegister::kNumVolatileRegisters);
+    MultiPushDoubles(kCallerSavedDoubles);
     // Note that d0 will be accessible at
     //   fp - ExitFrameConstants::kFrameSize -
     //   kNumVolatileRegisters * kDoubleSize,
@@ -828,6 +910,7 @@ int MacroAssembler::ActivationFrameAlignment() {
 void MacroAssembler::LeaveExitFrame(bool save_doubles, Register argument_count,
                                     bool restore_context,
                                     bool argument_count_is_length) {
+  ConstantPoolUnavailableScope constant_pool_unavailable(this);
   // Optionally restore all double registers.
   if (save_doubles) {
     // Calculate the stack location of the saved doubles and restore them.
@@ -835,7 +918,7 @@ void MacroAssembler::LeaveExitFrame(bool save_doubles, Register argument_count,
     const int offset =
         (ExitFrameConstants::kFrameSize + kNumRegs * kDoubleSize);
     addi(r6, fp, Operand(-offset));
-    RestoreFPRegs(r6, 0, kNumRegs);
+    MultiPopDoubles(kCallerSavedDoubles, r6);
   }
 
   // Clear top frame.
@@ -1078,10 +1161,11 @@ void MacroAssembler::IsObjectNameType(Register object, Register scratch,
 
 void MacroAssembler::DebugBreak() {
   li(r3, Operand::Zero());
-  mov(r4, Operand(ExternalReference(Runtime::kDebugBreak, isolate())));
+  mov(r4,
+      Operand(ExternalReference(Runtime::kHandleDebuggerStatement, isolate())));
   CEntryStub ces(isolate(), 1);
   DCHECK(AllowThisStubCall(&ces));
-  Call(ces.GetCode(), RelocInfo::DEBUG_BREAK);
+  Call(ces.GetCode(), RelocInfo::DEBUGGER_STATEMENT);
 }
 
 
@@ -1222,6 +1306,8 @@ void MacroAssembler::GetNumberHash(Register t0, Register scratch) {
   // hash = hash ^ (hash >> 16);
   srwi(scratch, t0, Operand(16));
   xor_(t0, t0, scratch);
+  // hash & 0x3fffffff
+  ExtractBitRange(t0, t0, 29, 0);
 }
 
 
@@ -1509,26 +1595,6 @@ void MacroAssembler::Allocate(Register object_size, Register result,
   if ((flags & TAG_OBJECT) != 0) {
     addi(result, result, Operand(kHeapObjectTag));
   }
-}
-
-
-void MacroAssembler::UndoAllocationInNewSpace(Register object,
-                                              Register scratch) {
-  ExternalReference new_space_allocation_top =
-      ExternalReference::new_space_allocation_top_address(isolate());
-
-  // Make sure the object has no tag before resetting top.
-  ClearRightImm(object, object, Operand(kHeapObjectTagSize));
-#ifdef DEBUG
-  // Check that the object un-allocated is below the current top.
-  mov(scratch, Operand(new_space_allocation_top));
-  LoadP(scratch, MemOperand(scratch));
-  cmp(object, scratch);
-  Check(lt, kUndoAllocationOfNonAllocatedMemory);
-#endif
-  // Write the address of the object to un-allocate as the current top.
-  mov(scratch, Operand(new_space_allocation_top));
-  StoreP(object, MemOperand(scratch));
 }
 
 
@@ -2916,28 +2982,6 @@ void MacroAssembler::InitializeFieldsWithFiller(Register start_offset,
 }
 
 
-void MacroAssembler::SaveFPRegs(Register location, int first, int count) {
-  DCHECK(count > 0);
-  int cur = first;
-  subi(location, location, Operand(count * kDoubleSize));
-  for (int i = 0; i < count; i++) {
-    DoubleRegister reg = DoubleRegister::from_code(cur++);
-    stfd(reg, MemOperand(location, i * kDoubleSize));
-  }
-}
-
-
-void MacroAssembler::RestoreFPRegs(Register location, int first, int count) {
-  DCHECK(count > 0);
-  int cur = first + count - 1;
-  for (int i = count - 1; i >= 0; i--) {
-    DoubleRegister reg = DoubleRegister::from_code(cur--);
-    lfd(reg, MemOperand(location, i * kDoubleSize));
-  }
-  addi(location, location, Operand(count * kDoubleSize));
-}
-
-
 void MacroAssembler::JumpIfBothInstanceTypesAreNotSequentialOneByte(
     Register first, Register second, Register scratch1, Register scratch2,
     Label* failure) {
@@ -3171,9 +3215,52 @@ void MacroAssembler::FlushICache(Register address, size_t size,
 }
 
 
+void MacroAssembler::DecodeConstantPoolOffset(Register result,
+                                              Register location) {
+  Label overflow_access, done;
+  DCHECK(!AreAliased(result, location, r0));
+
+  // Determine constant pool access type
+  // Caller has already placed the instruction word at location in result.
+  ExtractBitRange(r0, result, 31, 26);
+  cmpi(r0, Operand(ADDIS >> 26));
+  beq(&overflow_access);
+
+  // Regular constant pool access
+  // extract the load offset
+  andi(result, result, Operand(kImm16Mask));
+  b(&done);
+
+  bind(&overflow_access);
+  // Overflow constant pool access
+  // shift addis immediate
+  slwi(r0, result, Operand(16));
+  // sign-extend and add the load offset
+  lwz(result, MemOperand(location, kInstrSize));
+  extsh(result, result);
+  add(result, r0, result);
+
+  bind(&done);
+}
+
+
 void MacroAssembler::SetRelocatedValue(Register location, Register scratch,
                                        Register new_value) {
   lwz(scratch, MemOperand(location));
+
+  if (FLAG_enable_embedded_constant_pool) {
+    if (emit_debug_code()) {
+      // Check that the instruction sequence is a load from the constant pool
+      ExtractBitMask(scratch, scratch, 0x1f * B16);
+      cmpi(scratch, Operand(kConstantPoolRegister.code()));
+      Check(eq, kTheInstructionToPatchShouldBeALoadFromConstantPool);
+      // Scratch was clobbered. Restore it.
+      lwz(scratch, MemOperand(location));
+    }
+    DecodeConstantPoolOffset(scratch, location);
+    StorePX(new_value, MemOperand(kConstantPoolRegister, scratch));
+    return;
+  }
 
   // This code assumes a FIXED_SEQUENCE for lis/ori
 
@@ -3257,6 +3344,19 @@ void MacroAssembler::SetRelocatedValue(Register location, Register scratch,
 void MacroAssembler::GetRelocatedValue(Register location, Register result,
                                        Register scratch) {
   lwz(result, MemOperand(location));
+
+  if (FLAG_enable_embedded_constant_pool) {
+    if (emit_debug_code()) {
+      // Check that the instruction sequence is a load from the constant pool
+      ExtractBitMask(result, result, 0x1f * B16);
+      cmpi(result, Operand(kConstantPoolRegister.code()));
+      Check(eq, kTheInstructionToPatchShouldBeALoadFromConstantPool);
+      lwz(result, MemOperand(location));
+    }
+    DecodeConstantPoolOffset(result, location);
+    LoadPX(result, MemOperand(kConstantPoolRegister, result));
+    return;
+  }
 
   // This code assumes a FIXED_SEQUENCE for lis/ori
   if (emit_debug_code()) {
@@ -3695,6 +3795,18 @@ void MacroAssembler::LoadSmiLiteral(Register dst, Smi* smi) {
 
 void MacroAssembler::LoadDoubleLiteral(DoubleRegister result, double value,
                                        Register scratch) {
+  if (FLAG_enable_embedded_constant_pool && is_constant_pool_available() &&
+      !(scratch.is(r0) && ConstantPoolAccessIsInOverflow())) {
+    ConstantPoolEntry::Access access = ConstantPoolAddEntry(value);
+    if (access == ConstantPoolEntry::OVERFLOWED) {
+      addis(scratch, kConstantPoolRegister, Operand::Zero());
+      lfd(result, MemOperand(scratch, 0));
+    } else {
+      lfd(result, MemOperand(kConstantPoolRegister, 0));
+    }
+    return;
+  }
+
   // avoid gcc strict aliasing error using union cast
   union {
     double dval;
@@ -4418,23 +4530,35 @@ void MacroAssembler::JumpIfDictionaryInPrototypeChain(Register object,
                                                       Register scratch1,
                                                       Label* found) {
   DCHECK(!scratch1.is(scratch0));
-  Factory* factory = isolate()->factory();
   Register current = scratch0;
-  Label loop_again;
+  Label loop_again, end;
 
   // scratch contained elements pointer.
   mr(current, object);
+  LoadP(current, FieldMemOperand(current, HeapObject::kMapOffset));
+  LoadP(current, FieldMemOperand(current, Map::kPrototypeOffset));
+  CompareRoot(current, Heap::kNullValueRootIndex);
+  beq(&end);
 
   // Loop based on the map going up the prototype chain.
   bind(&loop_again);
   LoadP(current, FieldMemOperand(current, HeapObject::kMapOffset));
+
+  STATIC_ASSERT(JS_PROXY_TYPE < JS_OBJECT_TYPE);
+  STATIC_ASSERT(JS_VALUE_TYPE < JS_OBJECT_TYPE);
+  lbz(scratch1, FieldMemOperand(current, Map::kInstanceTypeOffset));
+  cmpi(scratch1, Operand(JS_OBJECT_TYPE));
+  blt(found);
+
   lbz(scratch1, FieldMemOperand(current, Map::kBitField2Offset));
   DecodeField<Map::ElementsKindBits>(scratch1);
   cmpi(scratch1, Operand(DICTIONARY_ELEMENTS));
   beq(found);
   LoadP(current, FieldMemOperand(current, Map::kPrototypeOffset));
-  Cmpi(current, Operand(factory->null_value()), r0);
+  CompareRoot(current, Heap::kNullValueRootIndex);
   bne(&loop_again);
+
+  bind(&end);
 }
 
 

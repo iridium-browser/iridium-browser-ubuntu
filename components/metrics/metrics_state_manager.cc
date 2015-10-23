@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/guid.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
@@ -124,14 +124,9 @@ void MetricsStateManager::ForceClientIdCreation() {
   client_id_ = base::GenerateGUID();
   local_state_->SetString(prefs::kMetricsClientID, client_id_);
 
-  if (local_state_->GetString(prefs::kMetricsOldClientID).empty()) {
-    // Record the timestamp of when the user opted in to UMA.
-    local_state_->SetInt64(prefs::kMetricsReportingEnabledTimestamp,
-                           base::Time::Now().ToTimeT());
-  } else {
-    UMA_HISTOGRAM_BOOLEAN("UMA.ClientIdMigrated", true);
-  }
-  local_state_->ClearPref(prefs::kMetricsOldClientID);
+  // Record the timestamp of when the user opted in to UMA.
+  local_state_->SetInt64(prefs::kMetricsReportingEnabledTimestamp,
+                         base::Time::Now().ToTimeT());
 
   BackUpCurrentClientInfo();
 }
@@ -208,11 +203,6 @@ void MetricsStateManager::RegisterPrefs(PrefRegistrySimple* registry) {
 
   ClonedInstallDetector::RegisterPrefs(registry);
   CachingPermutedEntropyProvider::RegisterPrefs(registry);
-
-  // TODO(asvitkine): Remove these once a couple of releases have passed.
-  // http://crbug.com/357704
-  registry->RegisterStringPref(prefs::kMetricsOldClientID, std::string());
-  registry->RegisterIntegerPref(prefs::kMetricsOldLowEntropySource, 0);
 }
 
 void MetricsStateManager::BackUpCurrentClientInfo() {
@@ -258,11 +248,16 @@ scoped_ptr<ClientInfo> MetricsStateManager::LoadClientInfoAndMaybeMigrate() {
 }
 
 int MetricsStateManager::GetLowEntropySource() {
+  UpdateLowEntropySource();
+  return low_entropy_source_;
+}
+
+void MetricsStateManager::UpdateLowEntropySource() {
   // Note that the default value for the low entropy source and the default pref
   // value are both kLowEntropySourceNotSet, which is used to identify if the
   // value has been set or not.
   if (low_entropy_source_ != kLowEntropySourceNotSet)
-    return low_entropy_source_;
+    return;
 
   const base::CommandLine* command_line(base::CommandLine::ForCurrentProcess());
   // Only try to load the value from prefs if the user did not request a
@@ -274,19 +269,14 @@ int MetricsStateManager::GetLowEntropySource() {
     // it below.
     if (value >= 0 && value < kMaxLowEntropySize) {
       low_entropy_source_ = value;
-      UMA_HISTOGRAM_BOOLEAN("UMA.GeneratedLowEntropySource", false);
-      return low_entropy_source_;
+      return;
     }
   }
 
-  UMA_HISTOGRAM_BOOLEAN("UMA.GeneratedLowEntropySource", true);
   low_entropy_source_ = GenerateLowEntropySource();
   local_state_->SetInteger(prefs::kMetricsLowEntropySource,
                            low_entropy_source_);
-  local_state_->ClearPref(prefs::kMetricsOldLowEntropySource);
   CachingPermutedEntropyProvider::ClearCache(local_state_);
-
-  return low_entropy_source_;
 }
 
 void MetricsStateManager::UpdateEntropySourceReturnedValue(

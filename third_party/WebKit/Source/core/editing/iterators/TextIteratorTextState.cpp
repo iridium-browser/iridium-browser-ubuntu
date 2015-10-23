@@ -153,10 +153,4 @@ void TextIteratorTextState::emitText(Node* textNode, LayoutText* layoutObject, i
     m_hasEmitted = true;
 }
 
-PassRefPtrWillBeRawPtr<Range> TextIteratorTextState::createRange() const
-{
-    flushPositionOffsets();
-    return Range::create(positionNode()->document(), positionNode(), positionStartOffset(), positionNode(), positionEndOffset());
-}
-
 } // namespace blink

@@ -10,6 +10,7 @@
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/frame/OriginsUsingFeatures.h"
 #include "core/frame/UseCounter.h"
 #include "modules/encryptedmedia/EncryptedMediaUtils.h"
 #include "modules/encryptedmedia/MediaKeySession.h"
@@ -84,19 +85,25 @@ class MediaKeySystemAccessInitializer final : public EncryptedMediaRequest {
 
 public:
     MediaKeySystemAccessInitializer(ScriptState*, const String& keySystem, const HeapVector<MediaKeySystemConfiguration>& supportedConfigurations);
-    virtual ~MediaKeySystemAccessInitializer() { }
+    ~MediaKeySystemAccessInitializer() override { }
 
     // EncryptedMediaRequest implementation.
-    virtual WebString keySystem() const override { return m_keySystem; }
-    virtual const WebVector<WebMediaKeySystemConfiguration>& supportedConfigurations() const override { return m_supportedConfigurations; }
-    virtual SecurityOrigin* securityOrigin() const override { return m_resolver->executionContext()->securityOrigin(); }
-    virtual void requestSucceeded(WebContentDecryptionModuleAccess*) override;
-    virtual void requestNotSupported(const WebString& errorMessage) override;
+    WebString keySystem() const override { return m_keySystem; }
+    const WebVector<WebMediaKeySystemConfiguration>& supportedConfigurations() const override { return m_supportedConfigurations; }
+    SecurityOrigin* securityOrigin() const override { return m_resolver->executionContext()->securityOrigin(); }
+    void requestSucceeded(WebContentDecryptionModuleAccess*) override;
+    void requestNotSupported(const WebString& errorMessage) override;
 
     ScriptPromise promise() { return m_resolver->promise(); }
 
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        visitor->trace(m_resolver);
+        EncryptedMediaRequest::trace(visitor);
+    }
+
 private:
-    RefPtr<ScriptPromiseResolver> m_resolver;
+    Member<ScriptPromiseResolver> m_resolver;
     const String m_keySystem;
     WebVector<WebMediaKeySystemConfiguration> m_supportedConfigurations;
 };
@@ -193,7 +200,7 @@ ScriptPromise NavigatorRequestMediaKeySystemAccess::requestMediaKeySystemAccess(
     Document* document = toDocument(executionContext);
     if (!document->page()) {
         return ScriptPromise::rejectWithDOMException(
-            scriptState, DOMException::create(InvalidStateError, "Document does not have a page."));
+            scriptState, DOMException::create(InvalidStateError, "The context provided is not associated with a page."));
     }
 
     MediaKeySystemAccessInitializer* initializer = new MediaKeySystemAccessInitializer(scriptState, keySystem, supportedConfigurations);

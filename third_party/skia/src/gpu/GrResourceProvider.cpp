@@ -8,6 +8,8 @@
 #include "GrResourceProvider.h"
 
 #include "GrGpu.h"
+#include "GrIndexBuffer.h"
+#include "GrPathRendering.h"
 #include "GrResourceCache.h"
 #include "GrResourceKey.h"
 #include "GrVertexBuffer.h"
@@ -26,7 +28,9 @@ const GrIndexBuffer* GrResourceProvider::createInstancedIndexBuffer(const uint16
                                                                     const GrUniqueKey& key) {
     size_t bufferSize = patternSize * reps * sizeof(uint16_t);
 
-    GrIndexBuffer* buffer = this->gpu()->createIndexBuffer(bufferSize, /* dynamic = */ false);
+    // This is typically used in GrBatchs, so we assume kNoPendingIO.
+    GrIndexBuffer* buffer = this->createIndexBuffer(bufferSize, kStatic_BufferUsage,
+                                                    kNoPendingIO_Flag);
     if (!buffer) {
         return NULL;
     }
@@ -63,3 +67,99 @@ const GrIndexBuffer* GrResourceProvider::createQuadIndexBuffer() {
     return this->createInstancedIndexBuffer(kPattern, 6, kMaxQuads, 4, fQuadIndexBufferKey);
 }
 
+GrPath* GrResourceProvider::createPath(const SkPath& path, const GrStrokeInfo& stroke) {
+    SkASSERT(this->gpu()->pathRendering());
+    return this->gpu()->pathRendering()->createPath(path, stroke);
+}
+
+GrPathRange* GrResourceProvider::createPathRange(GrPathRange::PathGenerator* gen,
+                                                 const GrStrokeInfo& stroke) {
+    SkASSERT(this->gpu()->pathRendering());
+    return this->gpu()->pathRendering()->createPathRange(gen, stroke);
+}
+
+GrPathRange* GrResourceProvider::createGlyphs(const SkTypeface* tf, const SkDescriptor* desc,
+                                              const GrStrokeInfo& stroke) {
+
+    SkASSERT(this->gpu()->pathRendering());
+    return this->gpu()->pathRendering()->createGlyphs(tf, desc, stroke);
+}
+
+GrIndexBuffer* GrResourceProvider::createIndexBuffer(size_t size, BufferUsage usage,
+                                                     uint32_t flags) {
+    if (this->isAbandoned()) {
+        return NULL;
+    }
+
+    bool noPendingIO = SkToBool(flags & kNoPendingIO_Flag);
+    bool dynamic = kDynamic_BufferUsage == usage;
+    if (dynamic) {
+        // bin by pow2 with a reasonable min
+        static const uint32_t MIN_SIZE = 1 << 12;
+        size = SkTMax(MIN_SIZE, GrNextPow2(SkToUInt(size)));
+
+        GrScratchKey key;
+        GrIndexBuffer::ComputeScratchKey(size, true, &key);
+        uint32_t scratchFlags = 0;
+        if (noPendingIO) {
+            scratchFlags = GrResourceCache::kRequireNoPendingIO_ScratchFlag;
+        } else {
+            scratchFlags = GrResourceCache::kPreferNoPendingIO_ScratchFlag;
+        }
+        GrGpuResource* resource = this->cache()->findAndRefScratchResource(key, size, scratchFlags);
+        if (resource) {
+            return static_cast<GrIndexBuffer*>(resource);
+        }
+    }
+    return this->gpu()->createIndexBuffer(size, dynamic);
+}
+
+GrVertexBuffer* GrResourceProvider::createVertexBuffer(size_t size, BufferUsage usage,
+                                                       uint32_t flags) {
+    if (this->isAbandoned()) {
+        return NULL;
+    }
+
+    bool noPendingIO = SkToBool(flags & kNoPendingIO_Flag);
+    bool dynamic = kDynamic_BufferUsage == usage;
+    if (dynamic) {
+        // bin by pow2 with a reasonable min
+        static const uint32_t MIN_SIZE = 1 << 12;
+        size = SkTMax(MIN_SIZE, GrNextPow2(SkToUInt(size)));
+
+        GrScratchKey key;
+        GrVertexBuffer::ComputeScratchKey(size, true, &key);
+        uint32_t scratchFlags = 0;
+        if (noPendingIO) {
+            scratchFlags = GrResourceCache::kRequireNoPendingIO_ScratchFlag;
+        } else {
+            scratchFlags = GrResourceCache::kPreferNoPendingIO_ScratchFlag;
+        }
+        GrGpuResource* resource = this->cache()->findAndRefScratchResource(key, size, scratchFlags);
+        if (resource) {
+            return static_cast<GrVertexBuffer*>(resource);
+        }
+    }
+    return this->gpu()->createVertexBuffer(size, dynamic);
+}
+
+GrBatchAtlas* GrResourceProvider::createAtlas(GrPixelConfig config,
+                                              int width, int height,
+                                              int numPlotsX, int numPlotsY,
+                                              GrBatchAtlas::EvictionFunc func, void* data) {
+    GrSurfaceDesc desc;
+    desc.fFlags = kNone_GrSurfaceFlags;
+    desc.fWidth = width;
+    desc.fHeight = height;
+    desc.fConfig = config;
+
+    // We don't want to flush the context so we claim we're in the middle of flushing so as to
+    // guarantee we do not recieve a texture with pending IO
+    // TODO: Determine how to avoid having to do this. (http://skbug.com/4156)
+    static const uint32_t kFlags = GrResourceProvider::kNoPendingIO_Flag;
+    GrTexture* texture = this->createApproxTexture(desc, kFlags);
+    if (!texture) {
+        return NULL;
+    }
+    return SkNEW_ARGS(GrBatchAtlas, (texture, numPlotsX, numPlotsY));
+}

@@ -41,6 +41,7 @@ namespace blink {
 
 template<class KeyType>
 class DOMWrapperMap {
+    WTF_MAKE_FAST_ALLOCATED(DOMWrapperMap);
 public:
     explicit DOMWrapperMap(v8::Isolate* isolate)
         : m_isolate(isolate)
@@ -68,13 +69,16 @@ public:
         return m_map.Contains(key);
     }
 
-    void set(KeyType* key, v8::Local<v8::Object> wrapper, const WrapperTypeInfo* wrapperTypeInfo)
+    bool set(KeyType* key, const WrapperTypeInfo* wrapperTypeInfo, v8::Local<v8::Object>& wrapper) WARN_UNUSED_RETURN
     {
-        ASSERT((getInternalField<KeyType, v8DOMWrapperObjectIndex>(wrapper)) == key);
-        RELEASE_ASSERT(!containsKey(key)); // See crbug.com/368095
+        if (UNLIKELY(containsKey(key))) {
+            wrapper = newLocal(m_isolate, key);
+            return false;
+        }
         v8::Global<v8::Object> global(m_isolate, wrapper);
         wrapperTypeInfo->configureWrapper(&global);
         m_map.Set(key, global.Pass());
+        return true;
     }
 
     void clear()
@@ -90,6 +94,7 @@ public:
 
 private:
     class PersistentValueMapTraits {
+        DISALLOW_ALLOCATION();
     public:
         // Map traits:
         typedef HashMap<KeyType*, v8::PersistentContainerValue> Impl;
@@ -142,6 +147,8 @@ private:
         {
             return reinterpret_cast<KeyType*>(data.GetInternalField(v8DOMWrapperObjectIndex));
         }
+
+        static void OnWeakCallback(const v8::WeakCallbackInfo<WeakCallbackDataType>& data) { }
 
         static void Dispose(v8::Isolate* isolate, v8::Global<v8::Object> value, KeyType* key) { }
 

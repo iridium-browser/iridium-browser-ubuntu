@@ -7,6 +7,7 @@
 #include "ui/compositor/compositor.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/vsync_provider.h"
+#include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/surface_factory_ozone.h"
 #include "ui/ozone/public/surface_ozone_canvas.h"
 
@@ -14,7 +15,8 @@ namespace content {
 
 SoftwareOutputDeviceOzone::SoftwareOutputDeviceOzone(ui::Compositor* compositor)
     : compositor_(compositor) {
-  ui::SurfaceFactoryOzone* factory = ui::SurfaceFactoryOzone::GetInstance();
+  ui::SurfaceFactoryOzone* factory =
+      ui::OzonePlatform::GetInstance()->GetSurfaceFactoryOzone();
 
   surface_ozone_ = factory->CreateCanvasForWidget(compositor_->widget());
 
@@ -48,8 +50,8 @@ SkCanvas* SoftwareOutputDeviceOzone::BeginPaint(const gfx::Rect& damage_rect) {
   return SoftwareOutputDevice::BeginPaint(damage_rect);
 }
 
-void SoftwareOutputDeviceOzone::EndPaint(cc::SoftwareFrameData* frame_data) {
-  SoftwareOutputDevice::EndPaint(frame_data);
+void SoftwareOutputDeviceOzone::EndPaint() {
+  SoftwareOutputDevice::EndPaint();
 
   surface_ozone_->PresentCanvas(damage_rect_);
 }

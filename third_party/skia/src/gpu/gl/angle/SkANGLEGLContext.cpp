@@ -9,20 +9,17 @@
 #include "gl/angle/SkANGLEGLContext.h"
 
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 
-#define EGL_PLATFORM_ANGLE_ANGLE                0x3201
-#define EGL_PLATFORM_ANGLE_TYPE_ANGLE           0x3202
-#define EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE      0x3206
-#define EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE     0x3207
+#define EGL_PLATFORM_ANGLE_ANGLE                0x3202
+#define EGL_PLATFORM_ANGLE_TYPE_ANGLE           0x3203
+#define EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE      0x3207
+#define EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE     0x3208
 
 void* SkANGLEGLContext::GetD3DEGLDisplay(void* nativeDisplay) {
-
-    typedef EGLDisplay (*EGLGetPlatformDisplayEXT)(EGLenum platform,
-                                                   void *native_display,
-                                                   const EGLint *attrib_list);
-    EGLGetPlatformDisplayEXT eglGetPlatformDisplayEXT;
+    PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT;
     eglGetPlatformDisplayEXT =
-        (EGLGetPlatformDisplayEXT) eglGetProcAddress("eglGetPlatformDisplayEXT");
+        (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
 
     if (!eglGetPlatformDisplayEXT) {
         return eglGetDisplay(static_cast<EGLNativeDisplayType>(nativeDisplay));
@@ -96,25 +93,27 @@ SkANGLEGLContext::SkANGLEGLContext()
 
     eglMakeCurrent(fDisplay, fSurface, fSurface, fContext);
 
-    fGL.reset(GrGLCreateANGLEInterface());
-    if (NULL == fGL.get()) {
+    SkAutoTUnref<const GrGLInterface> gl(GrGLCreateANGLEInterface());
+    if (NULL == gl.get()) {
         SkDebugf("Could not create ANGLE GL interface!\n");
         this->destroyGLContext();
         return;
     }
-    if (!fGL->validate()) {
+    if (!gl->validate()) {
         SkDebugf("Could not validate ANGLE GL interface!\n");
         this->destroyGLContext();
         return;
     }
+
+    this->init(gl.detach());
 }
 
 SkANGLEGLContext::~SkANGLEGLContext() {
+    this->teardown();
     this->destroyGLContext();
 }
 
 void SkANGLEGLContext::destroyGLContext() {
-    fGL.reset(NULL);
     if (fDisplay) {
         eglMakeCurrent(fDisplay, 0, 0, 0);
 
@@ -133,14 +132,18 @@ void SkANGLEGLContext::destroyGLContext() {
     }
 }
 
-void SkANGLEGLContext::makeCurrent() const {
+void SkANGLEGLContext::onPlatformMakeCurrent() const {
     if (!eglMakeCurrent(fDisplay, fSurface, fSurface, fContext)) {
         SkDebugf("Could not set the context.\n");
     }
 }
 
-void SkANGLEGLContext::swapBuffers() const {
+void SkANGLEGLContext::onPlatformSwapBuffers() const {
     if (!eglSwapBuffers(fDisplay, fSurface)) {
         SkDebugf("Could not complete eglSwapBuffers.\n");
     }
+}
+
+GrGLFuncPtr SkANGLEGLContext::onPlatformGetProcAddress(const char* name) const {
+    return eglGetProcAddress(name);
 }

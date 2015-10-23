@@ -13,16 +13,21 @@ namespace blink {
 class VideoTrackList final : public TrackListBase<VideoTrack> {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<VideoTrackList> create(HTMLMediaElement&);
+    static VideoTrackList* create(HTMLMediaElement&);
 
-    virtual ~VideoTrackList();
+    ~VideoTrackList() override;
 
     int selectedIndex() const;
 
     // EventTarget
-    virtual const AtomicString& interfaceName() const override;
+    const AtomicString& interfaceName() const override;
 
     void trackSelected(WebMediaPlayer::TrackId selectedTrackId);
+
+    DEFINE_INLINE_TRACE()
+    {
+        TrackListBase<VideoTrack>::trace(visitor);
+    }
 
 private:
     explicit VideoTrackList(HTMLMediaElement&);

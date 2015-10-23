@@ -23,12 +23,15 @@ goog.provide('framework.referencerenderer.rrRenderer');
 goog.require('framework.common.tcuTexture');
 goog.require('framework.common.tcuTextureUtil');
 goog.require('framework.delibs.debase.deMath');
+goog.require('framework.delibs.debase.deString');
+goog.require('framework.opengl.simplereference.sglrShaderProgram');
 goog.require('framework.referencerenderer.rrDefs');
 goog.require('framework.referencerenderer.rrFragmentOperations');
 goog.require('framework.referencerenderer.rrGenericVector');
 goog.require('framework.referencerenderer.rrMultisamplePixelBufferAccess');
 goog.require('framework.referencerenderer.rrRenderState');
 goog.require('framework.referencerenderer.rrShadingContext');
+goog.require('framework.referencerenderer.rrVertexAttrib');
 goog.require('framework.referencerenderer.rrVertexPacket');
 
 goog.scope(function() {
@@ -44,6 +47,9 @@ var rrRenderState = framework.referencerenderer.rrRenderState;
 var rrMultisamplePixelBufferAccess = framework.referencerenderer.rrMultisamplePixelBufferAccess;
 var rrShadingContext = framework.referencerenderer.rrShadingContext;
 var rrGenericVector = framework.referencerenderer.rrGenericVector;
+var sglrShaderProgram = framework.opengl.simplereference.sglrShaderProgram;
+var rrVertexAttrib = framework.referencerenderer.rrVertexAttrib;
+var deString = framework.delibs.debase.deString;
 
 /**
  * @enum
@@ -59,7 +65,6 @@ rrRenderer.PrimitiveType = {
 
     POINTS: 6 //!< Points
 };
-
 
 // /**
 //  * @constructor
@@ -81,420 +86,30 @@ rrRenderer.DrawContext = function(id) {
 
 };
 
-// rrRenderer.makeSharedVertexDistinct = function(packet, vertices, vpalloc) {
-//     if (!vertices[packet])
-//         vertices[packet] = true;
-//     else {
-//         var newPacket = vpalloc.alloc();
-//         // copy packet output values
-//         newPacket.position = packet.position;
-//         newPacket.pointSize = packet.pointSize;
-//         newPacket.primitiveID = packet.primitiveID;
-
-//         for (var outputNdx = 0; outputNdx < vpalloc.getNumVertexOutputs(); ++outputNdx)
-//             newPacket.outputs[outputNdx] = packet.outputs[outputNdx];
-
-//         // no need to insert new packet to "vertices" as newPacket is unique
-//         packet = newPacket;
-//     }
-//     return packet;
-// };
-
-// rrRenderer.findTriangleVertexDepthSlope = function(p, v0, v1) {
-//     // screen space
-//     var ssp = deMath.swizzle(p, [0, 1, 2]);
-//     var ssv0 = deMath.swizzle(v0, [0, 1, 2]);
-//     var ssv1 = deMath.swizzle(v1, [0, 1, 2]);
-
-//     // dx & dy
-
-//     var a = deMath.subtract(deMath.swizzle(ssv0, [0, 1, 2]), deMath.swizzle(ssp, [0, 1, 2]));
-//     var b = deMath.subtract(deMath.swizzle(ssv1, [0, 1, 2]), deMath.swizzle(ssp, [0, 1, 2]));
-//     var epsilon = 0.0001;
-//     var det = (a[0] * b[1] - b[0] * a[1]);
-
-//     // degenerate triangle, it won't generate any fragments anyway. Return value doesn't matter
-//     if (Math.abs(det) < epsilon)
-//         return 0;
-
-//     var dxDir = [b[1] / det, -a[1] / det];
-//     var dyDir = [-b[0] / det, a[0] / det];
-
-//     var dzdx = dxDir[0] * a[2] + dxDir[1] * b[2];
-//     var dzdy = dyDir[0] * a[2] + dyDir[1] * b[2];
-
-//     // approximate using max(|dz/dx|, |dz/dy|)
-//     return Math.max(Math.abs(dzdx), Math.abs(dzdy));
-// };
-
-rrRenderer.transformVertexClipCoordsToWindowCoords = function(/*const RenderState&*/ state, /*VertexPacket&*/ packet) {
+/**
+ * Transform [x, y] to window (pixel) coordinates.
+ * z and w are unchanged
+ * @param {rrRenderState.RenderState} state
+ * @param {rrVertexPacket.VertexPacket} packet
+ * Wreturn {Array<number>}
+ */
+rrRenderer.transformGLToWindowCoords = function(state, packet) {
     var transformed = [packet.position[0] / packet.position[3],
                                 packet.position[1] / packet.position[3],
-                                packet.position[2] / packet.position[3],
-                                1 / packet.position[3]];
+                                packet.position[2],
+                                packet.position[3]];
     var viewport = state.viewport.rect;
     var halfW = viewport.width / 2;
     var halfH = viewport.height / 2;
     var oX = viewport.left + halfW;
     var oY = viewport.bottom + halfH;
-    var zn = state.viewport.zn;
-    var zf = state.viewport.zf;
 
     return [
         transformed[0] * halfW + oX,
-        viewport.height - (transformed[1] * halfH + oY),
-        transformed[2] * (zf - zn) / 2 + (zn + zf) / 2,
+        transformed[1] * halfH + oY,
+        transformed[2],
         transformed[3]
     ];
-};
-
-// rrRenderer.getFloatingPointMinimumResolvableDifference = function(maxZValue, /*tcu::TextureFormat::ChannelType*/ type) {
-//     if (type == tcuTexture.ChannelType.FLOAT) {
-//         // 32f
-//         /* TODO: Port
-//         const int maxExponent = tcu::Float32(maxZValue).exponent();
-//         return tcu::Float32::construct(+1, maxExponent - 23, 1 << 23).asFloat();
-//         */
-//     }
-
-//     // unexpected format
-//     throw new Error('Unexpected format');
-// };
-
-// rrRenderer.getFixedPointMinimumResolvableDifference = function(numBits) {
-//     /* TODO: Port
-//     return tcu::Float32::construct(+1, -numBits, 1 << 23).asFloat();
-//     */
-//     throw new Error('Unimplemented');
-// };
-
-// rrRenderer.writeFragmentPackets = function(/*const RenderState&*/                   state,
-//                            /*const rrRenderer.RenderTarget&*/                  renderTarget,
-//                            /*const Program&*/                      program,
-//                            /*const rrFragmentOperations.Fragment**/                fragmentPackets,
-//                            /*int*/                                  numRasterizedPackets,
-//                            /*rr::FaceType*/                         facetype,
-//                            /*const std::vector<rr::GenericVec4>&*/  fragmentOutputArray,
-//                            /*const float**/                         depthValues,
-//                            /*std::vector<Fragment>&*/               fragmentBuffer) {
-//     var numSamples = renderTarget.colorBuffers[0].getNumSamples();
-//     var numOutputs = program.fragmentShader.getOutputs().length;
-//     var fragProcessor = new rrFragmentOperations.FragmentProcessor();
-//     var fragCount = 0;
-
-//     // Translate fragments but do not set the value yet
-//     for (var packetNdx = 0; packetNdx < numRasterizedPackets; ++packetNdx)
-//     for (var fragNdx = 0; fragNdx < 4; fragNdx++) {
-//         var packet = fragmentPackets[packetNdx];
-//         var xo = Math.floor(fragNdx % 2);
-//         var yo = Math.floor(fragNdx / 2);
-
-//         /* TODO: Port - needs 64 bit binary operations
-//         if (getCoverageAnyFragmentSampleLive(packet.coverage, numSamples, xo, yo)) {
-//             var fragment = fragmentBuffer[fragCount++];
-
-//             fragment.pixelCoord = deMath.add(packet.position, [xo, yo]);
-//             fragment.coverage = (deUint32)((packet.coverage & getCoverageFragmentSampleBits(numSamples, xo, yo)) >> getCoverageOffset(numSamples, xo, yo));
-//             fragment.sampleDepths = (depthValues) ? (&depthValues[(packetNdx*4 + yo*2 + xo)*numSamples]) : (DE_NULL);
-//         }
-//         */
-//     }
-
-//     // Set per output output values
-//     var noStencilDepthWriteState = new rrRenderState.FragmentOperationState(state.fragOps);
-//     noStencilDepthWriteState.depthMask = false;
-//     noStencilDepthWriteState.stencilStates[facetype].sFail = rrRenderState.StencilOp.STENCILOP_KEEP;
-//     noStencilDepthWriteState.stencilStates[facetype].dpFail = rrRenderState.StencilOp.STENCILOP_KEEP;
-//     noStencilDepthWriteState.stencilStates[facetype].dpPass = rrRenderState.StencilOp.STENCILOP_KEEP;
-
-//     fragCount = 0;
-//     for (var outputNdx = 0; outputNdx < numOutputs; ++outputNdx) {
-//         // Only the last output-pass has default state, other passes have stencil & depth writemask=0
-//         var fragOpsState = (outputNdx == numOutputs - 1) ? (state.fragOps) : (noStencilDepthWriteState);
-
-//         for (var packetNdx = 0; packetNdx < numRasterizedPackets; ++packetNdx)
-//         for (var fragNdx = 0; fragNdx < 4; fragNdx++) {
-//             var packet = fragmentPackets[packetNdx];
-//             var xo = Math.floor(fragNdx % 2);
-//             var yo = Math.floor(fragNdx / 2);
-
-//             /* TODO: Port
-//             // Add only fragments that have live samples to shaded fragments queue.
-//             if (getCoverageAnyFragmentSampleLive(packet.coverage, numSamples, xo, yo)) {
-//                 var fragment = fragmentBuffer[fragCount++];
-//                 fragment.value = fragmentOutputArray[(packetNdx*4 + fragNdx) * numOutputs + outputNdx];
-//             }
-//             */
-//         }
-
-//         // Execute per-fragment ops and write
-//         fragProcessor.render(renderTarget.colorBuffers[outputNdx], renderTarget.depthBuffer, renderTarget.stencilBuffer, fragmentBuffer, fragCount, facetype, fragOpsState);
-//     }
-// };
-
-// /**
-//  * @constructor
-//  */
-// rrRenderer.Triangle = function(v0_, v1_, v2_, provokingIndex_) {
-//     this.NUM_VERTICES = 3;
-//     this.v0 = v0_ || null;
-//     this.v1 = v1_ || null;
-//     this.v2 = v2_ || null;
-//     this.provokingIndex = provokingIndex_;
-
-// };
-
-// rrRenderer.Triangle.prototype.getProvokingVertex = function() {
-//     switch (this.provokingIndex) {
-//         case 0: return this.v0;
-//         case 1: return this.v1;
-//         case 2: return this.v2;
-//         default:
-//             throw new Error('Wrong provoking index:' + this.provokingIndex);
-//     }
-// };
-
-// rrRenderer.Triangle.prototype.makeSharedVerticesDistinct = function(vertices, vpalloc) {
-//     this.v0 = rrRenderer.makeSharedVertexDistinct(this.v0, vertices, vpalloc);
-//     this.v1 = rrRenderer.makeSharedVertexDistinct(this.v1, vertices, vpalloc);
-//     this.v2 = rrRenderer.makeSharedVertexDistinct(this.v2, vertices, vpalloc);
-// };
-
-// rrRenderer.Triangle.prototype.generatePrimitiveIDs = function(id) {
-//     this.v0.primitiveID = id;
-//     this.v1.primitiveID = id;
-//     this.v2.primitiveID = id;
-// };
-
-// rrRenderer.Triangle.prototype.flatshadePrimitiveVertices = function(outputNdx) {
-//     var flatValue = this.getProvokingVertex().outputs[outputNdx];
-//     this.v0.outputs[outputNdx] = flatValue;
-//     this.v1.outputs[outputNdx] = flatValue;
-//     this.v2.outputs[outputNdx] = flatValue;
-// };
-
-// rrRenderer.Triangle.prototype.transformPrimitiveClipCoordsToWindowCoords = function(state) {
-//     rrRenderer.transformVertexClipCoordsToWindowCoords(state, this.v0);
-//     rrRenderer.transformVertexClipCoordsToWindowCoords(state, this.v1);
-//     rrRenderer.transformVertexClipCoordsToWindowCoords(state, this.v2);
-// };
-
-// rrRenderer.Triangle.prototype.findPrimitiveMaximumDepthSlope = function() {
-//     var d1 = rrRenderer.findTriangleVertexDepthSlope(this.v0.position, this.v1.position, this.v2.position);
-//     var d2 = rrRenderer.findTriangleVertexDepthSlope(this.v1.position, this.v2.position, this.v0.position);
-//     var d3 = rrRenderer.findTriangleVertexDepthSlope(this.v2.position, this.v0.position, this.v1.position);
-
-//     return Math.max(d1, d2, d3);
-// };
-
-// rrRenderer.Triangle.prototype.findPrimitiveMinimumResolvableDifference = function(/*const rr::MultisampleConstPixelBufferAccess&*/ depthAccess) {
-//     var maxZvalue = Math.max(this.v0.position[2], this.v1.position[2], this.v2.position[2]);
-//     var format = depthAccess.raw().getFormat();
-//     var order = format.order;
-
-//     if (order == tcuTexture.ChannelOrder.D) {
-//         // depth only
-//         var channelType = format.type;
-//         var channelClass = tcuTextureUtil.getTextureChannelClass(channelType);
-//         var numBits = tcuTextureUtil.getTextureFormatBitDepth(format)[0];
-
-//         if (channelClass == tcuTextureUtil.TextureChannelClass.FLOATING_POINT)
-//             return rrRenderer.getFloatingPointMinimumResolvableDifference(maxZvalue, channelType);
-//         else
-//             // \note channelClass might be CLASS_LAST but that's ok
-//             return rrRenderer.getFixedPointMinimumResolvableDifference(numBits);
-//     } else if (order == tcuTexture.ChannelOrder.DS) {
-//         // depth stencil, special cases for possible combined formats
-//         if (format.type == tcuTexture.ChannelType.FLOAT_UNSIGNED_INT_24_8_REV)
-//             return rrRenderer.getFloatingPointMinimumResolvableDifference(maxZvalue, tcuTexture.ChannelType.FLOAT);
-//         else if (format.type == tcuTexture.ChannelType.UNSIGNED_INT_24_8)
-//             return rrRenderer.getFixedPointMinimumResolvableDifference(24);
-//     }
-
-//     // unexpected format
-//     throw new Error('Unexpected format');
-// };
-
-// rrRenderer.Triangle.prototype.rasterizePrimitive = function(/*const RenderState&*/                  state,
-//                          /*const rrRenderer.RenderTarget&*/                renderTarget,
-//                          /*const Program&*/                     program,
-//                          /*const tcu::IVec4&*/                  renderTargetRect,
-//                          /*rrRenderer.RasterizationInternalBuffers&*/      buffers) {
-//     var numSamples = renderTarget.colorBuffers[0].getNumSamples();
-//     var depthClampMin = Math.min(state.viewport.zn, state.viewport.zf);
-//     var depthClampMax = Math.max(state.viewport.zn, state.viewport.zf);
-//     var rasterizer = new rrRasterizer.TriangleRasterizer(renderTargetRect, numSamples, state.rasterization);
-//     var depthOffset = 0;
-
-//     rasterizer.init(this.v0.position, this.v1.position, this.v2.position);
-
-//     // Culling
-//     var visibleFace = rasterizer.getVisibleFace();
-//     if ((state.cullMode == rrRenderState.CullMode.CULLMODE_FRONT && visibleFace == rrDefs.FaceType.FACETYPE_FRONT) ||
-//         (state.cullMode == rrRenderState.CullMode.CULLMODE_BACK && visibleFace == rrDefs.FaceType.FACETYPE_BACK))
-//         return;
-
-//     // Shading context
-//     var shadingContext = new rrShadingContext.FragmentShadingContext(this.v0.outputs, this.v1.outputs, this.v2.outputs, buffers.shaderOutputs, buffers.fragmentDepthBuffer, this.v2.primitiveID, program.fragmentShader.getOutputs().length, numSamples);
-
-//     // Polygon offset
-//     if (buffers.fragmentDepthBuffer && state.fragOps.polygonOffsetEnabled) {
-//         var maximumDepthSlope = this.findPrimitiveMaximumDepthSlope();
-//         var minimumResolvableDifference = this.findPrimitiveMinimumResolvableDifference(renderTarget.depthBuffer);
-
-//         depthOffset = maximumDepthSlope * state.fragOps.polygonOffsetFactor + minimumResolvableDifference * state.fragOps.polygonOffsetUnits;
-//     }
-
-//     // Execute rrRenderer.rasterize - shade - write loop
-//     while (true) {
-//         // Rasterize
-
-//         // Clear the fragmentPackets and fragmentDepthBuffer buffers before rasterizing
-//         buffers.fragmentPackets.length = 0;
-//         if (buffers.fragmentDepthBuffer)
-//             buffers.fragmentDepthBuffer.length = 0;
-
-//         var numRasterizedPackets = rasterizer.rasterize(buffers.fragmentPackets, buffers.fragmentDepthBuffer);
-
-//         // numRasterizedPackets is guaranteed to be greater than zero for shadeFragments()
-
-//         if (!numRasterizedPackets)
-//             break; // Rasterization finished.
-
-//         // Polygon offset
-//         if (buffers.fragmentDepthBuffer && state.fragOps.polygonOffsetEnabled)
-//             for (var sampleNdx = 0; sampleNdx < numRasterizedPackets * 4 * numSamples; ++sampleNdx)
-//                 buffers.fragmentDepthBuffer[sampleNdx] = deMath.clamp(buffers.fragmentDepthBuffer[sampleNdx] + depthOffset, 0, 1);
-
-//         // Shade
-
-//         program.fragmentShader.shadeFragments(buffers.fragmentPackets, numRasterizedPackets, shadingContext);
-
-//         // Depth clamp
-//         if (buffers.fragmentDepthBuffer && state.fragOps.depthClampEnabled)
-//             for (var sampleNdx = 0; sampleNdx < numRasterizedPackets * 4 * numSamples; ++sampleNdx)
-//                 buffers.fragmentDepthBuffer[sampleNdx] = deMath.clamp(buffers.fragmentDepthBuffer[sampleNdx], depthClampMin, depthClampMax);
-
-//         // Handle fragment shader outputs
-
-//         rrRenderer.writeFragmentPackets(state, renderTarget, program, buffers.fragmentPackets, numRasterizedPackets, visibleFace, buffers.shaderOutputs, buffers.fragmentDepthBuffer, buffers.shadedFragments);
-//     }
-// };
-
-// rrRenderer.triangles = (function() {
-//     var exec = function(output, /*VertexPacket* const**/ vertices, /*size_t*/ numVertices, /*rr::ProvokingVertex*/ provokingConvention) {
-//         var provokingOffset = (provokingConvention == rrDefs.ProvokingVertex.PROVOKINGVERTEX_FIRST) ? (0) : (2);
-
-//         for (var ndx = 0; ndx + 2 < numVertices; ndx += 3)
-//             output.push(new rrRenderer.Triangle(vertices[ndx], vertices[ndx + 1], vertices[ndx + 2], provokingOffset));
-//     };
-
-//     var getPrimitiveCount = function(vertices) {
-//         return Math.floor(vertices / 3);
-//     };
-
-//     return {
-//         exec: exec,
-//         getPrimitiveCount: getPrimitiveCount
-//     };
-// })();
-
-// rrRenderer.assemblers = (function() {
-//     rrRenderer.assemblers = [];
-//     rrRenderer.assemblers[rrRenderer.PrimitiveType.TRIANGLES] = rrRenderer.triangles;
-//     return rrRenderer.assemblers;
-// })();
-
-// rrRenderer.makeSharedVerticesDistinct = function(list, /*VertexPacketAllocator&*/ vpalloc) {
-//     var vertices = {};
-
-//     for (var i = 0; i < list.length; i++)
-//         list[i].makeSharedVerticesDistinct(vertices, vpalloc);
-// };
-
-// rrRenderer.generatePrimitiveIDs = function(list, /*rrRenderer.DrawContext&*/ drawContext) {
-//     for (var i = 0; i < list.length; i++)
-//         list[i].generatePrimitiveIDs(drawContext.primitiveID++);
-// };
-//
-// rrRenderer.flatshadeVertices = function(/*const Program&*/ program, /*ContainerType&*/ list) {
-//     // flatshade
-//     var fragInputs = program.vertexShader.getOutputs();
-
-//     for (var inputNdx = 0; inputNdx < fragInputs.length; ++inputNdx)
-//         if (fragInputs[inputNdx].flatshade)
-//             for (var i = 0; i < list.length; i++)
-//                 list[i].flatshadePrimitiveVertices(inputNdx);
-// };
-
-// rrRenderer.transformClipCoordsToWindowCoords = function(/*const RenderState&*/ state, /*ContainerType&*/ list) {
-//     for (var i = 0; i < list.length; i++)
-//         list[i].transformPrimitiveClipCoordsToWindowCoords(state);
-// };
-
-// rrRenderer.rasterize = function(/*const RenderState&*/                  state,
-//                 /*const rrRenderer.RenderTarget&*/                 renderTarget,
-//                 /*const Program&*/                      program,
-//                 /*const ContainerType&*/                list) {
-//     var numSamples = renderTarget.colorBuffers[0].getNumSamples();
-//     var numFragmentOutputs = program.fragmentShader.getOutputs().length;
-
-//     var viewportRect = [state.viewport.rect.left, state.viewport.rect.bottom, state.viewport.rect.width, state.viewport.rect.height];
-//     var bufferRect = renderTarget.colorBuffers[0].getBufferSize();
-//     var renderTargetRect = deMath.intersect(viewportRect, bufferRect);
-//     var isDepthEnabled = !renderTarget.depthBuffer.isEmpty();
-
-//     var buffers = new rrRenderer.RasterizationInternalBuffers(isDepthEnabled);
-
-//     // rrRenderer.rasterize
-//     for (var i = 0; i < list.length; i++)
-//         list[i].rasterizePrimitive(state, renderTarget, program, renderTargetRect, buffers);
-// };
-
-// /*--------------------------------------------------------------------*//*!
-//  * Draws transformed rrRenderer.triangles, lines or points to render target
-//  *//*--------------------------------------------------------------------*/
-// rrRenderer.drawBasicPrimitives = function(/*const RenderState&*/ state, /*const rrRenderer.RenderTarget&*/ renderTarget, /*const Program&*/ program, /*ContainerType&*/ primList, /*VertexPacketAllocator&*/ vpalloc) {
-//     var clipZ = !state.fragOps.depthClampEnabled;
-
-//     // Transform feedback
-
-//     // Flatshading
-//     rrRenderer.flatshadeVertices(program, primList);
-
-//     /* TODO: implement
-//     // Clipping
-//     // \todo [jarkko] is creating & swapping std::vectors really a good solution?
-//     clipPrimitives(primList, program, clipZ, vpalloc);
-//     */
-
-//     // Transform vertices to window coords
-//     rrRenderer.transformClipCoordsToWindowCoords(state, primList);
-
-//     // Rasterize and paint
-//     rrRenderer.rasterize(state, renderTarget, program, primList);
-// };
-
-// rrRenderer.drawAsPrimitives = function(DrawPrimitiveType, /*const RenderState&*/ state, /*const rrRenderer.RenderTarget&*/ renderTarget, /*const Program&*/ program, /*VertexPacket* const**/ vertices, /*int*/ numVertices, /*rrRenderer.DrawContext&*/ drawContext, /*VertexPacketAllocator&*/ vpalloc) {
-//     // Assemble primitives (deconstruct stips & loops)
-//     var assembler = rrRenderer.assemblers[DrawPrimitiveType];
-//     var inputPrimitives = [];
-
-//     assembler.exec(inputPrimitives, vertices, numVertices, state.provokingVertexConvention);
-
-//     // Make shared vertices distinct. Needed for that the translation to screen space happens only once per vertex, and for flatshading
-//     rrRenderer.makeSharedVerticesDistinct(inputPrimitives, vpalloc);
-
-//     // A primitive ID will be generated even if no geometry shader is active
-//     rrRenderer.generatePrimitiveIDs(inputPrimitives, drawContext);
-
-//     // Draw as a basic type
-//     rrRenderer.drawBasicPrimitives(state, renderTarget, program, inputPrimitives, vpalloc);
-// };
-
-rrRenderer.isValidCommand = function(/*const rrRenderer.DrawCommand&*/ command, /*int*/ numInstances) {
-    /* TODO: Implement */
-    return true;
 };
 
 /**
@@ -527,36 +142,40 @@ rrRenderer.RenderTarget = function(colorMultisampleBuffer, depthMultisampleBuffe
  * @constructor
  * @param {ArrayBuffer} data
  * @param {rrDefs.IndexType} type
+ * @param {number} offset
  * @param {number=} baseVertex_
  */
-rrRenderer.DrawIndices = function(data, type, baseVertex_) {
-    this.data = data;
-    this.baseVertex = baseVertex_ || 0;
-    this.indexType = type;
+rrRenderer.DrawIndices = function(data, type, offset, baseVertex_) {
+    /** @type {ArrayBuffer} */ this.data = data;
+    /** @type {number} */ this.baseVertex = baseVertex_ || 0;
+    /** @type {rrDefs.IndexType} */ this.indexType = type;
+    /** @type {goog.NumberArray} */ this.access = null;
     switch (type) {
-        case rrDefs.IndexType.INDEXTYPE_UINT8: this.access = new Uint8Array(data); break;
-        case rrDefs.IndexType.INDEXTYPE_UINT16: this.access = new Uint16Array(data); break;
-        case rrDefs.IndexType.INDEXTYPE_UINT32: this.access = new Uint32Array(data); break;
+        case rrDefs.IndexType.INDEXTYPE_UINT8: this.access = new Uint8Array(data).subarray(offset); break;
+        case rrDefs.IndexType.INDEXTYPE_UINT16: this.access = new Uint16Array(data).subarray(offset / 2); break;
+        case rrDefs.IndexType.INDEXTYPE_UINT32: this.access = new Uint32Array(data).subarray(offset / 4); break;
         default: throw new Error('Invalid type: ' + type);
     }
 };
 
+/**
+ * @return {number}
+ */
 rrRenderer.DrawIndices.prototype.readIndexArray = function(index) { return this.access[index]; };
 
 /**
  * @constructor
  * @param {rrRenderer.PrimitiveType} primitiveType
  * @param {number} numElements
- * @param { (number|rrRenderer.DrawIndices) } indices
+ * @param {(number|rrRenderer.DrawIndices)} indices
  */
 rrRenderer.PrimitiveList = function(primitiveType, numElements, indices) {
-    this.m_primitiveType = primitiveType;
-    this.m_numElements = numElements;
-
+    /** @type {rrRenderer.PrimitiveType} */ this.m_primitiveType = primitiveType;
+    /** @type {number} */ this.m_numElements = numElements;
     if (typeof indices == 'number') {
         // !< primitive list for drawArrays-like call
         this.m_indices = null;
-        this.m_indexType = undefined;
+        this.m_indexType = null;
         this.m_baseVertex = indices;
     } else {
         // !< primitive list for drawElements-like call
@@ -564,8 +183,13 @@ rrRenderer.PrimitiveList = function(primitiveType, numElements, indices) {
         this.m_indexType = indices.indexType;
         this.m_baseVertex = indices.baseVertex;
     }
+    this.m_iterator = 0;
 };
 
+/**
+ * @param {number} elementNdx
+ * @return {number}
+ */
 rrRenderer.PrimitiveList.prototype.getIndex = function(elementNdx) {
     if (this.m_indices) {
         var index = this.m_baseVertex + this.m_indices.readIndexArray(elementNdx);
@@ -577,7 +201,12 @@ rrRenderer.PrimitiveList.prototype.getIndex = function(elementNdx) {
         return this.m_baseVertex + elementNdx;
 };
 
-rrRenderer.PrimitiveList.prototype.isRestartIndex = function (elementNdx, restartIndex) {
+/**
+ * @param {number} elementNdx
+ * @param {number} restartIndex
+ * @return {boolean}
+ */
+rrRenderer.PrimitiveList.prototype.isRestartIndex = function(elementNdx, restartIndex) {
     // implicit index or explicit index (without base vertex) equals restart
     if (this.m_indices)
         return this.m_indices.readIndexArray(elementNdx) == restartIndex;
@@ -585,87 +214,92 @@ rrRenderer.PrimitiveList.prototype.isRestartIndex = function (elementNdx, restar
         return elementNdx == restartIndex;
 };
 
+/**
+ * @return {number}
+ */
 rrRenderer.PrimitiveList.prototype.getNumElements = function() {return this.m_numElements;};
+
+/**
+ * @return {rrRenderer.PrimitiveType}
+ */
 rrRenderer.PrimitiveList.prototype.getPrimitiveType = function() {return this.m_primitiveType;};
+
+/**
+ * @return {?rrDefs.IndexType}
+ */
 rrRenderer.PrimitiveList.prototype.getIndexType = function() {return this.m_indexType;};
 
 /**
- * @constructor
- * @param {rrRenderState.RenderState} state_
- * @param {rrRenderer.RenderTarget} renderTarget_
- * @param {sglrShaderProgram.ShaderProgram} program_
- * @param {number} numVertexAttribs_
- * @param {Array<rrVertexAttrib.VertexAttrib>} vertexAttribs_
- * @param {rrRenderer.PrimitiveList} primitives_
+ * Generate a primitive from indices
+ * @param {boolean=} reset Restart generating primitives. Default false
+ * @return {Array<number>}
  */
-rrRenderer.DrawCommand = function(state_, renderTarget_, program_, numVertexAttribs_, vertexAttribs_, primitives_) {
-    this.state = state_;
-    this.renderTarget = renderTarget_;
-    this.program = program_;
-    this.numVertexAttribs = numVertexAttribs_;
-    this.vertexAttribs = vertexAttribs_;
-    this.primitives = primitives_;
+rrRenderer.PrimitiveList.prototype.getNextPrimitive = function(reset) {
+    if (reset)
+        this.m_iterator = 0;
+    var result = [];
+    var i = this.m_iterator;
+    switch (this.m_primitiveType) {
+        case rrRenderer.PrimitiveType.TRIANGLES:
+            if (this.m_iterator + 6 <= this.m_numElements) {
+                result = [i, i + 1, i + 2, i + 3, i + 4, i + 5];
+                this.m_iterator += 6;
+            }
+            break;
+        case rrRenderer.PrimitiveType.TRIANGLE_STRIP:
+            if (this.m_iterator + 4 <= this.m_numElements) {
+                result = [i, i + 1, i + 2, i + 3];
+                this.m_iterator += 2;
+            }
+            break;
+        case rrRenderer.PrimitiveType.TRIANGLE_FAN:
+            if (this.m_iterator + 4 <= this.m_numElements) {
+                result = [0, i + 1, i + 2, i + 3];
+                this.m_iterator += 2;
+            }
+            break;
+        case rrRenderer.PrimitiveType.LINES:
+            if (this.m_iterator + 2 <= this.m_numElements) {
+                result = [i, i + 1];
+                this.m_iterator += 2;
+            }
+            break;
+        case rrRenderer.PrimitiveType.LINE_STRIP:
+            if (this.m_iterator + 2 <= this.m_numElements) {
+                result = [i, i + 1];
+                this.m_iterator += 1;
+            }
+            break;
+        case rrRenderer.PrimitiveType.LINE_LOOP:
+            if (this.m_iterator == this.m_numElements)
+                break;
+            if (this.m_iterator + 2 <= this.m_numElements)
+                result = [i, i + 1];
+            else
+                result = [i, 0];
+            this.m_iterator += 1;
+            break;
+        case rrRenderer.PrimitiveType.POINTS:
+            if (this.m_iterator == this.m_numElements)
+                break;
+            else
+                result = [i];
+            this.m_iterator += 1;
+            break;
+        default:
+            throw new Error('Unsupported primitive type: ' + deString.enumToString(rrRenderer.PrimitiveType, this.m_primitiveType));
+    }
+
+    return result;
 };
 
-// rrRenderer.drawInstanced = function(/*const rrRenderer.DrawCommand&*/ command, numInstances) {
-//     // Do not run bad commands
-//     var validCommand = rrRenderer.isValidCommand(command, numInstances);
-//     if (!validCommand)
-//         throw new Error('Invalid command');
-//     // Do not rrRenderer.draw if nothing to rrRenderer.draw {
-//     if (command.primitives.getNumElements() == 0 || numInstances == 0)
-//         return;
-
-//     // Prepare transformation
-
-//     var numVaryings = command.program.vertexShader.getOutputs().length;
-//     var vpalloc = new rrVertexPacket.VertexPacketAllocator(numVaryings);
-//     var vertexPackets = vpalloc.allocArray(command.primitives.getNumElements());
-//     var drawContext = new rrRenderer.DrawContext();
-
-//     for (var instanceID = 0; instanceID < numInstances; ++instanceID) {
-//         // Each instance has its own primitives
-//         drawContext.primitiveID = 0;
-
-//         for (var elementNdx = 0; elementNdx < command.primitives.getNumElements(); ++elementNdx) {
-//             var numVertexPackets = 0;
-
-//             // collect primitive vertices until restart
-
-//             while (elementNdx < command.primitives.getNumElements() &&
-//                     !(command.state.restart.enabled && command.primitives.isRestartIndex(elementNdx, command.state.restart.restartIndex))) {
-//                 // input
-//                 vertexPackets[numVertexPackets].instanceNdx = instanceID;
-//                 vertexPackets[numVertexPackets].vertexNdx = command.primitives.getIndex(elementNdx);
-
-//                 // output
-//                 vertexPackets[numVertexPackets].pointSize = command.state.point.pointSize; // default value from the current state
-//                 vertexPackets[numVertexPackets].position = [0, 0, 0, 0]; // no undefined values
-
-//                 ++numVertexPackets;
-//                 ++elementNdx;
-//             }
-
-//             // Duplicated restart shade
-//             if (numVertexPackets == 0)
-//                 continue;
-
-//             // \todo Vertex cache?
-
-//             // Transform vertices
-
-//             command.program.shadeVertices(command.vertexAttribs, vertexPackets, numVertexPackets);
-
-//             // Draw primitives
-//             rrRenderer.drawAsPrimitives(command.primitives.getPrimitiveType(), command.state, command.renderTarget, command.program, vertexPackets, numVertexPackets, drawContext, vpalloc);
-//         }
-//     }
-// };
-
-// rrRenderer.draw = function(/*const rrRenderer.DrawCommand&*/ command) {
-//     rrRenderer.drawInstanced(command, 1);
-// };
-
+/**
+ * @param {Array<number>} v
+ * @param {Array<number>} v1
+ * @param {Array<number>} v2
+ * @param {Array<number>} v3
+ * @return {Array<number>}
+ */
 rrRenderer.getBarycentricCoefficients = function(v, v1, v2, v3) {
     var b = [];
 
@@ -680,8 +314,8 @@ rrRenderer.getBarycentricCoefficients = function(v, v1, v2, v3) {
 
     var det = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3);
 
-    b[0] = ((y2 - y3) * (x - x3) + (x3 - x2) * (y - y3)) / det;
-    b[1] = ((y3 - y1) * (x - x3) + (x1 - x3) * (y - y3)) / det;
+    b[0] = ((y3 - y1) * (x - x3) + (x1 - x3) * (y - y3)) / det;
+    b[1] = ((y2 - y3) * (x - x3) + (x3 - x2) * (y - y3)) / det;
     b[2] = 1 - b[0] - b[1];
 
     return b;
@@ -697,7 +331,7 @@ rrRenderer.writeFragments = function(state, renderTarget, fragments) {
     var colorbuffer = renderTarget.colorBuffers[0].raw();
     for (var i = 0; i < fragments.length; i++) {
         var fragment = fragments[i];
-        colorbuffer.setPixel(fragment.output, 0, fragment.pixelCoord[0], fragment.pixelCoord[1]);
+        colorbuffer.setPixel(fragment.value, 0, fragment.pixelCoord[0], fragment.pixelCoord[1]);
     }
 
 };
@@ -729,13 +363,13 @@ void FragmentProcessor::render (const rr::MultisamplePixelBufferAccess& msColorB
     var doDepthTest = hasDepth && state.depthTestEnabled;
     var doStencilTest = hasStencil && state.stencilTestEnabled;
 
-    var colorbufferClass = tcuTextureUtil.getTextureChannelClass(colorBuffer.getFormat().type);
+    var colorbufferClass = tcuTexture.getTextureChannelClass(colorBuffer.getFormat().type);
     var fragmentDataType = rrGenericVector.GenericVecType.FLOAT;
     switch (colorbufferClass) {
-        case tcuTextureUtil.TextureChannelClass.SIGNED_INTEGER:
+        case tcuTexture.TextureChannelClass.SIGNED_INTEGER:
             fragmentDataType = rrGenericVector.GenericVecType.INT32;
             break;
-        case tcuTextureUtil.TextureChannelClass.UNSIGNED_INTEGER:
+        case tcuTexture.TextureChannelClass.UNSIGNED_INTEGER:
             fragmentDataType = rrGenericVector.GenericVecType.UINT32;
             break;
     }
@@ -748,7 +382,7 @@ void FragmentProcessor::render (const rr::MultisamplePixelBufferAccess& msColorB
         throw new Error('Attachment must have the same depth');
 
     var stencilState = state.stencilStates[fragmentFacing];
-    var colorMaskFactor = [state.colorMask[0] ? true : false, state.colorMask[1] ? true : false, state.colorMask[2] ? true : false, state.colorMask[3] ? true : false];
+    var colorMaskFactor = [state.colorMask[0] ? 1 : 0, state.colorMask[1] ? 1 : 0, state.colorMask[2] ? 1 : 0, state.colorMask[3] ? 1 : 0];
     var colorMaskNegationFactor = [state.colorMask[0] ? false : true, state.colorMask[1] ? false : true, state.colorMask[2] ? false : true, state.colorMask[3] ? false : true];
     var sRGBTarget = false;
 
@@ -868,9 +502,71 @@ void FragmentProcessor::render (const rr::MultisamplePixelBufferAccess& msColorB
 };
 
 /**
+ * Determines the index of the corresponding vertex according to top/right conditions.
+ * @param {boolean} isTop
+ * @param {boolean} isRight
+ * @return {number}
  */
-rrRenderer.drawQuads = function(state, renderTarget, program, vertexAttribs, first, count) {
-    var primitives = new rrRenderer.PrimitiveList(gl.TRIANGLES, count * 2 * 3, first); // 2 triangles per quad with 3 vertices each.
+rrRenderer.getIndexOfCorner = function(isTop, isRight, vertexPackets) {
+    var x = null;
+    var y = null;
+
+    var xcriteria = isRight ? Math.max : Math.min;
+    var ycriteria = isTop ? Math.max : Math.min;
+
+    // Determine corner values
+    for (var i = 0; i < vertexPackets.length; i++) {
+        x = x != null ? xcriteria(vertexPackets[i].position[0], x) : vertexPackets[i].position[0];
+        y = y != null ? ycriteria(vertexPackets[i].position[1], y) : vertexPackets[i].position[1];
+    }
+
+    // Search for matching vertex
+    for (var v = 0; v < vertexPackets.length; v++)
+        if (vertexPackets[v].position[0] == x &&
+            vertexPackets[v].position[1] == y)
+            return v;
+
+    throw new Error('Corner not found');
+};
+
+/**
+ * @param {number} x
+ * @param {number} y
+ * @param {Array<number>} depths
+ * @return {number}
+ */
+rrRenderer.calculateDepth = function(x, y, depths) {
+    var d1 = x * depths[0] + (1 - x) * depths[1];
+    var d2 = x * depths[2] + (1 - x) * depths[3];
+    var d = y * d1 + (1 - y) * d2;
+    return d;
+};
+
+/**
+ * @param {rrRenderState.RenderState} state
+ * @param {rrRenderer.RenderTarget} renderTarget
+ * @param {sglrShaderProgram.ShaderProgram} program
+ * @param {Array<rrVertexAttrib.VertexAttrib>} vertexAttribs
+ * @param {rrRenderer.PrimitiveType} primitive
+ * @param {(number|rrRenderer.DrawIndices)} first Index of first quad vertex
+ * @param {number} count Number of indices
+ * @param {number} instanceID
+ */
+rrRenderer.drawQuads = function(state, renderTarget, program, vertexAttribs, primitive, first, count, instanceID) {
+
+    /**
+     * @param {Array<rrVertexPacket.VertexPacket>} vertices
+     * @param {Array<number>} indices
+     * @return {Array<rrVertexPacket.VertexPacket>}
+     */
+    var selectVertices = function(vertices, indices) {
+        var result = [];
+        for (var i = 0; i < indices.length; i++)
+            result.push(vertices[indices[i]]);
+        return result;
+    };
+
+    var primitives = new rrRenderer.PrimitiveList(primitive, count, first);
     // Do not draw if nothing to draw
     if (primitives.getNumElements() == 0)
         return;
@@ -881,106 +577,295 @@ rrRenderer.drawQuads = function(state, renderTarget, program, vertexAttribs, fir
     var vertexPackets = vpalloc.allocArray(primitives.getNumElements());
     var drawContext = new rrRenderer.DrawContext();
     drawContext.primitiveID = 0;
-    var instanceID = 0;
 
     var numberOfVertices = primitives.getNumElements();
-    for (var elementNdx = 0; elementNdx < numberOfVertices; ++elementNdx)
-    {
-        var numVertexPackets = 0;
+    var numVertexPackets = 0;
+    for (var elementNdx = 0; elementNdx < numberOfVertices; ++elementNdx) {
 
-        // collect primitive vertices until restart
-        while (elementNdx < numberOfVertices &&
-            !(state.restart.enabled && primitives.isRestartIndex(elementNdx, state.restart.restartIndex)))
-        {
-            // input
-            vertexPackets[numVertexPackets].instanceNdx = instanceID;
-            vertexPackets[numVertexPackets].vertexNdx = primitives.getIndex(elementNdx);
+        // input
+        vertexPackets[numVertexPackets].instanceNdx = instanceID;
+        vertexPackets[numVertexPackets].vertexNdx = primitives.getIndex(elementNdx);
 
-            // output
-            vertexPackets[numVertexPackets].pointSize = state.point.pointSize; // default value from the current state
-            vertexPackets[numVertexPackets].position = [0, 0, 0, 0]; // no undefined values
+        // output
+        vertexPackets[numVertexPackets].pointSize = state.point.pointSize; // default value from the current state
+        vertexPackets[numVertexPackets].position = [0, 0, 0, 0]; // no undefined values
 
-            ++numVertexPackets;
-            ++elementNdx;
-        }
+        ++numVertexPackets;
 
-        // Duplicated restart shade
-        if (numVertexPackets == 0)
-            continue;
-
-        // \todo Vertex cache?
-
-        // Transform vertices
-
-        program.shadeVertices(vertexAttribs, vertexPackets, numVertexPackets);
     }
+    program.shadeVertices(vertexAttribs, vertexPackets, numVertexPackets);
 
-    // For each quad, we get a group of four vertex packets
-    for (var quad = 0; quad < count; quad++) {
-        var bottomLeftVertexNdx = 0;
-        var bottomRightVertexNdx = 1;
-        var topLeftVertexNdx = 2;
-        var topRightVertexNdx = 3;
+    // For each quad, we get a group of six vertex packets
+    for (var prim = primitives.getNextPrimitive(true); prim.length > 0; prim = primitives.getNextPrimitive()) {
+        var quadPackets = selectVertices(vertexPackets, prim);
 
-        /*var glToCanvasXCoordFactor = state.viewport.rect.width;
-        var glToCanvasYCoordFactor = -state.viewport.rect.height;
+        var bottomLeftVertexNdx = rrRenderer.getIndexOfCorner(false, false, quadPackets);
+        var bottomRightVertexNdx = rrRenderer.getIndexOfCorner(false, true, quadPackets);
+        var topLeftVertexNdx = rrRenderer.getIndexOfCorner(true, false, quadPackets);
+        var topRightVertexNdx = rrRenderer.getIndexOfCorner(true, true, quadPackets);
 
-        var topLeft = [
-            (state.viewport.rect.width / 2) + Math.floor(vertexPackets[(quad * 6) + topLeftVertexNdx].position[0] * glToCanvasXCoordFactor),
-            (state.viewport.rect.height / 2) + Math.floor(vertexPackets[(quad * 6) + topLeftVertexNdx].position[1] * glToCanvasYCoordFactor)
-        ];
-        var bottomRight = [
-            (state.viewport.rect.width / 2) + Math.floor(vertexPackets[(quad * 6) + bottomRightVertexNdx].position[0] * glToCanvasXCoordFactor),
-            (state.viewport.rect.height / 2) + Math.floor(vertexPackets[(quad * 6) + bottomRightVertexNdx].position[1] * glToCanvasYCoordFactor)
-        ];*/
+        var topLeft = rrRenderer.transformGLToWindowCoords(state, quadPackets[topLeftVertexNdx]);
+        var bottomRight = rrRenderer.transformGLToWindowCoords(state, quadPackets[bottomRightVertexNdx]);
 
-        var topLeft = rrRenderer.transformVertexClipCoordsToWindowCoords(state, vertexPackets[(quad * 6) + topLeftVertexNdx]);
-        var bottomRight = rrRenderer.transformVertexClipCoordsToWindowCoords(state, vertexPackets[(quad * 6) + bottomRightVertexNdx]);
+        topLeft[0] = Math.round(topLeft[0]);
+        topLeft[1] = Math.round(topLeft[1]);
+        bottomRight[0] = Math.round(bottomRight[0]);
+        bottomRight[1] = Math.round(bottomRight[1]);
 
-        var v0 = [topLeft[0], topLeft[1]];
-        var v1 = [topLeft[0], bottomRight[1]];
-        var v2 = [bottomRight[0], topLeft[1]];
-        var v3 = [bottomRight[0], bottomRight[1]];
+        var v0 = [topLeft[0], topLeft[1], quadPackets[topLeftVertexNdx].position[2]];
+        var v1 = [topLeft[0], bottomRight[1], quadPackets[topRightVertexNdx].position[2]];
+        var v2 = [bottomRight[0], topLeft[1], quadPackets[bottomLeftVertexNdx].position[2]];
+        var v3 = [bottomRight[0], bottomRight[1], quadPackets[bottomRightVertexNdx].position[2]];
         var width = bottomRight[0] - topLeft[0];
-        var height = bottomRight[1] - topLeft[1];
+        var height = topLeft[1] - bottomRight[1];
 
         // Generate two rrRenderer.triangles [v0, v1, v2] and [v2, v1, v3]
         var shadingContextTopLeft = new rrShadingContext.FragmentShadingContext(
-            vertexPackets[(quad * 6) + topLeftVertexNdx].outputs,
-            vertexPackets[(quad * 6) + bottomLeftVertexNdx].outputs,
-            vertexPackets[(quad * 6) + topRightVertexNdx].outputs, null, 1
+            quadPackets[bottomLeftVertexNdx].outputs,
+            quadPackets[topLeftVertexNdx].outputs,
+            quadPackets[bottomRightVertexNdx].outputs
         );
         var packetsTopLeft = [];
 
         var shadingContextBottomRight = new rrShadingContext.FragmentShadingContext(
-            vertexPackets[(quad * 6) + topRightVertexNdx].outputs,
-            vertexPackets[(quad * 6) + bottomLeftVertexNdx].outputs,
-            vertexPackets[(quad * 6) + bottomRightVertexNdx].outputs, null, 1
+            quadPackets[bottomRightVertexNdx].outputs,
+            quadPackets[topLeftVertexNdx].outputs,
+            quadPackets[topRightVertexNdx].outputs
         );
         var packetsBottomRight = [];
 
         for (var i = 0; i < width; i++)
             for (var j = 0; j < height; j++) {
                 var x = v0[0] + i + 0.5;
-                var y = v0[1] + j + 0.5;
+                var y = v1[1] + j + 0.5;
 
                 var xf = (i + 0.5) / width;
                 var yf = (j + 0.5) / height;
+                var depth = rrRenderer.calculateDepth(xf, yf, [v0[2], v1[2], v2[2], v3[2]]);
                 var triNdx = xf + yf >= 1;
                 if (!triNdx) {
-                    var b = rrRenderer.getBarycentricCoefficients([x, y], v0, v1, v2);
-                    packetsTopLeft.push(new rrFragmentOperations.Fragment(b, [v0[0] + i, v0[1] + j]));
+                    var b = rrRenderer.getBarycentricCoefficients([x, y], v0, v1, v3);
+                    packetsTopLeft.push(new rrFragmentOperations.Fragment(b, [v0[0] + i, v1[1] + j], depth));
                 } else {
-                    var b = rrRenderer.getBarycentricCoefficients([x, y], v2, v1, v3);
-                    packetsBottomRight.push(new rrFragmentOperations.Fragment(b, [v0[0] + i, v0[1] + j]));
+                    var b = rrRenderer.getBarycentricCoefficients([x, y], v0, v3, v2);
+                    packetsBottomRight.push(new rrFragmentOperations.Fragment(b, [v0[0] + i, v1[1] + j], depth));
                 }
             }
 
-        program.fragmentShader.shadeFragments(packetsTopLeft, shadingContextTopLeft);
-        program.fragmentShader.shadeFragments(packetsBottomRight, shadingContextBottomRight);
+        program.shadeFragments(packetsTopLeft, shadingContextTopLeft);
+        program.shadeFragments(packetsBottomRight, shadingContextBottomRight);
 
         rrRenderer.writeFragments2(state, renderTarget, packetsTopLeft);
         rrRenderer.writeFragments2(state, renderTarget, packetsBottomRight);
+    }
+};
+
+/**
+ * @param {rrRenderState.RenderState} state
+ * @param {rrRenderer.RenderTarget} renderTarget
+ * @param {sglrShaderProgram.ShaderProgram} program
+ * @param {Array<rrVertexAttrib.VertexAttrib>} vertexAttribs
+ * @param {rrRenderer.PrimitiveType} primitive
+ * @param {(number|rrRenderer.DrawIndices)} first Index of first quad vertex
+ * @param {number} count Number of indices
+ * @param {number} instanceID
+ */
+rrRenderer.drawLines = function(state, renderTarget, program, vertexAttribs, primitive, first, count, instanceID) {
+
+    /**
+     * @param {Array<rrVertexPacket.VertexPacket>} vertices
+     * @param {Array<number>} indices
+     * @return {Array<rrVertexPacket.VertexPacket>}
+     */
+    var selectVertices = function(vertices, indices) {
+        var result = [];
+        for (var i = 0; i < indices.length; i++)
+            result.push(vertices[indices[i]]);
+        return result;
+    };
+
+    var lengthSquared = function(a) {
+        var sqSum = 0;
+        for (var i = 0; i < a.length; i++)
+            sqSum += a[i] * a[i];
+        return sqSum;
+    };
+
+    var dot = function(a, b) {
+        var res = 0;
+        for (var i = 0; i < a.length; i++)
+            res += a[i] * b[i];
+        return res;
+    };
+
+    var primitives = new rrRenderer.PrimitiveList(primitive, count, first);
+    // Do not draw if nothing to draw
+    if (primitives.getNumElements() == 0)
+        return;
+
+    // Prepare transformation
+    var numVaryings = program.vertexShader.getOutputs().length;
+    var vpalloc = new rrVertexPacket.VertexPacketAllocator(numVaryings);
+    var vertexPackets = vpalloc.allocArray(primitives.getNumElements());
+    var drawContext = new rrRenderer.DrawContext();
+    drawContext.primitiveID = 0;
+
+    var numberOfVertices = primitives.getNumElements();
+    var numVertexPackets = 0;
+    for (var elementNdx = 0; elementNdx < numberOfVertices; ++elementNdx) {
+
+        // input
+        vertexPackets[numVertexPackets].instanceNdx = instanceID;
+        vertexPackets[numVertexPackets].vertexNdx = primitives.getIndex(elementNdx);
+
+        // output
+        vertexPackets[numVertexPackets].pointSize = state.point.pointSize; // default value from the current state
+        vertexPackets[numVertexPackets].position = [0, 0, 0, 0]; // no undefined values
+
+        ++numVertexPackets;
+
+    }
+    program.shadeVertices(vertexAttribs, vertexPackets, numVertexPackets);
+
+    // For each quad, we get a group of six vertex packets
+    for (var prim = primitives.getNextPrimitive(true); prim.length > 0; prim = primitives.getNextPrimitive()) {
+        var linePackets = selectVertices(vertexPackets, prim);
+
+        var v0 = rrRenderer.transformGLToWindowCoords(state, linePackets[0]);
+        var v1 = rrRenderer.transformGLToWindowCoords(state, linePackets[1]);
+        v0[2] = linePackets[0].position[2];
+        v1[2] = linePackets[1].position[2];
+
+        v0[0] = Math.floor(v0[0]);
+        v0[1] = Math.floor(v0[1]);
+        v1[0] = Math.floor(v1[0]);
+        v1[1] = Math.floor(v1[1]);
+
+        var lineWidth = 1;
+        var d = [
+            Math.abs(v1[0] - v0[0]),
+            Math.abs(v1[1] - v0[1])];
+
+        var xstep = v0[0] < v1[0] ? 1 : -1;
+        var ystep = v0[1] < v1[1] ? 1 : -1;
+
+        var shadingContext = new rrShadingContext.FragmentShadingContext(
+            linePackets[0].outputs,
+            linePackets[1].outputs,
+            null
+        );
+        var packets = [];
+
+        var x = v0[0];
+        var y = v0[1];
+        var offset = d[0] - d[1];
+        var lenV = [v1[0] - v0[0], v1[1] - v0[1]];
+        var lenSq = lengthSquared(lenV);
+
+        while (true) {
+            var t = dot([x - v0[0], y - v0[1]], lenV) / lenSq;
+            var depth = (1 - t) * v0[2] + t * v1[2];
+            var b = [0, 0, 0];
+            b[0] = 1 - t;
+            b[1] = t;
+            packets.push(new rrFragmentOperations.Fragment(b, [x, y], depth));
+
+            if (x == v1[0] && y == v1[1])
+                break;
+
+            var offset2 = 2 * offset;
+            if (offset2 > -1 * d[1]) {
+                x += xstep;
+                offset -= d[1];
+            }
+
+            if (offset2 < d[0]) {
+                y += ystep;
+                offset += d[0];
+            }
+        }
+
+        program.shadeFragments(packets, shadingContext);
+
+        rrRenderer.writeFragments2(state, renderTarget, packets);
+    }
+};
+
+/**
+ * @param {rrRenderState.RenderState} state
+ * @param {rrRenderer.RenderTarget} renderTarget
+ * @param {sglrShaderProgram.ShaderProgram} program
+ * @param {Array<rrVertexAttrib.VertexAttrib>} vertexAttribs
+ * @param {rrRenderer.PrimitiveType} primitive
+ * @param {(number|rrRenderer.DrawIndices)} first Index of first quad vertex
+ * @param {number} count Number of indices
+ * @param {number} instanceID
+ */
+rrRenderer.drawPoints = function(state, renderTarget, program, vertexAttribs, primitive, first, count, instanceID) {
+    /**
+     * @param {Array<rrVertexPacket.VertexPacket>} vertices
+     * @param {Array<number>} indices
+     * @return {Array<rrVertexPacket.VertexPacket>}
+     */
+    var selectVertices = function(vertices, indices) {
+        var result = [];
+        for (var i = 0; i < indices.length; i++)
+            result.push(vertices[indices[i]]);
+        return result;
+    };
+
+    var primitives = new rrRenderer.PrimitiveList(primitive, count, first);
+    // Do not draw if nothing to draw
+    if (primitives.getNumElements() == 0)
+        return;
+
+    // Prepare transformation
+    var numVaryings = program.vertexShader.getOutputs().length;
+    var vpalloc = new rrVertexPacket.VertexPacketAllocator(numVaryings);
+    var vertexPackets = vpalloc.allocArray(primitives.getNumElements());
+    var drawContext = new rrRenderer.DrawContext();
+    drawContext.primitiveID = 0;
+
+    var numberOfVertices = primitives.getNumElements();
+    var numVertexPackets = 0;
+    for (var elementNdx = 0; elementNdx < numberOfVertices; ++elementNdx) {
+
+        // input
+        vertexPackets[numVertexPackets].instanceNdx = instanceID;
+        vertexPackets[numVertexPackets].vertexNdx = primitives.getIndex(elementNdx);
+
+        // output
+        vertexPackets[numVertexPackets].pointSize = state.point.pointSize; // default value from the current state
+        vertexPackets[numVertexPackets].position = [0, 0, 0, 0]; // no undefined values
+
+        ++numVertexPackets;
+
+    }
+    program.shadeVertices(vertexAttribs, vertexPackets, numVertexPackets);
+
+    // For each primitive, we draw a point.
+    for (var prim = primitives.getNextPrimitive(true); prim.length > 0; prim = primitives.getNextPrimitive()) {
+        var pointPackets = selectVertices(vertexPackets, prim);
+
+        var v0 = rrRenderer.transformGLToWindowCoords(state, pointPackets[0]);
+        v0[2] = pointPackets[0].position[2];
+
+        var shadingContext = new rrShadingContext.FragmentShadingContext(
+            pointPackets[0].outputs,
+            null,
+            null
+        );
+        var packets = [];
+
+        var x = v0[0];
+        var y = v0[1];
+        var depth = v0[2];
+        var b = [1, 0, 0];
+        packets.push(new rrFragmentOperations.Fragment(b, [x, y], depth));
+
+        program.shadeFragments(packets, shadingContext);
+
+        rrRenderer.writeFragments2(state, renderTarget, packets);
     }
 };
 

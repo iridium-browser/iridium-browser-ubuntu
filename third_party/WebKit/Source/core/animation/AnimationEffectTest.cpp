@@ -32,21 +32,18 @@
 #include "core/animation/AnimationEffect.h"
 
 #include "core/animation/ComputedTimingProperties.h"
-
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
+namespace blink {
 
 class TestAnimationEffectEventDelegate : public AnimationEffect::EventDelegate {
 public:
-    virtual void onEventCondition(const AnimationEffect& animationNode) override
+    void onEventCondition(const AnimationEffect& animationNode) override
     {
         m_eventTriggered = true;
 
     }
-    virtual bool requiresIterationEvents(const AnimationEffect& animationNode) override
+    bool requiresIterationEvents(const AnimationEffect& animationNode) override
     {
         return true;
     }
@@ -78,10 +75,10 @@ public:
         AnimationEffect::updateInheritedTime(time, reason);
     }
 
-    virtual void updateChildrenAndEffects() const override { }
+    void updateChildrenAndEffects() const override { }
     void willDetach() { }
     TestAnimationEffectEventDelegate* eventDelegate() { return m_eventDelegate.get(); }
-    virtual double calculateTimeToEffectChange(bool forwards, double localTime, double timeToNextIteration) const override
+    double calculateTimeToEffectChange(bool forwards, double localTime, double timeToNextIteration) const override
     {
         m_localTime = localTime;
         m_timeToNextIteration = timeToNextIteration;
@@ -784,4 +781,4 @@ TEST(AnimationAnimationEffectTest, TimeToEffectChange)
     EXPECT_TRUE(std::isinf(animationNode->takeTimeToNextIteration()));
 }
 
-}
+} // namespace blink

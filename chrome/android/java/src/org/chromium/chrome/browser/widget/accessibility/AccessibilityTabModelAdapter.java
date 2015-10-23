@@ -11,7 +11,7 @@ import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.Tab;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabList;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
@@ -69,11 +69,13 @@ public class AccessibilityTabModelAdapter extends BaseAdapter {
         public void schedulePendingClosure(int tab) {
             mActualTabModel.closeTab(
                     TabModelUtils.getTabById(mActualTabModel, tab), true, false, true);
+            notifyDataSetChanged();
         }
 
         @Override
         public void cancelPendingClosure(int tab) {
             mActualTabModel.cancelTabClosure(tab);
+            notifyDataSetChanged();
         }
 
         @Override
@@ -127,11 +129,10 @@ public class AccessibilityTabModelAdapter extends BaseAdapter {
     @Override
     public View getView(int position, View convertView, ViewGroup parent) {
         int tabId = (int) getItemId(position);
+        assert tabId != Tab.INVALID_TAB_ID;
 
-        if (tabId == Tab.INVALID_TAB_ID) return null;
-
-        AccessibilityTabModelListItem listItem = null;
-        if (convertView != null && convertView instanceof AccessibilityTabModelListItem) {
+        AccessibilityTabModelListItem listItem;
+        if (convertView instanceof AccessibilityTabModelListItem) {
             listItem = (AccessibilityTabModelListItem) convertView;
         } else {
             listItem = (AccessibilityTabModelListItem) LayoutInflater.from(mContext).inflate(

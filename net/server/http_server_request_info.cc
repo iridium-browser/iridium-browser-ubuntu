@@ -4,6 +4,7 @@
 
 #include "net/server/http_server_request_info.h"
 
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 
 namespace net {
@@ -14,7 +15,7 @@ HttpServerRequestInfo::~HttpServerRequestInfo() {}
 
 std::string HttpServerRequestInfo::GetHeaderValue(
     const std::string& header_name) const {
-  DCHECK_EQ(base::StringToLowerASCII(header_name), header_name);
+  DCHECK_EQ(base::ToLowerASCII(header_name), header_name);
   HttpServerRequestInfo::HeadersMap::const_iterator it =
       headers.find(header_name);
   if (it != headers.end())
@@ -25,15 +26,13 @@ std::string HttpServerRequestInfo::GetHeaderValue(
 bool HttpServerRequestInfo::HasHeaderValue(
     const std::string& header_name,
     const std::string& header_value) const {
-  DCHECK_EQ(base::StringToLowerASCII(header_value), header_value);
-  std::string complete_value = GetHeaderValue(header_name);
-  base::StringToLowerASCII(&complete_value);
-  std::vector<std::string> value_items;
-  Tokenize(complete_value, ",", &value_items);
-  for (std::vector<std::string>::iterator it = value_items.begin();
-      it != value_items.end(); ++it) {
-    base::TrimString(*it, " \t", &*it);
-    if (*it == header_value)
+  DCHECK_EQ(base::ToLowerASCII(header_value), header_value);
+  std::string complete_value = base::ToLowerASCII(GetHeaderValue(header_name));
+
+  for (const base::StringPiece& cur :
+       base::SplitString(complete_value, ",", base::KEEP_WHITESPACE,
+                         base::SPLIT_WANT_NONEMPTY)) {
+    if (base::TrimString(cur, " \t", base::TRIM_ALL) == header_value)
       return true;
   }
   return false;

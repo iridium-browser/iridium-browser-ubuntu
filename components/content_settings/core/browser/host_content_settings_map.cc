@@ -34,17 +34,6 @@ typedef std::vector<content_settings::Rule> Rules;
 
 typedef std::pair<std::string, std::string> StringPair;
 
-// TODO(bauerb): Expose constants.
-const char* kProviderNames[] = {
-  "platform_app",
-  "policy",
-  "supervised_user",
-  "extension",
-  "override",
-  "preference",
-  "default"
-};
-
 // These constants are copied from extensions/common/extension_constants.h and
 // content/public/common/url_constants.h to avoid complicated dependencies.
 // TODO(vabr): Get these constants through the ContentSettingsClient.
@@ -55,18 +44,24 @@ const char kChromeUIScheme[] = "chrome";
 const char kExtensionScheme[] = "chrome-extension";
 #endif
 
-content_settings::SettingSource kProviderSourceMap[] = {
-  content_settings::SETTING_SOURCE_EXTENSION,
-  content_settings::SETTING_SOURCE_POLICY,
-  content_settings::SETTING_SOURCE_SUPERVISED,
-  content_settings::SETTING_SOURCE_EXTENSION,
-  content_settings::SETTING_SOURCE_USER,
-  content_settings::SETTING_SOURCE_USER,
-  content_settings::SETTING_SOURCE_USER,
+struct ProviderNamesSourceMapEntry {
+  const char* provider_name;
+  content_settings::SettingSource provider_source;
 };
-static_assert(arraysize(kProviderSourceMap) ==
-                   HostContentSettingsMap::NUM_PROVIDER_TYPES,
-              "kProviderSourceMap should have NUM_PROVIDER_TYPES elements");
+
+const ProviderNamesSourceMapEntry kProviderNamesSourceMap[] = {
+    {"platform_app", content_settings::SETTING_SOURCE_EXTENSION},
+    {"policy", content_settings::SETTING_SOURCE_POLICY},
+    {"supervised_user", content_settings::SETTING_SOURCE_SUPERVISED},
+    {"extension", content_settings::SETTING_SOURCE_EXTENSION},
+    {"preference", content_settings::SETTING_SOURCE_USER},
+    {"default", content_settings::SETTING_SOURCE_USER},
+};
+
+static_assert(
+    arraysize(kProviderNamesSourceMap) ==
+        HostContentSettingsMap::NUM_PROVIDER_TYPES,
+    "kProviderNamesSourceMap should have NUM_PROVIDER_TYPES elements");
 
 // Returns true if the |content_type| supports a resource identifier.
 // Resource identifiers are supported (but not required) for plugins.
@@ -98,9 +93,6 @@ HostContentSettingsMap::HostContentSettingsMap(PrefService* prefs,
       new content_settings::DefaultProvider(prefs_, is_off_the_record_);
   default_provider->AddObserver(this);
   content_settings_providers_[DEFAULT_PROVIDER] = default_provider;
-
-  content_settings_providers_[OVERRIDE_PROVIDER] =
-      new content_settings::OverrideProvider(prefs_, is_off_the_record_);
 }
 
 // static
@@ -112,7 +104,6 @@ void HostContentSettingsMap::RegisterProfilePrefs(
   content_settings::DefaultProvider::RegisterProfilePrefs(registry);
   content_settings::PrefProvider::RegisterProfilePrefs(registry);
   content_settings::PolicyProvider::RegisterProfilePrefs(registry);
-  content_settings::OverrideProvider::RegisterProfilePrefs(registry);
 }
 
 void HostContentSettingsMap::RegisterProvider(
@@ -160,14 +151,13 @@ ContentSetting HostContentSettingsMap::GetDefaultContentSetting(
   for (ConstProviderIterator provider = content_settings_providers_.begin();
        provider != content_settings_providers_.end();
        ++provider) {
-    if (provider->first == PREF_PROVIDER ||
-        provider->first == OVERRIDE_PROVIDER)
+    if (provider->first == PREF_PROVIDER)
       continue;
     ContentSetting default_setting =
         GetDefaultContentSettingFromProvider(content_type, provider->second);
     if (default_setting != CONTENT_SETTING_DEFAULT) {
       if (provider_id)
-        *provider_id = kProviderNames[provider->first];
+        *provider_id = kProviderNamesSourceMap[provider->first].provider_name;
       return default_setting;
     }
   }
@@ -199,8 +189,6 @@ void HostContentSettingsMap::GetSettingsForOneType(
   for (ConstProviderIterator provider = content_settings_providers_.begin();
        provider != content_settings_providers_.end();
        ++provider) {
-    if (provider->first == OVERRIDE_PROVIDER)
-      continue;
     // For each provider, iterate first the incognito-specific rules, then the
     // normal rules.
     if (is_off_the_record_) {
@@ -375,52 +363,6 @@ base::Time HostContentSettingsMap::GetLastUsageByPattern(
       primary_pattern, secondary_pattern, content_type);
 }
 
-ContentSetting HostContentSettingsMap::GetContentSettingWithoutOverride(
-    const GURL& primary_url,
-    const GURL& secondary_url,
-    ContentSettingsType content_type,
-    const std::string& resource_identifier) {
-  scoped_ptr<base::Value> value(GetWebsiteSettingWithoutOverride(
-      primary_url, secondary_url, content_type, resource_identifier, NULL));
-  return content_settings::ValueToContentSetting(value.get());
-}
-
-scoped_ptr<base::Value>
-HostContentSettingsMap::GetWebsiteSettingWithoutOverride(
-    const GURL& primary_url,
-    const GURL& secondary_url,
-    ContentSettingsType content_type,
-    const std::string& resource_identifier,
-    content_settings::SettingInfo* info) const {
-  return GetWebsiteSettingInternal(primary_url,
-                                   secondary_url,
-                                   content_type,
-                                   resource_identifier,
-                                   info,
-                                   false);
-}
-
-void HostContentSettingsMap::SetContentSettingOverride(
-    ContentSettingsType content_type,
-    bool is_enabled) {
-  UsedContentSettingsProviders();
-
-  content_settings::OverrideProvider* override =
-      static_cast<content_settings::OverrideProvider*>(
-          content_settings_providers_[OVERRIDE_PROVIDER]);
-  override->SetOverrideSetting(content_type, is_enabled);
-}
-
-bool HostContentSettingsMap::GetContentSettingOverride(
-    ContentSettingsType content_type) {
-  UsedContentSettingsProviders();
-
-  content_settings::OverrideProvider* override =
-      static_cast<content_settings::OverrideProvider*>(
-          content_settings_providers_[OVERRIDE_PROVIDER]);
-  return override->IsEnabled(content_type);
-}
-
 void HostContentSettingsMap::AddObserver(content_settings::Observer* observer) {
   observers_.AddObserver(observer);
 }
@@ -428,6 +370,10 @@ void HostContentSettingsMap::AddObserver(content_settings::Observer* observer) {
 void HostContentSettingsMap::RemoveObserver(
     content_settings::Observer* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void HostContentSettingsMap::FlushLossyWebsiteSettings() {
+  prefs_->SchedulePendingLossyWrites();
 }
 
 void HostContentSettingsMap::SetPrefClockForTesting(
@@ -470,6 +416,7 @@ void HostContentSettingsMap::ClearSettingsForOneType(
        ++provider) {
     provider->second->ClearAllContentSettingsRules(content_type);
   }
+  FlushLossyWebsiteSettings();
 }
 
 bool HostContentSettingsMap::IsValueAllowedForType(
@@ -562,12 +509,13 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
 bool HostContentSettingsMap::ContentTypeHasCompoundValue(
     ContentSettingsType type) {
   // Values for content type CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE,
-  // CONTENT_SETTINGS_TYPE_APP_BANNER, and
+  // CONTENT_SETTINGS_TYPE_APP_BANNER, CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT and
   // CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS are of type dictionary/map.
   // Compound types like dictionaries can't be mapped to the type
   // |ContentSetting|.
   return (type == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE ||
           type == CONTENT_SETTINGS_TYPE_APP_BANNER ||
+          type == CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT ||
           type == CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS);
 }
 
@@ -626,10 +574,8 @@ void HostContentSettingsMap::AddSettingsForOneType(
       setting_value = content_settings::ValueToContentSetting(rule.value.get());
     }
     settings->push_back(ContentSettingPatternSource(
-        rule.primary_pattern, rule.secondary_pattern,
-        setting_value,
-        kProviderNames[provider_type],
-        incognito));
+        rule.primary_pattern, rule.secondary_pattern, setting_value,
+        kProviderNamesSourceMap[provider_type].provider_name, incognito));
   }
 }
 
@@ -705,15 +651,14 @@ scoped_ptr<base::Value> HostContentSettingsMap::GetWebsiteSetting(
                                    secondary_url,
                                    content_type,
                                    resource_identifier,
-                                   info,
-                                   true);
+                                   info);
 }
 
 // static
 HostContentSettingsMap::ProviderType
 HostContentSettingsMap::GetProviderTypeFromSource(const std::string& source) {
-  for (size_t i = 0; i < arraysize(kProviderNames); ++i) {
-    if (source == kProviderNames[i])
+  for (size_t i = 0; i < arraysize(kProviderNamesSourceMap); ++i) {
+    if (source == kProviderNamesSourceMap[i].provider_name)
       return static_cast<ProviderType>(i);
   }
 
@@ -731,8 +676,7 @@ scoped_ptr<base::Value> HostContentSettingsMap::GetWebsiteSettingInternal(
     const GURL& secondary_url,
     ContentSettingsType content_type,
     const std::string& resource_identifier,
-    content_settings::SettingInfo* info,
-    bool get_override) const {
+    content_settings::SettingInfo* info) const {
   // TODO(msramek): MEDIASTREAM is deprecated. Remove this check when all
   // references to MEDIASTREAM are removed from the code.
   DCHECK_NE(CONTENT_SETTINGS_TYPE_MEDIASTREAM, content_type);
@@ -750,8 +694,6 @@ scoped_ptr<base::Value> HostContentSettingsMap::GetWebsiteSettingInternal(
   for (ConstProviderIterator provider = content_settings_providers_.begin();
        provider != content_settings_providers_.end();
        ++provider) {
-    if (!get_override && provider->first == OVERRIDE_PROVIDER)
-      continue;
 
     scoped_ptr<base::Value> value(
         content_settings::GetContentSettingValueAndPatterns(provider->second,
@@ -764,7 +706,7 @@ scoped_ptr<base::Value> HostContentSettingsMap::GetWebsiteSettingInternal(
                                                             secondary_pattern));
     if (value) {
       if (info)
-        info->source = kProviderSourceMap[provider->first];
+        info->source = kProviderNamesSourceMap[provider->first].provider_source;
       return value.Pass();
     }
   }

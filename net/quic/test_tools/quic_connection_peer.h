@@ -94,6 +94,7 @@ class QuicConnectionPeer {
   static QuicAlarm* GetRetransmissionAlarm(QuicConnection* connection);
   static QuicAlarm* GetSendAlarm(QuicConnection* connection);
   static QuicAlarm* GetTimeoutAlarm(QuicConnection* connection);
+  static QuicAlarm* GetMtuDiscoveryAlarm(QuicConnection* connection);
 
   static QuicPacketWriter* GetWriter(QuicConnection* connection);
   // If |owns_writer| is true, takes ownership of |writer|.
@@ -110,6 +111,13 @@ class QuicConnectionPeer {
       QuicConnection* connection, QuicPacketSequenceNumber number);
 
   static QuicConnectionStats* GetStats(QuicConnection* connection);
+
+  static QuicPacketCount GetPacketsBetweenMtuProbes(QuicConnection* connection);
+
+  static void SetPacketsBetweenMtuProbes(QuicConnection* connection,
+                                         QuicPacketCount packets);
+  static void SetNextMtuProbeAt(QuicConnection* connection,
+                                QuicPacketSequenceNumber number);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionPeer);

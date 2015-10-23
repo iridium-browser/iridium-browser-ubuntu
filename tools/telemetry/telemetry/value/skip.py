@@ -18,7 +18,7 @@ class SkipValue(value_module.Value):
     self._reason = reason
 
   def __repr__(self):
-    page_name = self.page.url
+    page_name = self.page.display_name
     return 'SkipValue(%s, %s)' % (page_name, self._reason)
 
   @property
@@ -67,6 +67,5 @@ class SkipValue(value_module.Value):
     assert False, 'Should not be called.'
 
   @classmethod
-  def MergeLikeValuesFromDifferentPages(cls, values,
-                                        group_by_name_suffix=False):
+  def MergeLikeValuesFromDifferentPages(cls, values):
     assert False, 'Should not be called.'

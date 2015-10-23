@@ -2,18 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import os
-import tempfile
-
-from telemetry import benchmark
+from core import perf_benchmark
 
 from measurements import session_restore
 import page_sets
 from profile_creators import profile_generator
 from profile_creators import small_profile_extender
+from telemetry import benchmark
 
 
-class _SessionRestoreTypical25(benchmark.Benchmark):
+class _SessionRestoreTypical25(perf_benchmark.PerfBenchmark):
   """Base Benchmark class for session restore benchmarks.
 
   A cold start means none of the Chromium files are in the disk cache.
@@ -26,6 +24,8 @@ class _SessionRestoreTypical25(benchmark.Benchmark):
   page_set = page_sets.Typical25PageSet
   tag = None  # override with 'warm' or 'cold'
 
+  PROFILE_TYPE = 'small_profile'
+
   @classmethod
   def Name(cls):
     return 'session_restore'
@@ -33,48 +33,35 @@ class _SessionRestoreTypical25(benchmark.Benchmark):
   @classmethod
   def ProcessCommandLineArgs(cls, parser, args):
     super(_SessionRestoreTypical25, cls).ProcessCommandLineArgs(parser, args)
-    profile_type = 'small_profile'
-    if not args.browser_options.profile_dir:
-      output_dir = os.path.join(tempfile.gettempdir(), profile_type)
-      profile_dir = os.path.join(output_dir, profile_type)
-      if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-      # Generate new profiles if profile_dir does not exist. It only exists if
-      # all profiles had been correctly generated in a previous run.
-      if not os.path.exists(profile_dir):
-        new_args = args.Copy()
-        new_args.pageset_repeat = 1
-        new_args.output_dir = output_dir
-        profile_generator.GenerateProfiles(
-            small_profile_extender.SmallProfileExtender,
-            profile_type, new_args)
-      args.browser_options.profile_dir = profile_dir
+    generator = profile_generator.ProfileGenerator(
+        small_profile_extender.SmallProfileExtender, cls.PROFILE_TYPE)
+    out_dir = generator.Run(args)
+    if out_dir:
+      args.browser_options.profile_dir = out_dir
+    else:
+      args.browser_options.dont_override_profile = True
 
   @classmethod
   def ValueCanBeAddedPredicate(cls, _, is_first_result):
     return cls.tag == 'cold' or not is_first_result
 
-  def CreateUserStorySet(self, _):
-    """Return a user story set that only has the first user story.
+  def CreateStorySet(self, _):
+    """Return a story set that only has the first story.
 
     The session restore measurement skips the navigation step and
     only tests session restore by having the browser start-up.
-    The first user story is used to get WPR set up and hold results.
+    The first story is used to get WPR set up and hold results.
     """
-    user_story_set = self.page_set()
-    for user_story in user_story_set.user_stories[1:]:
-      user_story_set.RemoveUserStory(user_story)
-    return user_story_set
+    story_set = self.page_set()
+    for story in story_set.stories[1:]:
+      story_set.RemoveStory(story)
+    return story_set
 
   def CreatePageTest(self, options):
     is_cold = (self.tag == 'cold')
     return session_restore.SessionRestore(cold=is_cold)
 
-  def CreatePageSet(self, options):
-    return page_sets.Typical25PageSet(run_no_page_interactions=True)
-
-# crbug.com/325479, crbug.com/381990
+# crbug.com/325479, crbug.com/381990, crbug.com/511273
 @benchmark.Disabled('android', 'linux', 'reference')
 class SessionRestoreColdTypical25(_SessionRestoreTypical25):
   """Test by clearing system cache and profile before repeats."""
@@ -86,7 +73,7 @@ class SessionRestoreColdTypical25(_SessionRestoreTypical25):
     return 'session_restore.cold.typical_25'
 
 
-# crbug.com/325479, crbug.com/381990
+# crbug.com/325479, crbug.com/381990, crbug.com/511273
 @benchmark.Disabled('android', 'linux', 'reference', 'xp')
 class SessionRestoreWarmTypical25(_SessionRestoreTypical25):
   """Test without clearing system cache or profile before repeats.

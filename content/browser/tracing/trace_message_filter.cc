@@ -5,13 +5,18 @@
 #include "content/browser/tracing/trace_message_filter.h"
 
 #include "components/tracing/tracing_messages.h"
+#include "content/browser/tracing/background_tracing_manager_impl.h"
 #include "content/browser/tracing/tracing_controller_impl.h"
+#include "content/common/child_process_host_impl.h"
 
 namespace content {
 
-TraceMessageFilter::TraceMessageFilter()
+TraceMessageFilter::TraceMessageFilter(int child_process_id)
     : BrowserMessageFilter(TracingMsgStart),
       has_child_(false),
+      tracing_process_id_(
+          ChildProcessHostImpl::ChildProcessUniqueIdToTracingProcessId(
+              child_process_id)),
       is_awaiting_end_ack_(false),
       is_awaiting_capture_monitoring_snapshot_ack_(false),
       is_awaiting_buffer_percent_full_ack_(false) {
@@ -55,18 +60,18 @@ bool TraceMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnGlobalMemoryDumpRequest)
     IPC_MESSAGE_HANDLER(TracingHostMsg_ProcessMemoryDumpResponse,
                         OnProcessMemoryDumpResponse)
+    IPC_MESSAGE_HANDLER(TracingHostMsg_TriggerBackgroundTrace,
+                        OnTriggerBackgroundTrace)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
 void TraceMessageFilter::SendBeginTracing(
-    const base::trace_event::CategoryFilter& category_filter,
-    const base::trace_event::TraceOptions& options) {
+      const base::trace_event::TraceConfig& trace_config) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  Send(new TracingMsg_BeginTracing(category_filter.ToString(),
-                                   base::TimeTicks::NowFromSystemTraceTime(),
-                                   options.ToString()));
+  Send(new TracingMsg_BeginTracing(
+      trace_config.ToString(), base::TraceTicks::Now(), tracing_process_id_));
 }
 
 void TraceMessageFilter::SendEndTracing() {
@@ -76,13 +81,18 @@ void TraceMessageFilter::SendEndTracing() {
   Send(new TracingMsg_EndTracing);
 }
 
-void TraceMessageFilter::SendEnableMonitoring(
-    const base::trace_event::CategoryFilter& category_filter,
-    const base::trace_event::TraceOptions& options) {
+void TraceMessageFilter::SendCancelTracing() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  Send(new TracingMsg_EnableMonitoring(category_filter.ToString(),
-      base::TimeTicks::NowFromSystemTraceTime(),
-      options.ToString()));
+  DCHECK(!is_awaiting_end_ack_);
+  is_awaiting_end_ack_ = true;
+  Send(new TracingMsg_CancelTracing);
+}
+
+void TraceMessageFilter::SendEnableMonitoring(
+      const base::trace_event::TraceConfig& trace_config) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  Send(new TracingMsg_EnableMonitoring(trace_config.ToString(),
+                                       base::TraceTicks::Now()));
 }
 
 void TraceMessageFilter::SendDisableMonitoring() {
@@ -194,6 +204,10 @@ void TraceMessageFilter::OnProcessMemoryDumpResponse(uint64 dump_guid,
                                                      bool success) {
   TracingControllerImpl::GetInstance()->OnProcessMemoryDumpResponse(
       this, dump_guid, success);
+}
+
+void TraceMessageFilter::OnTriggerBackgroundTrace(const std::string& name) {
+  BackgroundTracingManagerImpl::GetInstance()->OnHistogramTrigger(name);
 }
 
 }  // namespace content

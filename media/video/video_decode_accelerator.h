@@ -19,7 +19,7 @@ namespace media {
 
 // Video decoder interface.
 // This interface is extended by the various components that ultimately
-// implement the backend of PPB_VideoDecode_Dev.
+// implement the backend of PPB_VideoDecoder_Dev.
 class MEDIA_EXPORT VideoDecodeAccelerator {
  public:
   // Specification of a decoding profile supported by an decoder.
@@ -56,11 +56,13 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
   // output picture and blitting them. These callbacks will not be made unless
   // Initialize() has returned successfully.
   // This interface is extended by the various layers that relay messages back
-  // to the plugin, through the PPP_VideoDecode_Dev interface the plugin
+  // to the plugin, through the PPP_VideoDecoder_Dev interface the plugin
   // implements.
   class MEDIA_EXPORT Client {
    public:
     // Callback to tell client how many and what size of buffers to provide.
+    // Note that the actual count provided through AssignPictureBuffers() can be
+    // larger than the value requested.
     virtual void ProvidePictureBuffers(uint32 requested_num_of_buffers,
                                        const gfx::Size& dimensions,
                                        uint32 texture_target) = 0;
@@ -115,7 +117,9 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
   // callback has been initiated for a given buffer.
   //
   // Parameters:
-  //  |buffers| contains the allocated picture buffers for the output.
+  //  |buffers| contains the allocated picture buffers for the output.  Note
+  //  that the count of buffers may be larger than the count requested through
+  //  the call to Client::ProvidePictureBuffers().
   virtual void AssignPictureBuffers(
       const std::vector<PictureBuffer>& buffers) = 0;
 

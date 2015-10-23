@@ -31,11 +31,11 @@
 
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutListBox.h"
-#include "core/page/Chrome.h"
-#include "core/page/EventHandler.h"
+#include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "wtf/CurrentTime.h"
 
@@ -44,17 +44,22 @@ namespace blink {
 // Delay time in second for start autoscroll if pointer is in border edge of scrollable element.
 static double autoscrollDelay = 0.2;
 
-PassOwnPtr<AutoscrollController> AutoscrollController::create(Page& page)
+PassOwnPtrWillBeRawPtr<AutoscrollController> AutoscrollController::create(Page& page)
 {
-    return adoptPtr(new AutoscrollController(page));
+    return adoptPtrWillBeNoop(new AutoscrollController(page));
 }
 
 AutoscrollController::AutoscrollController(Page& page)
-    : m_page(page)
+    : m_page(&page)
     , m_autoscrollLayoutObject(nullptr)
     , m_autoscrollType(NoAutoscroll)
     , m_dragAndDropAutoscrollStartTime(0)
 {
+}
+
+DEFINE_TRACE(AutoscrollController)
+{
+    visitor->trace(m_page);
 }
 
 bool AutoscrollController::autoscrollInProgress() const
@@ -94,7 +99,6 @@ void AutoscrollController::stopAutoscroll()
 #if OS(WIN)
     if (panScrollInProgress()) {
         if (FrameView* view = scrollable->frame()->view()) {
-            view->removePanScrollIcon();
             view->setCursor(pointerCursor());
         }
     }
@@ -184,6 +188,11 @@ void AutoscrollController::handleMouseReleaseForPanScrolling(LocalFrame* frame, 
     case AutoscrollForPanCanStop:
         stopAutoscroll();
         break;
+    case AutoscrollForDragAndDrop:
+    case AutoscrollForSelection:
+    case NoAutoscroll:
+        // Nothing to do.
+        break;
     }
 }
 
@@ -202,8 +211,6 @@ void AutoscrollController::startPanScrolling(LayoutBox* scrollable, const IntPoi
     m_autoscrollLayoutObject = scrollable;
     m_panScrollStartPos = lastKnownMousePosition;
 
-    if (FrameView* view = scrollable->frame()->view())
-        view->addPanScrollIcon(lastKnownMousePosition);
     startAutoscroll();
 }
 #else
@@ -252,12 +259,12 @@ void AutoscrollController::animate(double)
 #endif
     }
     if (m_autoscrollType != NoAutoscroll)
-        m_page.chrome().scheduleAnimation();
+        m_page->chromeClient().scheduleAnimation();
 }
 
 void AutoscrollController::startAutoscroll()
 {
-    m_page.chrome().scheduleAnimation();
+    m_page->chromeClient().scheduleAnimation();
 }
 
 #if OS(WIN)
@@ -265,10 +272,10 @@ void AutoscrollController::updatePanScrollState(FrameView* view, const IntPoint&
 {
     // At the original click location we draw a 4 arrowed icon. Over this icon there won't be any scroll
     // So we don't want to change the cursor over this area
-    bool east = m_panScrollStartPos.x() < (lastKnownMousePosition.x() - FrameView::noPanScrollRadius);
-    bool west = m_panScrollStartPos.x() > (lastKnownMousePosition.x() + FrameView::noPanScrollRadius);
-    bool north = m_panScrollStartPos.y() > (lastKnownMousePosition.y() + FrameView::noPanScrollRadius);
-    bool south = m_panScrollStartPos.y() < (lastKnownMousePosition.y() - FrameView::noPanScrollRadius);
+    bool east = m_panScrollStartPos.x() < (lastKnownMousePosition.x() - noPanScrollRadius);
+    bool west = m_panScrollStartPos.x() > (lastKnownMousePosition.x() + noPanScrollRadius);
+    bool north = m_panScrollStartPos.y() > (lastKnownMousePosition.y() + noPanScrollRadius);
+    bool south = m_panScrollStartPos.y() < (lastKnownMousePosition.y() - noPanScrollRadius);
 
     if (m_autoscrollType == AutoscrollForPan && (east || west || north || south))
         m_autoscrollType = AutoscrollForPanCanStop;
@@ -287,12 +294,13 @@ void AutoscrollController::updatePanScrollState(FrameView* view, const IntPoint&
             view->setCursor(southWestPanningCursor());
         else
             view->setCursor(southPanningCursor());
-    } else if (east)
+    } else if (east) {
         view->setCursor(eastPanningCursor());
-    else if (west)
+    } else if (west) {
         view->setCursor(westPanningCursor());
-    else
+    } else {
         view->setCursor(middlePanningCursor());
+    }
 }
 #endif
 

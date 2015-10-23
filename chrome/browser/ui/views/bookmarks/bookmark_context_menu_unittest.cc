@@ -15,13 +15,13 @@
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/chrome_bookmark_client.h"
-#include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
+#include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/bookmarks/managed/managed_bookmark_service.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/test/test_browser_thread.h"
@@ -66,7 +66,6 @@ class BookmarkContextMenuTest : public testing::Test {
   }
 
   void SetUp() override {
-    event_source_ = ui::PlatformEventSource::CreateDefault();
     profile_.reset(new TestingProfile());
     profile_->CreateBookmarkModel(true);
 
@@ -82,14 +81,12 @@ class BookmarkContextMenuTest : public testing::Test {
     BrowserThread::GetBlockingPool()->FlushForTesting();
     // Flush the message loop to make application verifiers happy.
     message_loop_.RunUntilIdle();
-    event_source_.reset();
   }
 
  protected:
   base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
-  scoped_ptr<ui::PlatformEventSource> event_source_;
   scoped_ptr<TestingProfile> profile_;
   BookmarkModel* model_;
   TestingPageNavigator navigator_;
@@ -349,9 +346,9 @@ TEST_F(BookmarkContextMenuTest, ShowManagedBookmarks) {
       NULL, NULL, profile_.get(), NULL, nodes[0]->parent(), nodes, false));
 
   // Verify that there are no managed nodes yet.
-  ChromeBookmarkClient* client = ChromeBookmarkClientFactory::GetForProfile(
-      profile_.get());
-  EXPECT_TRUE(client->managed_node()->empty());
+  bookmarks::ManagedBookmarkService* managed =
+      ManagedBookmarkServiceFactory::GetForProfile(profile_.get());
+  EXPECT_TRUE(managed->managed_node()->empty());
 
   // The context menu should not show the option to "Show managed bookmarks".
   EXPECT_FALSE(
@@ -370,9 +367,9 @@ TEST_F(BookmarkContextMenuTest, ShowManagedBookmarks) {
   dict->SetString("url", "http://google.com");
   base::ListValue list;
   list.Append(dict);
-  EXPECT_TRUE(client->managed_node()->empty());
+  EXPECT_TRUE(managed->managed_node()->empty());
   profile_->GetPrefs()->Set(bookmarks::prefs::kManagedBookmarks, list);
-  EXPECT_FALSE(client->managed_node()->empty());
+  EXPECT_FALSE(managed->managed_node()->empty());
 
   // New context menus now show the "Show managed bookmarks" option.
   controller.reset(new BookmarkContextMenu(

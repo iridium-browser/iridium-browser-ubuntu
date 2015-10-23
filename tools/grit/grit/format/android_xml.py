@@ -58,6 +58,7 @@ would generate
 """
 
 import os
+import re
 import types
 import xml.sax.saxutils
 
@@ -96,6 +97,24 @@ _SIMPLE_TEMPLATE = u'<string name="%s">%s</string>\n'
 _PRODUCT_TEMPLATE = u'<string name="%s" product="%s">%s</string>\n'
 
 
+# Some strings have a plural equivalent
+_PLURALS_TEMPLATE = '<plurals name="%s">\n%s</plurals>\n'
+_PLURALS_ITEM_TEMPLATE = '  <item quantity="%s">%s</item>\n'
+_PLURALS_PATTERN = lazy_re.compile(r'\{[A-Z_]+,\s*plural,(?P<items>.*)\}$', flags=re.S)
+_PLURALS_ITEM_PATTERN = lazy_re.compile(r'(?P<quantity>\S+)\s*\{(?P<value>.*?)\}')
+_PLURALS_QUANTITY_MAP = {
+  '=0': 'zero',
+  'zero': 'zero',
+  '=1': 'one',
+  'one': 'one',
+  '=2': 'two',
+  'two': 'two',
+  'few': 'few',
+  'many': 'many',
+  'other': 'other',
+}
+
+
 def Format(root, lang='en', output_dir='.'):
   yield ('<?xml version="1.0" encoding="utf-8"?>\n'
           '<resources '
@@ -131,6 +150,49 @@ def ShouldOutputNode(node, tagged_only):
           (not tagged_only or _EMIT_TAG in node.formatter_data))
 
 
+def _FormatPluralMessage(message):
+  """Compiles ICU plural syntax to the body of an Android <plurals> element.
+
+  1. In a .grd file, we can write a plural string like this:
+
+    <message name="IDS_THINGS">
+      {NUM_THINGS, plural,
+      =1 {1 thing}
+      other {# things}}
+    </message>
+
+  2. The Android equivalent looks like this:
+
+    <plurals name="things">
+      <item quantity="one">1 thing</item>
+      <item quantity="other">%d things</item>
+    </plurals>
+
+  This method takes the body of (1) and converts it to the body of (2).
+
+  If the message is *not* a plural string, this function returns `None`.
+  If the message includes quantities without an equivalent format in Android,
+  it raises an exception.
+  """
+  ret = {}
+  plural_match = _PLURALS_PATTERN.match(message)
+  if not plural_match:
+    return None
+  body_in = plural_match.group('items').strip()
+  lines = []
+  for item_match in _PLURALS_ITEM_PATTERN.finditer(body_in):
+    quantity_in = item_match.group('quantity')
+    quantity_out = _PLURALS_QUANTITY_MAP.get(quantity_in)
+    value_in = item_match.group('value')
+    value_out = '"' + value_in.replace('#', '%d') + '"'
+    if quantity_out:
+      lines.append(_PLURALS_ITEM_TEMPLATE % (quantity_out, value_out))
+    else:
+      raise Exception('Unsupported plural quantity for android '
+                      'strings.xml: %s' % quantity_in)
+  return ''.join(lines)
+
+
 def _FormatMessage(item, lang):
   """Writes out a single string as a <resource/> element."""
 
@@ -138,6 +200,7 @@ def _FormatMessage(item, lang):
   # Replace < > & with &lt; &gt; &amp; to ensure we generate valid XML and
   # replace ' " with \' \" to conform to Android's string formatting rules.
   value = xml.sax.saxutils.escape(value, {"'": "\\'", '"': '\\"'})
+  plurals = _FormatPluralMessage(value)
   # Wrap the string in double quotes to preserve whitespace.
   value = '"' + value + '"'
 
@@ -152,7 +215,9 @@ def _FormatMessage(item, lang):
   product = item.formatter_data.get(_PRODUCT_TAG, product)
   name = item.formatter_data.get(_NAME_TAG, name)
 
-  if product:
+  if plurals:
+    return _PLURALS_TEMPLATE % (name, plurals)
+  elif product:
     return _PRODUCT_TEMPLATE % (name, product, value)
   else:
     return _SIMPLE_TEMPLATE % (name, value)

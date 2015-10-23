@@ -57,8 +57,6 @@ private:
  */
 class GrProcessor : public GrProgramElement {
 public:
-    SK_DECLARE_INST_COUNT(GrProcessor)
-
     virtual ~GrProcessor();
 
     /** Human-meaningful string to identify this prcoessor; may be embedded
@@ -103,7 +101,7 @@ protected:
      * GrTextureAccess is typically a member field of the GrProcessor subclass. This must only be
      * called from the constructor because GrProcessors are immutable.
      */
-    void addTextureAccess(const GrTextureAccess* textureAccess);
+    virtual void addTextureAccess(const GrTextureAccess* textureAccess);
 
     bool hasSameTextureAccesses(const GrProcessor&) const;
 
@@ -120,6 +118,7 @@ protected:
     }
 
     uint32_t fClassID;
+    SkSTArray<4, const GrTextureAccess*, true>   fTextureAccesses;
 
 private:
     static uint32_t GenClassID() {
@@ -139,7 +138,6 @@ private:
     };
     static int32_t gCurrProcessorClassID;
 
-    SkSTArray<4, const GrTextureAccess*, true>   fTextureAccesses;
     bool                                         fWillReadFragmentPosition;
 
     typedef GrProgramElement INHERITED;

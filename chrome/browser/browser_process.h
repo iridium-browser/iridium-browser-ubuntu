@@ -61,6 +61,10 @@ namespace gcm {
 class GCMDriver;
 }
 
+namespace memory {
+class OomPriorityManager;
+}
+
 namespace message_center {
 class MessageCenter;
 }
@@ -239,6 +243,9 @@ class BrowserProcess {
   virtual network_time::NetworkTimeTracker* network_time_tracker() = 0;
 
   virtual gcm::GCMDriver* gcm_driver() = 0;
+
+  // Returns the out-of-memory priority manager if it exists, null otherwise.
+  virtual memory::OomPriorityManager* GetOomPriorityManager() = 0;
 
   // Returns the default web client state of Chrome (i.e., was it the user's
   // default browser) at the time a previous check was made sometime between

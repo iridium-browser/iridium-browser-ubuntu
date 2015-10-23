@@ -37,8 +37,13 @@
 #include "google_apis/gaia/google_service_auth_error.h"
 
 class AccountTrackerService;
+class PrefRegistrySimple;
 class PrefService;
 class SigninClient;
+
+namespace user_prefs {
+class PrefRegistrySyncable;
+}
 
 class SigninManagerBase : public KeyedService {
  public:
@@ -63,6 +68,12 @@ class SigninManagerBase : public KeyedService {
   SigninManagerBase(SigninClient* client,
                     AccountTrackerService* account_tracker_service);
   ~SigninManagerBase() override;
+
+  // Registers per-profile prefs.
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+
+  // Registers per-install prefs.
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // If user was signed in, load tokens from DB if available.
   virtual void Initialize(PrefService* local_state);
@@ -139,7 +150,7 @@ class SigninManagerBase : public KeyedService {
 
   // List of observers to notify on signin events.
   // Makes sure list is empty on destruction.
-  ObserverList<Observer, true> observer_list_;
+  base::ObserverList<Observer, true> observer_list_;
 
   // Helper method to notify all registered diagnostics observers with.
   void NotifyDiagnosticsObservers(
@@ -158,7 +169,7 @@ class SigninManagerBase : public KeyedService {
   std::string authenticated_account_id_;
 
   // The list of SigninDiagnosticObservers.
-  ObserverList<signin_internals_util::SigninDiagnosticsObserver, true>
+  base::ObserverList<signin_internals_util::SigninDiagnosticsObserver, true>
       signin_diagnostics_observers_;
 
   base::WeakPtrFactory<SigninManagerBase> weak_pointer_factory_;

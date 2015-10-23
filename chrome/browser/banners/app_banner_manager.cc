@@ -4,7 +4,6 @@
 
 #include "chrome/browser/banners/app_banner_manager.h"
 
-#include "base/metrics/field_trial.h"
 #include "chrome/browser/banners/app_banner_data_fetcher.h"
 #include "chrome/browser/banners/app_banner_debug_log.h"
 #include "chrome/browser/banners/app_banner_settings_helper.h"
@@ -32,10 +31,27 @@ AppBannerManager::AppBannerManager(int icon_size)
     : ideal_icon_size_(icon_size),
       data_fetcher_(nullptr),
       weak_factory_(this) {
+  AppBannerSettingsHelper::UpdateFromFieldTrial();
+}
+
+AppBannerManager::AppBannerManager(content::WebContents* web_contents,
+                                   int icon_size)
+    : content::WebContentsObserver(web_contents),
+      ideal_icon_size_(icon_size),
+      data_fetcher_(nullptr),
+      weak_factory_(this) {
+  AppBannerSettingsHelper::UpdateFromFieldTrial();
 }
 
 AppBannerManager::~AppBannerManager() {
   CancelActiveFetcher();
+}
+
+void AppBannerManager::DidCommitProvisionalLoadForFrame(
+    content::RenderFrameHost* render_frame_host,
+    const GURL& url,
+    ui::PageTransition transition_type) {
+  last_transition_type_ = transition_type;
 }
 
 void AppBannerManager::DidFinishLoad(
@@ -60,9 +76,8 @@ void AppBannerManager::DidFinishLoad(
   // Kick off the data retrieval pipeline.
   data_fetcher_ = CreateAppBannerDataFetcher(weak_factory_.GetWeakPtr(),
                                              ideal_icon_size_);
-  data_fetcher_->Start(validated_url);
+  data_fetcher_->Start(validated_url, last_transition_type_);
 }
-
 
 bool AppBannerManager::HandleNonWebApp(const std::string& platform,
                                        const GURL& url,
@@ -74,13 +89,6 @@ void AppBannerManager::ReplaceWebContents(content::WebContents* web_contents) {
   Observe(web_contents);
   if (data_fetcher_.get())
     data_fetcher_.get()->ReplaceWebContents(web_contents);
-}
-
-AppBannerDataFetcher* AppBannerManager::CreateAppBannerDataFetcher(
-    base::WeakPtr<AppBannerDataFetcher::Delegate> weak_delegate,
-    const int ideal_icon_size) {
-  return new AppBannerDataFetcher(web_contents(), weak_delegate,
-                                  ideal_icon_size);
 }
 
 void AppBannerManager::CancelActiveFetcher() {
@@ -98,8 +106,10 @@ void AppBannerManager::DisableSecureSchemeCheckForTesting() {
   gDisableSecureCheckForTesting = true;
 }
 
-bool AppBannerManager::IsEnabled() {
-  return base::FieldTrialList::FindFullName("AppBanners") == "Enabled";
+void AppBannerManager::SetEngagementWeights(double direct_engagement,
+                                            double indirect_engagement) {
+  AppBannerSettingsHelper::SetEngagementWeights(direct_engagement,
+                                                indirect_engagement);
 }
 
 }  // namespace banners

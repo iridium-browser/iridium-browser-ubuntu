@@ -6,6 +6,7 @@
 
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 
 namespace content {
@@ -23,17 +24,22 @@ class FakeGaiaCookieManagerService : public GaiaCookieManagerService {
   void SetListAccountsResponseHttpNotFound();
   void SetListAccountsResponseWebLoginRequired();
   void SetListAccountsResponseNoAccounts();
-  void SetListAccountsResponseOneAccount(const char* account);
+  void SetListAccountsResponseOneAccount(
+      const char* email, const char* gaia_id);
   void SetListAccountsResponseOneAccountWithExpiry(
-      const char* account, bool expired);
-  void SetListAccountsResponseTwoAccounts(const char* account1,
-                                          const char* account2);
-  void SetListAccountsResponseTwoAccountsWithExpiry(
-      const char* account1, bool account1_expired,
-      const char* account2, bool account2_expired);
+      const char* account, const char* gaia_id, bool expired);
+  void SetListAccountsResponseTwoAccounts(
+    const char* email1, const char* gaia_id1,
+    const char* email2, const char* gaia_id2);
+  void SetListAccountsResponseTwoAccountsWithExpiry(const char* email1,
+                                                    const char* gaia_id1,
+                                                    bool account1_expired,
+                                                    const char* email2,
+                                                    const char* gaia_id2,
+                                                    bool account2_expired);
 
   // Helper function to be used with KeyedService::SetTestingFactory().
-  static KeyedService* Build(content::BrowserContext* context);
+  static scoped_ptr<KeyedService> Build(content::BrowserContext* context);
 
  private:
   // Provide a fake response for calls to /ListAccounts.

@@ -169,6 +169,28 @@ void ScopedXI2Event::InitKeyEvent(EventType type,
   event_->xkey.same_screen = 1;
 }
 
+void ScopedXI2Event::InitMotionEvent(const gfx::Point& location,
+                                     const gfx::Point& root_location,
+                                     int flags) {
+  XDisplay* display = gfx::GetXDisplay();
+  event_.reset(new XEvent);
+  memset(event_.get(), 0, sizeof(XEvent));
+  event_->type = MotionNotify;
+  event_->xmotion.serial = 0;
+  event_->xmotion.send_event = 0;
+  event_->xmotion.display = display;
+  event_->xmotion.time = 0;
+  event_->xmotion.window = 0;
+  event_->xmotion.root = 0;
+  event_->xkey.subwindow = 0;
+  event_->xmotion.x = location.x();
+  event_->xmotion.y = location.y();
+  event_->xmotion.x_root = root_location.x();
+  event_->xmotion.y_root = root_location.y();
+  event_->xmotion.state = XEventState(flags);
+  event_->xmotion.same_screen = 1;
+}
+
 void ScopedXI2Event::InitGenericKeyEvent(int deviceid,
                                          int sourceid,
                                          EventType type,
@@ -291,13 +313,22 @@ void SetUpTouchPadForTest(int deviceid) {
 
   TouchFactory::GetInstance()->SetPointerDeviceForTest(device_list);
   ui::DeviceDataManagerX11* manager = ui::DeviceDataManagerX11::GetInstance();
-  manager->SetDeviceListForTest(std::vector<int>(), device_list);
+  manager->SetDeviceListForTest(std::vector<int>(), device_list,
+                                std::vector<int>());
 }
 
 void SetUpTouchDevicesForTest(const std::vector<int>& devices) {
   TouchFactory::GetInstance()->SetTouchDeviceForTest(devices);
   ui::DeviceDataManagerX11* manager = ui::DeviceDataManagerX11::GetInstance();
-  manager->SetDeviceListForTest(devices, std::vector<int>());
+  manager->SetDeviceListForTest(devices, std::vector<int>(),
+                                std::vector<int>());
+}
+
+void SetUpPointerDevicesForTest(const std::vector<int>& devices) {
+  TouchFactory::GetInstance()->SetPointerDeviceForTest(devices);
+  ui::DeviceDataManagerX11* manager = ui::DeviceDataManagerX11::GetInstance();
+  manager->SetDeviceListForTest(std::vector<int>(), std::vector<int>(),
+                                devices);
 }
 
 }  // namespace ui

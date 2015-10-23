@@ -9,6 +9,8 @@
 #include "base/atomic_sequence_num.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/hash.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/numerics/safe_math.h"
@@ -30,7 +32,13 @@
 #include "base/linux_util.h"
 #elif defined(OS_WIN)
 #include "content/common/font_cache_dispatcher_win.h"
+#include "ipc/attachment_broker_privileged_win.h"
 #endif  // OS_LINUX
+
+#if defined(OS_WIN)
+base::LazyInstance<IPC::AttachmentBrokerPrivilegedWin>::Leaky
+    g_attachment_broker = LAZY_INSTANCE_INITIALIZER;
+#endif  // defined(OS_WIN)
 
 namespace {
 
@@ -79,14 +87,14 @@ base::FilePath TransformPathForFeature(const base::FilePath& path,
 // Global atomic to generate child process unique IDs.
 base::StaticAtomicSequenceNumber g_unique_id;
 
-// Global atomic to generate gpu memory buffer unique IDs.
-base::StaticAtomicSequenceNumber g_next_gpu_memory_buffer_id;
-
 }  // namespace
 
 namespace content {
 
 int ChildProcessHost::kInvalidUniqueID = -1;
+
+uint64 ChildProcessHost::kBrowserTracingProcessId =
+    std::numeric_limits<uint64>::max();
 
 // static
 ChildProcessHost* ChildProcessHost::Create(ChildProcessHostDelegate* delegate) {
@@ -137,6 +145,15 @@ base::FilePath ChildProcessHost::GetChildPath(int flags) {
   return child_path;
 }
 
+// static
+IPC::AttachmentBrokerPrivileged* ChildProcessHost::GetAttachmentBroker() {
+#if USE_ATTACHMENT_BROKER
+  return &g_attachment_broker.Get();
+#else
+  return nullptr;
+#endif  // USE_ATTACHMENT_BROKER
+}
+
 ChildProcessHostImpl::ChildProcessHostImpl(ChildProcessHostDelegate* delegate)
     : delegate_(delegate),
       opening_channel_(false) {
@@ -146,6 +163,9 @@ ChildProcessHostImpl::ChildProcessHostImpl(ChildProcessHostDelegate* delegate)
 }
 
 ChildProcessHostImpl::~ChildProcessHostImpl() {
+#if USE_ATTACHMENT_BROKER
+  g_attachment_broker.Get().DeregisterCommunicationChannel(channel_.get());
+#endif
   for (size_t i = 0; i < filters_.size(); ++i) {
     filters_[i]->OnChannelClosing();
     filters_[i]->OnFilterRemoved();
@@ -165,9 +185,13 @@ void ChildProcessHostImpl::ForceShutdown() {
 
 std::string ChildProcessHostImpl::CreateChannel() {
   channel_id_ = IPC::Channel::GenerateVerifiedChannelID(std::string());
-  channel_ = IPC::Channel::CreateServer(channel_id_, this);
+  channel_ =
+      IPC::Channel::CreateServer(channel_id_, this, GetAttachmentBroker());
   if (!channel_->Connect())
     return std::string();
+#if USE_ATTACHMENT_BROKER
+  g_attachment_broker.Get().RegisterCommunicationChannel(channel_.get());
+#endif
 
   for (size_t i = 0; i < filters_.size(); ++i)
     filters_[i]->OnFilterAdded(channel_.get());
@@ -225,6 +249,25 @@ int ChildProcessHostImpl::GenerateChildProcessUniqueId() {
   CHECK_NE(kInvalidUniqueID, id);
 
   return id;
+}
+
+uint64 ChildProcessHostImpl::ChildProcessUniqueIdToTracingProcessId(
+    int child_process_id) {
+  // In single process mode, all the children are hosted in the same process,
+  // therefore the generated memory dump guids should not be conditioned by the
+  // child process id. The clients need not be aware of SPM and the conversion
+  // takes care of the SPM special case while translating child process ids to
+  // tracing process ids.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSingleProcess))
+    return ChildProcessHost::kBrowserTracingProcessId;
+
+  // The hash value is incremented so that the tracing id is never equal to
+  // MemoryDumpManager::kInvalidTracingProcessId.
+  return static_cast<uint64>(
+             base::Hash(reinterpret_cast<const char*>(&child_process_id),
+                        sizeof(child_process_id))) +
+         1;
 }
 
 bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
@@ -312,10 +355,11 @@ void ChildProcessHostImpl::OnShutdownRequest() {
 }
 
 void ChildProcessHostImpl::OnAllocateGpuMemoryBuffer(
+    gfx::GpuMemoryBufferId id,
     uint32 width,
     uint32 height,
-    gfx::GpuMemoryBuffer::Format format,
-    gfx::GpuMemoryBuffer::Usage usage,
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage,
     gfx::GpuMemoryBufferHandle* handle) {
   // TODO(reveman): Add support for other types of GpuMemoryBuffers.
 
@@ -323,12 +367,9 @@ void ChildProcessHostImpl::OnAllocateGpuMemoryBuffer(
   // and handle failure in a controlled way when not. We just need to make
   // sure |format| and |usage| are supported here.
   if (GpuMemoryBufferImplSharedMemory::IsFormatSupported(format) &&
-      usage == gfx::GpuMemoryBuffer::MAP) {
+      GpuMemoryBufferImplSharedMemory::IsUsageSupported(usage)) {
     *handle = GpuMemoryBufferImplSharedMemory::AllocateForChildProcess(
-        g_next_gpu_memory_buffer_id.GetNext(),
-        gfx::Size(width, height),
-        format,
-        peer_process_.Handle());
+        id, gfx::Size(width, height), format, peer_process_.Handle());
   }
 }
 

@@ -4,13 +4,14 @@
 
 #include "chrome/browser/ui/views/toolbar/chevron_menu_button.h"
 
+#include "base/location.h"
 #include "base/memory/scoped_vector.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
-#include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/extension_action_view_controller.h"
@@ -36,27 +37,36 @@ namespace {
 class IconUpdater : public ExtensionActionIconFactory::Observer {
  public:
   IconUpdater(views::MenuItemView* menu_item_view,
-              ExtensionActionViewController* view_controller)
+              ToolbarActionView* represented_view)
       : menu_item_view_(menu_item_view),
-        view_controller_(view_controller) {
+        represented_view_(represented_view) {
     DCHECK(menu_item_view);
-    DCHECK(view_controller);
-    view_controller->set_icon_observer(this);
+    DCHECK(represented_view);
+    view_controller()->set_icon_observer(this);
   }
-  ~IconUpdater() override { view_controller_->set_icon_observer(nullptr); }
+  ~IconUpdater() override { view_controller()->set_icon_observer(nullptr); }
 
   // ExtensionActionIconFactory::Observer:
   void OnIconUpdated() override {
-    menu_item_view_->SetIcon(view_controller_->GetIconWithBadge());
+    menu_item_view_->SetIcon(
+        represented_view_->GetImage(views::Button::STATE_NORMAL));
   }
 
  private:
+  ExtensionActionViewController* view_controller() {
+    // Since the chevron overflow menu is only used in a world where toolbar
+    // actions are only extensions, this cast is safe.
+    return static_cast<ExtensionActionViewController*>(
+        represented_view_->view_controller());
+  }
+
   // The menu item view whose icon might be updated.
   views::MenuItemView* menu_item_view_;
 
-  // The view controller to be observed. When its icon changes, update the
-  // corresponding menu item view's icon.
-  ExtensionActionViewController* view_controller_;
+  // The view this icon updater is helping represent in the chevron overflow
+  // menu. When its icon changes, this updates the corresponding menu item
+  // view's icon.
+  ToolbarActionView* represented_view_;
 
   DISALLOW_COPY_AND_ASSIGN(IconUpdater);
 };
@@ -161,16 +171,14 @@ ChevronMenuButton::MenuController::MenuController(
     views::MenuItemView* menu_item = menu_->AppendMenuItemWithIcon(
         command_id,
         view->view_controller()->GetActionName(),
-        view->view_controller()->GetIconWithBadge());
+        view->GetImage(views::Button::STATE_NORMAL));
 
     // Set the tooltip for this item.
     menu_->SetTooltip(
         view->view_controller()->GetTooltip(view->GetCurrentWebContents()),
         command_id);
 
-    icon_updaters_.push_back(new IconUpdater(
-        menu_item,
-        static_cast<ExtensionActionViewController*>(view->view_controller())));
+    icon_updaters_.push_back(new IconUpdater(menu_item, view));
 
     ++command_id;
   }
@@ -197,10 +205,9 @@ void ChevronMenuButton::MenuController::RunMenu(views::Widget* window) {
   if (!for_drop_) {
     // Give the context menu (if any) a chance to execute the user-selected
     // command.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&ChevronMenuButton::MenuDone,
-                   owner_->weak_factory_.GetWeakPtr()));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&ChevronMenuButton::MenuDone,
+                              owner_->weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -395,11 +402,9 @@ bool ChevronMenuButton::CanDrop(const OSExchangeData& data) {
 void ChevronMenuButton::OnDragEntered(const ui::DropTargetEvent& event) {
   DCHECK(!weak_factory_.HasWeakPtrs());
   if (!menu_controller_) {
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&ChevronMenuButton::ShowOverflowMenu,
-                   weak_factory_.GetWeakPtr(),
-                   true),
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::Bind(&ChevronMenuButton::ShowOverflowMenu,
+                              weak_factory_.GetWeakPtr(), true),
         base::TimeDelta::FromMilliseconds(views::GetMenuShowDelay()));
   }
 }

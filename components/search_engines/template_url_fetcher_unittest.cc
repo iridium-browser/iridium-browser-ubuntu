@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <string>
+
 #include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/memory/scoped_ptr.h"
@@ -9,7 +11,6 @@
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_fetcher.h"
@@ -90,15 +91,24 @@ class TemplateURLFetcherTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(TemplateURLFetcherTest);
 };
 
+bool GetTestDataDir(base::FilePath* dir) {
+  if (!PathService::Get(base::DIR_SOURCE_ROOT, dir))
+    return false;
+  *dir = dir->AppendASCII("components")
+             .AppendASCII("test")
+             .AppendASCII("data")
+             .AppendASCII("search_engines");
+  return true;
+}
+
 TemplateURLFetcherTest::TemplateURLFetcherTest()
     : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
       callbacks_destroyed_(0),
       add_provider_called_(0),
       waiting_for_download_(false) {
-  base::FilePath src_dir;
-  CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
-  test_server_.ServeFilesFromDirectory(
-      src_dir.AppendASCII("chrome/test/data"));
+  base::FilePath test_data_dir;
+  CHECK(GetTestDataDir(&test_data_dir));
+  test_server_.ServeFilesFromDirectory(test_data_dir);
 }
 
 void TemplateURLFetcherTest::DestroyedCallback() {
@@ -119,10 +129,9 @@ void TemplateURLFetcherTest::StartDownload(
     const std::string& osdd_file_name,
     TemplateURLFetcher::ProviderType provider_type,
     bool check_that_file_exists) {
-
   if (check_that_file_exists) {
     base::FilePath osdd_full_path;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &osdd_full_path));
+    ASSERT_TRUE(GetTestDataDir(&osdd_full_path));
     osdd_full_path = osdd_full_path.AppendASCII(osdd_file_name);
     ASSERT_TRUE(base::PathExists(osdd_full_path));
     ASSERT_FALSE(base::DirectoryExists(osdd_full_path));
@@ -174,6 +183,7 @@ TEST_F(TemplateURLFetcherTest, BasicAutodetectedTest) {
   EXPECT_EQ(ASCIIToUTF16("http://example.com/%s/other_stuff"),
             t_url->url_ref().DisplayURL(
                 test_util()->model()->search_terms_data()));
+  EXPECT_EQ(ASCIIToUTF16("Simple Search"), t_url->short_name());
   EXPECT_TRUE(t_url->safe_for_autoreplace());
 }
 
@@ -315,4 +325,20 @@ TEST_F(TemplateURLFetcherTest, DuplicateDownloadTest) {
   ASSERT_EQ(1, add_provider_called());
   ASSERT_EQ(2, callbacks_destroyed());
   ASSERT_TRUE(last_callback_template_url());
+}
+
+TEST_F(TemplateURLFetcherTest, UnicodeTest) {
+  base::string16 keyword(ASCIIToUTF16("test"));
+
+  test_util()->ChangeModelToLoadState();
+  ASSERT_FALSE(test_util()->model()->GetTemplateURLForKeyword(keyword));
+
+  std::string osdd_file_name("unicode_open_search.xml");
+  StartDownload(keyword, osdd_file_name,
+                TemplateURLFetcher::AUTODETECTED_PROVIDER, true);
+  WaitForDownloadToFinish();
+  const TemplateURL* t_url =
+      test_util()->model()->GetTemplateURLForKeyword(keyword);
+  EXPECT_EQ(base::UTF8ToUTF16("\xd1\x82\xd0\xb5\xd1\x81\xd1\x82"),
+            t_url->short_name());
 }

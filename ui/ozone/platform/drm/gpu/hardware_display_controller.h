@@ -17,6 +17,7 @@
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "ui/gfx/swap_result.h"
 #include "ui/ozone/ozone_export.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager.h"
 #include "ui/ozone/platform/drm/gpu/overlay_plane.h"
@@ -86,6 +87,8 @@ class DrmDevice;
 // framebuffers. Though, in this case, it would be possible to have all
 // connectors active if some use the same CRTC to mirror the display.
 class OZONE_EXPORT HardwareDisplayController {
+  typedef base::Callback<void(gfx::SwapResult)> PageFlipCallback;
+
  public:
   HardwareDisplayController(scoped_ptr<CrtcController> controller,
                             const gfx::Point& origin);
@@ -94,6 +97,9 @@ class OZONE_EXPORT HardwareDisplayController {
   // Performs the initial CRTC configuration. If successful, it will display the
   // framebuffer for |primary| with |mode|.
   bool Modeset(const OverlayPlane& primary, drmModeModeInfo mode);
+
+  // Performs a CRTC configuration re-using the modes from the CRTCs.
+  bool Enable(const OverlayPlane& primary);
 
   // Disables the CRTC.
   void Disable();
@@ -114,9 +120,16 @@ class OZONE_EXPORT HardwareDisplayController {
   // called again before the page flip occurrs.
   //
   // Returns true if the page flip was successfully registered, false otherwise.
+  //
+  // When called with |test_only| true, this performs the page flip without
+  // changing any state, reporting if this page flip would be allowed to occur.
+  // This is always a synchronous operation, so |is_sync| is ignored and the
+  // callback is called immediately but should also be ignored; only the return
+  // value matters.
   bool SchedulePageFlip(const OverlayPlaneList& plane_list,
                         bool is_sync,
-                        const base::Closure& callback);
+                        bool test_only,
+                        const PageFlipCallback& callback);
 
   // Set the hardware cursor to show the contents of |surface|.
   bool SetCursor(const scoped_refptr<ScanoutBuffer>& buffer);
@@ -137,8 +150,6 @@ class OZONE_EXPORT HardwareDisplayController {
   gfx::Point origin() const { return origin_; }
   void set_origin(const gfx::Point& origin) { origin_ = origin; }
 
-  const drmModeModeInfo& get_mode() const { return mode_; };
-
   uint64_t GetTimeOfLastFlip() const;
 
   const std::vector<CrtcController*>& crtc_controllers() const {
@@ -157,9 +168,6 @@ class OZONE_EXPORT HardwareDisplayController {
 
   // Location of the controller on the screen.
   gfx::Point origin_;
-
-  // The mode used by the last modesetting operation.
-  drmModeModeInfo mode_;
 
   bool is_disabled_;
 

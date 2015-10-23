@@ -9,9 +9,10 @@
 #ifndef GrResourceKey_DEFINED
 #define GrResourceKey_DEFINED
 
+#include "../private/SkTemplates.h"
 #include "GrTypes.h"
+#include "SkData.h"
 #include "SkOnce.h"
-#include "SkTemplates.h"
 
 uint32_t GrResourceKeyHash(const uint32_t* data, size_t size);
 
@@ -46,7 +47,10 @@ protected:
     }
 
     bool operator==(const GrResourceKey& that) const {
-        return 0 == memcmp(fKey.get(), that.fKey.get(), this->size());
+        return this->hash() == that.hash() &&
+                0 == memcmp(&fKey[kHash_MetaDataIdx + 1],
+                            &that.fKey[kHash_MetaDataIdx + 1],
+                            this->internalSize() - sizeof(uint32_t));
     }
 
     GrResourceKey& operator=(const GrResourceKey& that) {
@@ -234,6 +238,7 @@ public:
 
     GrUniqueKey& operator=(const GrUniqueKey& that) {
         this->INHERITED::operator=(that);
+        this->setCustomData(that.getCustomData());
         return *this;
     }
 
@@ -241,6 +246,14 @@ public:
         return this->INHERITED::operator==(that);
     }
     bool operator!=(const GrUniqueKey& that) const { return !(*this == that); }
+
+    void setCustomData(const SkData* data) {
+        SkSafeRef(data);
+        fData.reset(data);
+    }
+    const SkData* getCustomData() const {
+        return fData.get();
+    }
 
     class Builder : public INHERITED::Builder {
     public:
@@ -265,6 +278,9 @@ public:
             return SkToInt((innerKey.dataSize() >> 2) + 1);
         }
     };
+
+private:
+    SkAutoTUnref<const SkData> fData;
 };
 
 /**

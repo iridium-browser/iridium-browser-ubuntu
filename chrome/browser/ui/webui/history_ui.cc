@@ -25,6 +25,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -45,13 +46,13 @@
 #include "components/search/search.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/device_info.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "grit/browser_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/escape.h"
-#include "net/base/net_util.h"
 #include "sync/protocol/history_delete_directive_specifics.pb.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
@@ -70,12 +71,12 @@
 #endif
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/android/chromium_application.h"
+#include "chrome/browser/android/chrome_application.h"
 #endif
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
-#include "chrome/browser/ui/webui/ntp/foreign_session_handler.h"
-#include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
+#include "chrome/browser/ui/webui/foreign_session_handler.h"
+#include "chrome/browser/ui/webui/history_login_handler.h"
 #endif
 
 using bookmarks::BookmarkModel;
@@ -128,12 +129,12 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
       content::WebUIDataSource::Create(chrome::kChromeUIHistoryFrameHost);
   source->AddBoolean("isUserSignedIn", is_authenticated);
   source->AddLocalizedString("collapseSessionMenuItemText",
-      IDS_NEW_TAB_OTHER_SESSIONS_COLLAPSE_SESSION);
+      IDS_HISTORY_OTHER_SESSIONS_COLLAPSE_SESSION);
   source->AddLocalizedString("expandSessionMenuItemText",
-      IDS_NEW_TAB_OTHER_SESSIONS_EXPAND_SESSION);
+      IDS_HISTORY_OTHER_SESSIONS_EXPAND_SESSION);
   source->AddLocalizedString("restoreSessionMenuItemText",
-      IDS_NEW_TAB_OTHER_SESSIONS_OPEN_ALL);
-  source->AddLocalizedString("xMore", IDS_OTHER_DEVICES_X_MORE);
+      IDS_HISTORY_OTHER_SESSIONS_OPEN_ALL);
+  source->AddLocalizedString("xMore", IDS_HISTORY_OTHER_DEVICES_X_MORE);
   source->AddLocalizedString("loading", IDS_HISTORY_LOADING);
   source->AddLocalizedString("title", IDS_HISTORY_TITLE);
   source->AddLocalizedString("newest", IDS_HISTORY_NEWEST);
@@ -154,10 +155,15 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
                              IDS_HISTORY_REMOVE_SELECTED_ITEMS);
   source->AddLocalizedString("clearAllHistory",
                              IDS_HISTORY_OPEN_CLEAR_BROWSING_DATA_DIALOG);
-  source->AddString(
-      "deleteWarning",
+
+  auto availability = IncognitoModePrefs::GetAvailability(profile->GetPrefs());
+  base::string16 delete_warning = availability == IncognitoModePrefs::ENABLED ?
       l10n_util::GetStringFUTF16(IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING,
-                                 base::UTF8ToUTF16(kIncognitoModeShortcut)));
+                                 base::UTF8ToUTF16(kIncognitoModeShortcut)) :
+      l10n_util::GetStringUTF16(
+          IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING_NO_INCOGNITO);
+  source->AddString("deleteWarning", delete_warning);
+
   source->AddLocalizedString("removeBookmark", IDS_HISTORY_REMOVE_BOOKMARK);
   source->AddLocalizedString("actionMenuDescription",
                              IDS_HISTORY_ACTION_MENU_DESCRIPTION);
@@ -177,10 +183,8 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   source->AddLocalizedString("inContentPack", IDS_HISTORY_IN_CONTENT_PACK);
   source->AddLocalizedString("allowItems", IDS_HISTORY_FILTER_ALLOW_ITEMS);
   source->AddLocalizedString("blockItems", IDS_HISTORY_FILTER_BLOCK_ITEMS);
-  source->AddLocalizedString("lockButton", IDS_HISTORY_LOCK_BUTTON);
   source->AddLocalizedString("blockedVisitText",
                              IDS_HISTORY_BLOCKED_VISIT_TEXT);
-  source->AddLocalizedString("unlockButton", IDS_HISTORY_UNLOCK_BUTTON);
   source->AddLocalizedString("hasSyncedResults",
                              IDS_HISTORY_HAS_SYNCED_RESULTS);
   source->AddLocalizedString("noSyncedResults", IDS_HISTORY_NO_SYNCED_RESULTS);
@@ -203,7 +207,7 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
       prefs->GetBoolean(prefs::kAllowDeletingBrowserHistory);
   source->AddBoolean("allowDeletingHistory", allow_deleting_history);
   source->AddBoolean("isInstantExtendedApiEnabled",
-                     chrome::IsInstantExtendedAPIEnabled());
+                     search::IsInstantExtendedAPIEnabled());
   source->AddBoolean("isSupervisedProfile", profile->IsSupervised());
   source->AddBoolean("hideDeleteVisitUI",
                      profile->IsSupervised() && !allow_deleting_history);
@@ -346,7 +350,8 @@ scoped_ptr<base::DictionaryValue> BrowsingHistoryHandler::HistoryEntry::ToValue(
   scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   SetUrlAndTitle(result.get());
 
-  base::string16 domain = net::IDNToUnicode(url.host(), accept_languages);
+  base::string16 domain =
+      url_formatter::IDNToUnicode(url.host(), accept_languages);
   // When the domain is empty, use the scheme instead. This allows for a
   // sensible treatment of e.g. file: URLs when group by domain is on.
   if (domain.empty())
@@ -480,7 +485,8 @@ void BrowsingHistoryHandler::WebHistoryTimeout() {
 }
 
 void BrowsingHistoryHandler::QueryHistory(
-    base::string16 search_text, const history::QueryOptions& options) {
+    const base::string16& search_text,
+    const history::QueryOptions& options) {
   Profile* profile = Profile::FromWebUI(web_ui());
 
   // Anything in-flight is invalid.
@@ -684,7 +690,7 @@ void BrowsingHistoryHandler::HandleRemoveVisits(const base::ListValue* args) {
 void BrowsingHistoryHandler::HandleClearBrowsingData(
     const base::ListValue* args) {
 #if defined(OS_ANDROID)
-  chrome::android::ChromiumApplication::OpenClearBrowsingData(
+  chrome::android::ChromeApplication::OpenClearBrowsingData(
       web_ui()->GetWebContents());
 #else
   // TODO(beng): This is an improper direct dependency on Browser. Route this
@@ -1029,11 +1035,11 @@ HistoryUI::HistoryUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   web_ui->AddMessageHandler(new BrowsingHistoryHandler());
   web_ui->AddMessageHandler(new MetricsHandler());
 
-// On mobile we deal with foreign sessions differently.
+  // On mobile we deal with foreign sessions differently.
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
-  if (chrome::IsInstantExtendedAPIEnabled()) {
+  if (search::IsInstantExtendedAPIEnabled()) {
     web_ui->AddMessageHandler(new browser_sync::ForeignSessionHandler());
-    web_ui->AddMessageHandler(new NTPLoginHandler());
+    web_ui->AddMessageHandler(new HistoryLoginHandler());
   }
 #endif
 
@@ -1041,6 +1047,8 @@ HistoryUI::HistoryUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
   content::WebUIDataSource::Add(profile, CreateHistoryUIHTMLSource(profile));
 }
+
+HistoryUI::~HistoryUI() {}
 
 // static
 base::RefCountedMemory* HistoryUI::GetFaviconResourceBytes(

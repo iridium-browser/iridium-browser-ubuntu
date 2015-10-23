@@ -10,7 +10,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/task_runner_util.h"
 #include "base/values.h"
-#include "chrome/browser/safe_json_parser.h"
+#include "components/safe_json/safe_json_parser.h"
 #include "content/public/browser/browser_thread.h"
 #include "url/gurl.h"
 
@@ -24,8 +24,6 @@ const char kUrlKey[] = "url";
 const char kWhitelistKey[] = "whitelist";
 
 namespace {
-
-bool g_load_in_process = false;
 
 std::string ReadFileOnBlockingThread(const base::FilePath& path) {
   SCOPED_UMA_HISTOGRAM_TIMER("ManagedUsers.Whitelist.ReadDuration");
@@ -114,11 +112,6 @@ void SupervisedUserSiteList::Load(const base::FilePath& path,
       base::Bind(&SupervisedUserSiteList::ParseJson, path, callback));
 }
 
-// static
-void SupervisedUserSiteList::SetLoadInProcessForTesting(bool in_process) {
-  g_load_in_process = in_process;
-}
-
 SupervisedUserSiteList::SupervisedUserSiteList(const base::ListValue& sites) {
   for (const base::Value* site : sites) {
     const base::DictionaryValue* entry = nullptr;
@@ -142,26 +135,12 @@ void SupervisedUserSiteList::ParseJson(
     const base::FilePath& path,
     const SupervisedUserSiteList::LoadedCallback& callback,
     const std::string& json) {
-  if (g_load_in_process) {
-    JSONFileValueDeserializer deserializer(path);
-    std::string error;
-    scoped_ptr<base::Value> value(deserializer.Deserialize(nullptr, &error));
-    if (!value) {
-      HandleError(path, error);
-      return;
-    }
-
-    OnJsonParseSucceeded(path, base::TimeTicks(), callback, value.Pass());
-    return;
-  }
-
-  // TODO(bauerb): Use batch mode to load multiple whitelists?
-  scoped_refptr<SafeJsonParser> parser(new SafeJsonParser(
-      json,
-      base::Bind(&SupervisedUserSiteList::OnJsonParseSucceeded, path,
-                 base::TimeTicks::Now(), callback),
-      base::Bind(&HandleError, path)));
-  parser->Start();
+  // TODO(bauerb): Use JSONSanitizer to sanitize whitelists on installation
+  // instead of using the expensive SafeJsonParser on every load.
+  safe_json::SafeJsonParser::Parse(
+      json, base::Bind(&SupervisedUserSiteList::OnJsonParseSucceeded, path,
+                       base::TimeTicks::Now(), callback),
+      base::Bind(&HandleError, path));
 }
 
 // static

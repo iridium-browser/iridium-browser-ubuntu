@@ -18,7 +18,8 @@ namespace cc {
 class ClipTree;
 class Layer;
 class LayerImpl;
-class OpacityTree;
+class RenderSurfaceImpl;
+class EffectTree;
 class TransformTree;
 class PropertyTrees;
 
@@ -33,28 +34,35 @@ ComputeClips(ClipTree* clip_tree, const TransformTree& transform_tree);
 // tree. This must be done prior to calling |ComputeClips|.
 void CC_EXPORT ComputeTransforms(TransformTree* transform_tree);
 
+// Computes screen space opacity for every node in the opacity tree.
+void CC_EXPORT ComputeOpacities(EffectTree* effect_tree);
+
 // Computes the visible content rect for every layer under |root_layer|. The
 // visible content rect is the clipped content space rect that will be used for
 // recording.
-void CC_EXPORT
-BuildPropertyTreesAndComputeVisibleRects(Layer* root_layer,
-                                         const Layer* page_scale_layer,
-                                         float page_scale_factor,
-                                         float device_scale_factor,
-                                         const gfx::Rect& viewport,
-                                         const gfx::Transform& device_transform,
-                                         PropertyTrees* property_trees,
-                                         LayerList* update_layer_list);
+void CC_EXPORT BuildPropertyTreesAndComputeVisibleRects(
+    Layer* root_layer,
+    const Layer* page_scale_layer,
+    const Layer* inner_viewport_scroll_layer,
+    const Layer* outer_viewport_scroll_layer,
+    float page_scale_factor,
+    float device_scale_factor,
+    const gfx::Rect& viewport,
+    const gfx::Transform& device_transform,
+    PropertyTrees* property_trees,
+    LayerList* update_layer_list);
 
-void CC_EXPORT
-BuildPropertyTreesAndComputeVisibleRects(LayerImpl* root_layer,
-                                         const LayerImpl* page_scale_layer,
-                                         float page_scale_factor,
-                                         float device_scale_factor,
-                                         const gfx::Rect& viewport,
-                                         const gfx::Transform& device_transform,
-                                         PropertyTrees* property_trees,
-                                         LayerImplList* update_layer_list);
+void CC_EXPORT BuildPropertyTreesAndComputeVisibleRects(
+    LayerImpl* root_layer,
+    const LayerImpl* page_scale_layer,
+    const LayerImpl* inner_viewport_scroll_layer,
+    const LayerImpl* outer_viewport_scroll_layer,
+    float page_scale_factor,
+    float device_scale_factor,
+    const gfx::Rect& viewport,
+    const gfx::Transform& device_transform,
+    PropertyTrees* property_trees,
+    LayerImplList* update_layer_list);
 
 void CC_EXPORT
 ComputeVisibleRectsUsingPropertyTrees(Layer* root_layer,
@@ -69,6 +77,22 @@ ComputeVisibleRectsUsingPropertyTrees(LayerImpl* root_layer,
 gfx::Transform CC_EXPORT
 DrawTransformFromPropertyTrees(const Layer* layer, const TransformTree& tree);
 
+gfx::Transform CC_EXPORT DrawTransformOfRenderSurfaceFromPropertyTrees(
+    const RenderSurfaceImpl* render_Surface,
+    const TransformTree& tree);
+
+bool CC_EXPORT
+RenderSurfaceIsClippedFromPropertyTrees(const RenderSurfaceImpl* render_surface,
+                                        const ClipTree& tree);
+
+gfx::Rect CC_EXPORT ClipRectOfRenderSurfaceFromPropertyTrees(
+    const RenderSurfaceImpl* render_surface,
+    const ClipTree& clip_tree);
+
+gfx::Transform CC_EXPORT ScreenSpaceTransformOfRenderSurfaceFromPropertyTrees(
+    RenderSurfaceImpl* render_surface,
+    const TransformTree& tree);
+
 gfx::Transform CC_EXPORT
 DrawTransformFromPropertyTrees(const LayerImpl* layer,
                                const TransformTree& tree);
@@ -81,11 +105,43 @@ gfx::Transform CC_EXPORT
 ScreenSpaceTransformFromPropertyTrees(const LayerImpl* layer,
                                       const TransformTree& tree);
 
-float CC_EXPORT
-DrawOpacityFromPropertyTrees(const Layer* layer, const OpacityTree& tree);
+bool CC_EXPORT
+ScreenSpaceTransformIsAnimatingFromPropertyTrees(const Layer* layer,
+                                                 const TransformTree& tree);
+
+bool CC_EXPORT
+ScreenSpaceTransformIsAnimatingFromPropertyTrees(const LayerImpl* layer,
+                                                 const TransformTree& tree);
+
+float CC_EXPORT DrawOpacityFromPropertyTrees(const Layer* layer,
+                                             const EffectTree& tree);
+
+float CC_EXPORT DrawOpacityFromPropertyTrees(const LayerImpl* layer,
+                                             const EffectTree& tree);
 
 float CC_EXPORT
-DrawOpacityFromPropertyTrees(const LayerImpl* layer, const OpacityTree& tree);
+DrawOpacityOfRenderSurfaceFromPropertyTrees(RenderSurfaceImpl* render_surface,
+                                            const EffectTree& tree);
+
+bool CC_EXPORT
+CanUseLcdTextFromPropertyTrees(const LayerImpl* layer,
+                               bool layers_always_allowed_lcd_text,
+                               bool can_use_lcd_text,
+                               PropertyTrees* property_trees);
+
+gfx::Rect CC_EXPORT DrawableContentRectOfSurfaceFromPropertyTrees(
+    const RenderSurfaceImpl* render_surface,
+    const TransformTree& transform_tree);
+
+gfx::Rect CC_EXPORT
+DrawableContentRectFromPropertyTrees(const LayerImpl* layer,
+                                     const TransformTree& transform_tree);
+
+gfx::Rect CC_EXPORT
+ClipRectFromPropertyTrees(const LayerImpl* layer,
+                          const TransformTree& transform_tree);
+
+gfx::Rect CC_EXPORT ViewportRectFromPropertyTrees(const ClipTree& tree);
 
 }  // namespace cc
 

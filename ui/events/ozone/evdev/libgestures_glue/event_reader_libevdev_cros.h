@@ -42,7 +42,6 @@ class EventReaderLibevdevCros : public EventConverterEvdev {
   EventReaderLibevdevCros(int fd,
                           const base::FilePath& path,
                           int id,
-                          InputDeviceType type,
                           const EventDeviceInfo& devinfo,
                           scoped_ptr<Delegate> delegate);
   ~EventReaderLibevdevCros() override;
@@ -53,7 +52,7 @@ class EventReaderLibevdevCros : public EventConverterEvdev {
   bool HasMouse() const override;
   bool HasTouchpad() const override;
   bool HasCapsLockLed() const override;
-  void OnStopped() override;
+  void OnDisabled() override;
 
  private:
   static void OnSynReport(void* data,

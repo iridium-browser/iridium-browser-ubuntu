@@ -59,21 +59,28 @@
 #include <malloc/malloc.h>
 #include "base/mac/mac_util.h"
 #endif
+#if defined(OS_ANDROID)
+#include "third_party/lss/linux_syscall_support.h"
+#endif
 
 using base::FilePath;
 
 namespace {
+
+const char kSignalFileSlow[] = "SlowChildProcess.die";
+const char kSignalFileKill[] = "KilledChildProcess.die";
+
+#if defined(OS_POSIX)
+const char kSignalFileTerm[] = "TerminatedChildProcess.die";
 
 #if defined(OS_ANDROID)
 const char kShellPath[] = "/system/bin/sh";
 const char kPosixShell[] = "sh";
 #else
 const char kShellPath[] = "/bin/sh";
-const char kPosixShell[] = "bash";
+const char kPosixShell[] = "sh";
 #endif
-
-const char kSignalFileSlow[] = "SlowChildProcess.die";
-const char kSignalFileKill[] = "KilledChildProcess.die";
+#endif  // defined(OS_POSIX)
 
 #if defined(OS_WIN)
 const int kExpectedStillRunningExitCode = 0x102;
@@ -222,7 +229,19 @@ const char kSignalFileCrash[] = "CrashingChildProcess.die";
 
 MULTIPROCESS_TEST_MAIN(CrashingChildProcess) {
   WaitToDie(ProcessUtilTest::GetSignalFilePath(kSignalFileCrash).c_str());
-#if defined(OS_POSIX)
+#if defined(OS_ANDROID)
+  // Android L+ expose signal and sigaction symbols that override the system
+  // ones. There is a bug in these functions where a request to set the handler
+  // to SIG_DFL is ignored. In that case, an infinite loop is entered as the
+  // signal is repeatedly sent to the crash dump signal handler.
+  // To work around this, directly call the system's sigaction.
+  struct kernel_sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sys_sigemptyset(&sa.sa_mask);
+  sa.sa_handler_ = SIG_DFL;
+  sa.sa_flags = SA_RESTART;
+  sys_rt_sigaction(SIGSEGV, &sa, NULL, sizeof(kernel_sigset_t));
+#elif defined(OS_POSIX)
   // Have to disable to signal handler for segv so we can get a crash
   // instead of an abnormal termination through the crash dump handler.
   ::signal(SIGSEGV, SIG_DFL);
@@ -286,7 +305,16 @@ MULTIPROCESS_TEST_MAIN(KilledChildProcess) {
   return 1;
 }
 
-TEST_F(ProcessUtilTest, GetTerminationStatusKill) {
+#if defined(OS_POSIX)
+MULTIPROCESS_TEST_MAIN(TerminatedChildProcess) {
+  WaitToDie(ProcessUtilTest::GetSignalFilePath(kSignalFileTerm).c_str());
+  // Send a SIGTERM to this process.
+  ::kill(getpid(), SIGTERM);
+  return 1;
+}
+#endif
+
+TEST_F(ProcessUtilTest, GetTerminationStatusSigKill) {
   const std::string signal_file =
     ProcessUtilTest::GetSignalFilePath(kSignalFileKill);
   remove(signal_file.c_str());
@@ -302,7 +330,12 @@ TEST_F(ProcessUtilTest, GetTerminationStatusKill) {
   exit_code = 42;
   base::TerminationStatus status =
       WaitForChildTermination(process.Handle(), &exit_code);
+#if defined(OS_CHROMEOS)
+  EXPECT_EQ(base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM, status);
+#else
   EXPECT_EQ(base::TERMINATION_STATUS_PROCESS_WAS_KILLED, status);
+#endif
+
 #if defined(OS_WIN)
   EXPECT_EQ(kExpectedKilledExitCode, exit_code);
 #elif defined(OS_POSIX)
@@ -313,6 +346,33 @@ TEST_F(ProcessUtilTest, GetTerminationStatusKill) {
 #endif
   remove(signal_file.c_str());
 }
+
+#if defined(OS_POSIX)
+TEST_F(ProcessUtilTest, GetTerminationStatusSigTerm) {
+  const std::string signal_file =
+    ProcessUtilTest::GetSignalFilePath(kSignalFileTerm);
+  remove(signal_file.c_str());
+  base::Process process = SpawnChild("TerminatedChildProcess");
+  ASSERT_TRUE(process.IsValid());
+
+  int exit_code = 42;
+  EXPECT_EQ(base::TERMINATION_STATUS_STILL_RUNNING,
+            base::GetTerminationStatus(process.Handle(), &exit_code));
+  EXPECT_EQ(kExpectedStillRunningExitCode, exit_code);
+
+  SignalChildren(signal_file.c_str());
+  exit_code = 42;
+  base::TerminationStatus status =
+      WaitForChildTermination(process.Handle(), &exit_code);
+  EXPECT_EQ(base::TERMINATION_STATUS_PROCESS_WAS_KILLED, status);
+
+  int signaled = WIFSIGNALED(exit_code);
+  EXPECT_NE(0, signaled);
+  int signal = WTERMSIG(exit_code);
+  EXPECT_EQ(SIGTERM, signal);
+  remove(signal_file.c_str());
+}
+#endif
 
 #if defined(OS_WIN)
 // TODO(estade): if possible, port this test.
@@ -980,6 +1040,7 @@ MULTIPROCESS_TEST_MAIN(CheckPidProcess) {
   return kSuccess;
 }
 
+#if defined(CLONE_NEWUSER) && defined(CLONE_NEWPID)
 TEST_F(ProcessUtilTest, CloneFlags) {
   if (RunningOnValgrind() ||
       !base::PathExists(FilePath("/proc/self/ns/user")) ||
@@ -998,6 +1059,7 @@ TEST_F(ProcessUtilTest, CloneFlags) {
   EXPECT_TRUE(process.WaitForExit(&exit_code));
   EXPECT_EQ(kSuccess, exit_code);
 }
+#endif
 
 TEST(ForkWithFlagsTest, UpdatesPidCache) {
   // The libc clone function, which allows ForkWithFlags to keep the pid cache

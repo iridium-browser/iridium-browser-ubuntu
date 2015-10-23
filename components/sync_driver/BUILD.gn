@@ -2,10 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-static_library("sync_driver") {
+import("//build/config/features.gni")
+
+source_set("sync_driver") {
   sources = [
     "backend_data_type_configurer.cc",
     "backend_data_type_configurer.h",
+    "backend_migrator.cc",
+    "backend_migrator.h",
     "change_processor.cc",
     "change_processor.h",
     "data_type_controller.cc",
@@ -31,6 +35,14 @@ static_library("sync_driver") {
     "generic_change_processor.h",
     "generic_change_processor_factory.cc",
     "generic_change_processor_factory.h",
+    "glue/synced_session.cc",
+    "glue/synced_session.h",
+    "glue/typed_url_model_associator.cc",
+    "glue/typed_url_model_associator.h",
+    "invalidation_adapter.cc",
+    "invalidation_adapter.h",
+    "invalidation_helper.cc",
+    "invalidation_helper.h",
     "local_device_info_provider.h",
     "model_association_manager.cc",
     "model_association_manager.h",
@@ -41,8 +53,15 @@ static_library("sync_driver") {
     "non_blocking_data_type_manager.h",
     "non_ui_data_type_controller.cc",
     "non_ui_data_type_controller.h",
+    "open_tabs_ui_delegate.cc",
+    "open_tabs_ui_delegate.h",
     "pref_names.cc",
     "pref_names.h",
+    "profile_sync_auth_provider.cc",
+    "profile_sync_auth_provider.h",
+    "profile_sync_components_factory.h",
+    "protocol_event_observer.cc",
+    "protocol_event_observer.h",
     "proxy_data_type_controller.cc",
     "proxy_data_type_controller.h",
     "shared_change_processor.cc",
@@ -50,6 +69,10 @@ static_library("sync_driver") {
     "shared_change_processor_ref.cc",
     "shared_change_processor_ref.h",
     "sync_api_component_factory.h",
+    "sync_client.cc",
+    "sync_client.h",
+    "sync_error_controller.cc",
+    "sync_error_controller.h",
     "sync_frontend.cc",
     "sync_frontend.h",
     "sync_prefs.cc",
@@ -57,8 +80,14 @@ static_library("sync_driver") {
     "sync_service.h",
     "sync_service_observer.cc",
     "sync_service_observer.h",
+    "sync_service_utils.cc",
+    "sync_service_utils.h",
+    "sync_stopped_reporter.cc",
+    "sync_stopped_reporter.h",
     "system_encryptor.cc",
     "system_encryptor.h",
+    "tab_node_pool.cc",
+    "tab_node_pool.h",
     "ui_data_type_controller.cc",
     "ui_data_type_controller.h",
     "user_selectable_sync_type.h",
@@ -66,12 +95,29 @@ static_library("sync_driver") {
 
   deps = [
     "//base",
+    "//components/history/core/browser",
+    "//components/invalidation/public",
     "//components/os_crypt",
+    "//components/sessions",
+    "//components/signin/core/browser",
+    "//net",
     "//sync",
+    "//third_party/cacheinvalidation",
   ]
+
+  if (enable_configuration_policy) {
+    sources += [
+      "sync_policy_handler.cc",
+      "sync_policy_handler.h",
+    ]
+    deps += [
+      "//components/policy",
+      "//components/policy:policy_component",
+    ]
+  }
 }
 
-static_library("test_support") {
+source_set("test_support") {
   testonly = true
   sources = [
     "change_processor_mock.cc",
@@ -94,11 +140,39 @@ static_library("test_support") {
     "non_ui_data_type_controller_mock.h",
   ]
 
-  deps = [
+  public_deps = [
     ":sync_driver",
-    "//base",
     "//sync",
+  ]
+
+  deps = [
+    "//base",
+    "//components/sessions",
     "//sync:test_support_sync_internal_api",
+    "//testing/gmock",
+    "//testing/gtest",
+  ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "data_type_manager_impl_unittest.cc",
+    "device_info_data_type_controller_unittest.cc",
+    "device_info_sync_service_unittest.cc",
+    "generic_change_processor_unittest.cc",
+    "model_association_manager_unittest.cc",
+    "non_blocking_data_type_controller_unittest.cc",
+    "non_ui_data_type_controller_unittest.cc",
+    "shared_change_processor_unittest.cc",
+    "sync_policy_handler_unittest.cc",
+    "sync_prefs_unittest.cc",
+    "system_encryptor_unittest.cc",
+    "tab_node_pool_unittest.cc",
+    "ui_data_type_controller_unittest.cc",
+  ]
+  deps = [
+    ":test_support",
     "//testing/gmock",
     "//testing/gtest",
   ]

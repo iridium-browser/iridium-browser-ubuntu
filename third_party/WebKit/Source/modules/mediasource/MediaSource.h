@@ -51,7 +51,7 @@ class MediaSource final
     : public RefCountedGarbageCollectedEventTargetWithInlineData<MediaSource>
     , public HTMLMediaSource
     , public ActiveDOMObject {
-    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<MediaSource>);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(MediaSource);
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MediaSource);
 public:
@@ -60,7 +60,7 @@ public:
     static const AtomicString& endedKeyword();
 
     static MediaSource* create(ExecutionContext*);
-    virtual ~MediaSource();
+    ~MediaSource() override;
 
     // MediaSource.idl methods
     SourceBufferList* sourceBuffers() { return m_sourceBuffers.get(); }
@@ -74,40 +74,40 @@ public:
     static bool isTypeSupported(const String& type);
 
     // HTMLMediaSource
-    virtual bool attachToElement(HTMLMediaElement*) override;
-    virtual void setWebMediaSourceAndOpen(PassOwnPtr<WebMediaSource>) override;
-    virtual void close() override;
-    virtual bool isClosed() const override;
-    virtual double duration() const override;
-    virtual PassRefPtrWillBeRawPtr<TimeRanges> buffered() const override;
-    virtual PassRefPtrWillBeRawPtr<TimeRanges> seekable() const override;
+    bool attachToElement(HTMLMediaElement*) override;
+    void setWebMediaSourceAndOpen(PassOwnPtr<WebMediaSource>) override;
+    void close() override;
+    bool isClosed() const override;
+    double duration() const override;
+    TimeRanges* buffered() const override;
+    TimeRanges* seekable() const override;
 #if !ENABLE(OILPAN)
-    virtual void refHTMLMediaSource() override { ref(); }
-    virtual void derefHTMLMediaSource() override { deref(); }
+    void refHTMLMediaSource() override { ref(); }
+    void derefHTMLMediaSource() override { deref(); }
 #endif
 
     // EventTarget interface
-    virtual const AtomicString& interfaceName() const override;
-    virtual ExecutionContext* executionContext() const override;
+    const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override;
 
     // ActiveDOMObject interface
-    virtual bool hasPendingActivity() const override;
-    virtual void stop() override;
+    bool hasPendingActivity() const override;
+    void stop() override;
 
     // URLRegistrable interface
-    virtual URLRegistry& registry() const override;
+    URLRegistry& registry() const override;
 
     // Used by SourceBuffer.
     void openIfInEndedState();
     bool isOpen() const;
     void setSourceBufferActive(SourceBuffer*);
+    HTMLMediaElement* mediaElement() const;
 
     // Used by MediaSourceRegistry.
     void addedToRegistry();
     void removedFromRegistry();
 
     DECLARE_VIRTUAL_TRACE();
-    void clearWeakMembers(Visitor*);
 
 private:
     explicit MediaSource(ExecutionContext*);
@@ -117,7 +117,7 @@ private:
 
     bool isUpdating() const;
 
-    PassOwnPtr<WebSourceBuffer> createWebSourceBuffer(const String& type, const Vector<String>& codecs, ExceptionState&);
+    PassOwnPtr<WebSourceBuffer> createWebSourceBuffer(const String& type, const String& codecs, ExceptionState&);
     void scheduleEvent(const AtomicString& eventName);
     void endOfStreamInternal(const WebMediaSource::EndOfStreamStatus, ExceptionState&);
 

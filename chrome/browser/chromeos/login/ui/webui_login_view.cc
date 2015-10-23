@@ -26,7 +26,6 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
-#include "chrome/common/render_messages.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/network/network_state.h"
@@ -68,9 +67,6 @@ const char kAccelNameDeviceRequisitionRemora[] = "device_requisition_remora";
 const char kAccelNameDeviceRequisitionShark[] = "device_requisition_shark";
 const char kAccelNameAppLaunchBailout[] = "app_launch_bailout";
 const char kAccelNameAppLaunchNetworkConfig[] = "app_launch_network_config";
-const char kAccelNameNewOobe[] = "new_oobe";
-const char kAccelNameToggleWebviewSignin[] = "toggle_webview_signin";
-const char kAccelNameToggleNewLoginUI[] = "toggle_new_login_ui";
 const char kAccelNameToggleEasyBootstrap[] = "toggle_easy_bootstrap";
 
 // A class to change arrow key traversal behavior when it's alive.
@@ -131,12 +127,6 @@ WebUILoginView::WebUILoginView()
   accel_map_[ui::Accelerator(ui::VKEY_X,
       ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
       kAccelNameEnableDebugging;
-  accel_map_[ui::Accelerator(ui::VKEY_W,
-      ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
-      kAccelNameToggleWebviewSignin;
-  accel_map_[ui::Accelerator(
-      ui::VKEY_L, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
-      kAccelNameToggleNewLoginUI;
   accel_map_[ui::Accelerator(
       ui::VKEY_B, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
       kAccelNameToggleEasyBootstrap;
@@ -145,14 +135,6 @@ WebUILoginView::WebUILoginView()
       kAccelFocusPrev;
   accel_map_[ui::Accelerator(ui::VKEY_RIGHT, ui::EF_NONE)] =
       kAccelFocusNext;
-
-  // Use KEY_RELEASED because Gaia consumes KEY_PRESSED for up/down key.
-  ui::Accelerator key_up(ui::VKEY_UP, ui::EF_NONE);
-  key_up.set_type(ui::ET_KEY_RELEASED);
-  ui::Accelerator key_down(ui::VKEY_DOWN, ui::EF_NONE);
-  key_down.set_type(ui::ET_KEY_RELEASED);
-  accel_map_[key_up] = kAccelFocusPrev;
-  accel_map_[key_down] = kAccelFocusNext;
 
   accel_map_[ui::Accelerator(
       ui::VKEY_D, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
@@ -172,10 +154,6 @@ WebUILoginView::WebUILoginView()
   accel_map_[ui::Accelerator(ui::VKEY_N,
                              ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
       kAccelNameAppLaunchNetworkConfig;
-
-  accel_map_[ui::Accelerator(
-      ui::VKEY_O, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN)] =
-      kAccelNameNewOobe;
 
   for (AccelMap::iterator i(accel_map_.begin()); i != accel_map_.end(); ++i)
     AddAccelerator(i->first);
@@ -214,9 +192,6 @@ void WebUILoginView::Init() {
   WebContentsModalDialogManager::CreateForWebContents(web_contents);
   WebContentsModalDialogManager::FromWebContents(web_contents)->
       SetDelegate(this);
-  if (!popup_manager_.get())
-    popup_manager_.reset(new web_modal::PopupManager(this));
-  popup_manager_->RegisterWith(web_contents);
 
   web_contents->SetDelegate(this);
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
@@ -490,7 +465,8 @@ void WebUILoginView::DidFailProvisionalLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description) {
+    const base::string16& error_description,
+    bool was_ignored_by_handler) {
   FOR_EACH_OBSERVER(FrameObserver,
                     frame_observer_list_,
                     OnFrameError(render_frame_host->GetFrameName()));

@@ -5,15 +5,17 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/invalidation/fake_invalidation_service.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -22,19 +24,23 @@
 #include "chrome/browser/sync/supervised_user_signin_manager_wrapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/sync_util.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "components/invalidation/invalidation_service.h"
-#include "components/invalidation/profile_invalidation_provider.h"
+#include "components/invalidation/impl/profile_invalidation_provider.h"
+#include "components/invalidation/public/invalidation_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/data_type_manager.h"
+#include "components/sync_driver/fake_data_type_controller.h"
 #include "components/sync_driver/pref_names.h"
 #include "components/sync_driver/sync_prefs.h"
+#include "components/version_info/version_info_values.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -108,13 +114,16 @@ class SyncBackendHostNoReturn : public SyncBackendHostMock {
       scoped_ptr<base::Thread> sync_thread,
       const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
       const GURL& service_url,
+      const std::string& sync_user_agent,
       const syncer::SyncCredentials& credentials,
       bool delete_sync_data_folder,
       scoped_ptr<syncer::SyncManagerFactory> sync_manager_factory,
-      scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
-      syncer::ReportUnrecoverableErrorFunction
-          report_unrecoverable_error_function,
-      syncer::NetworkResources* network_resources) override {}
+      const syncer::WeakHandle<syncer::UnrecoverableErrorHandler>&
+          unrecoverable_error_handler,
+      const base::Closure& report_unrecoverable_error_function,
+      syncer::NetworkResources* network_resources,
+      scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state)
+      override {}
 };
 
 class SyncBackendHostMockCollectDeleteDirParam : public SyncBackendHostMock {
@@ -128,21 +137,25 @@ class SyncBackendHostMockCollectDeleteDirParam : public SyncBackendHostMock {
       scoped_ptr<base::Thread> sync_thread,
       const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
       const GURL& service_url,
+      const std::string& sync_user_agent,
       const syncer::SyncCredentials& credentials,
       bool delete_sync_data_folder,
       scoped_ptr<syncer::SyncManagerFactory> sync_manager_factory,
-      scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
-      syncer::ReportUnrecoverableErrorFunction
-          report_unrecoverable_error_function,
-      syncer::NetworkResources* network_resources) override {
+      const syncer::WeakHandle<syncer::UnrecoverableErrorHandler>&
+          unrecoverable_error_handler,
+      const base::Closure& report_unrecoverable_error_function,
+      syncer::NetworkResources* network_resources,
+      scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state)
+      override {
     delete_dir_param_->push_back(delete_sync_data_folder);
     SyncBackendHostMock::Initialize(frontend, sync_thread.Pass(),
-                                    event_handler, service_url, credentials,
-                                    delete_sync_data_folder,
+                                    event_handler, service_url, sync_user_agent,
+                                    credentials, delete_sync_data_folder,
                                     sync_manager_factory.Pass(),
-                                    unrecoverable_error_handler.Pass(),
+                                    unrecoverable_error_handler,
                                     report_unrecoverable_error_function,
-                                    network_resources);
+                                    network_resources,
+                                    saved_nigori_state.Pass());
   }
 
  private:
@@ -162,11 +175,11 @@ ACTION_P(ReturnNewMockHostCollectDeleteDirParam, delete_dir_param) {
       delete_dir_param);
 }
 
-KeyedService* BuildFakeProfileInvalidationProvider(
+scoped_ptr<KeyedService> BuildFakeProfileInvalidationProvider(
     content::BrowserContext* context) {
-  return new invalidation::ProfileInvalidationProvider(
+  return make_scoped_ptr(new invalidation::ProfileInvalidationProvider(
       scoped_ptr<invalidation::InvalidationService>(
-          new invalidation::FakeInvalidationService));
+          new invalidation::FakeInvalidationService)));
 }
 
 // A test harness that uses a real ProfileSyncService and in most cases a
@@ -235,6 +248,8 @@ class ProfileSyncServiceTest : public ::testing::Test {
     service_->SetClearingBrowseringDataForTesting(
         base::Bind(&ProfileSyncServiceTest::ClearBrowsingDataCallback,
                    base::Unretained(this)));
+    service_->RegisterDataTypeController(
+        new sync_driver::FakeDataTypeController(syncer::BOOKMARKS));
   }
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || (defined(OS_LINUX) && !defined(OS_CHROMEOS))
@@ -252,14 +267,26 @@ class ProfileSyncServiceTest : public ::testing::Test {
   }
 
   void InitializeForNthSync() {
-    // Set first sync time before initialize to disable backup.
+    // Set first sync time before initialize to disable backup and simulate
+    // a complete sync setup.
     sync_driver::SyncPrefs sync_prefs(service()->profile()->GetPrefs());
     sync_prefs.SetFirstSyncTime(base::Time::Now());
+    sync_prefs.SetSyncSetupCompleted();
+    sync_prefs.SetKeepEverythingSynced(true);
     service_->Initialize();
   }
 
   void InitializeForFirstSync() {
     service_->Initialize();
+  }
+
+  void TriggerPassphraseRequired() {
+    service_->OnPassphraseRequired(syncer::REASON_DECRYPTION,
+                                   sync_pb::EncryptedData());
+  }
+
+  void TriggerDataTypeStartRequest() {
+    service_->OnDataTypeRequestsSyncStartup(syncer::BOOKMARKS);
   }
 
   void ExpectDataTypeManagerCreation(int times) {
@@ -310,8 +337,8 @@ class ProfileSyncServiceTest : public ::testing::Test {
  protected:
   void PumpLoop() {
     base::RunLoop run_loop;
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE, run_loop.QuitClosure());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  run_loop.QuitClosure());
     run_loop.Run();
   }
 
@@ -333,8 +360,8 @@ TEST_F(ProfileSyncServiceTest, InitialState) {
   CreateService(browser_sync::AUTO_START);
   InitializeForNthSync();
   const std::string& url = service()->sync_service_url().spec();
-  EXPECT_TRUE(url == ProfileSyncService::kSyncServerUrl ||
-              url == ProfileSyncService::kDevServerUrl);
+  EXPECT_TRUE(url == internal::kSyncServerUrl ||
+              url == internal::kSyncDevServerUrl);
 }
 
 // Verify a successful initialization.
@@ -347,7 +374,7 @@ TEST_F(ProfileSyncServiceTest, SuccessfulInitialization) {
   ExpectSyncBackendHostCreation(1);
   InitializeForNthSync();
   EXPECT_FALSE(service()->IsManaged());
-  EXPECT_TRUE(service()->SyncActive());
+  EXPECT_TRUE(service()->IsSyncActive());
   EXPECT_EQ(ProfileSyncService::SYNC, service()->backend_mode());
 }
 
@@ -356,7 +383,7 @@ TEST_F(ProfileSyncServiceTest, SuccessfulInitialization) {
 // and notifies observers.
 TEST_F(ProfileSyncServiceTest, SetupInProgress) {
   CreateService(browser_sync::AUTO_START);
-  InitializeForNthSync();
+  InitializeForFirstSync();
 
   TestSyncServiceObserver observer(service());
   service()->AddObserver(&observer);
@@ -377,7 +404,7 @@ TEST_F(ProfileSyncServiceTest, DisabledByPolicyBeforeInit) {
   CreateService(browser_sync::AUTO_START);
   InitializeForNthSync();
   EXPECT_TRUE(service()->IsManaged());
-  EXPECT_FALSE(service()->SyncActive());
+  EXPECT_FALSE(service()->IsSyncActive());
 }
 
 // Verify that disable by enterprise policy works even after the backend has
@@ -390,13 +417,13 @@ TEST_F(ProfileSyncServiceTest, DisabledByPolicyAfterInit) {
   InitializeForNthSync();
 
   EXPECT_FALSE(service()->IsManaged());
-  EXPECT_TRUE(service()->SyncActive());
+  EXPECT_TRUE(service()->IsSyncActive());
 
   profile()->GetTestingPrefService()->SetManagedPref(
       sync_driver::prefs::kSyncManaged, new base::FundamentalValue(true));
 
   EXPECT_TRUE(service()->IsManaged());
-  EXPECT_FALSE(service()->SyncActive());
+  EXPECT_FALSE(service()->IsSyncActive());
 }
 
 // Exercies the ProfileSyncService's code paths related to getting shut down
@@ -407,34 +434,36 @@ TEST_F(ProfileSyncServiceTest, AbortedByShutdown) {
 
   IssueTestTokens();
   InitializeForNthSync();
-  EXPECT_FALSE(service()->SyncActive());
+  EXPECT_FALSE(service()->IsSyncActive());
 
   ShutdownAndDeleteService();
 }
 
-// Test StopAndSuppress() before we've initialized the backend.
-TEST_F(ProfileSyncServiceTest, EarlyStopAndSuppress) {
+// Test RequestStop() before we've initialized the backend.
+TEST_F(ProfileSyncServiceTest, EarlyRequestStop) {
   CreateService(browser_sync::AUTO_START);
   IssueTestTokens();
 
-  service()->StopAndSuppress();
+  service()->RequestStop(ProfileSyncService::KEEP_DATA);
   EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 
-  // Because of supression, this should fail.
-  InitializeForNthSync();
-  EXPECT_FALSE(service()->SyncActive());
+  // Because of suppression, this should fail.
+  sync_driver::SyncPrefs sync_prefs(service()->profile()->GetPrefs());
+  sync_prefs.SetFirstSyncTime(base::Time::Now());
+  service()->Initialize();
+  EXPECT_FALSE(service()->IsSyncActive());
 
-  // Remove suppression.  This should be enough to allow init to happen.
+  // Request start.  This should be enough to allow init to happen.
   ExpectDataTypeManagerCreation(1);
   ExpectSyncBackendHostCreation(1);
-  service()->UnsuppressAndStart();
-  EXPECT_TRUE(service()->SyncActive());
+  service()->RequestStart();
+  EXPECT_TRUE(service()->IsSyncActive());
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 }
 
-// Test StopAndSuppress() after we've initialized the backend.
+// Test RequestStop() after we've initialized the backend.
 TEST_F(ProfileSyncServiceTest, DisableAndEnableSyncTemporarily) {
   CreateService(browser_sync::AUTO_START);
   IssueTestTokens();
@@ -442,22 +471,22 @@ TEST_F(ProfileSyncServiceTest, DisableAndEnableSyncTemporarily) {
   ExpectSyncBackendHostCreation(1);
   InitializeForNthSync();
 
-  EXPECT_TRUE(service()->SyncActive());
+  EXPECT_TRUE(service()->IsSyncActive());
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 
   testing::Mock::VerifyAndClearExpectations(components_factory());
 
-  service()->StopAndSuppress();
-  EXPECT_FALSE(service()->SyncActive());
+  service()->RequestStop(ProfileSyncService::KEEP_DATA);
+  EXPECT_FALSE(service()->IsSyncActive());
   EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 
   ExpectDataTypeManagerCreation(1);
   ExpectSyncBackendHostCreation(1);
 
-  service()->UnsuppressAndStart();
-  EXPECT_TRUE(service()->SyncActive());
+  service()->RequestStart();
+  EXPECT_TRUE(service()->IsSyncActive());
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 }
@@ -472,13 +501,13 @@ TEST_F(ProfileSyncServiceTest, EnableSyncAndSignOut) {
   IssueTestTokens();
   InitializeForNthSync();
 
-  EXPECT_TRUE(service()->SyncActive());
+  EXPECT_TRUE(service()->IsSyncActive());
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 
   SigninManagerFactory::GetForProfile(profile())->SignOut(
       signin_metrics::SIGNOUT_TEST);
-  EXPECT_FALSE(service()->SyncActive());
+  EXPECT_FALSE(service()->IsSyncActive());
 }
 #endif  // !defined(OS_CHROMEOS)
 
@@ -541,14 +570,14 @@ TEST_F(ProfileSyncServiceTest, BackupBeforeFirstSync) {
 
   // At this time, backup is finished. Task is posted to start sync again.
   EXPECT_EQ(ProfileSyncService::BACKUP, service()->backend_mode());
-  EXPECT_FALSE(service()->SyncActive());
+  EXPECT_FALSE(service()->IsSyncActive());
   EXPECT_EQ(1u, delete_dir_param.size());
   EXPECT_TRUE(delete_dir_param[0]);
 
   // Pump loop to start sync.
   PumpLoop();
   EXPECT_EQ(ProfileSyncService::SYNC, service()->backend_mode());
-  EXPECT_TRUE(service()->SyncActive());
+  EXPECT_TRUE(service()->IsSyncActive());
   EXPECT_EQ(2u, delete_dir_param.size());
   EXPECT_TRUE(delete_dir_param[0]);
 }
@@ -566,14 +595,14 @@ TEST_F(ProfileSyncServiceTest, ResumeBackupIfAborted) {
 
   // At this time, backup is finished. Task is posted to start sync again.
   EXPECT_EQ(ProfileSyncService::BACKUP, service()->backend_mode());
-  EXPECT_FALSE(service()->SyncActive());
+  EXPECT_FALSE(service()->IsSyncActive());
   EXPECT_EQ(1u, delete_dir_param.size());
   EXPECT_TRUE(delete_dir_param[0]);
 
   // Pump loop to start sync.
   PumpLoop();
   EXPECT_EQ(ProfileSyncService::SYNC, service()->backend_mode());
-  EXPECT_TRUE(service()->SyncActive());
+  EXPECT_TRUE(service()->IsSyncActive());
   EXPECT_EQ(2u, delete_dir_param.size());
   EXPECT_TRUE(delete_dir_param[0]);
 }
@@ -586,7 +615,7 @@ TEST_F(ProfileSyncServiceTest, Rollback) {
   ExpectSyncBackendHostCreationCollectDeleteDir(2, &delete_dir_param);
   IssueTestTokens();
   InitializeForNthSync();
-  EXPECT_TRUE(service()->SyncActive());
+  EXPECT_TRUE(service()->IsSyncActive());
   EXPECT_EQ(ProfileSyncService::SYNC, service()->backend_mode());
 
   // First sync time should be recorded.
@@ -620,15 +649,6 @@ TEST_F(ProfileSyncServiceTest, Rollback) {
 
 #endif
 
-TEST_F(ProfileSyncServiceTest, GetSyncServiceURL) {
-  // See that we can override the URL with a flag.
-  base::CommandLine command_line(
-      base::FilePath(base::FilePath(FILE_PATH_LITERAL("chrome.exe"))));
-  command_line.AppendSwitchASCII(switches::kSyncServiceURL, "https://foo/bar");
-  EXPECT_EQ("https://foo/bar",
-            ProfileSyncService::GetSyncServiceURL(command_line).spec());
-}
-
 // Verify that LastSyncedTime is cleared when the user signs out.
 TEST_F(ProfileSyncServiceTest, ClearLastSyncedTimeOnSignOut) {
   IssueTestTokens();
@@ -636,12 +656,12 @@ TEST_F(ProfileSyncServiceTest, ClearLastSyncedTimeOnSignOut) {
   ExpectDataTypeManagerCreation(1);
   ExpectSyncBackendHostCreation(1);
   InitializeForNthSync();
-  EXPECT_TRUE(service()->SyncActive());
+  EXPECT_TRUE(service()->IsSyncActive());
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_SYNC_TIME_JUST_NOW),
             service()->GetLastSyncedTimeString());
 
   // Sign out.
-  service()->DisableForUser();
+  service()->RequestStop(ProfileSyncService::CLEAR_DATA);
   PumpLoop();
 
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_SYNC_TIME_NEVER),
@@ -651,12 +671,12 @@ TEST_F(ProfileSyncServiceTest, ClearLastSyncedTimeOnSignOut) {
 // Verify that the disable sync flag disables sync.
 TEST_F(ProfileSyncServiceTest, DisableSyncFlag) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(switches::kDisableSync);
-  EXPECT_FALSE(ProfileSyncService::IsSyncEnabled());
+  EXPECT_FALSE(ProfileSyncService::IsSyncAllowedByFlag());
 }
 
 // Verify that no disable sync flag enables sync.
 TEST_F(ProfileSyncServiceTest, NoDisableSyncFlag) {
-  EXPECT_TRUE(ProfileSyncService::IsSyncEnabled());
+  EXPECT_TRUE(ProfileSyncService::IsSyncAllowedByFlag());
 }
 
 // Test Sync will stop after receive memory pressure
@@ -667,7 +687,7 @@ TEST_F(ProfileSyncServiceTest, MemoryPressureRecording) {
   ExpectSyncBackendHostCreation(1);
   InitializeForNthSync();
 
-  EXPECT_TRUE(service()->SyncActive());
+  EXPECT_TRUE(service()->IsSyncActive());
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 
@@ -702,6 +722,58 @@ TEST_F(ProfileSyncServiceTest, MemoryPressureRecording) {
                 sync_driver::prefs::kSyncMemoryPressureWarningCount),
             2);
   EXPECT_TRUE(sync_prefs.DidSyncShutdownCleanly());
+}
+
+// Verify that OnLocalSetPassphraseEncryption shuts down and restarts sync.
+TEST_F(ProfileSyncServiceTest, OnLocalSetPassphraseEncryption) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kSyncEnableClearDataOnPassphraseEncryption);
+  IssueTestTokens();
+  CreateService(browser_sync::AUTO_START);
+  ExpectDataTypeManagerCreation(1);
+  ExpectSyncBackendHostCreation(1);
+  InitializeForNthSync();
+  EXPECT_TRUE(service()->IsSyncActive());
+  EXPECT_EQ(ProfileSyncService::SYNC, service()->backend_mode());
+  testing::Mock::VerifyAndClearExpectations(components_factory());
+
+  ExpectDataTypeManagerCreation(1);
+  ExpectSyncBackendHostCreation(1);
+  const syncer::SyncEncryptionHandler::NigoriState nigori_state;
+  service()->OnLocalSetPassphraseEncryption(nigori_state);
+  PumpLoop();
+  testing::Mock::VerifyAndClearExpectations(components_factory());
+}
+
+// Test that the passphrase prompt due to version change logic gets triggered
+// on a datatype type requesting startup, but only happens once.
+TEST_F(ProfileSyncServiceTest, PassphrasePromptDueToVersion) {
+  IssueTestTokens();
+  CreateService(browser_sync::AUTO_START);
+  ExpectDataTypeManagerCreation(1);
+  ExpectSyncBackendHostCreation(1);
+  InitializeForNthSync();
+
+  sync_driver::SyncPrefs sync_prefs(service()->profile()->GetPrefs());
+  EXPECT_EQ(PRODUCT_VERSION, sync_prefs.GetLastRunVersion());
+
+  sync_prefs.SetPassphrasePrompted(true);
+
+  // Until a datatype requests startup while a passphrase is required the
+  // passphrase prompt bit should remain set.
+  EXPECT_TRUE(sync_prefs.IsPassphrasePrompted());
+  TriggerPassphraseRequired();
+  EXPECT_TRUE(sync_prefs.IsPassphrasePrompted());
+
+  // Because the last version was unset, this run should be treated as a new
+  // version and force a prompt.
+  TriggerDataTypeStartRequest();
+  EXPECT_FALSE(sync_prefs.IsPassphrasePrompted());
+
+  // At this point further datatype startup request should have no effect.
+  sync_prefs.SetPassphrasePrompted(true);
+  TriggerDataTypeStartRequest();
+  EXPECT_TRUE(sync_prefs.IsPassphrasePrompted());
 }
 
 }  // namespace

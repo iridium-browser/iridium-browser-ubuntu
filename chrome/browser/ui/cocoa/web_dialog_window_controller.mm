@@ -8,7 +8,6 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #import "chrome/browser/ui/browser_dialogs.h"
-#import "chrome/browser/ui/cocoa/browser_command_executor.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
 #include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -84,15 +83,6 @@ private:
 
   DISALLOW_COPY_AND_ASSIGN(WebDialogWindowDelegateBridge);
 };
-
-// ChromeEventProcessingWindow expects its controller to implement the
-// BrowserCommandExecutor protocol.
-@interface WebDialogWindowController (InternalAPI) <BrowserCommandExecutor>
-
-// BrowserCommandExecutor methods.
-- (void)executeCommand:(int)command;
-
-@end
 
 namespace chrome {
 
@@ -281,14 +271,6 @@ void WebDialogWindowDelegateBridge::HandleKeyboardEvent(
   [event_window redispatchKeyEvent:event.os_event];
 }
 
-@implementation WebDialogWindowController (InternalAPI)
-
-// This gets called whenever a chrome-specific keyboard shortcut is performed
-// in the Web dialog window.  We simply swallow all those events.
-- (void)executeCommand:(int)command {}
-
-@end
-
 @implementation WebDialogWindowController
 
 // NOTE(akalin): We'll probably have to add the parentWindow parameter back
@@ -319,7 +301,7 @@ void WebDialogWindowDelegateBridge::HandleKeyboardEvent(
           initWithContentRect:dialogRect
                     styleMask:style
                       backing:NSBackingStoreBuffered
-                        defer:YES]);
+                        defer:NO]);
   if (!window.get()) {
     return nil;
   }

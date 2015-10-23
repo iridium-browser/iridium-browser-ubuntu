@@ -46,21 +46,18 @@
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebViewImpl.h"
 #include "web/tests/FrameTestHelpers.h"
-
 #include <gtest/gtest.h>
 
-using namespace blink;
+namespace blink {
 
-namespace {
-
-class TestListener : public V8AbstractEventListener {
+class TestListener final : public V8AbstractEventListener {
 public:
-    virtual bool operator==(const EventListener&)
+    bool operator==(const EventListener&) override
     {
         return true;
     }
 
-    virtual void handleEvent(ScriptState* scriptState, Event* event)
+    void handleEvent(ScriptState* scriptState, Event* event) override
     {
         EXPECT_EQ(event->type(), "blah");
 
@@ -71,18 +68,18 @@ public:
         EXPECT_EQ(jsEvent->ToObject(context).ToLocalChecked()->Get(context, v8AtomicString(isolate(), "detail")).ToLocalChecked(), v8::Boolean::New(isolate(), true));
     }
 
-    static PassRefPtr<TestListener> create(ScriptState* scriptState)
+    static PassRefPtrWillBeRawPtr<TestListener> create(ScriptState* scriptState)
     {
-        return adoptRef(new TestListener(scriptState));
+        return adoptRefWillBeNoop(new TestListener(scriptState));
     }
 
 private:
-    TestListener(ScriptState* scriptState)
+    explicit TestListener(ScriptState* scriptState)
         : V8AbstractEventListener(false, scriptState->world(), scriptState->isolate())
     {
     }
 
-    virtual v8::Local<v8::Value> callListenerFunction(ScriptState*, v8::Local<v8::Value>, Event*)
+    v8::Local<v8::Value> callListenerFunction(ScriptState*, v8::Local<v8::Value>, Event*) override
     {
         ASSERT_NOT_REACHED();
         return v8::Local<v8::Value>();
@@ -109,11 +106,11 @@ TEST(CustomEventTest, InitWithSerializedScriptValue)
     v8::Isolate* isolate = toIsolate(frame->frame());
     V8TestingScope scope(isolate);
     customEvent.initCustomEvent("blah", false, false, WebSerializedScriptValue::serialize(v8::Boolean::New(isolate, true)));
-    RefPtr<EventListener> listener = TestListener::create(scope.scriptState());
+    RefPtrWillBeRawPtr<EventListener> listener = TestListener::create(scope.scriptState());
     frame->frame()->document()->addEventListener("blah", listener, false);
     frame->frame()->document()->dispatchEvent(event);
 
     Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
 }
 
-}
+} // namespace blink

@@ -42,7 +42,8 @@ bool ExtensionJSBrowserTest::RunJavascriptTestF(bool is_async,
   }
   scripts.push_back(BuildRunTestJSCall(is_async, "RUN_TEST_F", args));
 
-  base::string16 script_16 = JoinString(scripts, '\n');
+  base::string16 script_16 =
+      base::JoinString(scripts, base::ASCIIToUTF16("\n"));
   std::string script = base::UTF16ToUTF8(script_16);
 
   std::string result =
@@ -51,9 +52,7 @@ bool ExtensionJSBrowserTest::RunJavascriptTestF(bool is_async,
           load_waiter_->extension_id(),
           script);
 
-  base::JSONReader reader;
-  scoped_ptr<base::Value> value_result;
-  value_result.reset(reader.Read(result));
+  scoped_ptr<base::Value> value_result = base::JSONReader::Read(result);
   CHECK_EQ(base::Value::TYPE_DICTIONARY, value_result->GetType());
   base::DictionaryValue* dict_value =
       static_cast<base::DictionaryValue*>(value_result.get());

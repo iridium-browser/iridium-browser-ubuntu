@@ -15,7 +15,6 @@
 #include "chromeos/login/auth/auth_status_consumer.h"
 #include "chromeos/login/auth/authenticator.h"
 #include "chromeos/login/auth/extended_authenticator.h"
-#include "chromeos/login/auth/online_attempt_host.h"
 #include "chromeos/login/auth/user_context.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
@@ -41,8 +40,7 @@ namespace chromeos {
 // If auth is succeeded, cookie fetcher is executed, LP instance deletes itself.
 //
 // If |delegate_| is not NULL it will handle error messages, password input.
-class CHROMEOS_EXPORT LoginPerformer : public AuthStatusConsumer,
-                                       public OnlineAttemptHost::Delegate {
+class CHROMEOS_EXPORT LoginPerformer : public AuthStatusConsumer {
  public:
   typedef enum AuthorizationMode {
     // Authorization performed internally by Chrome.
@@ -57,12 +55,10 @@ class CHROMEOS_EXPORT LoginPerformer : public AuthStatusConsumer,
     ~Delegate() override {}
     virtual void WhiteListCheckFailed(const std::string& email) = 0;
     virtual void PolicyLoadFailed() = 0;
-    virtual void OnOnlineChecked(const std::string& email, bool success) = 0;
   };
 
   LoginPerformer(scoped_refptr<base::TaskRunner> task_runner,
-                 Delegate* delegate,
-                 bool disable_client_login);
+                 Delegate* delegate);
   ~LoginPerformer() override;
 
   // Performs a login for |user_context|.
@@ -117,22 +113,19 @@ class CHROMEOS_EXPORT LoginPerformer : public AuthStatusConsumer,
 
   AuthorizationMode auth_mode() const { return auth_mode_; }
 
- protected:
-  // Implements OnlineAttemptHost::Delegate.
-  void OnChecked(const std::string& user_id, bool success) override;
+  // Check if user is allowed to sign in on device. |wildcard_match| will
+  // contain additional information whether this user is explicitly listed or
+  // not (may be relevant for extension-based sign-in).
+  virtual bool IsUserWhitelisted(const std::string& user_id,
+                                 bool* wildcard_match) = 0;
 
+ protected:
   // Platform-dependant methods to be implemented by concrete class.
 
   // Run trusted check for a platform. If trusted check have to be performed
   // asynchronously, |false| will be returned, and either delegate's
   // PolicyLoadFailed() or |callback| will be called upon actual check.
   virtual bool RunTrustedCheck(const base::Closure& callback) = 0;
-
-  // Check if user is allowed to sign in on device. |wildcard_match| will
-  // contain additional information whether this user is explicitly listed or
-  // not (may be relevant for extension-based sign-in).
-  virtual bool IsUserWhitelisted(const std::string& user_id,
-                                 bool* wildcard_match) = 0;
 
   // This method should run addional online check if user can sign in on device.
   // Either |success_callback| or |failure_callback| should be called upon this
@@ -209,9 +202,6 @@ class CHROMEOS_EXPORT LoginPerformer : public AuthStatusConsumer,
   // Used for logging in.
   scoped_refptr<ExtendedAuthenticator> extended_authenticator_;
 
-  // Used to make auxiliary online check.
-  OnlineAttemptHost online_attempt_host_;
-
   // Represents last login failure that was encountered when communicating to
   // sign-in server. AuthFailure.LoginFailureNone() by default.
   AuthFailure last_login_failure_;
@@ -226,9 +216,6 @@ class CHROMEOS_EXPORT LoginPerformer : public AuthStatusConsumer,
 
   // Authorization mode type.
   AuthorizationMode auth_mode_;
-
-  // TODO(antrim): remove once we got rid of /ClientLogin.
-  bool disable_client_login_;
 
   base::WeakPtrFactory<LoginPerformer> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(LoginPerformer);

@@ -19,7 +19,7 @@ import pnacl_commands
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 NACL_DIR = os.path.dirname(SCRIPT_DIR)
 
-CLANG_VER = '3.6.0'
+CLANG_VER = '3.7.0'
 
 # Return the path to a tool to build target libraries
 # msys should be false if the path will be called directly rather than passed to
@@ -118,12 +118,15 @@ def TargetLibCflags(bias_arch):
   flags = '-g -O2'
   if IsBCArch(bias_arch):
     flags += ' -mllvm -inline-threshold=5 -allow-asm'
-  elif bias_arch != 'arm':
-    # Newlib target libs need to be build with the LLVM assembler on x86-64
-    # because it uses the sandbox base address-hiding form of calls, which
-    # we need in the IRT. On x86-32 that doesn't matter but the LLVM assembler
-    # sometimes generates slightly better code and it's good to be consistent.
-    flags += ' -integrated-as'
+  else:
+    # Use sections for the library builds to allow better GC for the IRT.
+    flags += ' -ffunction-sections -fdata-sections'
+    if bias_arch != 'arm':
+      # Newlib target libs need to be build with the LLVM assembler on x86-64
+      # because it uses the sandbox base address-hiding form of calls, which
+      # we need in the IRT. On x86-32 that doesn't matter but the LLVM assembler
+      # sometimes generates slightly better code and it's good to be consistent.
+      flags += ' -integrated-as'
   if IsBiasedBCArch(bias_arch):
     flags += ' ' + ' '.join(BiasedBitcodeTargetFlag(bias_arch))
   return flags
@@ -144,8 +147,9 @@ def LibCxxCflags(bias_arch):
 
 
 # Build a single object file for the target.
-def BuildTargetObjectCmd(source, output, bias_arch, output_dir='%(cwd)s'):
-  flags = ['-Wall', '-Werror', '-O2', '-c']
+def BuildTargetObjectCmd(source, output, bias_arch, output_dir='%(cwd)s',
+                         extra_flags=[]):
+  flags = ['-Wall', '-Werror', '-O2', '-c'] + extra_flags
   if IsBiasedBCArch(bias_arch):
     flags.extend(BiasedBitcodeTargetFlag(bias_arch))
   flags.extend(NewlibIsystemCflags(bias_arch).split())
@@ -171,7 +175,7 @@ def BuildTargetTranslatorCmd(sourcefile, output, arch, extra_flags=[],
      '-o', command.path.join(output_dir, output)])
 
 
-def BuildLibgccEhCmd(sourcefile, output, arch):
+def BuildLibgccEhCmd(sourcefile, output, arch, no_nacl_gcc):
   # Return a command to compile a file from libgcc_eh (see comments in at the
   # rule definition below).
   flags_common = ['-DENABLE_RUNTIME_CHECKING', '-g', '-O2', '-W', '-Wall',
@@ -196,6 +200,8 @@ def BuildLibgccEhCmd(sourcefile, output, arch):
     flags_naclcc = ['-arch', arch, '--pnacl-bias=' + arch,
                     '--pnacl-allow-translate', '--pnacl-allow-native']
   else:
+    if no_nacl_gcc:
+      return command.WriteData('', output)
     os_name = pynacl.platform.GetOS()
     arch_name = pynacl.platform.GetArch()
     platform_dir = '%s_%s' % (os_name, arch_name)
@@ -286,6 +292,8 @@ GROUP ( libnacl.a libcrt_common.a )
     format_list = ['elf32-i386-nacl']
   elif arch == 'x86_64':
     format_list = ['%s-x86-64-nacl' % elfclass_x86_64]
+  elif arch == 'mipsel' :
+    format_list = ['elf32-tradlittlemips-nacl']
   else:
     raise Exception('TODO(mcgrathr): OUTPUT_FORMAT for %s' % arch)
   return template % ', '.join(['"' + fmt + '"' for fmt in format_list])
@@ -349,6 +357,49 @@ def LibcxxDirectoryCmds(bias_arch):
       command.RemoveDirectory(os.path.join('%(output)s', 'i686-nacl')),
   ]
 
+def D2NLibsSupportCommands(bias_arch, clang_libdir):
+  def TL(lib):
+    return GSDJoin(lib, pynacl.platform.GetArch3264(bias_arch))
+  def TranslatorFile(lib, filename):
+    return os.path.join('%(' + TL(lib) + ')s', filename)
+  commands = [
+              # Build compiler_rt which is now also used for the PNaCl
+              # translator.
+              command.Command(MakeCommand() + [
+                  '-C', '%(abs_compiler_rt_src)s', 'ProjObjRoot=%(cwd)s',
+                  'VERBOSE=1',
+                  'AR=' + PnaclTool('ar', arch=bias_arch),
+                  'RANLIB=' + PnaclTool('ranlib', arch=bias_arch),
+                  'CC=' + PnaclTool('clang', arch=bias_arch), 'clang_nacl',
+                  'EXTRA_CFLAGS=' + NewlibIsystemCflags(bias_arch)]),
+              command.Mkdir(clang_libdir, parents=True),
+              command.Copy(os.path.join(
+                'clang_nacl',
+                'full-' + bias_arch.replace('i686', 'i386')
+                                   .replace('mipsel', 'mips32'),
+                'libcompiler_rt.a'),
+                 os.path.join('%(output)s', clang_libdir,
+                              'libgcc.a')),
+              command.Copy(
+                  TranslatorFile('libgcc_eh', 'libgcc_eh.a'),
+                  os.path.join('%(output)s', clang_libdir, 'libgcc_eh.a')),
+              BuildTargetObjectCmd('clang_direct/crtbegin.c', 'crtbeginT.o',
+                                   bias_arch, output_dir=clang_libdir),
+              BuildTargetObjectCmd('crtend.c', 'crtend.o',
+                                   bias_arch, output_dir=clang_libdir),
+  ]
+  if bias_arch == "mipsel":
+       commands.extend([
+           BuildTargetObjectCmd('bitcode/pnaclmm.c', 'pnaclmm.o', bias_arch),
+           BuildTargetObjectCmd('clang_direct/nacl-tp-offset.c',
+                                'nacl_tp_offset.o', bias_arch,
+                                extra_flags=['-I%(top_srcdir)s/..']),
+           command.Command([PnaclTool('ar'), 'rc',
+               command.path.join(clang_libdir, 'libpnacl_legacy.a'),
+               command.path.join('pnaclmm.o'),
+               command.path.join('nacl_tp_offset.o')])
+       ])
+  return commands
 
 def TargetLibBuildType(is_canonical):
   return 'build' if is_canonical else 'build_noncanonical'
@@ -522,8 +573,6 @@ def TargetLibs(bias_arch, is_canonical):
     # churning the in-browser translator.
     def TL(lib):
       return GSDJoin(lib, pynacl.platform.GetArch3264(bias_arch))
-    def TranslatorFile(lib, filename):
-      return os.path.join('%(' + TL(lib) + ')s', filename)
     libs.update({
       T('libs_support'): {
           'type': TargetLibBuildType(is_canonical),
@@ -531,32 +580,10 @@ def TargetLibs(bias_arch, is_canonical):
                             GSDJoin('newlib', MultilibArch(bias_arch)),
                             TL('libgcc_eh'),
                             'target_lib_compiler'],
-          'inputs': { 'src': os.path.join(NACL_DIR, 'pnacl', 'support')},
-          'commands': [
-              # Build compiler_rt which is now also used for the PNaCl
-              # translator.
-              command.Command(MakeCommand() + [
-                  '-C', '%(abs_compiler_rt_src)s', 'ProjObjRoot=%(cwd)s',
-                  'VERBOSE=1',
-                  'AR=' + PnaclTool('ar', arch=bias_arch),
-                  'RANLIB=' + PnaclTool('ranlib', arch=bias_arch),
-                  'CC=' + PnaclTool('clang', arch=bias_arch), 'clang_nacl',
-                  'EXTRA_CFLAGS=' + NewlibIsystemCflags(bias_arch)]),
-              command.Mkdir(clang_libdir, parents=True),
-              command.Copy(os.path.join(
-                'clang_nacl',
-                'full-' + bias_arch.replace('i686', 'i386'),
-                'libcompiler_rt.a'),
-                 os.path.join('%(output)s', clang_libdir,
-                              'libgcc.a')),
-              command.Copy(
-                  TranslatorFile('libgcc_eh', 'libgcc_eh.a'),
-                  os.path.join('%(output)s', clang_libdir, 'libgcc_eh.a')),
-              BuildTargetObjectCmd('clang_direct/crtbegin.c', 'crtbeginT.o',
-                                   bias_arch, output_dir=clang_libdir),
-              BuildTargetObjectCmd('crtend.c', 'crtend.o',
-                                   bias_arch, output_dir=clang_libdir),
-          ],
+          'inputs': { 'src': os.path.join(NACL_DIR, 'pnacl', 'support'),
+                      'tls_params': os.path.join(NACL_DIR, 'src', 'untrusted',
+                                                 'nacl', 'tls_params.h')},
+          'commands': D2NLibsSupportCommands(bias_arch, clang_libdir),
       }
     })
 
@@ -600,7 +627,7 @@ def SubzeroRuntimeCommands(arch, out_dir):
         LlcArchArgs),
     ]
 
-def TranslatorLibs(arch, is_canonical):
+def TranslatorLibs(arch, is_canonical, no_nacl_gcc):
   setjmp_arch = arch
   if setjmp_arch.endswith('-nonsfi'):
     setjmp_arch = setjmp_arch[:-len('-nonsfi')]
@@ -664,7 +691,8 @@ def TranslatorLibs(arch, is_canonical):
                 ' '.join(BiasedBitcodeTargetFlag(bias_arch)))]),
         command.Copy(os.path.join(
                 'clang_nacl',
-                'full-' + bias_arch.replace('i686', 'i386'),
+                'full-' + bias_arch.replace('i686', 'i386')
+                                   .replace('mipsel', 'mips32'),
                 'libcompiler_rt.a'),
             os.path.join('%(output)s', 'libgcc.a')),
     ]
@@ -742,9 +770,10 @@ def TranslatorLibs(arch, is_canonical):
               command.Copy(os.path.join('%(scripts)s', 'libgcc-tconfig.h'),
                            'tconfig.h'),
               command.WriteData('', 'tm.h'),
-              BuildLibgccEhCmd('unwind-dw2.c', 'unwind-dw2.o', arch),
+              BuildLibgccEhCmd('unwind-dw2.c', 'unwind-dw2.o', arch,
+                               no_nacl_gcc),
               BuildLibgccEhCmd('unwind-dw2-fde-glibc.c',
-                               'unwind-dw2-fde-glibc.o', arch),
+                               'unwind-dw2-fde-glibc.o', arch, no_nacl_gcc),
               command.Command([PnaclTool('ar'), 'rc',
                                command.path.join('%(output)s', 'libgcc_eh.a'),
                                'unwind-dw2.o', 'unwind-dw2-fde-glibc.o']),

@@ -31,8 +31,10 @@
 #ifndef Microtask_h
 #define Microtask_h
 
+#include "bindings/core/v8/ScriptState.h"
 #include "core/CoreExport.h"
 #include "public/platform/WebThread.h"
+#include "wtf/Allocator.h"
 #include "wtf/Functional.h"
 #include "wtf/PassOwnPtr.h"
 #include <v8.h>
@@ -40,8 +42,9 @@
 namespace blink {
 
 class CORE_EXPORT Microtask {
+    STATIC_ONLY(Microtask);
 public:
-    static void performCheckpoint();
+    static void performCheckpoint(v8::Isolate*);
     static bool performingCheckpoint(v8::Isolate*);
 
     // TODO(jochen): Make all microtasks pass in the ScriptState they want to be
@@ -49,9 +52,6 @@ public:
     // ScriptState themselves.
     static void enqueueMicrotask(PassOwnPtr<WebThread::Task>);
     static void enqueueMicrotask(PassOwnPtr<Closure>);
-
-private:
-    explicit Microtask();
 };
 
 } // namespace blink

@@ -24,6 +24,7 @@
 #ifndef NinePieceImage_h
 #define NinePieceImage_h
 
+#include "core/CoreExport.h"
 #include "core/style/BorderImageLengthBox.h"
 #include "core/style/DataRef.h"
 #include "core/style/StyleImage.h"
@@ -36,7 +37,7 @@ enum ENinePieceImageRule {
     StretchImageRule, RoundImageRule, SpaceImageRule, RepeatImageRule
 };
 
-class NinePieceImageData : public RefCounted<NinePieceImageData> {
+class CORE_EXPORT NinePieceImageData : public RefCounted<NinePieceImageData> {
 public:
     static PassRefPtr<NinePieceImageData> create() { return adoptRef(new NinePieceImageData); }
     PassRefPtr<NinePieceImageData> copy() const { return adoptRef(new NinePieceImageData(*this)); }
@@ -47,7 +48,7 @@ public:
     unsigned fill : 1;
     unsigned horizontalRule : 2; // ENinePieceImageRule
     unsigned verticalRule : 2; // ENinePieceImageRule
-    RefPtr<StyleImage> image;
+    RefPtrWillBePersistent<StyleImage> image;
     LengthBox imageSlices;
     BorderImageLengthBox borderSlices;
     BorderImageLengthBox outset;
@@ -57,10 +58,10 @@ private:
     NinePieceImageData(const NinePieceImageData&);
 };
 
-class NinePieceImage {
+class CORE_EXPORT NinePieceImage {
 public:
     NinePieceImage();
-    NinePieceImage(PassRefPtr<StyleImage>, LengthBox imageSlices, bool fill, const BorderImageLengthBox& borderSlices,
+    NinePieceImage(PassRefPtrWillBeRawPtr<StyleImage>, LengthBox imageSlices, bool fill, const BorderImageLengthBox& borderSlices,
         const BorderImageLengthBox& outset, ENinePieceImageRule horizontalRule, ENinePieceImageRule verticalRule);
 
     bool operator==(const NinePieceImage& other) const { return m_data == other.m_data; }
@@ -68,7 +69,7 @@ public:
 
     bool hasImage() const { return m_data->image; }
     StyleImage* image() const { return m_data->image.get(); }
-    void setImage(PassRefPtr<StyleImage> image) { m_data.access()->image = image; }
+    void setImage(PassRefPtrWillBeRawPtr<StyleImage> image) { m_data.access()->image = image; }
 
     const LengthBox& imageSlices() const { return m_data->imageSlices; }
     void setImageSlices(const LengthBox& slices) { m_data.access()->imageSlices = slices; }

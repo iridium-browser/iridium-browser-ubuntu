@@ -37,25 +37,30 @@
 #include "core/events/MessageEvent.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "public/platform/WebString.h"
+#include "public/web/WebDocument.h"
 #include "public/web/WebFrame.h"
 #include "public/web/WebSerializedScriptValue.h"
 #include "web/WebLocalFrameImpl.h"
 
 namespace blink {
 
-void WebDOMMessageEvent::initMessageEvent(const WebString& type, bool canBubble, bool cancelable, const WebSerializedScriptValue& messageData, const WebString& origin, const WebFrame* sourceFrame, const WebString& lastEventId, const WebMessagePortChannelArray& webChannels)
+void WebDOMMessageEvent::initMessageEvent(const WebString& type, bool canBubble, bool cancelable, const WebSerializedScriptValue& messageData, const WebString& origin, const WebFrame* sourceFrame, const WebDocument& targetDocument, const WebString& lastEventId, const WebMessagePortChannelArray& webChannels)
 {
     ASSERT(m_private.get());
     ASSERT(isMessageEvent());
     DOMWindow* window = nullptr;
-    // TODO(alexmos): Figure out if this is the right thing to do.
     if (sourceFrame)
         window = toCoreFrame(sourceFrame)->domWindow();
-    OwnPtrWillBeRawPtr<MessagePortArray> ports = nullptr;
-    // TODO(alexmos): make ports work properly with OOPIF.
-    if (sourceFrame && sourceFrame->isWebLocalFrame())
-        ports = MessagePort::toMessagePortArray(toLocalDOMWindow(window)->document(), webChannels);
-    unwrap<MessageEvent>()->initMessageEvent(type, canBubble, cancelable, messageData, origin, lastEventId, window, ports.release());
+    MessagePortArray* ports = nullptr;
+    if (!targetDocument.isNull()) {
+        RefPtrWillBeRawPtr<Document> coreDocument = PassRefPtrWillBeRawPtr<Document>(targetDocument);
+        ports = MessagePort::toMessagePortArray(coreDocument.get(), webChannels);
+    }
+    // Use an empty array for |ports| when it is null because this function
+    // is used to implement postMessage().
+    if (!ports)
+        ports = new MessagePortArray;
+    unwrap<MessageEvent>()->initMessageEvent(type, canBubble, cancelable, messageData, origin, lastEventId, window, ports);
 }
 
 WebSerializedScriptValue WebDOMMessageEvent::data() const

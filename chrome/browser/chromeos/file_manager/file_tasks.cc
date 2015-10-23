@@ -8,6 +8,7 @@
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/file_task_executor.h"
@@ -15,8 +16,6 @@
 #include "chrome/browser/chromeos/file_manager/file_browser_handlers.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/open_util.h"
-#include "chrome/browser/drive/drive_api_util.h"
-#include "chrome/browser/drive/drive_app_registry.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -27,6 +26,8 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/drive/drive_api_util.h"
+#include "components/drive/drive_app_registry.h"
 #include "components/mime_util/mime_util.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
@@ -168,7 +169,7 @@ void UpdateDefaultTask(PrefService* pref_service,
         iter != suffixes.end(); ++iter) {
       base::StringValue* value = new base::StringValue(task_id);
       // Suffixes are case insensitive.
-      std::string lower_suffix = base::StringToLowerASCII(*iter);
+      std::string lower_suffix = base::ToLowerASCII(*iter);
       mime_type_pref->SetWithoutPathExpansion(lower_suffix, value);
     }
   }
@@ -196,7 +197,7 @@ std::string GetDefaultTaskIdFromPrefs(const PrefService& pref_service,
       pref_service.GetDictionary(prefs::kDefaultTasksBySuffix);
   DCHECK(suffix_task_prefs);
   LOG_IF(ERROR, !suffix_task_prefs) << "Unable to open suffix prefs";
-  std::string lower_suffix = base::StringToLowerASCII(suffix);
+  std::string lower_suffix = base::ToLowerASCII(suffix);
   if (suffix_task_prefs)
     suffix_task_prefs->GetStringWithoutPathExpansion(lower_suffix, &task_id);
   VLOG_IF(1, !task_id.empty()) << "Found suffix default handler: " << task_id;
@@ -221,14 +222,15 @@ std::string TaskDescriptorToId(const TaskDescriptor& task_descriptor) {
 bool ParseTaskID(const std::string& task_id, TaskDescriptor* task) {
   DCHECK(task);
 
-  std::vector<std::string> result;
-  int count = Tokenize(task_id, std::string("|"), &result);
+  std::vector<std::string> result = base::SplitString(
+      task_id, "|", base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
 
   // Parse a legacy task ID that only contain two parts. Drive tasks are
   // identified by a prefix "drive-app:" on the extension ID. The legacy task
   // IDs can be stored in preferences.
-  if (count == 2) {
-    if (StartsWithASCII(result[0], kDriveTaskExtensionPrefix, true)) {
+  if (result.size() == 2) {
+    if (base::StartsWith(result[0], kDriveTaskExtensionPrefix,
+                         base::CompareCase::SENSITIVE)) {
       task->task_type = TASK_TYPE_DRIVE_APP;
       task->app_id = result[0].substr(kDriveTaskExtensionPrefixLength);
     } else {
@@ -241,7 +243,7 @@ bool ParseTaskID(const std::string& task_id, TaskDescriptor* task) {
     return true;
   }
 
-  if (count != 3)
+  if (result.size() != 3)
     return false;
 
   TaskType task_type = StringToTaskType(result[1]);

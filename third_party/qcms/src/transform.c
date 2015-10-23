@@ -27,6 +27,7 @@
 #include <string.h> //memcpy
 #include "qcmsint.h"
 #include "chain.h"
+#include "halffloat.h"
 #include "matrix.h"
 #include "transform_util.h"
 
@@ -513,7 +514,7 @@ static void qcms_transform_data_clut(qcms_transform *transform, unsigned char *s
 */
 
 // Using lcms' tetra interpolation algorithm.
-static void qcms_transform_data_tetra_clut_rgba(qcms_transform *transform, unsigned char *src, unsigned char *dest, size_t length, qcms_format_type output_format)
+void qcms_transform_data_tetra_clut_rgba(qcms_transform *transform, unsigned char *src, unsigned char *dest, size_t length, qcms_format_type output_format)
 {
 	const int r_out = output_format.r;
 	const int b_out = output_format.b;
@@ -1144,8 +1145,17 @@ qcms_transform* qcms_transform_precacheLUT_float(qcms_transform *transform, qcms
 			transform->g_clut = &lut[1]; // g
 			transform->b_clut = &lut[2]; // b
 			transform->grid_size = samples;
+
 			if (in_type == QCMS_DATA_RGBA_8) {
+#if defined(SSE2_ENABLE)
+				if (sse_version_available() >= 2) {
+					transform->transform_fn = qcms_transform_data_tetra_clut_rgba_sse2;
+				} else {
+					transform->transform_fn = qcms_transform_data_tetra_clut_rgba;
+				}
+#else
 				transform->transform_fn = qcms_transform_data_tetra_clut_rgba;
+#endif
 			} else {
 				transform->transform_fn = qcms_transform_data_tetra_clut;
 			}
@@ -1239,38 +1249,47 @@ qcms_transform* qcms_transform_create(
 		qcms_profile *out, qcms_data_type out_type,
 		qcms_intent intent)
 {
+	qcms_transform *transform = NULL;
 	bool precache = false;
+	int i, j;
 
-        qcms_transform *transform = transform_alloc();
-        if (!transform) {
+	transform = transform_alloc();
+	if (!transform) {
 		return NULL;
 	}
-	if (out_type != QCMS_DATA_RGB_8 &&
-                out_type != QCMS_DATA_RGBA_8) {
-            assert(0 && "output type");
-	    transform_free(transform);
-            return NULL;
-        }
 
-	if (out->output_table_r &&
-			out->output_table_g &&
-			out->output_table_b) {
+	if (out_type != QCMS_DATA_RGB_8 && out_type != QCMS_DATA_RGBA_8) {
+		assert(0 && "output type");
+		qcms_transform_release(transform);
+		return NULL;
+	}
+
+	transform->transform_flags = 0;
+
+	if (out->output_table_r && out->output_table_g && out->output_table_b) {
 		precache = true;
 	}
 
 	if (qcms_supports_iccv4 && (in->A2B0 || out->B2A0 || in->mAB || out->mAB)) {
 		// Precache the transformation to a CLUT 33x33x33 in size.
-		// 33 is used by many profiles and works well in pratice. 
+		// 33 is used by many profiles and works well in practice.
 		// This evenly divides 256 into blocks of 8x8x8.
 		// TODO For transforming small data sets of about 200x200 or less
 		// precaching should be avoided.
 		qcms_transform *result = qcms_transform_precacheLUT_float(transform, in, out, 33, in_type);
 		if (!result) {
-            		assert(0 && "precacheLUT failed");
-			transform_free(transform);
+			assert(0 && "precacheLUT failed");
+			qcms_transform_release(transform);
 			return NULL;
 		}
 		return result;
+	}
+
+	/* A matrix-based transform will be selected: check that the PCS
+	   of the input/output profiles are the same, crbug.com/5120682 */
+	if (in->pcs != out->pcs) {
+		qcms_transform_release(transform);
+		return NULL;
 	}
 
 	if (precache) {
@@ -1282,43 +1301,34 @@ qcms_transform* qcms_transform_create(
 			qcms_transform_release(transform);
 			return NO_MEM_TRANSFORM;
 		}
+
 		build_output_lut(out->redTRC, &transform->output_gamma_lut_r, &transform->output_gamma_lut_r_length);
 		build_output_lut(out->greenTRC, &transform->output_gamma_lut_g, &transform->output_gamma_lut_g_length);
 		build_output_lut(out->blueTRC, &transform->output_gamma_lut_b, &transform->output_gamma_lut_b_length);
+
 		if (!transform->output_gamma_lut_r || !transform->output_gamma_lut_g || !transform->output_gamma_lut_b) {
 			qcms_transform_release(transform);
 			return NO_MEM_TRANSFORM;
 		}
 	}
 
-        if (in->color_space == RGB_SIGNATURE) {
+	if (in->color_space == RGB_SIGNATURE) {
 		struct matrix in_matrix, out_matrix, result;
 
-		if (in_type != QCMS_DATA_RGB_8 &&
-                    in_type != QCMS_DATA_RGBA_8){
-                	assert(0 && "input type");
-			transform_free(transform);
-                	return NULL;
-            	}
-		if (precache) {
-#if defined(SSE2_ENABLE) && defined(X86)
-		    if (sse_version_available() >= 2) {
-			    if (in_type == QCMS_DATA_RGB_8)
-				    transform->transform_fn = qcms_transform_data_rgb_out_lut_sse2;
-			    else
-				    transform->transform_fn = qcms_transform_data_rgba_out_lut_sse2;
+		if (in_type != QCMS_DATA_RGB_8 && in_type != QCMS_DATA_RGBA_8) {
+			assert(0 && "input type");
+			qcms_transform_release(transform);
+			return NULL;
+		}
 
-#if defined(SSE2_ENABLE) && !(defined(_MSC_VER) && defined(_M_AMD64))
-                    /* Microsoft Compiler for x64 doesn't support MMX.
-                     * SSE code uses MMX so that we disable on x64 */
-		    } else
-		    if (sse_version_available() >= 1) {
-			    if (in_type == QCMS_DATA_RGB_8)
-				    transform->transform_fn = qcms_transform_data_rgb_out_lut_sse1;
-			    else
-				    transform->transform_fn = qcms_transform_data_rgba_out_lut_sse1;
-#endif
-		    } else
+		if (precache) {
+#if defined(SSE2_ENABLE)
+			if (sse_version_available() >= 2) {
+				if (in_type == QCMS_DATA_RGB_8)
+					transform->transform_fn = qcms_transform_data_rgb_out_lut_sse2;
+				else
+					transform->transform_fn = qcms_transform_data_rgba_out_lut_sse2;
+			} else
 #endif
 			{
 				if (in_type == QCMS_DATA_RGB_8)
@@ -1337,11 +1347,11 @@ qcms_transform* qcms_transform_create(
 		transform->input_gamma_table_r = build_input_gamma_table(in->redTRC);
 		transform->input_gamma_table_g = build_input_gamma_table(in->greenTRC);
 		transform->input_gamma_table_b = build_input_gamma_table(in->blueTRC);
+
 		if (!transform->input_gamma_table_r || !transform->input_gamma_table_g || !transform->input_gamma_table_b) {
 			qcms_transform_release(transform);
 			return NO_MEM_TRANSFORM;
 		}
-
 
 		/* build combined colorant matrix */
 		in_matrix = build_colorant_matrix(in);
@@ -1352,6 +1362,17 @@ qcms_transform* qcms_transform_create(
 			return NULL;
 		}
 		result = matrix_multiply(out_matrix, in_matrix);
+
+		/* check for NaN values in the matrix and bail if we find any
+		   see also https://bugzilla.mozilla.org/show_bug.cgi?id=1170316 */
+		for (i = 0 ; i < 3 ; ++i) {
+			for (j = 0 ; j < 3 ; ++j) {
+				if (result.m[i][j] != result.m[i][j]) {
+					qcms_transform_release(transform);
+					return NULL;
+				}
+			}
+		}
 
 		/* store the results in column major mode
 		 * this makes doing the multiplication with sse easier */
@@ -1365,15 +1386,18 @@ qcms_transform* qcms_transform_create(
 		transform->matrix[1][2] = result.m[2][1];
 		transform->matrix[2][2] = result.m[2][2];
 
+		/* Flag transform as matrix. */
+		transform->transform_flags |= TRANSFORM_FLAG_MATRIX;
+
 	} else if (in->color_space == GRAY_SIGNATURE) {
-		if (in_type != QCMS_DATA_GRAY_8 &&
-				in_type != QCMS_DATA_GRAYA_8){
+		if (in_type != QCMS_DATA_GRAY_8 && in_type != QCMS_DATA_GRAYA_8) {
 			assert(0 && "input type");
-			transform_free(transform);
+			qcms_transform_release(transform);
 			return NULL;
 		}
 
 		transform->input_gamma_table_gray = build_input_gamma_table(in->grayTRC);
+
 		if (!transform->input_gamma_table_gray) {
 			qcms_transform_release(transform);
 			return NO_MEM_TRANSFORM;
@@ -1394,9 +1418,10 @@ qcms_transform* qcms_transform_create(
 		}
 	} else {
 		assert(0 && "unexpected colorspace");
-		transform_free(transform);
+		qcms_transform_release(transform);
 		return NULL;
 	}
+
 	return transform;
 }
 
@@ -1405,7 +1430,7 @@ qcms_transform* qcms_transform_create(
  * of the attribute but is currently only supported by clang */
 #if defined(__has_attribute)
 #define HAS_FORCE_ALIGN_ARG_POINTER __has_attribute(__force_align_arg_pointer__)
-#elif defined(__GNUC__) && !defined(__x86_64__) && !defined(__amd64__) && !defined(__arm__) && !defined(__mips__)
+#elif defined(__GNUC__) && defined(__i386__)
 #define HAS_FORCE_ALIGN_ARG_POINTER 1
 #else
 #define HAS_FORCE_ALIGN_ARG_POINTER 0
@@ -1431,7 +1456,117 @@ void qcms_transform_data_type(qcms_transform *transform, void *src, void *dest, 
 }
 
 qcms_bool qcms_supports_iccv4;
+
 void qcms_enable_iccv4()
 {
 	qcms_supports_iccv4 = true;
+}
+
+static inline qcms_bool transform_is_matrix(qcms_transform *t)
+{
+	return (t->transform_flags & TRANSFORM_FLAG_MATRIX) ? true : false;
+}
+
+qcms_bool qcms_transform_is_matrix(qcms_transform *t)
+{
+	return transform_is_matrix(t);
+}
+
+float qcms_transform_get_matrix(qcms_transform *t, unsigned i, unsigned j)
+{
+	assert(transform_is_matrix(t) && i < 3 && j < 3);
+
+	// Return transform matrix element in row major order (permute i and j)
+
+	return t->matrix[j][i];
+}
+
+static inline qcms_bool supported_trc_type(qcms_trc_type type)
+{
+	return type == QCMS_TRC_HALF_FLOAT;
+}
+
+const uint16_t half_float_one = 0x3c00;
+
+size_t qcms_transform_get_input_trc_rgba(qcms_transform *t, qcms_profile *in, qcms_trc_type type, unsigned short *data)
+{
+	const size_t size = 256; // The input gamma tables always have 256 entries.
+
+	size_t i;
+
+	if (in->color_space != RGB_SIGNATURE || !supported_trc_type(type))
+		return 0;
+
+	// qcms_profile *in is assumed to be the profile on the input-side of the color transform t.
+	// When a transform is created, the input gamma curve data is stored in the transform ...
+
+	if (!t->input_gamma_table_r || !t->input_gamma_table_g || !t->input_gamma_table_b)
+		return 0;
+
+	// Report the size if no output data is requested. This allows callers to first work out the
+	// the curve size, then provide allocated memory sufficient to store the curve rgba data.
+
+	if (!data)
+		return size;
+
+	for (i = 0; i < size; ++i) {
+		*data++ = float_to_half_float(t->input_gamma_table_r[i]); // r
+		*data++ = float_to_half_float(t->input_gamma_table_g[i]); // g
+		*data++ = float_to_half_float(t->input_gamma_table_b[i]); // b
+		*data++ = half_float_one;                                 // a
+	}
+
+	return size;
+}
+
+const float inverse65535 = (float) (1.0 / 65535.0);
+
+size_t qcms_transform_get_output_trc_rgba(qcms_transform *t, qcms_profile *out, qcms_trc_type type, unsigned short *data)
+{
+	size_t size, i;
+
+	if (out->color_space != RGB_SIGNATURE || !supported_trc_type(type))
+		return 0;
+
+	// qcms_profile *out is assumed to be the profile on the output-side of the transform t.
+	// If the transform output gamma curves need building, do that. They're usually built when
+	// the transform was created, but sometimes not due to the output gamma precache ...
+
+	if (!out->redTRC || !out->greenTRC || !out->blueTRC)
+		return 0;
+	if (!t->output_gamma_lut_r)
+		build_output_lut(out->redTRC, &t->output_gamma_lut_r, &t->output_gamma_lut_r_length);
+	if (!t->output_gamma_lut_g)
+		build_output_lut(out->greenTRC, &t->output_gamma_lut_g, &t->output_gamma_lut_g_length);
+	if (!t->output_gamma_lut_b)
+		build_output_lut(out->blueTRC, &t->output_gamma_lut_b, &t->output_gamma_lut_b_length);
+
+	if (!t->output_gamma_lut_r || !t->output_gamma_lut_g || !t->output_gamma_lut_b)
+		return 0;
+
+	// Output gamma tables should have the same size and should have 4096 entries at most (the
+	// minimum is 256). Larger tables are rare and ignored here: fail by returning 0.
+
+	size = t->output_gamma_lut_r_length;
+	if (size != t->output_gamma_lut_g_length)
+		return 0;
+	if (size != t->output_gamma_lut_b_length)
+		return 0;
+	if (size < 256 || size > 4096)
+		return 0;
+
+	// Report the size if no output data is requested. This allows callers to first work out the
+	// the curve size, then provide allocated memory sufficient to store the curve rgba data.
+
+	if (!data)
+		return size;
+
+	for (i = 0; i < size; ++i) {
+		*data++ = float_to_half_float(t->output_gamma_lut_r[i] * inverse65535); // r
+		*data++ = float_to_half_float(t->output_gamma_lut_g[i] * inverse65535); // g
+		*data++ = float_to_half_float(t->output_gamma_lut_b[i] * inverse65535); // b
+		*data++ = half_float_one;                                               // a
+	}
+
+	return size;
 }

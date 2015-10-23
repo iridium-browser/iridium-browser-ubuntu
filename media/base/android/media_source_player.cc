@@ -18,6 +18,7 @@
 #include "media/base/android/audio_decoder_job.h"
 #include "media/base/android/media_player_manager.h"
 #include "media/base/android/video_decoder_job.h"
+#include "media/base/buffers.h"
 
 namespace media {
 
@@ -216,6 +217,11 @@ void MediaSourcePlayer::StartInternal() {
   // If there are pending events, wait for them finish.
   if (pending_event_ != NO_EVENT_PENDING)
     return;
+
+  if (!manager()->RequestPlay(player_id())) {
+    Pause(true);
+    return;
+  }
 
   // When we start, we could have new demuxed data coming in. This new data
   // could be clear (not encrypted) or encrypted with different keys. So key

@@ -10,6 +10,10 @@
 #include "ash/ash_export.h"
 #include "base/containers/scoped_ptr_hash_map.h"
 
+namespace aura {
+class Window;
+}  // namespace aura
+
 namespace ash {
 
 class TaskSwitchTimeTracker;
@@ -22,30 +26,52 @@ class ASH_EXPORT TaskSwitchMetricsRecorder {
   // Enumeration of the different user interfaces that could be the source of
   // a task switch. Note this is not necessarily comprehensive of all sources.
   enum TaskSwitchSource {
+    // Task switches caused by any two sources in this enum. NOTE: This value
+    // should NOT be used outside of this class.
+    ANY,
+    // Task switches from selecting items in the app list.
+    APP_LIST,
+    // Task switches caused by the user activating a task window by clicking or
+    // tapping on it.
+    DESKTOP,
+    // Task switches caused by selecting a window from overview mode which is
+    // different from the previously-active window.
+    OVERVIEW_MODE,
     // All task switches caused by shelf buttons, not including sub-menus.
-    kShelf,
+    SHELF,
     // All task switches caused by the tab strip.
-    kTabStrip,
+    TAB_STRIP,
     // Task switches caused by the WindowCycleController (ie Alt+Tab).
-    kWindowCycleController
+    WINDOW_CYCLE_CONTROLLER
   };
 
   TaskSwitchMetricsRecorder();
   virtual ~TaskSwitchMetricsRecorder();
 
-  // Notifies |this| that a "navigate to" task switch has occurred. A
-  // "navigate to" operation is defined by a task switch where the specific task
-  // that becomes active is user-predictable (ie Alt+Tab accelerator, launching
-  // a new window via the shelf, etc). Contrast to a "navigate away" operation
-  // which is defined as a user interaction that navigates away from a specified
-  // task and the next task that becomes active is likely not user-predictable
-  // (ie. closing or minimizing a window, closing a tab, etc).
+  // Notifies |this| that a "navigate to" task switch has occurred from the
+  // specified |task_switch_source|. The metrics associated with
+  // TaskSwitchSource::ANY source will be updated as well.
+  //
+  // NOTE: A |task_switch_source| value of TaskSwitchSource::ANY should not be
+  // used and behavior is undefined if it is.
+  //
+  // A "navigate to" operation is defined by a task switch where the specific
+  // task that becomes active is user-predictable (e.g., Alt+Tab accelerator,
+  // launching a new window via the shelf, etc). Contrast to a "navigate away"
+  // operation which is defined as a user interaction that navigates away from a
+  // specified task and the next task that becomes active is likely not
+  // user-predictable (e.g., closing or minimizing a window, closing a tab,
+  // etc).
   //
   // Will add an entry to |histogram_map_| when called for the first time for
   // each |task_switch_source| value.
   void OnTaskSwitch(TaskSwitchSource task_switch_source);
 
  private:
+  // Internal implementation of OnTaskSwitch(TaskSwitchSource) that will accept
+  // the TaskSwitchSource::ANY value.
+  void OnTaskSwitchInternal(TaskSwitchSource task_switch_source);
+
   // Returns the TaskSwitchTimeTracker associated with the specified
   // |task_switch_source|. May return nullptr if mapping does not exist yet.
   TaskSwitchTimeTracker* FindTaskSwitchTimeTracker(

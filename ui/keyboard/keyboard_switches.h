@@ -10,15 +10,9 @@
 namespace keyboard {
 namespace switches {
 
-// Enables the swipe selection feature on the virtual keyboard.
-KEYBOARD_EXPORT extern const char kEnableSwipeSelection[];
-
 // Disables IME extension APIs from overriding the URL for specifying the
 // contents of the virtual keyboard container.
 KEYBOARD_EXPORT extern const char kDisableInputView[];
-
-// Disables material design styling of the keyboard.
-KEYBOARD_EXPORT extern const char kDisableNewMDInputView[];
 
 // Disables voice input.
 KEYBOARD_EXPORT extern const char kDisableVoiceInput[];
@@ -70,9 +64,15 @@ KEYBOARD_EXPORT extern const char kDisableVirtualKeyboardOverscroll[];
 // to provide access to content that would otherwise be occluded.
 KEYBOARD_EXPORT extern const char kEnableVirtualKeyboardOverscroll[];
 
-// Disable automatic showing/hiding of the keyboard based on the devices plugged
-// in.
-KEYBOARD_EXPORT extern const char kDisableSmartVirtualKeyboard[];
+// Controls automatic showing/hiding of the keyboard based on the devices
+// plugged in.
+KEYBOARD_EXPORT extern const char kSmartVirtualKeyboard[];
+
+// Enables smart deploy for the virtual keyboard.
+KEYBOARD_EXPORT extern const char kSmartVirtualKeyboardEnabled[];
+
+// Disables smart deploy for the virtual keyboard.
+KEYBOARD_EXPORT extern const char kSmartVirtualKeyboardDisabled[];
 
 }  // namespace switches
 }  // namespace keyboard

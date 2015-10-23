@@ -14,15 +14,10 @@
 #include "base/time/time.h"
 #include "chrome/browser/interstitials/security_interstitial_page.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ssl/certificate_error_report.h"
 #include "chrome/browser/ssl/ssl_cert_reporter.h"
 #include "net/ssl/ssl_info.h"
 #include "url/gurl.h"
-
-// Constants for the HTTPSErrorReporter Finch experiment
-extern const char kHTTPSErrorReporterFinchExperimentName[];
-extern const char kHTTPSErrorReporterFinchGroupShowPossiblySend[];
-extern const char kHTTPSErrorReporterFinchGroupDontShowDontSend[];
-extern const char kHTTPSErrorReporterFinchParamName[];
 
 #if defined(ENABLE_EXTENSIONS)
 namespace extensions {
@@ -30,6 +25,11 @@ class ExperienceSamplingEvent;
 }
 #endif
 
+namespace policy {
+class PolicyTest_SSLErrorOverridingDisallowed_Test;
+}
+
+class CertReportHelper;
 class SSLErrorClassification;
 
 // This class is responsible for showing/hiding the interstitial page that is
@@ -76,10 +76,14 @@ class SSLBlockingPage : public SecurityInterstitialPage {
   // if SSL error overriding is allowed by policy.
   static bool IsOverridable(int options_mask, const Profile* const profile);
 
+  static bool DoesPolicyAllowDangerOverride(const Profile* const profile);
+
   void SetSSLCertReporterForTesting(
       scoped_ptr<SSLCertReporter> ssl_cert_reporter);
 
  protected:
+  friend class policy::PolicyTest_SSLErrorOverridingDisallowed_Test;
+
   // InterstitialPageDelegate implementation.
   void CommandReceived(const std::string& command) override;
   void OverrideEntry(content::NavigationEntry* entry) override;
@@ -92,25 +96,13 @@ class SSLBlockingPage : public SecurityInterstitialPage {
   void PopulateInterstitialStrings(
       base::DictionaryValue* load_time_data) override;
 
-  void PopulateExtendedReportingOption(base::DictionaryValue* load_time_data);
-
  private:
   void NotifyDenyCertificate();
   void NotifyAllowCertificate();
+  CertificateErrorReport::InterstitialReason GetCertReportInterstitialReason();
 
   std::string GetUmaHistogramPrefix() const;
   std::string GetSamplingEventName() const;
-
-  // Send a report about an invalid certificate to the server.
-  void FinishCertCollection();
-
-  // Check whether a checkbox should be shown on the page that allows
-  // the user to opt in to Safe Browsing extended reporting.
-  bool ShouldShowCertificateReporterCheckbox();
-
-  // Returns true if an certificate report should be sent for the SSL
-  // error for this page.
-  bool ShouldReportCertificateError();
 
   base::Callback<void(bool)> callback_;
 
@@ -136,8 +128,7 @@ class SSLBlockingPage : public SecurityInterstitialPage {
   // calculates all times relative to this.
   const base::Time time_triggered_;
 
-  // Handles reports of invalid SSL certificates.
-  scoped_ptr<SSLCertReporter> ssl_cert_reporter_;
+  scoped_ptr<CertReportHelper> cert_report_helper_;
 
   // Which type of interstitial this is.
   enum SSLInterstitialReason {

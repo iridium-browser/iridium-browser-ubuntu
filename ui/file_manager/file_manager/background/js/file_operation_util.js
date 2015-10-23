@@ -113,7 +113,7 @@ fileOperationUtil.deduplicatePath = function(
  * include the entry itself.
  *
  * @param {Entry} entry The root Entry for traversing.
- * @param {function(Array.<Entry>)} successCallback Called when the traverse
+ * @param {function(Array<Entry>)} successCallback Called when the traverse
  *     is successfully done with the array of the entries.
  * @param {function(DOMError)} errorCallback Called on error with the first
  *     occurred error (i.e. following errors will just be discarded).
@@ -193,10 +193,10 @@ fileOperationUtil.resolveRecursively_ = function(
  * <p>For real-time (as you scan) results use {@code findFilesRecursively}.
  *
  * @param {!DirectoryEntry} entry The DirectoryEntry to scan.
- * @return {!Promise.<!Array.<!Entry>>} Resolves when scanning is complete.
+ * @return {!Promise.<!Array<!Entry>>} Resolves when scanning is complete.
  */
 fileOperationUtil.gatherEntriesRecursively = function(entry) {
-  /** @type {!Array.<!Entry>} */
+  /** @type {!Array<!Entry>} */
   var gatheredFiles = [];
 
   return fileOperationUtil.findEntriesRecursively(
@@ -352,8 +352,8 @@ fileOperationUtil.listEntries = function(directory, callback) {
  * - The progress callback is supported.
  * - The cancellation is supported.
  *
- * @param {Entry} source The entry to be copied.
- * @param {DirectoryEntry} parent The entry of the destination directory.
+ * @param {!Entry} source The entry to be copied.
+ * @param {!DirectoryEntry} parent The entry of the destination directory.
  * @param {string} newName The name of copied file.
  * @param {function(string, Entry)} entryChangedCallback
  *     Callback invoked when an entry is created with the source URL and
@@ -372,7 +372,9 @@ fileOperationUtil.listEntries = function(directory, callback) {
 fileOperationUtil.copyTo = function(
     source, parent, newName, entryChangedCallback, progressCallback,
     successCallback, errorCallback) {
-  var copyId = null;
+
+  /** @type {number|undefined} */
+  var copyId;
   var pendingCallbacks = [];
 
   // Makes the callback called in order they were invoked.
@@ -443,7 +445,8 @@ fileOperationUtil.copyTo = function(
           console.error('Unknown progress type: ' + status.type);
           chrome.fileManagerPrivate.onCopyProgress.removeListener(
               onCopyProgress);
-          chrome.fileManagerPrivate.cancelCopy(copyId);
+          chrome.fileManagerPrivate.cancelCopy(
+              assert(copyId), util.checkAPIError);
           errorCallback(util.createDOMError(
               util.FileError.INVALID_STATE_ERR));
           callback();
@@ -456,9 +459,8 @@ fileOperationUtil.copyTo = function(
   chrome.fileManagerPrivate.onCopyProgress.addListener(onCopyProgress);
 
   // Then starts the copy.
-  // TODO(mtomasz): Convert URL to Entry in custom bindings.
   chrome.fileManagerPrivate.startCopy(
-      source.toURL(), parent.toURL(), newName, function(startCopyId) {
+      source, parent, newName, function(startCopyId) {
         // last error contains the FileError code on error.
         if (chrome.runtime.lastError) {
           // Unsubscribe the progress listener.
@@ -477,14 +479,15 @@ fileOperationUtil.copyTo = function(
 
   return function() {
     // If copyId is not yet available, wait for it.
-    if (copyId == null) {
+    if (copyId === undefined) {
       pendingCallbacks.push(function() {
-        chrome.fileManagerPrivate.cancelCopy(copyId);
+        chrome.fileManagerPrivate.cancelCopy(
+            assert(copyId), util.checkAPIError);
       });
       return;
     }
 
-    chrome.fileManagerPrivate.cancelCopy(copyId);
+    chrome.fileManagerPrivate.cancelCopy(copyId, util.checkAPIError);
   };
 };
 
@@ -492,8 +495,8 @@ fileOperationUtil.copyTo = function(
  * Thin wrapper of chrome.fileManagerPrivate.zipSelection to adapt its
  * interface similar to copyTo().
  *
- * @param {Array.<Entry>} sources The array of entries to be archived.
- * @param {DirectoryEntry} parent The entry of the destination directory.
+ * @param {!Array<!Entry>} sources The array of entries to be archived.
+ * @param {!DirectoryEntry} parent The entry of the destination directory.
  * @param {string} newName The name of the archive to be created.
  * @param {function(FileEntry)} successCallback Callback invoked when the
  *     operation is successfully done with the entry of the created archive.
@@ -502,11 +505,9 @@ fileOperationUtil.copyTo = function(
  */
 fileOperationUtil.zipSelection = function(
     sources, parent, newName, successCallback, errorCallback) {
-  // TODO(mtomasz): Move conversion from entry to url to custom bindings.
-  // crbug.com/345527.
   chrome.fileManagerPrivate.zipSelection(
-      parent.toURL(),
-      util.entriesToURLs(sources),
+      parent,
+      sources,
       newName, function(success) {
         if (!success) {
           // Failed to create a zip archive.
@@ -530,7 +531,7 @@ fileOperationUtil.zipSelection = function(
  *
  * @param {string} taskId A unique ID for identifying this task.
  * @param {util.FileOperationType} operationType The type of this operation.
- * @param {Array.<Entry>} sourceEntries Array of source entries.
+ * @param {Array<Entry>} sourceEntries Array of source entries.
  * @param {DirectoryEntry} targetDirEntry Target directory.
  * @constructor
  * @struct
@@ -543,7 +544,7 @@ fileOperationUtil.Task = function(
   /** @type {util.FileOperationType} */
   this.operationType = operationType;
 
-  /** @type {Array.<Entry>} */
+  /** @type {Array<Entry>} */
   this.sourceEntries = sourceEntries;
 
   /** @type {DirectoryEntry} */
@@ -551,7 +552,7 @@ fileOperationUtil.Task = function(
 
   /**
    * An array of map from url to Entry being processed.
-   * @type {Array.<Object<string, Entry>>}
+   * @type {Array<Object<Entry>>}
    */
   this.processingEntries = null;
 
@@ -668,7 +669,7 @@ fileOperationUtil.Task.prototype.calcProcessedBytes_ = function() {
  * Task to copy entries.
  *
  * @param {string} taskId A unique ID for identifying this task.
- * @param {Array.<Entry>} sourceEntries Array of source entries.
+ * @param {Array<Entry>} sourceEntries Array of source entries.
  * @param {DirectoryEntry} targetDirEntry Target directory.
  * @param {boolean} deleteAfterCopy Whether the delete original files after
  *     copy.
@@ -870,8 +871,8 @@ fileOperationUtil.CopyTask.prototype.run = function(
 /**
  * Copies the source entry to the target directory.
  *
- * @param {Entry} sourceEntry An entry to be copied.
- * @param {DirectoryEntry} destinationEntry The entry which will contain the
+ * @param {!Entry} sourceEntry An entry to be copied.
+ * @param {!DirectoryEntry} destinationEntry The entry which will contain the
  *     copied entry.
  * @param {function(string, Entry)} entryChangedCallback
  *     Callback invoked when an entry is created with the source URL and
@@ -914,7 +915,7 @@ fileOperationUtil.CopyTask.prototype.processEntry_ = function(
  * Task to move entries.
  *
  * @param {string} taskId A unique ID for identifying this task.
- * @param {Array.<Entry>} sourceEntries Array of source entries.
+ * @param {Array<Entry>} sourceEntries Array of source entries.
  * @param {DirectoryEntry} targetDirEntry Target directory.
  * @constructor
  * @extends {fileOperationUtil.Task}
@@ -1044,9 +1045,9 @@ fileOperationUtil.MoveTask.processEntry_ = function(
  * Task to create a zip archive.
  *
  * @param {string} taskId A unique ID for identifying this task.
- * @param {Array.<Entry>} sourceEntries Array of source entries.
- * @param {DirectoryEntry} targetDirEntry Target directory.
- * @param {DirectoryEntry} zipBaseDirEntry Base directory dealt as a root
+ * @param {!Array<!Entry>} sourceEntries Array of source entries.
+ * @param {!DirectoryEntry} targetDirEntry Target directory.
+ * @param {!DirectoryEntry} zipBaseDirEntry Base directory dealt as a root
  *     in ZIP archive.
  * @constructor
  * @extends {fileOperationUtil.Task}
@@ -1179,8 +1180,8 @@ fileOperationUtil.Error = function(code, data) {
  * @extends {cr.EventTarget}
  */
 fileOperationUtil.EventRouter = function() {
-  this.pendingDeletedEntries_ = [];
-  this.pendingCreatedEntries_ = [];
+  this.pendingDeletedEntries_ = {};
+  this.pendingCreatedEntries_ = {};
   this.entryChangedEventRateLimiter_ = new AsyncUtil.RateLimiter(
       this.dispatchEntryChangedEvent_.bind(this), 500);
 };
@@ -1240,9 +1241,9 @@ fileOperationUtil.EventRouter.prototype.sendProgressEvent = function(
 fileOperationUtil.EventRouter.prototype.sendEntryChangedEvent = function(
     kind, entry) {
   if (kind === util.EntryChangedKind.DELETED)
-    this.pendingDeletedEntries_.push(entry);
+    this.pendingDeletedEntries_[entry.toURL()] = entry;
   if (kind === util.EntryChangedKind.CREATED)
-    this.pendingCreatedEntries_.push(entry);
+    this.pendingCreatedEntries_[entry.toURL()] = entry;
 
   this.entryChangedEventRateLimiter_.run();
 };
@@ -1253,19 +1254,27 @@ fileOperationUtil.EventRouter.prototype.sendEntryChangedEvent = function(
  */
 fileOperationUtil.EventRouter.prototype.dispatchEntryChangedEvent_ =
     function() {
-  if (this.pendingDeletedEntries_.length > 0) {
+  var deletedEntries = [];
+  var createdEntries = [];
+  for (var url in this.pendingDeletedEntries_) {
+    deletedEntries.push(this.pendingDeletedEntries_[url]);
+  }
+  for (var url in this.pendingCreatedEntries_) {
+    createdEntries.push(this.pendingCreatedEntries_[url]);
+  }
+  if (deletedEntries.length > 0) {
     var event = new Event('entries-changed');
     event.kind = util.EntryChangedKind.DELETED;
-    event.entries = this.pendingDeletedEntries_;
+    event.entries = deletedEntries;
     this.dispatchEvent(event);
-    this.pendingDeletedEntries_ = [];
+    this.pendingDeletedEntries_ = {};
   }
-  if (this.pendingCreatedEntries_.length > 0) {
+  if (createdEntries.length > 0) {
     var event = new Event('entries-changed');
     event.kind = util.EntryChangedKind.CREATED;
-    event.entries = this.pendingCreatedEntries_;
+    event.entries = createdEntries;
     this.dispatchEvent(event);
-    this.pendingCreatedEntries_ = [];
+    this.pendingCreatedEntries_ = {};
   }
 };
 

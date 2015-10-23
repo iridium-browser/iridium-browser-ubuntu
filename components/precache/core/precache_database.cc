@@ -6,9 +6,12 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
-#include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/location.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "components/history/core/browser/history_constants.h"
 #include "sql/connection.h"
 #include "sql/transaction.h"
 #include "url/gurl.h"
@@ -71,13 +74,27 @@ void PrecacheDatabase::DeleteExpiredPrecacheHistory(
   buffered_writes_.push_back(
       base::Bind(&PrecacheURLTable::DeleteAllPrecachedBefore,
                  base::Unretained(&precache_url_table_), delete_end));
-
   Flush();
 }
 
-void PrecacheDatabase::RecordURLPrecached(const GURL& url,
-                                          const base::Time& fetch_time,
-                                          int64 size, bool was_cached) {
+void PrecacheDatabase::ClearHistory() {
+  if (!IsDatabaseAccessible()) {
+    // Do nothing if unable to access the database.
+    return;
+  }
+
+  buffered_writes_.push_back(base::Bind(
+      &PrecacheURLTable::DeleteAll, base::Unretained(&precache_url_table_)));
+  Flush();
+}
+
+void PrecacheDatabase::RecordURLPrefetch(const GURL& url,
+                                         const base::TimeDelta& latency,
+                                         const base::Time& fetch_time,
+                                         int64 size,
+                                         bool was_cached) {
+  UMA_HISTOGRAM_TIMES("Precache.Latency.Prefetch", latency);
+
   if (!IsDatabaseAccessible()) {
     // Don't track anything if unable to access the database.
     return;
@@ -114,10 +131,25 @@ void PrecacheDatabase::RecordURLPrecached(const GURL& url,
   MaybePostFlush();
 }
 
-void PrecacheDatabase::RecordURLFetched(const GURL& url,
-                                        const base::Time& fetch_time,
-                                        int64 size, bool was_cached,
-                                        bool is_connection_cellular) {
+void PrecacheDatabase::RecordURLNonPrefetch(const GURL& url,
+                                            const base::TimeDelta& latency,
+                                            const base::Time& fetch_time,
+                                            int64 size,
+                                            bool was_cached,
+                                            int host_rank,
+                                            bool is_connection_cellular) {
+  UMA_HISTOGRAM_TIMES("Precache.Latency.NonPrefetch", latency);
+
+  if (host_rank != history::kMaxTopHosts) {
+    // The resource was loaded on a page that could have been affected by
+    // precaching.
+    UMA_HISTOGRAM_TIMES("Precache.Latency.NonPrefetch.TopHosts", latency);
+  } else {
+    // The resource was loaded on a page that could NOT have been affected by
+    // precaching.
+    UMA_HISTOGRAM_TIMES("Precache.Latency.NonPrefetch.NonTopHosts", latency);
+  }
+
   if (!IsDatabaseAccessible()) {
     // Don't track anything if unable to access the database.
     return;
@@ -217,11 +249,10 @@ void PrecacheDatabase::MaybePostFlush() {
     return;
   }
 
-  DCHECK(base::MessageLoop::current());
   // Post a delayed task to flush the buffer in 1 second, so that multiple
   // database writes can be buffered up and flushed together in the same
   // transaction.
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::Bind(&PrecacheDatabase::PostedFlush,
                             scoped_refptr<PrecacheDatabase>(this)),
       base::TimeDelta::FromSeconds(1));

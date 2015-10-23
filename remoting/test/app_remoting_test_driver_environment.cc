@@ -15,6 +15,7 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "remoting/test/access_token_fetcher.h"
+#include "remoting/test/app_remoting_report_issue_request.h"
 #include "remoting/test/refresh_token_store.h"
 #include "remoting/test/remote_host_info.h"
 
@@ -23,17 +24,27 @@ namespace test {
 
 AppRemotingTestDriverEnvironment* AppRemotingSharedData;
 
+AppRemotingTestDriverEnvironment::EnvironmentOptions::EnvironmentOptions()
+    : refresh_token_file_path(base::FilePath()),
+      service_environment(kUnknownEnvironment),
+      release_hosts_when_done(false) {
+}
+
+AppRemotingTestDriverEnvironment::EnvironmentOptions::~EnvironmentOptions() {
+}
+
 AppRemotingTestDriverEnvironment::AppRemotingTestDriverEnvironment(
-    const std::string& user_name,
-    ServiceEnvironment service_environment)
-    : user_name_(user_name),
-      service_environment_(service_environment),
+    const EnvironmentOptions& options)
+    : user_name_(options.user_name),
+      service_environment_(options.service_environment),
+      release_hosts_when_done_(options.release_hosts_when_done),
+      refresh_token_file_path_(options.refresh_token_file_path),
       test_access_token_fetcher_(nullptr),
+      test_app_remoting_report_issue_request_(nullptr),
       test_refresh_token_store_(nullptr),
-      test_remote_host_info_fetcher_(nullptr),
-      message_loop_(new base::MessageLoopForIO()) {
+      test_remote_host_info_fetcher_(nullptr) {
   DCHECK(!user_name_.empty());
-  DCHECK(service_environment < kUnknownEnvironment);
+  DCHECK(service_environment_ < kUnknownEnvironment);
 
   PopulateApplicationNames();
   PopulateApplicationDetailsMap();
@@ -48,12 +59,17 @@ bool AppRemotingTestDriverEnvironment::Initialize(
     return true;
   }
 
+  if (!base::MessageLoop::current()) {
+    message_loop_.reset(new base::MessageLoopForIO);
+  }
+
   // If a unit test has set |test_refresh_token_store_| then we should use it
   // below.  Note that we do not want to destroy the test object.
   scoped_ptr<RefreshTokenStore> temporary_refresh_token_store;
   RefreshTokenStore* refresh_token_store = test_refresh_token_store_;
   if (!refresh_token_store) {
-    temporary_refresh_token_store = RefreshTokenStore::OnDisk(user_name_);
+    temporary_refresh_token_store =
+        RefreshTokenStore::OnDisk(user_name_, refresh_token_file_path_);
     refresh_token_store = temporary_refresh_token_store.get();
   }
 
@@ -61,7 +77,7 @@ bool AppRemotingTestDriverEnvironment::Initialize(
   refresh_token_ = refresh_token_store->FetchRefreshToken();
   if (refresh_token_.empty()) {
     // This isn't necessarily an error as this might be a first run scenario.
-    DVLOG(1) << "No refresh token stored for " << user_name_;
+    VLOG(2) << "No refresh token stored for " << user_name_;
 
     if (auth_code.empty()) {
       // No token and no Auth code means no service connectivity, bail!
@@ -125,6 +141,26 @@ bool AppRemotingTestDriverEnvironment::GetRemoteHostInfoForApplicationId(
   return remote_host_info->IsReadyForConnection();
 }
 
+void AppRemotingTestDriverEnvironment::AddHostToReleaseList(
+    const std::string& application_id,
+    const std::string& host_id) {
+  if (!release_hosts_when_done_) {
+    return;
+  }
+
+  auto map_iterator = host_ids_to_release_.find(application_id);
+  if (map_iterator == host_ids_to_release_.end()) {
+    std::vector<std::string> host_id_list(1, host_id);
+    host_ids_to_release_.insert(std::make_pair(application_id, host_id_list));
+  } else {
+    std::vector<std::string>* host_ids = &map_iterator->second;
+    if (std::find(host_ids->begin(), host_ids->end(), host_id) ==
+        host_ids->end()) {
+      host_ids->push_back(host_id);
+    }
+  }
+}
+
 void AppRemotingTestDriverEnvironment::ShowHostAvailability() {
   const char kHostAvailabilityFormatString[] = "%-25s%-35s%-10s";
 
@@ -173,6 +209,13 @@ void AppRemotingTestDriverEnvironment::SetAccessTokenFetcherForTest(
   test_access_token_fetcher_ = access_token_fetcher;
 }
 
+void AppRemotingTestDriverEnvironment::SetAppRemotingReportIssueRequestForTest(
+    AppRemotingReportIssueRequest* app_remoting_report_issue_request) {
+  DCHECK(app_remoting_report_issue_request);
+
+  test_app_remoting_report_issue_request_ = app_remoting_report_issue_request;
+}
+
 void AppRemotingTestDriverEnvironment::SetRefreshTokenStoreForTest(
     RefreshTokenStore* refresh_token_store) {
   DCHECK(refresh_token_store);
@@ -188,6 +231,39 @@ void AppRemotingTestDriverEnvironment::SetRemoteHostInfoFetcherForTest(
 }
 
 void AppRemotingTestDriverEnvironment::TearDown() {
+  // If a unit test has set |test_app_remoting_report_issue_request_| then we
+  // should use it below.  Note that we do not want to destroy the test object
+  // at the end of the function which is why we have the dance below.
+  scoped_ptr<AppRemotingReportIssueRequest> temporary_report_issue_request;
+  AppRemotingReportIssueRequest* report_issue_request =
+      test_app_remoting_report_issue_request_;
+  if (!report_issue_request) {
+    temporary_report_issue_request.reset(new AppRemotingReportIssueRequest());
+    report_issue_request = temporary_report_issue_request.get();
+  }
+
+  for (const auto& kvp : host_ids_to_release_) {
+    std::string application_id = kvp.first;
+    VLOG(1) << "Releasing hosts for application: " << application_id;
+
+    for (const auto& host_id : kvp.second) {
+      base::RunLoop run_loop;
+
+      VLOG(1) << "    Releasing host: " << host_id;
+      bool request_started = report_issue_request->Start(
+          application_id, host_id, access_token_, service_environment_, true,
+          run_loop.QuitClosure());
+
+      if (request_started) {
+        run_loop.Run();
+      } else {
+        LOG(ERROR) << "Failed to send ReportIssueRequest for: "
+                   << application_id << ", " << host_id;
+      }
+    }
+  }
+  temporary_report_issue_request.reset();
+
   // Letting the MessageLoop tear down during the test destructor results in
   // errors after test completion, when the MessageLoop dtor touches the
   // registered AtExitManager. The AtExitManager is torn down before the test
@@ -240,7 +316,8 @@ bool AppRemotingTestDriverEnvironment::RetrieveAccessToken(
       scoped_ptr<RefreshTokenStore> temporary_refresh_token_store;
       RefreshTokenStore* refresh_token_store = test_refresh_token_store_;
       if (!refresh_token_store) {
-        temporary_refresh_token_store = RefreshTokenStore::OnDisk(user_name_);
+        temporary_refresh_token_store =
+            RefreshTokenStore::OnDisk(user_name_, refresh_token_file_path_);
         refresh_token_store = temporary_refresh_token_store.get();
       }
 

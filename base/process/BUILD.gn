@@ -77,7 +77,7 @@ source_set("process") {
     set_sources_assignment_filter(sources_assignment_filter)
   }
 
-  if (is_nacl) {
+  if (is_nacl || is_ios) {
     sources -= [
       "kill.cc",
       "kill.h",
@@ -92,6 +92,13 @@ source_set("process") {
       "process_metrics.cc",
       "process_metrics_posix.cc",
       "process_posix.cc",
+    ]
+  }
+
+  if (is_ios) {
+    sources += [
+      "memory_stubs.cc",
+      "process_metrics.cc",
     ]
   }
 

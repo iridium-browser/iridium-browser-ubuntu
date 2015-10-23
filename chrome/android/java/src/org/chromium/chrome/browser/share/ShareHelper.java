@@ -4,11 +4,15 @@
 
 package org.chromium.chrome.browser.share;
 
+import android.annotation.TargetApi;
 import android.app.Activity;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
@@ -19,9 +23,10 @@ import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.preference.PreferenceManager;
 import android.support.v7.app.AlertDialog;
-import android.util.Log;
+import android.util.Pair;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.AdapterView;
@@ -30,7 +35,10 @@ import android.widget.AdapterView.OnItemClickListener;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.ui.UiUtils;
@@ -40,17 +48,21 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * A helper class that helps to start an intent to share titles and URLs.
  */
 public class ShareHelper {
 
-    private static final String TAG = "ShareHelper";
+    private static final String TAG = "cr.chrome.browser";
 
     private static final String PACKAGE_NAME_KEY = "last_shared_package_name";
     private static final String CLASS_NAME_KEY = "last_shared_class_name";
     private static final String EXTRA_SHARE_SCREENSHOT_AS_STREAM = "share_screenshot_as_stream";
+    private static final long COMPONENT_INFO_READ_TIMEOUT_IN_MS = 1000;
 
     /**
      * Directory name for screenshots.
@@ -59,13 +71,74 @@ public class ShareHelper {
 
     private ShareHelper() {}
 
+    @SuppressFBWarnings("NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE")
     private static void deleteScreenshotFiles(File file) {
         if (!file.exists()) return;
         if (file.isDirectory()) {
             for (File f : file.listFiles()) deleteScreenshotFiles(f);
         }
         if (!file.delete()) {
-            Log.w(TAG, "Failed to delete screenshot file: " + file.getAbsolutePath());
+            Log.w(TAG, "Failed to delete screenshot file: %s", file.getAbsolutePath());
+        }
+    }
+
+    /**
+     * Receiver to record the chosen component when sharing an Intent.
+     */
+    static class TargetChosenReceiver extends BroadcastReceiver {
+        private static final String EXTRA_RECEIVER_TOKEN = "receiver_token";
+        private static final Object LOCK = new Object();
+
+        private static String sTargetChosenReceiveAction;
+        private static TargetChosenReceiver sLastRegisteredReceiver;
+
+        static boolean isSupported() {
+            return Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1;
+        }
+
+        @TargetApi(Build.VERSION_CODES.LOLLIPOP_MR1)
+        static void sendChooserIntent(Activity activity, Intent sharingIntent) {
+            synchronized (LOCK) {
+                if (sTargetChosenReceiveAction == null) {
+                    sTargetChosenReceiveAction = activity.getPackageName() + "/"
+                            + TargetChosenReceiver.class.getName() + "_ACTION";
+                }
+                Context context = activity.getApplicationContext();
+                if (sLastRegisteredReceiver != null) {
+                    context.unregisterReceiver(sLastRegisteredReceiver);
+                }
+                sLastRegisteredReceiver = new TargetChosenReceiver();
+                context.registerReceiver(
+                        sLastRegisteredReceiver, new IntentFilter(sTargetChosenReceiveAction));
+            }
+
+            Intent intent = new Intent(sTargetChosenReceiveAction);
+            intent.setPackage(activity.getPackageName());
+            intent.putExtra(EXTRA_RECEIVER_TOKEN, sLastRegisteredReceiver.hashCode());
+            final PendingIntent callback = PendingIntent.getBroadcast(activity, 0, intent,
+                    PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_ONE_SHOT);
+            Intent chooserIntent = Intent.createChooser(sharingIntent,
+                    activity.getString(R.string.share_link_chooser_title),
+                    callback.getIntentSender());
+            activity.startActivity(chooserIntent);
+        }
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            synchronized (LOCK) {
+                if (sLastRegisteredReceiver != this) return;
+                context.getApplicationContext().unregisterReceiver(sLastRegisteredReceiver);
+                sLastRegisteredReceiver = null;
+            }
+            if (!intent.hasExtra(EXTRA_RECEIVER_TOKEN)
+                    || intent.getIntExtra(EXTRA_RECEIVER_TOKEN, 0) != this.hashCode()) {
+                return;
+            }
+
+            ComponentName target = intent.getParcelableExtra(Intent.EXTRA_CHOSEN_COMPONENT);
+            if (target != null) {
+                setLastShareComponentName(context, target);
+            }
         }
     }
 
@@ -107,6 +180,8 @@ public class ShareHelper {
             Bitmap screenshot) {
         if (shareDirectly) {
             shareWithLastUsed(activity, title, url, screenshot);
+        } else if (TargetChosenReceiver.isSupported()) {
+            makeIntentAndShare(activity, title, url, screenshot, null);
         } else {
             showShareDialog(activity, title, url, screenshot);
         }
@@ -166,10 +241,19 @@ public class ShareHelper {
         makeIntentAndShare(activity, title, url, screenshot, component);
     }
 
+    private static void shareIntent(Activity activity, Intent sharingIntent) {
+        if (sharingIntent.getComponent() != null) {
+            activity.startActivity(sharingIntent);
+        } else {
+            assert TargetChosenReceiver.isSupported();
+            TargetChosenReceiver.sendChooserIntent(activity, sharingIntent);
+        }
+    }
+
     private static void makeIntentAndShare(final Activity activity, final String title,
             final String url, final Bitmap screenshot, final ComponentName component) {
         if (screenshot == null) {
-            activity.startActivity(getDirectShareIntentForComponent(title, url, null, component));
+            shareIntent(activity, getDirectShareIntentForComponent(title, url, null, component));
         } else {
             new AsyncTask<Void, Void, File>() {
                 @Override
@@ -207,7 +291,7 @@ public class ShareHelper {
                             != ApplicationState.HAS_DESTROYED_ACTIVITIES) {
                         Uri screenshotUri = saveFile == null
                                 ? null : UiUtils.getUriForImageCaptureFile(activity, saveFile);
-                        activity.startActivity(getDirectShareIntentForComponent(
+                        shareIntent(activity, getDirectShareIntentForComponent(
                                 title, url, screenshotUri, component));
                     }
                 }
@@ -225,16 +309,58 @@ public class ShareHelper {
         Drawable directShareIcon = null;
         CharSequence directShareTitle = null;
 
-        ComponentName component = getLastShareComponentName(activity);
+        final ComponentName component = getLastShareComponentName(activity);
+        boolean isComponentValid = false;
         if (component != null) {
+            Intent intent = getShareIntent("", "", null);
+            intent.setPackage(component.getPackageName());
+            PackageManager manager = activity.getPackageManager();
+            List<ResolveInfo> resolveInfoList = manager.queryIntentActivities(intent, 0);
+            for (ResolveInfo info : resolveInfoList) {
+                ActivityInfo ai = info.activityInfo;
+                if (component.equals(new ComponentName(ai.applicationInfo.packageName, ai.name))) {
+                    isComponentValid = true;
+                    break;
+                }
+            }
+        }
+        if (isComponentValid) {
+            boolean retrieved = false;
             try {
-                directShareIcon = activity.getPackageManager().getActivityIcon(component);
-                ApplicationInfo ai = activity.getPackageManager().getApplicationInfo(
-                        component.getPackageName(), 0);
-                directShareTitle = activity.getPackageManager().getApplicationLabel(ai);
-            } catch (NameNotFoundException exception) {
+                final PackageManager pm = activity.getPackageManager();
+                AsyncTask<Void, Void, Pair<Drawable, CharSequence>> task =
+                        new AsyncTask<Void, Void, Pair<Drawable, CharSequence>>() {
+                            @Override
+                            protected Pair<Drawable, CharSequence> doInBackground(Void... params) {
+                                Drawable directShareIcon = null;
+                                CharSequence directShareTitle = null;
+                                try {
+                                    directShareIcon = pm.getActivityIcon(component);
+                                    ApplicationInfo ai =
+                                            pm.getApplicationInfo(component.getPackageName(), 0);
+                                    directShareTitle = pm.getApplicationLabel(ai);
+                                } catch (NameNotFoundException exception) {
+                                    // Use the default null values.
+                                }
+                                return new Pair<Drawable, CharSequence>(
+                                        directShareIcon, directShareTitle);
+                            }
+                        };
+                task.execute();
+                Pair<Drawable, CharSequence> result =
+                        task.get(COMPONENT_INFO_READ_TIMEOUT_IN_MS, TimeUnit.MILLISECONDS);
+                directShareIcon = result.first;
+                directShareTitle = result.second;
+                retrieved = true;
+            } catch (InterruptedException ie) {
+                // Use the default null values.
+            } catch (ExecutionException ee) {
+                // Use the default null values.
+            } catch (TimeoutException te) {
                 // Use the default null values.
             }
+            RecordHistogram.recordBooleanHistogram(
+                    "Android.IsLastSharedAppInfoRetrieved", retrieved);
         }
 
         item.setIcon(directShareIcon);

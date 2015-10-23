@@ -39,19 +39,19 @@ class ExceptionState;
 class ExecutionContext;
 class GenericEventQueue;
 
-class MediaController final : public EventTargetWithInlineData, public RefCountedWillBeNoBase<MediaController> {
+class MediaController final : public RefCountedGarbageCollectedEventTargetWithInlineData<MediaController> {
     DEFINE_WRAPPERTYPEINFO();
-    REFCOUNTED_EVENT_TARGET(MediaController);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(MediaController);
 public:
-    static PassRefPtrWillBeRawPtr<MediaController> create(ExecutionContext*);
-    virtual ~MediaController();
+    static MediaController* create(ExecutionContext*);
+    ~MediaController() override;
 
     void addMediaElement(HTMLMediaElement*);
     void removeMediaElement(HTMLMediaElement*);
 
-    PassRefPtrWillBeRawPtr<TimeRanges> buffered() const;
-    PassRefPtrWillBeRawPtr<TimeRanges> seekable() const;
-    PassRefPtrWillBeRawPtr<TimeRanges> played();
+    TimeRanges* buffered() const;
+    TimeRanges* seekable() const;
+    TimeRanges* played();
 
     double duration() const;
     double currentTime() const;
@@ -104,8 +104,8 @@ private:
     void startTimeupdateTimer();
 
     // EventTarget
-    virtual const AtomicString& interfaceName() const override;
-    virtual ExecutionContext* executionContext() const override { return m_executionContext; }
+    const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override { return m_executionContext; }
 
     friend class HTMLMediaElement;
     friend class MediaControllerEventListener;

@@ -32,7 +32,7 @@
 #include "public/web/WebRuntimeFeatures.h"
 
 #include "platform/RuntimeEnabledFeatures.h"
-#include "web/WebMediaPlayerClientImpl.h"
+#include "wtf/Assertions.h"
 
 namespace blink {
 
@@ -41,9 +41,20 @@ void WebRuntimeFeatures::enableExperimentalFeatures(bool enable)
     RuntimeEnabledFeatures::setExperimentalFeaturesEnabled(enable);
 }
 
-void WebRuntimeFeatures::enableFeatureFromString(const WebString& name, bool enable)
+void WebRuntimeFeatures::enableWebBluetooth(bool enable)
+{
+    RuntimeEnabledFeatures::setWebBluetoothEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableFeatureFromString(const std::string& name, bool enable)
 {
     RuntimeEnabledFeatures::setFeatureEnabledFromString(name, enable);
+}
+
+// TODO(bashi): Remove.
+void WebRuntimeFeatures::enableFeatureFromString(const WebString& name, bool enable)
+{
+    RuntimeEnabledFeatures::setFeatureEnabledFromString(name.latin1(), enable);
 }
 
 void WebRuntimeFeatures::enableBleedingEdgeFastPaths(bool enable)
@@ -51,11 +62,6 @@ void WebRuntimeFeatures::enableBleedingEdgeFastPaths(bool enable)
     ASSERT(enable);
     RuntimeEnabledFeatures::setBleedingEdgeFastPathsEnabled(enable);
     RuntimeEnabledFeatures::setWebAnimationsAPIEnabled(enable);
-}
-
-void WebRuntimeFeatures::enableBlinkScheduler(bool enable)
-{
-    RuntimeEnabledFeatures::setBlinkSchedulerEnabled(enable);
 }
 
 void WebRuntimeFeatures::enableCompositorAnimationTimelines(bool enable)
@@ -173,11 +179,6 @@ void WebRuntimeFeatures::enableNavigatorContentUtils(bool enable)
     RuntimeEnabledFeatures::setNavigatorContentUtilsEnabled(enable);
 }
 
-void WebRuntimeFeatures::enableNavigationTransitions(bool enable)
-{
-    RuntimeEnabledFeatures::setNavigationTransitionsEnabled(enable);
-}
-
 void WebRuntimeFeatures::enableNetworkInformation(bool enable)
 {
     RuntimeEnabledFeatures::setNetworkInformationEnabled(enable);
@@ -213,14 +214,14 @@ void WebRuntimeFeatures::enableScriptedSpeech(bool enable)
     RuntimeEnabledFeatures::setScriptedSpeechEnabled(enable);
 }
 
-void WebRuntimeFeatures::enableServiceWorker(bool enable)
-{
-    RuntimeEnabledFeatures::setServiceWorkerEnabled(enable);
-}
-
 void WebRuntimeFeatures::enableSlimmingPaint(bool enable)
 {
     RuntimeEnabledFeatures::setSlimmingPaintEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableSlimmingPaintV2(bool enable)
+{
+    RuntimeEnabledFeatures::setSlimmingPaintV2Enabled(enable);
 }
 
 void WebRuntimeFeatures::enableTouch(bool enable)
@@ -248,11 +249,6 @@ void WebRuntimeFeatures::enableWebGLImageChromium(bool enable)
     RuntimeEnabledFeatures::setWebGLImageChromiumEnabled(enable);
 }
 
-void WebRuntimeFeatures::enableWebMIDI(bool enable)
-{
-    return RuntimeEnabledFeatures::setWebMIDIEnabled(enable);
-}
-
 void WebRuntimeFeatures::enableXSLT(bool enable)
 {
     RuntimeEnabledFeatures::setXSLTEnabled(enable);
@@ -268,6 +264,11 @@ void WebRuntimeFeatures::enableOverlayFullscreenVideo(bool enable)
     RuntimeEnabledFeatures::setOverlayFullscreenVideoEnabled(enable);
 }
 
+void WebRuntimeFeatures::forceOverlayFullscreenVideo(bool enable)
+{
+    RuntimeEnabledFeatures::setForceOverlayFullscreenVideoEnabled(enable);
+}
+
 void WebRuntimeFeatures::enableSharedWorker(bool enable)
 {
     RuntimeEnabledFeatures::setSharedWorkerEnabled(enable);
@@ -281,11 +282,6 @@ void WebRuntimeFeatures::enablePreciseMemoryInfo(bool enable)
 void WebRuntimeFeatures::enableCredentialManagerAPI(bool enable)
 {
     RuntimeEnabledFeatures::setCredentialManagerEnabled(enable);
-}
-
-void WebRuntimeFeatures::enableTextBlobs(bool enable)
-{
-    RuntimeEnabledFeatures::setTextBlobEnabled(enable);
 }
 
 void WebRuntimeFeatures::enableCSSViewport(bool enable)
@@ -331,6 +327,16 @@ void WebRuntimeFeatures::enableUnsafeES3APIs(bool enable)
 void WebRuntimeFeatures::enableWebVR(bool enable)
 {
     RuntimeEnabledFeatures::setWebVREnabled(enable);
+}
+
+void WebRuntimeFeatures::enableNewMediaPlaybackUi(bool enable)
+{
+    RuntimeEnabledFeatures::setNewMediaPlaybackUiEnabled(enable);
+}
+
+void WebRuntimeFeatures::enablePresentationAPI(bool enable)
+{
+    RuntimeEnabledFeatures::setPresentationEnabled(enable);
 }
 
 } // namespace blink

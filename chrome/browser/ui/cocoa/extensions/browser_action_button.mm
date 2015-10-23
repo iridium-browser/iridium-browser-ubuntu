@@ -13,7 +13,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
@@ -21,6 +20,7 @@
 #import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_delegate.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
@@ -35,7 +35,6 @@ NSString* const kBrowserActionButtonDraggingNotification =
 NSString* const kBrowserActionButtonDragEndNotification =
     @"BrowserActionButtonDragEndNotification";
 
-static const CGFloat kBrowserActionBadgeOriginYOffset = 5;
 static const CGFloat kAnimationDuration = 0.2;
 static const CGFloat kMinimumDragDistance = 5;
 
@@ -171,11 +170,6 @@ void ToolbarActionViewDelegateBridge::DoShowContextMenu() {
   DCHECK(![controller_ toolbarActionsBar]->popped_out_action());
 }
 
-@interface BrowserActionCell (Internals)
-- (void)drawBadgeWithinFrame:(NSRect)frame
-              forWebContents:(content::WebContents*)webContents;
-@end
-
 @implementation BrowserActionButton
 
 @synthesize isBeingDragged = isBeingDragged_;
@@ -202,7 +196,6 @@ void ToolbarActionViewDelegateBridge::DoShowContextMenu() {
         new ToolbarActionViewDelegateBridge(self, controller, viewController));
 
     [cell setBrowserActionsController:controller];
-    [cell setViewController:viewController_];
     [cell
         accessibilitySetOverrideValue:base::SysUTF16ToNSString(
             viewController_->GetAccessibleName([controller currentWebContents]))
@@ -332,9 +325,23 @@ void ToolbarActionViewDelegateBridge::DoShowContextMenu() {
   // mouse-up).
   NSPoint location = [self convertPoint:[theEvent locationInWindow]
                                fromView:nil];
+  // Only perform the click if we didn't drag the button.
   if (NSPointInRect(location, [self bounds]) && !isBeingDragged_) {
-    // Only perform the click if we didn't drag the button.
-    [self performClick:self];
+    // There's also a chance that the action is disabled, and the left click
+    // should show the context menu.
+    if (!viewController_->IsEnabled(
+            [browserActionsController_ currentWebContents]) &&
+        viewController_->DisabledClickOpensMenu()) {
+      // No menus-in-menus; see comment in -rightMouseDown:.
+      if ([browserActionsController_ isOverflow]) {
+        [browserActionsController_ mainButtonForId:viewController_->GetId()]->
+            viewControllerDelegate_->ShowContextMenu();
+      } else {
+        [NSMenu popUpContextMenu:[self menu] withEvent:theEvent forView:self];
+      }
+    } else {
+      [self performClick:self];
+    }
   } else {
     // Make sure an ESC to end a drag doesn't trigger 2 endDrags.
     if (isBeingDragged_) {
@@ -396,23 +403,18 @@ void ToolbarActionViewDelegateBridge::DoShowContextMenu() {
   if (!webContents)
     return;
 
-  if (viewController_->WantsToRun(webContents)) {
-    [[self cell] setImageID:IDR_BROWSER_ACTION_R
-        forButtonState:image_button_cell::kDefaultState];
-  } else {
-    [[self cell] setImageID:IDR_BROWSER_ACTION
-        forButtonState:image_button_cell::kDefaultState];
-  }
-
   base::string16 tooltip = viewController_->GetTooltip(webContents);
   [self setToolTip:(tooltip.empty() ? nil : base::SysUTF16ToNSString(tooltip))];
 
-  gfx::Image image = viewController_->GetIcon(webContents);
+  gfx::Image image =
+      viewController_->GetIcon(webContents, gfx::Size([self frame].size));
 
   if (!image.IsEmpty())
     [self setImage:image.ToNSImage()];
 
-  [self setEnabled:viewController_->IsEnabled(webContents)];
+  BOOL enabled = viewController_->IsEnabled(webContents) ||
+                 viewController_->DisabledClickOpensMenu();
+  [self setEnabled:enabled];
 
   [self setNeedsDisplay:YES];
 }
@@ -467,11 +469,6 @@ void ToolbarActionViewDelegateBridge::DoShowContextMenu() {
            respectFlipped:YES
                     hints:nil];
 
-  bounds.origin.y += kBrowserActionBadgeOriginYOffset;
-  [[self cell] drawBadgeWithinFrame:bounds
-                     forWebContents:
-                            [browserActionsController_ currentWebContents]];
-
   [image unlockFocus];
   return image;
 }
@@ -523,42 +520,40 @@ void ToolbarActionViewDelegateBridge::DoShowContextMenu() {
   testContextMenu_ = testContextMenu;
 }
 
+- (BOOL)wantsToRunForTesting {
+  return viewController_->WantsToRun(
+      [browserActionsController_ currentWebContents]);
+}
+
 @end
 
 @implementation BrowserActionCell
 
 @synthesize browserActionsController = browserActionsController_;
-@synthesize viewController = viewController_;
-
-- (void)drawBadgeWithinFrame:(NSRect)frame
-              forWebContents:(content::WebContents*)webContents {
-  gfx::CanvasSkiaPaint canvas(frame, false);
-  canvas.set_composite_alpha(true);
-  gfx::Rect boundingRect(NSRectToCGRect(frame));
-  viewController_->PaintExtra(&canvas, boundingRect, webContents);
-}
 
 - (void)drawWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
   gfx::ScopedNSGraphicsContextSaveGState scopedGState;
   [super drawWithFrame:cellFrame inView:controlView];
-  DCHECK(viewController_);
-  content::WebContents* webContents =
-      [browserActionsController_ currentWebContents];
+
   const NSSize imageSize = self.image.size;
   const NSRect imageRect =
       NSMakeRect(std::floor((NSWidth(cellFrame) - imageSize.width) / 2.0),
                  std::floor((NSHeight(cellFrame) - imageSize.height) / 2.0),
                  imageSize.width, imageSize.height);
+
   [self.image drawInRect:imageRect
                 fromRect:NSZeroRect
                operation:NSCompositeSourceOver
                 fraction:1.0
           respectFlipped:YES
                    hints:nil];
+}
 
-  cellFrame.origin.y += kBrowserActionBadgeOriginYOffset;
-  [self drawBadgeWithinFrame:cellFrame
-              forWebContents:webContents];
+- (void)drawFocusRingMaskWithFrame:(NSRect)cellFrame inView:(NSView*)view {
+  // Match the hover image's bezel.
+  [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(cellFrame, 2, 2)
+                                   xRadius:2
+                                   yRadius:2] fill];
 }
 
 - (ui::ThemeProvider*)themeProviderForWindow:(NSWindow*)window {

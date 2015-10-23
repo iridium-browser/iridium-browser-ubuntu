@@ -33,9 +33,8 @@ WebInspector.Widget = function(isWebComponent)
 {
     this.contentElement = createElementWithClass("div", "widget");
     if (isWebComponent) {
-        WebInspector.installComponentRootStyles(this.contentElement);
         this.element = createElementWithClass("div", "vbox flex-auto");
-        this._shadowRoot = this.element.createShadowRoot();
+        this._shadowRoot = WebInspector.createShadowRootWithCoreStyles(this.element);
         this._shadowRoot.appendChild(this.contentElement);
     } else {
         this.element = this.contentElement;
@@ -68,7 +67,6 @@ WebInspector.Widget.createStyleElement = function(cssFile)
 WebInspector.Widget.prototype = {
     markAsRoot: function()
     {
-        WebInspector.installComponentRootStyles(this.element);
         WebInspector.Widget.__assert(!this.element.parentElement, "Attempt to mark as root attached node");
         this._isRoot = true;
     },
@@ -108,12 +106,12 @@ WebInspector.Widget.prototype = {
     /**
      * @return {boolean}
      */
-    _shouldHideOnDetach: function()
+    shouldHideOnDetach: function()
     {
         if (this._hideOnDetach)
             return true;
         for (var child of this._children) {
-            if (child._shouldHideOnDetach())
+            if (child.shouldHideOnDetach())
                 return true;
         }
         return false;
@@ -253,7 +251,7 @@ WebInspector.Widget.prototype = {
         if (this._parentIsShowing())
             this._processWillShow();
 
-        this.element.classList.add("visible");
+        this.element.classList.remove("hidden");
 
         // Reparent
         if (this.element.parentElement !== parentElement) {
@@ -285,8 +283,8 @@ WebInspector.Widget.prototype = {
         if (this._parentIsShowing())
             this._processWillHide();
 
-        if (!overrideHideOnDetach && this._shouldHideOnDetach()) {
-            this.element.classList.remove("visible");
+        if (!overrideHideOnDetach && this.shouldHideOnDetach()) {
+            this.element.classList.add("hidden");
             this._visible = false;
             if (this._parentIsShowing())
                 this._processWasHidden();

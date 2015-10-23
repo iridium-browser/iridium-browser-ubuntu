@@ -4,7 +4,7 @@
 
 #include "components/tracing/child_trace_message_filter.h"
 
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/metrics/statistics_recorder.h"
 #include "base/trace_event/trace_event.h"
 #include "components/tracing/child_memory_dump_manager_delegate_impl.h"
 #include "components/tracing/tracing_messages.h"
@@ -14,10 +14,16 @@ using base::trace_event::TraceLog;
 
 namespace tracing {
 
+namespace {
+
+const int kMinTimeBetweenHistogramChangesInSeconds = 10;
+
+}  // namespace
+
 ChildTraceMessageFilter::ChildTraceMessageFilter(
-    base::MessageLoopProxy* ipc_message_loop)
+    base::SingleThreadTaskRunner* ipc_task_runner)
     : sender_(NULL),
-      ipc_message_loop_(ipc_message_loop),
+      ipc_task_runner_(ipc_task_runner),
       pending_memory_dump_guid_(0) {
 }
 
@@ -39,6 +45,7 @@ bool ChildTraceMessageFilter::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(ChildTraceMessageFilter, message)
     IPC_MESSAGE_HANDLER(TracingMsg_BeginTracing, OnBeginTracing)
     IPC_MESSAGE_HANDLER(TracingMsg_EndTracing, OnEndTracing)
+    IPC_MESSAGE_HANDLER(TracingMsg_CancelTracing, OnCancelTracing)
     IPC_MESSAGE_HANDLER(TracingMsg_EnableMonitoring, OnEnableMonitoring)
     IPC_MESSAGE_HANDLER(TracingMsg_DisableMonitoring, OnDisableMonitoring)
     IPC_MESSAGE_HANDLER(TracingMsg_CaptureMonitoringSnapshot,
@@ -50,6 +57,8 @@ bool ChildTraceMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnProcessMemoryDumpRequest)
     IPC_MESSAGE_HANDLER(TracingMsg_GlobalMemoryDumpResponse,
                         OnGlobalMemoryDumpResponse)
+    IPC_MESSAGE_HANDLER(TracingMsg_SetUMACallback, OnSetUMACallback)
+    IPC_MESSAGE_HANDLER(TracingMsg_ClearUMACallback, OnClearUMACallback)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -58,23 +67,21 @@ bool ChildTraceMessageFilter::OnMessageReceived(const IPC::Message& message) {
 ChildTraceMessageFilter::~ChildTraceMessageFilter() {}
 
 void ChildTraceMessageFilter::OnBeginTracing(
-    const std::string& category_filter_str,
-    base::TimeTicks browser_time,
-    const std::string& options) {
+    const std::string& trace_config_str,
+    base::TraceTicks browser_time,
+    uint64 tracing_process_id) {
 #if defined(__native_client__)
   // NaCl and system times are offset by a bit, so subtract some time from
   // the captured timestamps. The value might be off by a bit due to messaging
   // latency.
-  base::TimeDelta time_offset = base::TimeTicks::NowFromSystemTraceTime() -
-      browser_time;
+  base::TimeDelta time_offset = base::TraceTicks::Now() - browser_time;
   TraceLog::GetInstance()->SetTimeOffset(time_offset);
 #endif
-  base::trace_event::TraceOptions trace_options;
-  trace_options.SetFromString(options);
+  ChildMemoryDumpManagerDelegateImpl::GetInstance()->set_tracing_process_id(
+      tracing_process_id);
   TraceLog::GetInstance()->SetEnabled(
-      base::trace_event::CategoryFilter(category_filter_str),
-      base::trace_event::TraceLog::RECORDING_MODE,
-      trace_options);
+      base::trace_event::TraceConfig(trace_config_str),
+      base::trace_event::TraceLog::RECORDING_MODE);
 }
 
 void ChildTraceMessageFilter::OnEndTracing() {
@@ -86,18 +93,22 @@ void ChildTraceMessageFilter::OnEndTracing() {
   // OnTraceDataCollected calls will not be deferred.
   TraceLog::GetInstance()->Flush(
       base::Bind(&ChildTraceMessageFilter::OnTraceDataCollected, this));
+
+  ChildMemoryDumpManagerDelegateImpl::GetInstance()->set_tracing_process_id(
+      base::trace_event::MemoryDumpManager::kInvalidTracingProcessId);
+}
+
+void ChildTraceMessageFilter::OnCancelTracing() {
+  TraceLog::GetInstance()->CancelTracing(
+      base::Bind(&ChildTraceMessageFilter::OnTraceDataCollected, this));
 }
 
 void ChildTraceMessageFilter::OnEnableMonitoring(
-    const std::string& category_filter_str,
-    base::TimeTicks browser_time,
-    const std::string& options) {
-  base::trace_event::TraceOptions trace_options;
-  trace_options.SetFromString(options);
+    const std::string& trace_config_str,
+    base::TraceTicks browser_time) {
   TraceLog::GetInstance()->SetEnabled(
-      base::trace_event::CategoryFilter(category_filter_str),
-      base::trace_event::TraceLog::MONITORING_MODE,
-      trace_options);
+      base::trace_event::TraceConfig(trace_config_str),
+      base::trace_event::TraceLog::MONITORING_MODE);
 }
 
 void ChildTraceMessageFilter::OnDisableMonitoring() {
@@ -132,8 +143,9 @@ void ChildTraceMessageFilter::OnCancelWatchEvent() {
 }
 
 void ChildTraceMessageFilter::OnWatchEventMatched() {
-  if (!ipc_message_loop_->BelongsToCurrentThread()) {
-    ipc_message_loop_->PostTask(FROM_HERE,
+  if (!ipc_task_runner_->BelongsToCurrentThread()) {
+    ipc_task_runner_->PostTask(
+        FROM_HERE,
         base::Bind(&ChildTraceMessageFilter::OnWatchEventMatched, this));
     return;
   }
@@ -143,10 +155,10 @@ void ChildTraceMessageFilter::OnWatchEventMatched() {
 void ChildTraceMessageFilter::OnTraceDataCollected(
     const scoped_refptr<base::RefCountedString>& events_str_ptr,
     bool has_more_events) {
-  if (!ipc_message_loop_->BelongsToCurrentThread()) {
-    ipc_message_loop_->PostTask(FROM_HERE,
-        base::Bind(&ChildTraceMessageFilter::OnTraceDataCollected, this,
-                   events_str_ptr, has_more_events));
+  if (!ipc_task_runner_->BelongsToCurrentThread()) {
+    ipc_task_runner_->PostTask(
+        FROM_HERE, base::Bind(&ChildTraceMessageFilter::OnTraceDataCollected,
+                              this, events_str_ptr, has_more_events));
     return;
   }
   if (events_str_ptr->data().size()) {
@@ -163,13 +175,11 @@ void ChildTraceMessageFilter::OnTraceDataCollected(
 void ChildTraceMessageFilter::OnMonitoringTraceDataCollected(
      const scoped_refptr<base::RefCountedString>& events_str_ptr,
      bool has_more_events) {
-  if (!ipc_message_loop_->BelongsToCurrentThread()) {
-    ipc_message_loop_->PostTask(FROM_HERE,
-        base::Bind(&ChildTraceMessageFilter::
-                   OnMonitoringTraceDataCollected,
-                   this,
-                   events_str_ptr,
-                   has_more_events));
+  if (!ipc_task_runner_->BelongsToCurrentThread()) {
+    ipc_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&ChildTraceMessageFilter::OnMonitoringTraceDataCollected,
+                   this, events_str_ptr, has_more_events));
     return;
   }
   sender_->Send(new TracingHostMsg_MonitoringTraceDataCollected(
@@ -223,6 +233,48 @@ void ChildTraceMessageFilter::OnGlobalMemoryDumpResponse(uint64 dump_guid,
   if (pending_memory_dump_callback_.is_null())
     return;
   pending_memory_dump_callback_.Run(dump_guid, success);
+}
+
+void ChildTraceMessageFilter::OnHistogramChanged(
+    const std::string& histogram_name,
+    base::Histogram::Sample reference_value,
+    base::Histogram::Sample actual_value) {
+  if (actual_value < reference_value)
+    return;
+
+  ipc_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&ChildTraceMessageFilter::SendTriggerMessage, this,
+                            histogram_name));
+}
+
+void ChildTraceMessageFilter::SendTriggerMessage(
+    const std::string& histogram_name) {
+  if (!histogram_last_changed_.is_null()) {
+    base::Time computed_next_allowed_time =
+        histogram_last_changed_ +
+        base::TimeDelta::FromSeconds(kMinTimeBetweenHistogramChangesInSeconds);
+    if (computed_next_allowed_time > base::Time::Now())
+      return;
+  }
+  histogram_last_changed_ = base::Time::Now();
+
+  if (sender_)
+    sender_->Send(new TracingHostMsg_TriggerBackgroundTrace(histogram_name));
+}
+
+void ChildTraceMessageFilter::OnSetUMACallback(
+    const std::string& histogram_name,
+    int histogram_value) {
+  histogram_last_changed_ = base::Time();
+  base::StatisticsRecorder::SetCallback(
+      histogram_name, base::Bind(&ChildTraceMessageFilter::OnHistogramChanged,
+                                 this, histogram_name, histogram_value));
+}
+
+void ChildTraceMessageFilter::OnClearUMACallback(
+    const std::string& histogram_name) {
+  histogram_last_changed_ = base::Time();
+  base::StatisticsRecorder::ClearCallback(histogram_name);
 }
 
 }  // namespace tracing

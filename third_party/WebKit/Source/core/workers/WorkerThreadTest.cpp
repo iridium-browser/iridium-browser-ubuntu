@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 using testing::_;
+using testing::AtMost;
 using testing::Invoke;
 using testing::Return;
 using testing::Mock;
@@ -55,17 +56,25 @@ public:
     MOCK_METHOD0(willDestroyWorkerGlobalScope, void());
 };
 
+void notifyScriptLoadedEventToWorkerThreadForTest(WorkerThread*);
+
 class FakeWorkerGlobalScope : public WorkerGlobalScope {
 public:
     typedef WorkerGlobalScope Base;
 
     FakeWorkerGlobalScope(const KURL& url, const String& userAgent, WorkerThread* thread, const SecurityOrigin* starterOrigin, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
         : WorkerGlobalScope(url, userAgent, thread, monotonicallyIncreasingTime(), starterOrigin, workerClients)
+        , m_thread(thread)
     {
     }
 
     ~FakeWorkerGlobalScope() override
     {
+    }
+
+    void scriptLoaded(size_t, size_t) override
+    {
+        notifyScriptLoadedEventToWorkerThreadForTest(m_thread);
     }
 
     // EventTarget
@@ -77,6 +86,9 @@ public:
     void logExceptionToConsole(const String&, int, const String&, int, int, PassRefPtrWillBeRawPtr<ScriptCallStack>) override
     {
     }
+
+private:
+    WorkerThread* m_thread;
 };
 
 class WorkerThreadForTest : public WorkerThread {
@@ -86,6 +98,7 @@ public:
         WorkerReportingProxy& mockWorkerReportingProxy)
         : WorkerThread(WorkerLoaderProxy::create(mockWorkerLoaderProxyProvider), mockWorkerReportingProxy)
         , m_thread(WebThreadSupportingGC::create("Test thread"))
+        , m_scriptLoadedEvent(adoptPtr(Platform::current()->createWaitableEvent()))
     {
     }
 
@@ -104,9 +117,25 @@ public:
         return adoptRefWillBeNoop(new FakeWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, this, startupData->m_starterOrigin, startupData->m_workerClients.release()));
     }
 
+    void waitUntilScriptLoaded()
+    {
+        m_scriptLoadedEvent->wait();
+    }
+
+    void scriptLoaded()
+    {
+        m_scriptLoadedEvent->signal();
+    }
+
 private:
     OwnPtr<WebThreadSupportingGC> m_thread;
+    OwnPtr<WebWaitableEvent> m_scriptLoadedEvent;
 };
+
+void notifyScriptLoadedEventToWorkerThreadForTest(WorkerThread* thread)
+{
+    static_cast<WorkerThreadForTest*>(thread)->scriptLoaded();
+}
 
 class WakeupTask : public WebThread::Task {
 public:
@@ -159,7 +188,6 @@ public:
         m_workerThread = adoptRef(new WorkerThreadForTest(
             m_mockWorkerLoaderProxyProvider.get(),
             *m_mockWorkerReportingProxy));
-        ExpectWorkerLifetimeReportingCalls();
     }
 
     void TearDown() override
@@ -167,38 +195,40 @@ public:
         m_workerThread->workerLoaderProxy()->detachProvider(m_mockWorkerLoaderProxyProvider.get());
     }
 
-    void startAndWaitForInit()
+    void start()
     {
-        OwnPtr<WebWaitableEvent> completionEvent = adoptPtr(Platform::current()->createWaitableEvent());
+        startWithSourceCode("//fake source code");
+    }
+
+    void startWithSourceCode(const String& source)
+    {
+        OwnPtr<Vector<CSPHeaderAndType>> headers = adoptPtr(new Vector<CSPHeaderAndType>());
+        CSPHeaderAndType headerAndType("contentSecurityPolicy", ContentSecurityPolicyHeaderTypeReport);
+        headers->append(headerAndType);
+
+        OwnPtrWillBeRawPtr<WorkerClients> clients = nullptr;
 
         m_workerThread->start(WorkerThreadStartupData::create(
             KURL(ParsedURLString, "http://fake.url/"),
             "fake user agent",
-            "//fake source code",
+            source,
             nullptr,
             DontPauseWorkerGlobalScopeOnStart,
-            "contentSecurityPolicy",
-            ContentSecurityPolicyHeaderTypeReport,
+            headers.release(),
             m_securityOrigin.get(),
-            WorkerClients::create(),
+            clients.release(),
             V8CacheOptionsDefault));
+    }
+
+    void waitForInit()
+    {
+        OwnPtr<WebWaitableEvent> completionEvent = adoptPtr(Platform::current()->createWaitableEvent());
         m_workerThread->backingThread().postTask(FROM_HERE, new SignalTask(completionEvent.get()));
         completionEvent->wait();
     }
 
-    void postWakeUpTask(long long waitMs)
-    {
-        WebScheduler* scheduler = m_workerThread->backingThread().platformThread().scheduler();
-
-        // The idle task will get posted on an after wake up queue, so we need another task
-        // posted at the right time to wake the system up.  We don't know the right delay here
-        // since the thread can take a variable length of time to be responsive, however this
-        // isn't a problem when posting a delayed task from within a task on the worker thread.
-        scheduler->postLoadingTask(FROM_HERE, new PostDelayedWakeupTask(scheduler, waitMs));
-    }
-
 protected:
-    void ExpectWorkerLifetimeReportingCalls()
+    void expectWorkerLifetimeReportingCalls()
     {
         EXPECT_CALL(*m_mockWorkerReportingProxy, workerGlobalScopeStarted(_)).Times(1);
         EXPECT_CALL(*m_mockWorkerReportingProxy, didEvaluateWorkerScript(true)).Times(1);
@@ -214,29 +244,44 @@ protected:
 
 TEST_F(WorkerThreadTest, StartAndStop)
 {
-    startAndWaitForInit();
+    expectWorkerLifetimeReportingCalls();
+    start();
+    waitForInit();
     m_workerThread->terminateAndWait();
 }
 
-TEST_F(WorkerThreadTest, GcOccursWhileIdle)
+TEST_F(WorkerThreadTest, StartAndStopImmediately)
 {
-    OwnPtr<WebWaitableEvent> gcDone = adoptPtr(Platform::current()->createWaitableEvent());
-
-    ON_CALL(*m_workerThread, doIdleGc(_)).WillByDefault(Invoke(
-        [&gcDone](double)
-        {
-            gcDone->signal();
-            return false;
-        }));
-
-    EXPECT_CALL(*m_workerThread, doIdleGc(_)).Times(1);
-
-    startAndWaitForInit();
-    postWakeUpTask(500ul);
-
-    gcDone->wait();
+    EXPECT_CALL(*m_mockWorkerReportingProxy, workerGlobalScopeStarted(_))
+        .Times(AtMost(1));
+    EXPECT_CALL(*m_mockWorkerReportingProxy, didEvaluateWorkerScript(true))
+        .Times(AtMost(1));
+    EXPECT_CALL(*m_mockWorkerReportingProxy, workerThreadTerminated())
+        .Times(AtMost(1));
+    EXPECT_CALL(*m_mockWorkerReportingProxy, willDestroyWorkerGlobalScope())
+        .Times(AtMost(1));
+    start();
     m_workerThread->terminateAndWait();
-};
+}
+
+TEST_F(WorkerThreadTest, StartAndStopOnScriptLoaded)
+{
+    // Use a JavaScript source code that makes an infinite loop so that we can
+    // catch some kind of issues as a timeout.
+    const String source("while(true) {}");
+
+    EXPECT_CALL(*m_mockWorkerReportingProxy, workerGlobalScopeStarted(_))
+        .Times(AtMost(1));
+    EXPECT_CALL(*m_mockWorkerReportingProxy, didEvaluateWorkerScript(_))
+        .Times(AtMost(1));
+    EXPECT_CALL(*m_mockWorkerReportingProxy, workerThreadTerminated())
+        .Times(AtMost(1));
+    EXPECT_CALL(*m_mockWorkerReportingProxy, willDestroyWorkerGlobalScope())
+        .Times(AtMost(1));
+    startWithSourceCode(source);
+    m_workerThread->waitUntilScriptLoaded();
+    m_workerThread->terminateAndWait();
+}
 
 class RepeatingTask : public WebThread::Task {
 public:
@@ -275,7 +320,9 @@ TEST_F(WorkerThreadTest, GcDoesNotOccurWhenNotIdle)
 
     EXPECT_CALL(*m_workerThread, doIdleGc(_)).Times(0);
 
-    startAndWaitForInit();
+    expectWorkerLifetimeReportingCalls();
+    start();
+    waitForInit();
 
     WebScheduler* scheduler = m_workerThread->backingThread().platformThread().scheduler();
 

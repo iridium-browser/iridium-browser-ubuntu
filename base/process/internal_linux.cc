@@ -25,8 +25,8 @@ const char kProcDir[] = "/proc";
 
 const char kStatFile[] = "stat";
 
-base::FilePath GetProcPidDir(pid_t pid) {
-  return base::FilePath(kProcDir).Append(IntToString(pid));
+FilePath GetProcPidDir(pid_t pid) {
+  return FilePath(kProcDir).Append(IntToString(pid));
 }
 
 pid_t ProcDirSlotToPid(const char* d_name) {
@@ -97,8 +97,9 @@ bool ParseProcStats(const std::string& stats_data,
                         close_parens_idx - (open_parens_idx + 1)));
 
   // Split the rest.
-  std::vector<std::string> other_stats;
-  SplitString(stats_data.substr(close_parens_idx + 2), ' ', &other_stats);
+  std::vector<std::string> other_stats = SplitString(
+      stats_data.substr(close_parens_idx + 2), " ",
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   for (size_t i = 0; i < other_stats.size(); ++i)
     proc_stats->push_back(other_stats[i]);
   return true;
@@ -106,7 +107,7 @@ bool ParseProcStats(const std::string& stats_data,
 
 typedef std::map<std::string, std::string> ProcStatMap;
 void ParseProcStat(const std::string& contents, ProcStatMap* output) {
-  base::StringPairs key_value_pairs;
+  StringPairs key_value_pairs;
   SplitStringIntoKeyValuePairs(contents, ' ', '\n', &key_value_pairs);
   for (size_t i = 0; i < key_value_pairs.size(); ++i) {
     output->insert(key_value_pairs[i]);

@@ -5,17 +5,37 @@
 #include "content/common/gpu/client/gpu_memory_buffer_impl_io_surface.h"
 
 #include "base/logging.h"
+#include "content/common/mac/io_surface_manager.h"
+#include "ui/gfx/buffer_format_util.h"
 
 namespace content {
+namespace {
+
+uint32_t LockFlags(gfx::BufferUsage usage) {
+  switch (usage) {
+    case gfx::BufferUsage::MAP:
+      return kIOSurfaceLockAvoidSync;
+    case gfx::BufferUsage::PERSISTENT_MAP:
+      return 0;
+    case gfx::BufferUsage::SCANOUT:
+      return 0;
+  }
+  NOTREACHED();
+  return 0;
+}
+
+}  // namespace
 
 GpuMemoryBufferImplIOSurface::GpuMemoryBufferImplIOSurface(
     gfx::GpuMemoryBufferId id,
     const gfx::Size& size,
-    Format format,
+    gfx::BufferFormat format,
     const DestructionCallback& callback,
-    IOSurfaceRef io_surface)
-    : GpuMemoryBufferImpl(id, size, format, callback), io_surface_(io_surface) {
-}
+    IOSurfaceRef io_surface,
+    uint32_t lock_flags)
+    : GpuMemoryBufferImpl(id, size, format, callback),
+      io_surface_(io_surface),
+      lock_flags_(lock_flags) {}
 
 GpuMemoryBufferImplIOSurface::~GpuMemoryBufferImplIOSurface() {
 }
@@ -24,40 +44,46 @@ GpuMemoryBufferImplIOSurface::~GpuMemoryBufferImplIOSurface() {
 scoped_ptr<GpuMemoryBufferImpl> GpuMemoryBufferImplIOSurface::CreateFromHandle(
     const gfx::GpuMemoryBufferHandle& handle,
     const gfx::Size& size,
-    Format format,
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage,
     const DestructionCallback& callback) {
   base::ScopedCFTypeRef<IOSurfaceRef> io_surface(
-      IOSurfaceLookup(handle.io_surface_id));
+      IOSurfaceManager::GetInstance()->AcquireIOSurface(handle.id));
   if (!io_surface)
-    return scoped_ptr<GpuMemoryBufferImpl>();
+    return nullptr;
 
-  return make_scoped_ptr<GpuMemoryBufferImpl>(new GpuMemoryBufferImplIOSurface(
-      handle.id, size, format, callback, io_surface.release()));
+  return make_scoped_ptr<GpuMemoryBufferImpl>(
+      new GpuMemoryBufferImplIOSurface(handle.id, size, format, callback,
+                                       io_surface.release(), LockFlags(usage)));
 }
 
 bool GpuMemoryBufferImplIOSurface::Map(void** data) {
   DCHECK(!mapped_);
-  IOSurfaceLock(io_surface_, 0, NULL);
+  IOReturn status = IOSurfaceLock(io_surface_, lock_flags_, NULL);
+  DCHECK_NE(status, kIOReturnCannotLock);
   mapped_ = true;
-  *data = IOSurfaceGetBaseAddress(io_surface_);
+  size_t num_planes = gfx::NumberOfPlanesForBufferFormat(GetFormat());
+  for (size_t plane = 0; plane < num_planes; ++plane)
+    data[plane] = IOSurfaceGetBaseAddressOfPlane(io_surface_, plane);
   return true;
 }
 
 void GpuMemoryBufferImplIOSurface::Unmap() {
   DCHECK(mapped_);
-  IOSurfaceUnlock(io_surface_, 0, NULL);
+  IOSurfaceUnlock(io_surface_, lock_flags_, NULL);
   mapped_ = false;
 }
 
-void GpuMemoryBufferImplIOSurface::GetStride(int* stride) const {
-  *stride = IOSurfaceGetBytesPerRow(io_surface_);
+void GpuMemoryBufferImplIOSurface::GetStride(int* strides) const {
+  size_t num_planes = gfx::NumberOfPlanesForBufferFormat(GetFormat());
+  for (size_t plane = 0; plane < num_planes; ++plane)
+    strides[plane] = IOSurfaceGetBytesPerRowOfPlane(io_surface_, plane);
 }
 
 gfx::GpuMemoryBufferHandle GpuMemoryBufferImplIOSurface::GetHandle() const {
   gfx::GpuMemoryBufferHandle handle;
   handle.type = gfx::IO_SURFACE_BUFFER;
   handle.id = id_;
-  handle.io_surface_id = IOSurfaceGetID(io_surface_);
   return handle;
 }
 

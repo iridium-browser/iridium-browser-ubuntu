@@ -16,22 +16,8 @@
 #include "vpx/vpx_integer.h"
 
 #include "vp9/common/vp9_blockd.h"
-#include "vp9/common/vp9_filter.h"
 #include "vp9/common/vp9_reconinter.h"
 #include "vp9/common/vp9_reconintra.h"
-
-void inter_predictor(const uint8_t *src, int src_stride,
-                            uint8_t *dst, int dst_stride,
-                            const int subpel_x,
-                            const int subpel_y,
-                            const struct scale_factors *sf,
-                            int w, int h, int ref,
-                            const InterpKernel *kernel,
-                            int xs, int ys) {
-  sf->predict[subpel_x != 0][subpel_y != 0][ref](
-      src, src_stride, dst, dst_stride,
-      kernel[subpel_x], xs, kernel[subpel_y], ys, w, h);
-}
 
 #if CONFIG_VP9_HIGHBITDEPTH
 void high_inter_predictor(const uint8_t *src, int src_stride,
@@ -174,7 +160,7 @@ void build_inter_predictors(MACROBLOCKD *xd, int plane, int block,
   struct macroblockd_plane *const pd = &xd->plane[plane];
   const MODE_INFO *mi = xd->mi[0];
   const int is_compound = has_second_ref(&mi->mbmi);
-  const InterpKernel *kernel = vp9_get_interp_kernel(mi->mbmi.interp_filter);
+  const InterpKernel *kernel = vp9_filter_kernels[mi->mbmi.interp_filter];
   int ref;
 
   for (ref = 0; ref < 1 + is_compound; ++ref) {

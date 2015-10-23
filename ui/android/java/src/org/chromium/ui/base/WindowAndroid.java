@@ -23,11 +23,11 @@ import android.util.SparseArray;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityManager;
-import android.widget.Toast;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.ui.VSyncMonitor;
+import org.chromium.ui.widget.Toast;
 
 import java.lang.ref.WeakReference;
 import java.util.HashMap;
@@ -88,7 +88,7 @@ public class WindowAndroid {
 
     private ViewGroup mKeyboardAccessoryView;
 
-    private boolean mIsKeyboardShowing = false;
+    protected boolean mIsKeyboardShowing = false;
 
     // System accessibility service.
     private final AccessibilityManager mAccessibilityManager;
@@ -221,6 +221,7 @@ public class WindowAndroid {
      * @param permission The permission whose access is to be checked.
      * @return Whether access to the permission is granted.
      */
+    @CalledByNative
     public boolean hasPermission(String permission) {
         return mApplicationContext.checkPermission(permission, Process.myPid(), Process.myUid())
                 == PackageManager.PERMISSION_GRANTED;
@@ -238,6 +239,7 @@ public class WindowAndroid {
      * @param permission The permission name.
      * @return Whether the requesting the permission is allowed.
      */
+    @CalledByNative
     public boolean canRequestPermission(String permission) {
         Log.w(TAG, "Cannot determine the request permission state as the context "
                 + "is not an Activity");
@@ -351,21 +353,31 @@ public class WindowAndroid {
     }
 
     /**
-     * For window instances associated with an activity, notifies any listeners
-     * that the activity has been paused.
+     * Notify any observers that the visibility of the Android Window associated
+     * with this Window has changed.
+     * @param visible whether the View is visible.
      */
-    protected void onActivityPaused() {
+    public void onVisibilityChanged(boolean visible) {
         if (mNativeWindowAndroid == 0) return;
-        nativeOnActivityPaused(mNativeWindowAndroid);
+        nativeOnVisibilityChanged(mNativeWindowAndroid, visible);
     }
 
     /**
      * For window instances associated with an activity, notifies any listeners
-     * that the activity has been paused.
+     * that the activity has been stopped.
      */
-    protected void onActivityResumed() {
+    protected void onActivityStopped() {
         if (mNativeWindowAndroid == 0) return;
-        nativeOnActivityResumed(mNativeWindowAndroid);
+        nativeOnActivityStopped(mNativeWindowAndroid);
+    }
+
+    /**
+     * For window instances associated with an activity, notifies any listeners
+     * that the activity has been started.
+     */
+    protected void onActivityStarted() {
+        if (mNativeWindowAndroid == 0) return;
+        nativeOnActivityStarted(mNativeWindowAndroid);
     }
 
     @CalledByNative
@@ -577,8 +589,9 @@ public class WindowAndroid {
     private native void nativeOnVSync(long nativeWindowAndroid,
                                       long vsyncTimeMicros,
                                       long vsyncPeriodMicros);
-    private native void nativeOnActivityPaused(long nativeWindowAndroid);
-    private native void nativeOnActivityResumed(long nativeWindowAndroid);
+    private native void nativeOnVisibilityChanged(long nativeWindowAndroid, boolean visible);
+    private native void nativeOnActivityStopped(long nativeWindowAndroid);
+    private native void nativeOnActivityStarted(long nativeWindowAndroid);
     private native void nativeDestroy(long nativeWindowAndroid);
 
 }

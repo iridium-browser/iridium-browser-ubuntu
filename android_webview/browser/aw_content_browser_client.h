@@ -48,6 +48,7 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       bool in_memory,
       content::ProtocolHandlerMap* protocol_handlers,
       content::URLRequestInterceptorScopedVector request_interceptors) override;
+  bool IsHandledURL(const GURL& url) override;
   std::string GetCanonicalEncodingNameByAliasName(
       const std::string& alias_name) override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
@@ -117,7 +118,8 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
                        bool opener_suppressed,
                        content::ResourceContext* context,
                        int render_process_id,
-                       int opener_id,
+                       int opener_render_view_id,
+                       int opener_render_frame_id,
                        bool* no_javascript_access) override;
   void ResourceDispatcherHostCreated() override;
   net::NetLog* GetNetLog() override;

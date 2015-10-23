@@ -6,7 +6,9 @@
 
 #include <vector>
 
-#include "chrome/browser/safe_browsing/android_safe_browsing_api_handler.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/timer/elapsed_timer.h"
+#include "chrome/browser/safe_browsing/safe_browsing_api_handler.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -37,6 +39,7 @@ class RemoteSafeBrowsingDatabaseManager::ClientRequest {
   Client* client_;
   RemoteSafeBrowsingDatabaseManager* db_manager_;
   GURL url_;
+  base::ElapsedTimer timer_;
   base::WeakPtrFactory<ClientRequest> weak_factory_;
 };
 
@@ -61,8 +64,11 @@ void RemoteSafeBrowsingDatabaseManager::ClientRequest::OnRequestDoneWeak(
 void RemoteSafeBrowsingDatabaseManager::ClientRequest::OnRequestDone(
     SBThreatType matched_threat_type,
     const std::string& metadata) {
-  VLOG(1) << "OnRequestDone for client " << client_ << " and URL " << url_;
+  DVLOG(1) << "OnRequestDone took " << timer_.Elapsed().InMilliseconds()
+           << " ms for client " << client_ << " and URL " << url_;
   client_->OnCheckBrowseUrlResult(url_, matched_threat_type, metadata);
+  UMA_HISTOGRAM_TIMES("SB2.RemoteCall.Elapsed", timer_.Elapsed());
+  // CancelCheck() will delete *this.
   db_manager_->CancelCheck(client_);
 }
 
@@ -70,13 +76,10 @@ void RemoteSafeBrowsingDatabaseManager::ClientRequest::OnRequestDone(
 // RemoteSafeBrowsingDatabaseManager methods
 //
 
-// TODO(nparker): Add tests for this class once implemented.
+// TODO(nparker): Add tests for this class
 RemoteSafeBrowsingDatabaseManager::RemoteSafeBrowsingDatabaseManager()
     : enabled_(false) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  // TODO(nparker): Implement the initialization glue.
-  // Check flag to see if this is enabled.
-  // Ask AndroidSafeBrowsingAPIHandler if Java API is correct version.
 }
 
 RemoteSafeBrowsingDatabaseManager::~RemoteSafeBrowsingDatabaseManager() {
@@ -152,22 +155,25 @@ bool RemoteSafeBrowsingDatabaseManager::CheckBrowseUrl(const GURL& url,
   if (!enabled_)
     return true;
 
-  if (!CanCheckUrl(url))
+  bool can_check_url = CanCheckUrl(url);
+  UMA_HISTOGRAM_BOOLEAN("SB2.RemoteCall.CanCheckUrl", can_check_url);
+  if (!can_check_url)
     return true;  // Safe, continue right away.
 
   scoped_ptr<ClientRequest> req(new ClientRequest(client, this, url));
-  std::vector<SBThreatType> threat_types;
-  threat_types.push_back(SB_THREAT_TYPE_URL_MALWARE);
+  std::vector<SBThreatType> threat_types;  // Not currently used.
 
-  VLOG(1) << "Checking for client " << client << " and URL " << url;
-  bool started = api_handler_.StartURLCheck(
+  DVLOG(1) << "Checking for client " << client << " and URL " << url;
+  SafeBrowsingApiHandler* api_handler = SafeBrowsingApiHandler::GetInstance();
+  // If your build hits this at run time, then you should have either not built
+  // with safe_browsing=3, or set a SafeBrowingApiHandler singleton at startup.
+  DCHECK(api_handler) << "SafeBrowsingApiHandler was never constructed";
+  api_handler->StartURLCheck(
       base::Bind(&ClientRequest::OnRequestDoneWeak, req->GetWeakPtr()), url,
       threat_types);
-  if (!started) {
-    LOG(DFATAL) << "Failed to start Safe Browsing request";
-    return true;
-  }
 
+  UMA_HISTOGRAM_COUNTS_10000("SB2.RemoteCall.ChecksPending",
+                             current_requests_.size());
   current_requests_.push_back(req.release());
 
   // Defer the resource load.
@@ -180,7 +186,7 @@ void RemoteSafeBrowsingDatabaseManager::CancelCheck(Client* client) {
   for (auto itr = current_requests_.begin(); itr != current_requests_.end();
        ++itr) {
     if ((*itr)->client() == client) {
-      VLOG(1) << "Canceling check for URL " << (*itr)->url();
+      DVLOG(2) << "Canceling check for URL " << (*itr)->url();
       delete *itr;
       current_requests_.erase(itr);
       return;
@@ -190,20 +196,20 @@ void RemoteSafeBrowsingDatabaseManager::CancelCheck(Client* client) {
 }
 
 void RemoteSafeBrowsingDatabaseManager::StartOnIOThread() {
-  VLOG(1) << "RemoteSafeBrowsing starting";
+  VLOG(1) << "RemoteSafeBrowsingDatabaseManager starting";
   enabled_ = true;
 }
 
 void RemoteSafeBrowsingDatabaseManager::StopOnIOThread(bool shutdown) {
   // |shutdown| is not used.
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  VLOG(1) << "RemoteSafeBrowsing stopping";
+  DVLOG(1) << "RemoteSafeBrowsingDatabaseManager stopping";
 
   // Call back and delete any remaining clients. OnRequestDone() modifies
   // |current_requests_|, so we make a copy first.
   std::vector<ClientRequest*> to_callback(current_requests_);
   for (auto req : to_callback) {
-    VLOG(1) << "Stopping: Invoking unfinished req for URL " << req->url();
+    DVLOG(1) << "Stopping: Invoking unfinished req for URL " << req->url();
     req->OnRequestDone(SB_THREAT_TYPE_SAFE, std::string());
   }
   enabled_ = false;

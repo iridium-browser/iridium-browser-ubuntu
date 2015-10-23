@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry import story
 
 class ToughAnimatedImageCasesPage(page_module.Page):
 
@@ -14,7 +14,7 @@ class ToughAnimatedImageCasesPage(page_module.Page):
     with action_runner.CreateInteraction('ToughAnimatedImage'):
       action_runner.Wait(10)
 
-class ToughAnimatedImageCasesPageSet(page_set_module.PageSet):
+class ToughAnimatedImageCasesPageSet(story.StorySet):
 
   """
   Description: A collection of difficult animated image tests
@@ -28,4 +28,4 @@ class ToughAnimatedImageCasesPageSet(page_set_module.PageSet):
     ]
 
     for url in urls_list:
-      self.AddUserStory(ToughAnimatedImageCasesPage(url, self))
+      self.AddStory(ToughAnimatedImageCasesPage(url, self))

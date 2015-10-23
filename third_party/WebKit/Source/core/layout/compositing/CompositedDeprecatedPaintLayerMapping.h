@@ -50,7 +50,7 @@ struct GraphicsLayerPaintInfo {
     IntSize offsetFromLayoutObject;
     bool offsetFromLayoutObjectSet;
 
-    GraphicsLayerPaintInfo() : paintLayer(0), offsetFromLayoutObjectSet(false) { }
+    GraphicsLayerPaintInfo() : paintLayer(nullptr), offsetFromLayoutObjectSet(false) { }
 };
 
 enum GraphicsLayerUpdateScope {
@@ -70,7 +70,7 @@ class CompositedDeprecatedPaintLayerMapping final : public GraphicsLayerClient {
     WTF_MAKE_NONCOPYABLE(CompositedDeprecatedPaintLayerMapping); WTF_MAKE_FAST_ALLOCATED(CompositedDeprecatedPaintLayerMapping);
 public:
     explicit CompositedDeprecatedPaintLayerMapping(DeprecatedPaintLayer&);
-    virtual ~CompositedDeprecatedPaintLayerMapping();
+    ~CompositedDeprecatedPaintLayerMapping() override;
 
     DeprecatedPaintLayer& owningLayer() const { return m_owningLayer; }
 
@@ -132,20 +132,23 @@ public:
     bool hasUnpositionedOverflowControlsLayers() const;
 
     // Returns true if the assignment actually changed the assigned squashing layer.
-    bool updateSquashingLayerAssignment(DeprecatedPaintLayer* squashedLayer, const DeprecatedPaintLayer& owningLayer, size_t nextSquashedLayerIndex);
+    bool updateSquashingLayerAssignment(DeprecatedPaintLayer* squashedLayer, size_t nextSquashedLayerIndex);
     void removeLayerFromSquashingGraphicsLayer(const DeprecatedPaintLayer*);
+#if ENABLE(ASSERT)
+    bool verifyLayerInSquashingVector(const DeprecatedPaintLayer*);
+#endif
 
     void finishAccumulatingSquashingLayers(size_t nextSquashedLayerIndex);
     void updateRenderingContext();
     void updateShouldFlattenTransform();
 
     // GraphicsLayerClient interface
-    virtual void notifyAnimationStarted(const GraphicsLayer*, double monotonicTime, int group) override;
-    virtual void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const IntRect& clip) override;
-    virtual bool isTrackingPaintInvalidations() const override;
+    void notifyAnimationStarted(const GraphicsLayer*, double monotonicTime, int group) override;
+    void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const IntRect& clip) override;
+    bool isTrackingPaintInvalidations() const override;
 
 #if ENABLE(ASSERT)
-    virtual void verifyNotPainting() override;
+    void verifyNotPainting() override;
 #endif
 
     LayoutRect contentsBox() const;
@@ -180,7 +183,7 @@ public:
     void assertNeedsToUpdateGraphicsLayerBitsCleared() {  ASSERT(m_pendingUpdateScope == GraphicsLayerUpdateNone); }
 #endif
 
-    virtual String debugName(const GraphicsLayer*) override;
+    String debugName(const GraphicsLayer*) override;
 
     LayoutSize contentOffsetInCompositingLayer() const;
 
@@ -189,7 +192,7 @@ public:
         return m_squashingLayerOffsetFromTransformedAncestor;
     }
 
-    // If there is a squashed layer painting into this CLM that is an ancestor of the given LayoutObject, return it. Otherwise return 0.
+    // If there is a squashed layer painting into this CLM that is an ancestor of the given LayoutObject, return it. Otherwise return nullptr.
     const GraphicsLayerPaintInfo* containingSquashedLayer(const LayoutObject*, unsigned maxSquashedLayerIndex);
 
     void updateScrollingBlockSelection();
@@ -260,7 +263,6 @@ private:
     void updateTransform(const ComputedStyle&);
     void updateLayerBlendMode(const ComputedStyle&);
     void updateIsRootForIsolatedGroup();
-    void updateScrollBlocksOn(const ComputedStyle&);
     // Return the opacity value that this layer should use for compositing.
     float compositingOpacity(float layoutObjectOpacity) const;
 
@@ -295,6 +297,10 @@ private:
     bool owningLayerClippedByLayerNotAboveCompositedAncestor(DeprecatedPaintLayer* scrollParent);
 
     DeprecatedPaintLayer* scrollParent();
+
+    // Clear the groupedMapping entry on the layer at the given index, only if that layer does
+    // not appear earlier in the set of layers for this object.
+    bool invalidateLayerIfNoPrecedingEntry(size_t);
 
     DeprecatedPaintLayer& m_owningLayer;
 

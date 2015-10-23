@@ -12,9 +12,9 @@ WebInspector.EmulatedDevice = function()
     /** @type {string} */
     this.type = WebInspector.EmulatedDevice.Type.Unknown;
     /** @type {!WebInspector.EmulatedDevice.Orientation} */
-    this.vertical = {width: 0, height: 0, outlineInsets: null, outlineImages: null};
+    this.vertical = {width: 0, height: 0, outlineInsets: null, outlineImage: null};
     /** @type {!WebInspector.EmulatedDevice.Orientation} */
-    this.horizontal = {width: 0, height: 0, outlineInsets: null, outlineImages: null};
+    this.horizontal = {width: 0, height: 0, outlineInsets: null, outlineImage: null};
     /** @type {number} */
     this.deviceScaleFactor = 1;
     /** @type {!Array.<string>} */
@@ -28,12 +28,15 @@ WebInspector.EmulatedDevice = function()
     this._show = WebInspector.EmulatedDevice._Show.Default;
     /** @type {boolean} */
     this._showByDefault = true;
+
+    /** @type {?Runtime.Extension} */
+    this._extension = null;
 }
 
-/** @typedef {!{title: string, orientation: string, pageRect: !WebInspector.Geometry.Rect, images: !WebInspector.EmulatedDevice.Images}} */
+/** @typedef {!{title: string, orientation: string, insets: !Insets, image: ?string}} */
 WebInspector.EmulatedDevice.Mode;
 
-/** @typedef {!{width: number, height: number, outlineInsets: ?WebInspector.Geometry.Insets, outlineImages: ?WebInspector.EmulatedDevice.Images}} */
+/** @typedef {!{width: number, height: number, outlineInsets: ?Insets, outlineImage: ?string}} */
 WebInspector.EmulatedDevice.Orientation;
 
 WebInspector.EmulatedDevice.Horizontal = "horizontal";
@@ -100,49 +103,11 @@ WebInspector.EmulatedDevice.fromJSONV1 = function(json)
 
         /**
          * @param {*} json
-         * @return {!WebInspector.Geometry.Rect}
+         * @return {!Insets}
          */
-        function parseIntRect(json)
+        function parseInsets(json)
         {
-            var result = {};
-            result.top = parseIntValue(json, "top");
-            result.left = parseIntValue(json, "left");
-            result.width = parseIntValue(json, "width");
-            result.height = parseIntValue(json, "height");
-            return /** @type {!WebInspector.Geometry.Rect} */ (result);
-        }
-
-        /**
-         * @param {*} json
-         * @return {?WebInspector.Geometry.Insets}
-         */
-        function parseIntInsets(json)
-        {
-            if (json === null)
-                return null;
-            var result = {};
-            result.top = parseIntValue(json, "top");
-            result.left = parseIntValue(json, "left");
-            return /** @type {?WebInspector.Geometry.Insets} */ (result);
-        }
-
-        /**
-         * @param {*} json
-         * @return {!WebInspector.EmulatedDevice.Images}
-         */
-        function parseImages(json)
-        {
-            if (!Array.isArray(json))
-                throw new Error("Emulated device images is not an array");
-            var result = new WebInspector.EmulatedDevice.Images();
-            for (var i = 0; i < json.length; ++i) {
-                var src = /** @type {string} */ (parseValue(json[i], "src", "string"));
-                var scale = /** @type {number} */ (parseValue(json[i], "scale", "number"));
-                if (scale <= 0)
-                    throw new Error("Emulated device property image scale must be positive");
-                result.addSource(src, scale);
-            }
-            return result;
+            return new Insets(parseIntValue(json, "left"), parseIntValue(json, "top"), parseIntValue(json, "right"), parseIntValue(json, "bottom"));
         }
 
         /**
@@ -161,11 +126,12 @@ WebInspector.EmulatedDevice.fromJSONV1 = function(json)
             if (result.height < 0 || result.height > WebInspector.OverridesSupport.MaxDeviceSize)
                 throw new Error("Emulated device has wrong height: " + result.height);
 
-            result.outlineInsets = parseIntInsets(parseValue(json["outline"], "insets", "object", null));
-            if (result.outlineInsets) {
+            var outlineInsets = parseValue(json["outline"], "insets", "object", null);
+            if (outlineInsets) {
+                result.outlineInsets = parseInsets(outlineInsets);
                 if (result.outlineInsets.left < 0 || result.outlineInsets.top < 0)
                     throw new Error("Emulated device has wrong outline insets");
-                result.outlineImages = parseImages(parseValue(json["outline"], "images", "object"));
+                result.outlineImage = /** @type {string} */ (parseValue(json["outline"], "image", "string"));
             }
 
             return /** @type {!WebInspector.EmulatedDevice.Orientation} */ (result);
@@ -204,12 +170,12 @@ WebInspector.EmulatedDevice.fromJSONV1 = function(json)
             if (mode.orientation !== WebInspector.EmulatedDevice.Vertical && mode.orientation !== WebInspector.EmulatedDevice.Horizontal)
                 throw new Error("Emulated device mode has wrong orientation '" + mode.orientation + "'");
             var orientation = result.orientationByName(mode.orientation);
-            mode.pageRect = parseIntRect(parseValue(modes[i], "page-rect", "object"));
-            if (mode.pageRect.top < 0 || mode.pageRect.left < 0 || mode.pageRect.width < 0 || mode.pageRect.height < 0 ||
-                mode.pageRect.top + mode.pageRect.height > orientation.height || mode.pageRect.left + mode.pageRect.width > orientation.width) {
-                throw new Error("Emulated device mode '" + mode.title + "'has wrong page rect");
+            mode.insets = parseInsets(parseValue(modes[i], "insets", "object"));
+            if (mode.insets.top < 0 || mode.insets.left < 0 || mode.insets.right < 0 || mode.insets.bottom < 0 ||
+                mode.insets.top + mode.insets.bottom > orientation.height || mode.insets.left + mode.insets.right > orientation.width) {
+                throw new Error("Emulated device mode '" + mode.title + "'has wrong mode insets");
             }
-            mode.images = parseImages(parseValue(modes[i], "images", "object"));
+            mode.image = /** @type {string} */ (parseValue(modes[i], "image", "string", null));
             result.modes.push(mode);
         }
 
@@ -260,6 +226,36 @@ WebInspector.EmulatedDevice.compareByTitle = function(device1, device2)
 
 WebInspector.EmulatedDevice.prototype = {
     /**
+     * @return {?Runtime.Extension}
+     */
+    extension: function()
+    {
+        return this._extension;
+    },
+
+    /**
+     * @param {?Runtime.Extension} extension
+     */
+    setExtension: function(extension)
+    {
+        this._extension = extension;
+    },
+
+    /**
+     * @param {string} orientation
+     * @return {!Array.<!WebInspector.EmulatedDevice.Mode>}
+     */
+    modesForOrientation: function(orientation)
+    {
+        var result = [];
+        for (var index = 0; index < this.modes.length; index++) {
+            if (this.modes[index].orientation === orientation)
+                result.push(this.modes[index]);
+        }
+        return result;
+    },
+
+    /**
      * @return {*}
      */
     _toJSON: function()
@@ -280,8 +276,13 @@ WebInspector.EmulatedDevice.prototype = {
             var mode = {};
             mode["title"] = this.modes[i].title;
             mode["orientation"] = this.modes[i].orientation;
-            mode["page-rect"] = this.modes[i].pageRect;
-            mode["images"] = this.modes[i].images._toJSON();
+            mode["insets"] = {};
+            mode["insets"]["left"] = this.modes[i].insets.left;
+            mode["insets"]["top"] = this.modes[i].insets.top;
+            mode["insets"]["right"] = this.modes[i].insets.right;
+            mode["insets"]["bottom"] = this.modes[i].insets.bottom;
+            if (this.modes[i].image)
+                mode["image"] = this.modes[i].image;
             json["modes"].push(mode);
         }
 
@@ -302,25 +303,44 @@ WebInspector.EmulatedDevice.prototype = {
         json["height"] = orientation.height;
         if (orientation.outlineInsets) {
             json["outline"] = {};
-            json["outline"]["insets"] = orientation.outlineInsets;
-            json["outline"]["images"] = orientation.outlineImages._toJSON();
+            json["outline"]["insets"] = {};
+            json["outline"]["insets"]["left"] = orientation.outlineInsets.left;
+            json["outline"]["insets"]["top"] = orientation.outlineInsets.top;
+            json["outline"]["insets"]["right"] = orientation.outlineInsets.right;
+            json["outline"]["insets"]["bottom"] = orientation.outlineInsets.bottom;
+            json["outline"]["image"] = orientation.outlineImage;
         }
         return json;
     },
 
     /**
+     * @param {!WebInspector.EmulatedDevice.Mode} mode
      * @return {!WebInspector.OverridesSupport.Device}
      */
-    toOverridesDevice: function()
+    modeToOverridesDevice: function(mode)
     {
         var result = {};
-        result.width = this.vertical.width;
-        result.height = this.vertical.height;
+        var orientation = this.orientationByName(mode.orientation);
+        result.width = orientation.width - mode.insets.left - mode.insets.right;
+        result.height = orientation.height - mode.insets.top - mode.insets.bottom;
         result.deviceScaleFactor = this.deviceScaleFactor;
         result.userAgent = this.userAgent;
         result.touch = this.touch();
         result.mobile = this.mobile();
         return result;
+    },
+
+    /**
+     * @param {!WebInspector.EmulatedDevice.Mode} mode
+     * @return {string}
+     */
+    modeImage: function(mode)
+    {
+        if (!mode.image)
+            return "";
+        if (!this._extension)
+            return mode.image;
+        return this._extension.module().substituteURL(mode.image);
     },
 
     /**
@@ -380,99 +400,43 @@ WebInspector.EmulatedDevice.prototype = {
  * @constructor
  * @extends {WebInspector.Object}
  */
-WebInspector.EmulatedDevice.Images = function()
-{
-    WebInspector.Object.call(this);
-    this._sources = [];
-    this._scales = [];
-}
-
-WebInspector.EmulatedDevice.Images.Events = {
-    Update: "Update"
-}
-
-WebInspector.EmulatedDevice.Images.prototype = {
-    /**
-     * @return {*}
-     */
-    _toJSON: function()
-    {
-        var result = [];
-        for (var i = 0; i < this._sources.length; ++i)
-            result.push({src: this._sources[i], scale: this._scales[i]});
-        return result;
-    },
-
-    /**
-     * @param {string} src
-     * @param {number} scale
-     */
-    addSource: function(src, scale)
-    {
-        this._sources.push(src);
-        this._scales.push(scale);
-    },
-
-    __proto__: WebInspector.Object.prototype
-}
-
-
-/**
- * @constructor
- * @extends {WebInspector.Object}
- */
 WebInspector.EmulatedDevicesList = function()
 {
     WebInspector.Object.call(this);
     WebInspector.settings.createSetting("standardEmulatedDeviceList", []).remove();
 
-    /**
-     * @param {!Array.<*>} list
-     * @param {string} type
-     * @return {!Array.<*>}
-     */
-    function convert(list, type)
-    {
-        var result = [];
-        for (var i = 0; i < list.length; ++i) {
-            var device = WebInspector.EmulatedDevice.fromOverridesDevice(/** @type {!WebInspector.OverridesSupport.Device} */ (list[i]), list[i].title, type);
-            result.push(device._toJSON());
-        }
-        return result;
-    }
-
-    // FIXME: shrink default list once external list is good enough.
-    var defaultValue = convert(WebInspector.OverridesUI._phones, "phone")
-        .concat(convert(WebInspector.OverridesUI._tablets, "tablet"))
-        .concat(convert(WebInspector.OverridesUI._notebooks, "notebook"));
-
     /** @type {!WebInspector.Setting} */
-    this._standardSetting = WebInspector.settings.createSetting("standardEmulatedDeviceList", defaultValue);
+    this._standardSetting = WebInspector.settings.createSetting("standardEmulatedDeviceList", []);
     /** @type {!Array.<!WebInspector.EmulatedDevice>} */
     this._standard = this._listFromJSONV1(this._standardSetting.get());
+    this._updateStandardDevices();
 
     /** @type {!WebInspector.Setting} */
     this._customSetting = WebInspector.settings.createSetting("customEmulatedDeviceList", []);
     /** @type {!Array.<!WebInspector.EmulatedDevice>} */
     this._custom = this._listFromJSONV1(this._customSetting.get());
-
-    /** @type {!WebInspector.Setting} */
-    this._lastUpdatedSetting = WebInspector.settings.createSetting("lastUpdatedDeviceList", null);
-
-    /** @type {boolean} */
-    this._updating = false;
 }
 
 WebInspector.EmulatedDevicesList.Events = {
     CustomDevicesUpdated: "CustomDevicesUpdated",
-    IsUpdatingChanged: "IsUpdatingChanged",
     StandardDevicesUpdated: "StandardDevicesUpdated"
 }
 
-WebInspector.EmulatedDevicesList._DevicesJsonUrl = "https://api.github.com/repos/GoogleChrome/devtools-device-data/contents/devices.json?ref=release";
-WebInspector.EmulatedDevicesList._UpdateIntervalMs = 24 * 60 * 60 * 1000;
-
 WebInspector.EmulatedDevicesList.prototype = {
+    _updateStandardDevices: function()
+    {
+        var devices = [];
+        var extensions = self.runtime.extensions("emulated-device");
+        for (var i = 0; i < extensions.length; ++i) {
+            var device = WebInspector.EmulatedDevice.fromJSONV1(extensions[i].descriptor()["device"]);
+            device.setExtension(extensions[i]);
+            devices.push(device);
+        }
+        this._copyShowValues(this._standard, devices);
+        this._standard = devices;
+        this.saveStandardDevices();
+    },
+
     /**
      * @param {!Array.<*>} jsonArray
      * @return {!Array.<!WebInspector.EmulatedDevice>}
@@ -484,8 +448,13 @@ WebInspector.EmulatedDevicesList.prototype = {
             return result;
         for (var i = 0; i < jsonArray.length; ++i) {
             var device = WebInspector.EmulatedDevice.fromJSONV1(jsonArray[i]);
-            if (device)
+            if (device) {
                 result.push(device);
+                if (!device.modes.length) {
+                    device.modes.push({title: "", orientation: WebInspector.EmulatedDevice.Horizontal, insets: new Insets(0, 0, 0, 0), image: null});
+                    device.modes.push({title: "", orientation: WebInspector.EmulatedDevice.Vertical, insets: new Insets(0, 0, 0, 0), image: null});
+                }
+            }
         }
         return result;
     },
@@ -538,107 +507,6 @@ WebInspector.EmulatedDevicesList.prototype = {
         this.dispatchEventToListeners(WebInspector.EmulatedDevicesList.Events.StandardDevicesUpdated);
     },
 
-    update: function()
-    {
-        if (this._updating)
-            return;
-
-        this._updating = true;
-        this.dispatchEventToListeners(WebInspector.EmulatedDevicesList.Events.IsUpdatingChanged);
-
-        /**
-         * @param {*} json
-         * @return {!Promise.<string>}
-         */
-        function decodeBase64Content(json)
-        {
-            return loadXHR("data:application/json;charset=utf-8;base64," + json.content);
-        }
-
-        /**
-         * FIXME: promise chain below does not compile with JSON.parse.
-         * @return {*}
-         */
-        function myJsonParse(json)
-        {
-            return JSON.parse(json);
-        }
-
-        loadXHR(WebInspector.EmulatedDevicesList._DevicesJsonUrl)
-            .then(JSON.parse)
-            .then(decodeBase64Content)
-            .then(myJsonParse)
-            .then(this._parseUpdatedDevices.bind(this))
-            .then(this._updateFinished.bind(this))
-            .catch(this._updateFailed.bind(this));
-    },
-
-    maybeAutoUpdate: function()
-    {
-        if (!Runtime.experiments.isEnabled("externalDeviceList"))
-            return;
-        var lastUpdated = this._lastUpdatedSetting.get();
-        if (lastUpdated && (Date.now() - lastUpdated < WebInspector.EmulatedDevicesList._UpdateIntervalMs))
-            return;
-        this.update();
-    },
-
-    /**
-     * @param {*} json
-     */
-    _parseUpdatedDevices: function(json)
-    {
-        if (!json || typeof json !== "object") {
-            WebInspector.console.error("Malfromed device list");
-            return;
-        }
-        if (!("version" in json) || typeof json["version"] !== "number") {
-            WebInspector.console.error("Device list does not specify version");
-            return;
-        }
-        var version = json["version"];
-        if (version === 1) {
-            this._parseDevicesV1(json);
-            return;
-        }
-        WebInspector.console.error("Unsupported device list version '" + version + "'");
-    },
-
-    /**
-     * @param {*} json
-     */
-    _parseDevicesV1: function(json)
-    {
-        if (!("devices" in json)) {
-            WebInspector.console.error("Malfromed device list");
-            return;
-        }
-        var devices = json["devices"];
-        if (!Array.isArray(devices)) {
-            WebInspector.console.error("Malfromed device list");
-            return;
-        }
-
-        devices = this._listFromJSONV1(devices);
-        this._copyShowValues(this._standard, devices);
-        this._standard = devices;
-        this.saveStandardDevices();
-        WebInspector.console.log("Device list updated successfully");
-    },
-
-    _updateFailed: function()
-    {
-        WebInspector.console.error("Cannot update device list");
-        this._updateFinished();
-    },
-
-    _updateFinished: function()
-    {
-        this._updating = false;
-        this._lastUpdatedSetting.set(Date.now());
-        this.dispatchEventToListeners(WebInspector.EmulatedDevicesList.Events.IsUpdatingChanged);
-    },
-
     /**
      * @param {!Array.<!WebInspector.EmulatedDevice>} from
      * @param {!Array.<!WebInspector.EmulatedDevice>} to
@@ -654,14 +522,6 @@ WebInspector.EmulatedDevicesList.prototype = {
             if (deviceById.has(title))
                 to[i].copyShowFrom(/** @type {!WebInspector.EmulatedDevice} */ (deviceById.get(title)));
         }
-    },
-
-    /**
-     * @return {boolean}
-     */
-    isUpdating: function()
-    {
-        return this._updating;
     },
 
     __proto__: WebInspector.Object.prototype

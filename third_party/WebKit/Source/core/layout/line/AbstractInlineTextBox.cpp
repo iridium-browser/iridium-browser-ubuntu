@@ -31,12 +31,13 @@
 #include "config.h"
 #include "core/layout/line/AbstractInlineTextBox.h"
 
+#include "core/dom/AXObjectCache.h"
 #include "core/editing/iterators/TextIterator.h"
 #include "platform/text/TextBreakIterator.h"
 
 namespace blink {
 
-AbstractInlineTextBox::InlineToAbstractInlineTextBoxHashMap* AbstractInlineTextBox::gAbstractInlineTextBoxMap = 0;
+AbstractInlineTextBox::InlineToAbstractInlineTextBoxHashMap* AbstractInlineTextBox::gAbstractInlineTextBoxMap = nullptr;
 
 PassRefPtr<AbstractInlineTextBox> AbstractInlineTextBox::getOrCreate(LayoutText* layoutText, InlineTextBox* inlineTextBox)
 {
@@ -67,15 +68,26 @@ void AbstractInlineTextBox::willDestroy(InlineTextBox* inlineTextBox)
     }
 }
 
+AbstractInlineTextBox::~AbstractInlineTextBox()
+{
+    ASSERT(!m_layoutText);
+    ASSERT(!m_inlineTextBox);
+}
+
 void AbstractInlineTextBox::detach()
 {
+    if (Node* node = m_layoutText->node()) {
+        if (AXObjectCache* cache = node->document().existingAXObjectCache())
+            cache->remove(this);
+    }
+
     m_layoutText = 0;
     m_inlineTextBox = 0;
 }
 
 PassRefPtr<AbstractInlineTextBox> AbstractInlineTextBox::nextInlineTextBox() const
 {
-    ASSERT(!m_inlineTextBox || !m_inlineTextBox->layoutObject().needsLayout());
+    ASSERT(!m_inlineTextBox || !m_inlineTextBox->lineLayoutItem().needsLayout());
     if (!m_inlineTextBox)
         return nullptr;
 
@@ -87,7 +99,7 @@ LayoutRect AbstractInlineTextBox::bounds() const
     if (!m_inlineTextBox || !m_layoutText)
         return LayoutRect();
 
-    FloatRect boundaries = m_inlineTextBox->calculateBoundaries().toFloatRect();
+    FloatRect boundaries = m_inlineTextBox->calculateBoundaries();
     return LayoutRect(m_layoutText->localToAbsoluteQuad(boundaries).enclosingBoundingBox());
 }
 
@@ -109,7 +121,7 @@ AbstractInlineTextBox::Direction AbstractInlineTextBox::direction() const
     return (m_inlineTextBox->direction() == RTL ? BottomToTop : TopToBottom);
 }
 
-void AbstractInlineTextBox::characterWidths(Vector<FloatWillBeLayoutUnit>& widths) const
+void AbstractInlineTextBox::characterWidths(Vector<float>& widths) const
 {
     if (!m_inlineTextBox)
         return;
@@ -147,10 +159,9 @@ String AbstractInlineTextBox::text() const
     unsigned start = m_inlineTextBox->start();
     unsigned len = m_inlineTextBox->len();
     if (Node* node = m_layoutText->node()) {
-        RefPtrWillBeRawPtr<Range> range = Range::create(node->document());
-        range->setStart(node, start, IGNORE_EXCEPTION);
-        range->setEnd(node, start + len, IGNORE_EXCEPTION);
-        return plainText(range.get(), TextIteratorIgnoresStyleVisibility);
+        if (node->isTextNode())
+            return plainText(EphemeralRange(Position(node, start), Position(node, start + len)), TextIteratorIgnoresStyleVisibility);
+        return plainText(EphemeralRange(Position(node, PositionAnchorType::BeforeAnchor), Position(node, PositionAnchorType::AfterAnchor)), TextIteratorIgnoresStyleVisibility);
     }
 
     String result = m_layoutText->text().substring(start, len).simplifyWhiteSpace(WTF::DoNotStripWhiteSpace);
@@ -161,19 +172,19 @@ String AbstractInlineTextBox::text() const
 
 bool AbstractInlineTextBox::isFirst() const
 {
-    ASSERT(!m_inlineTextBox || !m_inlineTextBox->layoutObject().needsLayout());
+    ASSERT(!m_inlineTextBox || !m_inlineTextBox->lineLayoutItem().needsLayout());
     return !m_inlineTextBox || !m_inlineTextBox->prevTextBox();
 }
 
 bool AbstractInlineTextBox::isLast() const
 {
-    ASSERT(!m_inlineTextBox || !m_inlineTextBox->layoutObject().needsLayout());
+    ASSERT(!m_inlineTextBox || !m_inlineTextBox->lineLayoutItem().needsLayout());
     return !m_inlineTextBox || !m_inlineTextBox->nextTextBox();
 }
 
 PassRefPtr<AbstractInlineTextBox> AbstractInlineTextBox::nextOnLine() const
 {
-    ASSERT(!m_inlineTextBox || !m_inlineTextBox->layoutObject().needsLayout());
+    ASSERT(!m_inlineTextBox || !m_inlineTextBox->lineLayoutItem().needsLayout());
     if (!m_inlineTextBox)
         return nullptr;
 
@@ -186,7 +197,7 @@ PassRefPtr<AbstractInlineTextBox> AbstractInlineTextBox::nextOnLine() const
 
 PassRefPtr<AbstractInlineTextBox> AbstractInlineTextBox::previousOnLine() const
 {
-    ASSERT(!m_inlineTextBox || !m_inlineTextBox->layoutObject().needsLayout());
+    ASSERT(!m_inlineTextBox || !m_inlineTextBox->lineLayoutItem().needsLayout());
     if (!m_inlineTextBox)
         return nullptr;
 

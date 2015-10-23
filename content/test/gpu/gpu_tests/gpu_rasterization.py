@@ -7,7 +7,7 @@ import gpu_rasterization_expectations
 import optparse
 import page_sets
 
-from telemetry.image_processing import image_util
+from telemetry.util import image_util
 
 
 test_harness_script = r"""
@@ -30,14 +30,14 @@ test_harness_script = r"""
 def _DidTestSucceed(tab):
   return tab.EvaluateJavaScript('domAutomationController._succeeded')
 
-class _GpuRasterizationValidator(cloud_storage_test_base.ValidatorBase):
+class GpuRasterizationValidator(cloud_storage_test_base.ValidatorBase):
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs(['--enable-threaded-compositing',
                                     '--enable-impl-side-painting',
                                     '--force-gpu-rasterization',
                                     '--enable-gpu-benchmarking'])
 
-  def ValidateAndMeasurePage(self, page, tab, results):
+  def ValidateAndMeasurePageInner(self, page, tab, results):
     if not _DidTestSucceed(tab):
       raise page_test.Failure('Page indicated a failure')
 
@@ -66,17 +66,17 @@ class _GpuRasterizationValidator(cloud_storage_test_base.ValidatorBase):
 
 class GpuRasterization(cloud_storage_test_base.TestBase):
   """Tests that GPU rasterization produces valid content"""
-  test = _GpuRasterizationValidator
+  test = GpuRasterizationValidator
 
   @classmethod
   def Name(cls):
     return 'gpu_rasterization'
 
-  def CreatePageSet(self, options):
-    page_set = page_sets.GpuRasterizationTestsPageSet()
-    for page in page_set.pages:
+  def CreateStorySet(self, options):
+    story_set = page_sets.GpuRasterizationTestsStorySet(self.GetExpectations())
+    for page in story_set:
       page.script_to_evaluate_on_commit = test_harness_script
-    return page_set
+    return story_set
 
-  def CreateExpectations(self):
+  def _CreateExpectations(self):
     return gpu_rasterization_expectations.GpuRasterizationExpectations()

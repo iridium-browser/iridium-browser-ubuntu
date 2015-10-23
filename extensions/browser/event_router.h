@@ -17,12 +17,16 @@
 #include "base/memory/ref_counted.h"
 #include "base/scoped_observer.h"
 #include "base/values.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_process_host_observer.h"
 #include "extensions/browser/event_listener_map.h"
+#include "extensions/browser/extension_event_histogram_value.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/event_filtering_info.h"
 #include "ipc/ipc_sender.h"
+#include "url/gurl.h"
 
 class GURL;
 class PrefService;
@@ -43,9 +47,11 @@ struct Event;
 struct EventDispatchInfo;
 struct EventListenerInfo;
 
-class EventRouter : public content::NotificationObserver,
+class EventRouter : public KeyedService,
+                    public content::NotificationObserver,
                     public ExtensionRegistryObserver,
-                    public EventListenerMap::Delegate {
+                    public EventListenerMap::Delegate,
+                    public content::RenderProcessHostObserver {
  public:
   // These constants convey the state of our knowledge of whether we're in
   // a user-caused gesture as part of DispatchEvent.
@@ -72,8 +78,6 @@ class EventRouter : public content::NotificationObserver,
   };
 
   // Gets the EventRouter for |browser_context|.
-  // Shorthand for ExtensionSystem::Get(browser_context)->event_router(); it's
-  // a very common operation.
   static EventRouter* Get(content::BrowserContext* browser_context);
 
   // Converts event names like "foo.onBar/123" into "foo.onBar". Event names
@@ -82,13 +86,17 @@ class EventRouter : public content::NotificationObserver,
 
   // Sends an event via ipc_sender to the given extension. Can be called on any
   // thread.
-  static void DispatchEvent(IPC::Sender* ipc_sender,
-                            void* browser_context_id,
-                            const std::string& extension_id,
-                            const std::string& event_name,
-                            scoped_ptr<base::ListValue> event_args,
-                            UserGestureState user_gesture,
-                            const EventFilteringInfo& info);
+  //
+  // It is very rare to call this function directly. Instead use the instance
+  // methods BroadcastEvent or DispatchEventToExtension.
+  static void DispatchEventToSender(IPC::Sender* ipc_sender,
+                                    void* browser_context_id,
+                                    const std::string& extension_id,
+                                    events::HistogramValue histogram_value,
+                                    const std::string& event_name,
+                                    scoped_ptr<base::ListValue> event_args,
+                                    UserGestureState user_gesture,
+                                    const EventFilteringInfo& info);
 
   // An EventRouter is shared between |browser_context| and its associated
   // incognito context. |extension_prefs| may be NULL in tests.
@@ -182,6 +190,15 @@ class EventRouter : public content::NotificationObserver,
   void OnEventAck(content::BrowserContext* context,
                   const std::string& extension_id);
 
+  // Reports UMA for an event dispatched to |extension| with histogram value
+  // |histogram_value|. Must be called on the UI thread.
+  //
+  // |did_enqueue| should be true if the event was queued waiting for a process
+  // to start, like an event page.
+  void ReportEvent(events::HistogramValue histogram_value,
+                   const Extension* extension,
+                   bool did_enqueue);
+
  private:
   friend class EventRouterTest;
 
@@ -226,9 +243,9 @@ class EventRouter : public content::NotificationObserver,
                             const std::string& extension_id,
                             const std::string& event_name);
 
-  // Shared by DispatchEvent*. If |restrict_to_extension_id| is empty, the
-  // event is broadcast.
-  // An event that just came off the pending list may not be delayed again.
+  // Shared by all event dispatch methods. If |restrict_to_extension_id| is
+  // empty, the event is broadcast.  An event that just came off the pending
+  // list may not be delayed again.
   void DispatchEventImpl(const std::string& restrict_to_extension_id,
                          const linked_ptr<Event>& event);
 
@@ -238,14 +255,17 @@ class EventRouter : public content::NotificationObserver,
   // event dispatch that is queued.
   void DispatchLazyEvent(const std::string& extension_id,
                          const linked_ptr<Event>& event,
-                         std::set<EventDispatchIdentifier>* already_dispatched);
+                         std::set<EventDispatchIdentifier>* already_dispatched,
+                         const base::DictionaryValue* listener_filter);
 
   // Dispatches the event to the specified extension or URL running in
   // |process|.
   void DispatchEventToProcess(const std::string& extension_id,
                               const GURL& listener_url,
                               content::RenderProcessHost* process,
-                              const linked_ptr<Event>& event);
+                              const linked_ptr<Event>& event,
+                              const base::DictionaryValue* listener_filter,
+                              bool did_enqueue);
 
   // Returns false when the event is scoped to a context and the listening
   // extension does not have access to events from that context. Also fills
@@ -261,7 +281,8 @@ class EventRouter : public content::NotificationObserver,
   bool MaybeLoadLazyBackgroundPageToDispatchEvent(
       content::BrowserContext* context,
       const Extension* extension,
-      const linked_ptr<Event>& event);
+      const linked_ptr<Event>& event,
+      const base::DictionaryValue* listener_filter);
 
   // Adds a filter to an event.
   void AddFilterToEvent(const std::string& event_name,
@@ -286,10 +307,12 @@ class EventRouter : public content::NotificationObserver,
                                const std::string& event_name);
 
   // static
-  static void IncrementInFlightEventsOnUI(void* browser_context_id,
-                                          const std::string& extension_id,
-                                          int event_id,
-                                          const std::string& event_name);
+  static void DoDispatchEventToSenderBookkeepingOnUI(
+      void* browser_context_id,
+      const std::string& extension_id,
+      int event_id,
+      events::HistogramValue histogram_value,
+      const std::string& event_name);
 
   void DispatchPendingEvent(const linked_ptr<Event>& event,
                             ExtensionHost* host);
@@ -297,6 +320,12 @@ class EventRouter : public content::NotificationObserver,
   // Implementation of EventListenerMap::Delegate.
   void OnListenerAdded(const EventListener* listener) override;
   void OnListenerRemoved(const EventListener* listener) override;
+
+  // RenderProcessHostObserver implementation.
+  void RenderProcessExited(content::RenderProcessHost* host,
+                           base::TerminationStatus status,
+                           int exit_code) override;
+  void RenderProcessHostDestroyed(content::RenderProcessHost* host) override;
 
   content::BrowserContext* browser_context_;
 
@@ -315,6 +344,8 @@ class EventRouter : public content::NotificationObserver,
   typedef base::hash_map<std::string, Observer*> ObserverMap;
   ObserverMap observers_;
 
+  std::set<content::RenderProcessHost*> observed_process_set_;
+
   DISALLOW_COPY_AND_ASSIGN(EventRouter);
 };
 
@@ -323,7 +354,14 @@ struct Event {
   // given context and extension, and false otherwise.
   typedef base::Callback<bool(content::BrowserContext*,
                               const Extension*,
-                              base::ListValue*)> WillDispatchCallback;
+                              Event*,
+                              const base::DictionaryValue*)>
+      WillDispatchCallback;
+
+  // The identifier for the event, for histograms. In most cases this
+  // correlates 1:1 with |event_name|, in some cases events will generate
+  // their own names, but they cannot generate their own identifier.
+  events::HistogramValue histogram_value;
 
   // The event to dispatch.
   std::string event_name;
@@ -356,14 +394,17 @@ struct Event {
   // this event to be dispatched to non-extension processes, like WebUI.
   WillDispatchCallback will_dispatch_callback;
 
-  Event(const std::string& event_name,
+  Event(events::HistogramValue histogram_value,
+        const std::string& event_name,
         scoped_ptr<base::ListValue> event_args);
 
-  Event(const std::string& event_name,
+  Event(events::HistogramValue histogram_value,
+        const std::string& event_name,
         scoped_ptr<base::ListValue> event_args,
         content::BrowserContext* restrict_to_browser_context);
 
-  Event(const std::string& event_name,
+  Event(events::HistogramValue histogram_value,
+        const std::string& event_name,
         scoped_ptr<base::ListValue> event_args,
         content::BrowserContext* restrict_to_browser_context,
         const GURL& event_url,

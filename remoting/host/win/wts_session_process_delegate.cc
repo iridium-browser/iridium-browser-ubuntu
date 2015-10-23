@@ -24,6 +24,7 @@
 #include "remoting/host/host_main.h"
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/ipc_util.h"
+#include "remoting/host/switches.h"
 #include "remoting/host/win/launch_process_with_token.h"
 #include "remoting/host/win/worker_process_launcher.h"
 #include "remoting/host/win/wts_terminal_monitor.h"
@@ -383,7 +384,8 @@ void WtsSessionProcessDelegate::Core::DoLaunchProcess() {
       IPC::ChannelProxy::Create(IPC::ChannelHandle(pipe.Get()),
                                 IPC::Channel::MODE_SERVER,
                                 this,
-                                io_task_runner_));
+                                io_task_runner_,
+                                nullptr));
 
   // Pass the name of the IPC channel to use.
   command_line.AppendSwitchNative(kDaemonPipeSwitchName,

@@ -17,6 +17,8 @@
         'angle_enable_d3d11%': 0,
         'angle_enable_gl%': 0,
         'angle_enable_hlsl%': 0,
+        'angle_link_glx%': 0,
+        'angle_gl_library_type%': 'shared_library',
         'conditions':
         [
             ['OS=="win"',
@@ -26,7 +28,11 @@
                 'angle_enable_d3d11%': 1,
                 'angle_enable_hlsl%': 1,
             }],
-            ['OS=="linux" and use_x11==1',
+            ['OS=="linux" and use_x11==1 and chromeos==0',
+            {
+                'angle_enable_gl%': 1,
+            }],
+            ['OS=="mac"',
             {
                 'angle_enable_gl%': 1,
             }],
@@ -61,16 +67,37 @@
                     '<(angle_path)/src',
                     '<(angle_path)/include',
                 ],
+                'conditions':
+                [
+                    ['OS=="win"',
+                    {
+                        'configurations':
+                        {
+                            'Debug_Base':
+                            {
+                                'defines':
+                                [
+                                    'ANGLE_ENABLE_DEBUG_ANNOTATIONS'
+                                ],
+                            },
+                        },
+                    }],
+                ],
             },
             'conditions':
             [
-                ['angle_build_winrt==1',
+                ['OS=="win"',
                 {
-                    'msvs_enable_winrt' : '1',
-                }],
-                ['angle_build_winphone==1',
-                {
-                    'msvs_enable_winphone' : '1',
+                    'configurations':
+                    {
+                        'Debug_Base':
+                        {
+                            'defines':
+                            [
+                                'ANGLE_ENABLE_DEBUG_ANNOTATIONS'
+                            ],
+                        },
+                    },
                 }],
             ],
         },
@@ -91,12 +118,7 @@
             [
                 ['angle_build_winrt==1',
                 {
-                    'msvs_enable_winrt' : '1',
                     'type' : 'shared_library',
-                }],
-                ['angle_build_winphone==1',
-                {
-                    'msvs_enable_winphone' : '1',
                 }],
             ],
         },
@@ -139,12 +161,7 @@
                     [
                         ['angle_build_winrt==1',
                         {
-                            'msvs_enable_winrt' : '1',
                             'type' : 'shared_library',
-                        }],
-                        ['angle_build_winphone==1',
-                        {
-                            'msvs_enable_winphone' : '1',
                         }],
                     ],
                 }
@@ -176,12 +193,7 @@
                     [
                         ['angle_build_winrt==1',
                         {
-                            'msvs_enable_winrt' : '1',
                             'type' : 'shared_library',
-                        }],
-                        ['angle_build_winphone==1',
-                        {
-                            'msvs_enable_winphone' : '1',
                         }],
                     ],
                 }
@@ -220,12 +232,7 @@
                         }],
                         ['angle_build_winrt==1',
                         {
-                            'msvs_enable_winrt' : '1',
                             'type' : 'shared_library',
-                        }],
-                        ['angle_build_winphone==1',
-                        {
-                            'msvs_enable_winphone' : '1',
                         }],
                     ]
                 },

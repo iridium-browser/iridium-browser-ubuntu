@@ -31,12 +31,13 @@ class MockDownloadControllerAndroid
   void StartContextMenuDownload(
       const content::ContextMenuParams& params,
       content::WebContents* web_contents,
-      bool is_link) override;
+      bool is_link, const std::string& extra_headers) override;
   void DangerousDownloadValidated(
       content::WebContents* web_contents, int download_id,
       bool accept) override;
   void AcquireFileAccessPermission(
-      content::WebContents* web_contents,
+      int render_process_id,
+      int render_view_id,
       const AcquireFileAccessPermissionCallback& callback) override;
   void SetApproveFileAccessRequestForTesting(bool approve) override;
 

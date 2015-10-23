@@ -9,22 +9,25 @@
 #include "base/memory/weak_ptr.h"
 #include "media/base/demuxer_stream.h"
 #include "media/mojo/interfaces/demuxer_stream.mojom.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
 
 namespace media {
 class DemuxerStream;
 
 // This class wraps a media::DemuxerStream and exposes it as a
-// mojo::DemuxerStream for use as a proxy from remote applications.
-class MojoDemuxerStreamImpl : public mojo::InterfaceImpl<mojo::DemuxerStream> {
+// interfaces::DemuxerStream for use as a proxy from remote applications.
+class MojoDemuxerStreamImpl : public interfaces::DemuxerStream {
  public:
   // |stream| is the underlying DemuxerStream we are proxying for.
   // Note: |this| does not take ownership of |stream|.
-  explicit MojoDemuxerStreamImpl(media::DemuxerStream* stream);
+  MojoDemuxerStreamImpl(
+      media::DemuxerStream* stream,
+      mojo::InterfaceRequest<interfaces::DemuxerStream> request);
   ~MojoDemuxerStreamImpl() override;
 
-  // mojo::DemuxerStream implementation.
-  // InitializeCallback and ReadCallback are defined in mojo::DemuxerStream.
+  // interfaces::DemuxerStream implementation.
+  // InitializeCallback and ReadCallback are defined in
+  // interfaces::DemuxerStream.
   void Initialize(const InitializeCallback& callback) override;
   void Read(const ReadCallback& callback) override;
 
@@ -32,6 +35,8 @@ class MojoDemuxerStreamImpl : public mojo::InterfaceImpl<mojo::DemuxerStream> {
   void OnBufferReady(const ReadCallback& callback,
                      media::DemuxerStream::Status status,
                      const scoped_refptr<media::DecoderBuffer>& buffer);
+
+  mojo::StrongBinding<interfaces::DemuxerStream> binding_;
 
   // See constructor.  We do not own |stream_|.
   media::DemuxerStream* stream_;

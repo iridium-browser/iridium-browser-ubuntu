@@ -43,9 +43,9 @@ class FailureValue(value_module.Value):
 
   def __repr__(self):
     if self.page:
-      page_name = self.page.url
+      page_name = self.page.display_name
     else:
-      page_name = None
+      page_name = 'None'
     return 'FailureValue(%s, %s)' % (
         page_name, GetStringFromExcInfo(self._exc_info))
 
@@ -94,8 +94,7 @@ class FailureValue(value_module.Value):
     assert False, 'Should not be called.'
 
   @classmethod
-  def MergeLikeValuesFromDifferentPages(cls, values,
-                                        group_by_name_suffix=False):
+  def MergeLikeValuesFromDifferentPages(cls, values):
     assert False, 'Should not be called.'
 
 def GetStringFromExcInfo(exc_info):

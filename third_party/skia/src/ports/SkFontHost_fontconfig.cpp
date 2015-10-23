@@ -8,8 +8,6 @@
 #include "SkFontConfigInterface.h"
 #include "SkFontConfigTypeface.h"
 #include "SkFontDescriptor.h"
-#include "SkFontHost_FreeType_common.h"
-#include "SkFontStream.h"
 #include "SkStream.h"
 #include "SkTypeface.h"
 #include "SkTypefaceCache.h"
@@ -155,6 +153,5 @@ void FontConfigTypeface::onGetFontDescriptor(SkFontDescriptor* desc,
     SkString name;
     this->getFamilyName(&name);
     desc->setFamilyName(name.c_str());
-    desc->setFontIndex(this->getIdentity().fTTCIndex);
     *isLocalStream = SkToBool(this->getLocalStream());
 }

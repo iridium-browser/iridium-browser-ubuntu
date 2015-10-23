@@ -17,7 +17,6 @@
 #include "remoting/client/chromoting_client.h"
 #include "remoting/client/client_context.h"
 #include "remoting/client/token_fetcher_proxy.h"
-#include "remoting/protocol/authentication_method.h"
 #include "remoting/protocol/chromium_port_allocator.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/libjingle_transport_factory.h"
@@ -26,14 +25,10 @@
 #include "remoting/protocol/session_config.h"
 #include "remoting/protocol/third_party_client_authenticator.h"
 #include "remoting/signaling/xmpp_signal_strategy.h"
-#include "remoting/test/remote_host_info_fetcher.h"
+#include "remoting/test/connection_setup_info.h"
 #include "remoting/test/test_video_renderer.h"
 
 namespace {
-
-const char kAppRemotingCapabilities[] =
-    "rateLimitResizeRequests desktopShape sendInitialResolution googleDrive";
-
 const char kXmppHostName[] = "talk.google.com";
 const int kXmppPortNumber = 5222;
 
@@ -45,7 +40,7 @@ void FetchThirdPartyToken(
     const std::string& host_public_key,
     const std::string& scope,
     base::WeakPtr<remoting::TokenFetcherProxy> token_fetcher_proxy) {
-  DVLOG(1) << "FetchThirdPartyToken("
+  VLOG(2)  << "FetchThirdPartyToken("
            << "token_url: " << token_url << ", "
            << "host_public_key: " << host_public_key << ", "
            << "scope: " << scope << ") Called";
@@ -58,70 +53,11 @@ void FetchThirdPartyToken(
   }
 }
 
-const char* ConnectionStateToFriendlyString(
-    remoting::protocol::ConnectionToHost::State state) {
-  switch (state) {
-    case remoting::protocol::ConnectionToHost::INITIALIZING:
-      return "INITIALIZING";
-
-    case remoting::protocol::ConnectionToHost::CONNECTING:
-      return "CONNECTING";
-
-    case remoting::protocol::ConnectionToHost::AUTHENTICATED:
-      return "AUTHENTICATED";
-
-    case remoting::protocol::ConnectionToHost::CONNECTED:
-      return "CONNECTED";
-
-    case remoting::protocol::ConnectionToHost::CLOSED:
-      return "CLOSED";
-
-    case remoting::protocol::ConnectionToHost::FAILED:
-      return "FAILED";
-
-    default:
-      LOG(ERROR) << "Unknown connection state: '" << state << "'";
-      return "UNKNOWN";
-  }
-}
-
-const char* ProtocolErrorToFriendlyString(
-    remoting::protocol::ErrorCode error_code) {
-  switch (error_code) {
-    case remoting::protocol::OK:
-      return "NONE";
-
-    case remoting::protocol::PEER_IS_OFFLINE:
-      return "PEER_IS_OFFLINE";
-
-    case remoting::protocol::SESSION_REJECTED:
-      return "SESSION_REJECTED";
-
-    case remoting::protocol::AUTHENTICATION_FAILED:
-      return "AUTHENTICATION_FAILED";
-
-    case remoting::protocol::INCOMPATIBLE_PROTOCOL:
-      return "INCOMPATIBLE_PROTOCOL";
-
-    case remoting::protocol::HOST_OVERLOAD:
-      return "HOST_OVERLOAD";
-
-    case remoting::protocol::CHANNEL_CONNECTION_ERROR:
-      return "CHANNEL_CONNECTION_ERROR";
-
-    case remoting::protocol::SIGNALING_ERROR:
-      return "SIGNALING_ERROR";
-
-    case remoting::protocol::SIGNALING_TIMEOUT:
-      return "SIGNALING_TIMEOUT";
-
-    case remoting::protocol::UNKNOWN_ERROR:
-      return "UNKNOWN_ERROR";
-
-    default:
-      LOG(ERROR) << "Unrecognized error code: '" << error_code << "'";
-      return "UNKNOWN_ERROR";
-  }
+void FetchSecret(
+    const std::string& client_secret,
+    bool pairing_expected,
+    const remoting::protocol::SecretFetchedCallback& secret_fetched_callback) {
+  secret_fetched_callback.Run(client_secret);
 }
 
 }  // namespace
@@ -131,7 +67,12 @@ namespace test {
 
 TestChromotingClient::TestChromotingClient()
     : connection_to_host_state_(protocol::ConnectionToHost::INITIALIZING),
-      connection_error_code_(protocol::OK) {
+      connection_error_code_(protocol::OK) {}
+
+TestChromotingClient::TestChromotingClient(
+    scoped_ptr<VideoRenderer> video_renderer)
+    : video_renderer_(video_renderer.Pass()) {
+  TestChromotingClient();
 }
 
 TestChromotingClient::~TestChromotingClient() {
@@ -141,13 +82,7 @@ TestChromotingClient::~TestChromotingClient() {
 }
 
 void TestChromotingClient::StartConnection(
-    const std::string& user_name,
-    const std::string& access_token,
-    const RemoteHostInfo& remote_host_info) {
-  DCHECK(!user_name.empty());
-  DCHECK(!access_token.empty());
-  DCHECK(remote_host_info.IsReadyForConnection());
-
+    const ConnectionSetupInfo& connection_setup_info) {
   // Required to establish a connection to the host.
   jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
 
@@ -158,7 +93,10 @@ void TestChromotingClient::StartConnection(
 
   client_context_.reset(new ClientContext(base::ThreadTaskRunnerHandle::Get()));
 
-  video_renderer_.reset(new TestVideoRenderer());
+  // Check to see if the user passed in a customized video renderer.
+  if (!video_renderer_) {
+    video_renderer_.reset(new TestVideoRenderer());
+  }
 
   chromoting_client_.reset(new ChromotingClient(client_context_.get(),
                                                 this,  // client_user_interface.
@@ -174,8 +112,8 @@ void TestChromotingClient::StartConnection(
   xmpp_server_config.host = kXmppHostName;
   xmpp_server_config.port = kXmppPortNumber;
   xmpp_server_config.use_tls = true;
-  xmpp_server_config.username = user_name;
-  xmpp_server_config.auth_token = access_token;
+  xmpp_server_config.username = connection_setup_info.user_name;
+  xmpp_server_config.auth_token = connection_setup_info.access_token;
 
   // Set up the signal strategy.  This must outlive the client object.
   signal_strategy_.reset(
@@ -196,26 +134,28 @@ void TestChromotingClient::StartConnection(
 
   scoped_ptr<protocol::ThirdPartyClientAuthenticator::TokenFetcher>
       token_fetcher(new TokenFetcherProxy(
-          base::Bind(&FetchThirdPartyToken, remote_host_info.authorization_code,
-                     remote_host_info.shared_secret),
-          "FAKE_HOST_PUBLIC_KEY"));
+          base::Bind(&FetchThirdPartyToken,
+                     connection_setup_info.authorization_code,
+                     connection_setup_info.shared_secret),
+          connection_setup_info.public_key));
 
-  std::vector<protocol::AuthenticationMethod> auth_methods;
-  auth_methods.push_back(protocol::AuthenticationMethod::ThirdParty());
-
-  // FetchSecretCallback is used for PIN based auth which we aren't using so we
-  // can pass a null callback here.
   protocol::FetchSecretCallback fetch_secret_callback;
+  if (!connection_setup_info.pin.empty()) {
+    fetch_secret_callback = base::Bind(&FetchSecret, connection_setup_info.pin);
+  }
+
   scoped_ptr<protocol::Authenticator> authenticator(
       new protocol::NegotiatingClientAuthenticator(
-          std::string(),  // client_pairing_id
-          std::string(),  // shared_secret
-          std::string(),  // authentication_tag
-          fetch_secret_callback, token_fetcher.Pass(), auth_methods));
+          connection_setup_info.pairing_id,
+          connection_setup_info.shared_secret,
+          connection_setup_info.host_id,
+          fetch_secret_callback,
+          token_fetcher.Pass(),
+          connection_setup_info.auth_methods));
 
-  chromoting_client_->Start(signal_strategy_.get(), authenticator.Pass(),
-                            transport_factory.Pass(), remote_host_info.host_jid,
-                            kAppRemotingCapabilities);
+  chromoting_client_->Start(
+      signal_strategy_.get(), authenticator.Pass(), transport_factory.Pass(),
+      connection_setup_info.host_jid, connection_setup_info.capabilities);
 }
 
 void TestChromotingClient::EndConnection() {
@@ -257,10 +197,10 @@ void TestChromotingClient::SetConnectionToHostForTests(
 void TestChromotingClient::OnConnectionState(
     protocol::ConnectionToHost::State state,
     protocol::ErrorCode error_code) {
-  DVLOG(1) << "TestChromotingClient::OnConnectionState("
-           << "state: " << ConnectionStateToFriendlyString(state) << ", "
-           << "error_code: " << ProtocolErrorToFriendlyString(error_code)
-           << ") Called";
+  VLOG(1) << "TestChromotingClient::OnConnectionState("
+          << "state: " << protocol::ConnectionToHost::StateToString(state)
+          << ", error_code: " << protocol::ErrorCodeToString(error_code)
+          << ") Called";
 
   connection_error_code_ = error_code;
   connection_to_host_state_ = state;
@@ -270,8 +210,8 @@ void TestChromotingClient::OnConnectionState(
 }
 
 void TestChromotingClient::OnConnectionReady(bool ready) {
-  DVLOG(1) << "TestChromotingClient::OnConnectionReady("
-           << "ready:" << ready << ") Called";
+  VLOG(1) << "TestChromotingClient::OnConnectionReady("
+          << "ready:" << ready << ") Called";
 
   FOR_EACH_OBSERVER(RemoteConnectionObserver, connection_observers_,
                     ConnectionReady(ready));
@@ -280,18 +220,18 @@ void TestChromotingClient::OnConnectionReady(bool ready) {
 void TestChromotingClient::OnRouteChanged(
     const std::string& channel_name,
     const protocol::TransportRoute& route) {
-  DVLOG(1) << "TestChromotingClient::OnRouteChanged("
-           << "channel_name:" << channel_name << ", "
-           << "route:" << protocol::TransportRoute::GetTypeString(route.type)
-           << ") Called";
+  VLOG(1) << "TestChromotingClient::OnRouteChanged("
+          << "channel_name:" << channel_name << ", "
+          << "route:" << protocol::TransportRoute::GetTypeString(route.type)
+          << ") Called";
 
   FOR_EACH_OBSERVER(RemoteConnectionObserver, connection_observers_,
                     RouteChanged(channel_name, route));
 }
 
 void TestChromotingClient::SetCapabilities(const std::string& capabilities) {
-  DVLOG(1) << "TestChromotingClient::SetCapabilities("
-           << "capabilities: " << capabilities << ") Called";
+  VLOG(1) << "TestChromotingClient::SetCapabilities("
+          << "capabilities: " << capabilities << ") Called";
 
   FOR_EACH_OBSERVER(RemoteConnectionObserver, connection_observers_,
                     CapabilitiesSet(capabilities));
@@ -299,10 +239,10 @@ void TestChromotingClient::SetCapabilities(const std::string& capabilities) {
 
 void TestChromotingClient::SetPairingResponse(
     const protocol::PairingResponse& pairing_response) {
-  DVLOG(1) << "TestChromotingClient::SetPairingResponse("
-           << "client_id: " << pairing_response.client_id() << ", "
-           << "shared_secret: " << pairing_response.shared_secret()
-           << ") Called";
+  VLOG(1) << "TestChromotingClient::SetPairingResponse("
+          << "client_id: " << pairing_response.client_id() << ", "
+          << "shared_secret: " << pairing_response.shared_secret()
+          << ") Called";
 
   FOR_EACH_OBSERVER(RemoteConnectionObserver, connection_observers_,
                     PairingResponseSet(pairing_response));
@@ -310,32 +250,32 @@ void TestChromotingClient::SetPairingResponse(
 
 void TestChromotingClient::DeliverHostMessage(
     const protocol::ExtensionMessage& message) {
-  DVLOG(1) << "TestChromotingClient::DeliverHostMessage("
-           << "type: " << message.type() << ", "
-           << "data: " << message.data() << ") Called";
+  VLOG(1) << "TestChromotingClient::DeliverHostMessage("
+          << "type: " << message.type() << ", "
+          << "data: " << message.data() << ") Called";
 
   FOR_EACH_OBSERVER(RemoteConnectionObserver, connection_observers_,
                     HostMessageReceived(message));
 }
 
 protocol::ClipboardStub* TestChromotingClient::GetClipboardStub() {
-  DVLOG(1) << "TestChromotingClient::GetClipboardStub() Called";
+  VLOG(1) << "TestChromotingClient::GetClipboardStub() Called";
   return this;
 }
 
 protocol::CursorShapeStub* TestChromotingClient::GetCursorShapeStub() {
-  DVLOG(1) << "TestChromotingClient::GetCursorShapeStub() Called";
+  VLOG(1) << "TestChromotingClient::GetCursorShapeStub() Called";
   return this;
 }
 
 void TestChromotingClient::InjectClipboardEvent(
     const protocol::ClipboardEvent& event) {
-  DVLOG(1) << "TestChromotingClient::InjectClipboardEvent() Called";
+  VLOG(1) << "TestChromotingClient::InjectClipboardEvent() Called";
 }
 
 void TestChromotingClient::SetCursorShape(
     const protocol::CursorShapeInfo& cursor_shape) {
-  DVLOG(1) << "TestChromotingClient::SetCursorShape() Called";
+  VLOG(1) << "TestChromotingClient::SetCursorShape() Called";
 }
 
 }  // namespace test

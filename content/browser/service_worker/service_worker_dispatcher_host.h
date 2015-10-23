@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/id_map.h"
+#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "content/browser/service_worker/service_worker_registration_status.h"
@@ -29,6 +30,7 @@ class ServiceWorkerRegistration;
 class ServiceWorkerRegistrationHandle;
 class ServiceWorkerVersion;
 struct ServiceWorkerObjectInfo;
+struct ServiceWorkerRegistrationInfo;
 struct ServiceWorkerRegistrationObjectInfo;
 struct ServiceWorkerVersionAttributes;
 struct TransferredMessagePort;
@@ -87,19 +89,24 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
                                int provider_id,
                                const GURL& pattern,
                                const GURL& script_url);
+  void OnUpdateServiceWorker(int thread_id,
+                             int request_id,
+                             int provider_id,
+                             int64 registration_id);
   void OnUnregisterServiceWorker(int thread_id,
                                  int request_id,
                                  int provider_id,
-                                 const GURL& pattern);
+                                 int64 registration_id);
   void OnGetRegistration(int thread_id,
                          int request_id,
                          int provider_id,
                          const GURL& document_url);
+  void OnGetRegistrations(int thread_id, int request_id, int provider_id);
   void OnGetRegistrationForReady(int thread_id,
                                  int request_id,
                                  int provider_id);
   void OnProviderCreated(int provider_id,
-                         int render_frame_id,
+                         int route_id,
                          ServiceWorkerProviderType provider_type);
   void OnProviderDestroyed(int provider_id);
   void OnSetHostedVersionId(int provider_id, int64 version_id);
@@ -111,7 +118,6 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
   void OnWorkerScriptEvaluated(int embedded_worker_id, bool success);
   void OnWorkerStarted(int embedded_worker_id);
   void OnWorkerStopped(int embedded_worker_id);
-  void OnPausedAfterDownload(int embedded_worker_id);
   void OnReportException(int embedded_worker_id,
                          const base::string16& error_message,
                          int line_number,
@@ -149,6 +155,13 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
                             const std::string& status_message,
                             int64 registration_id);
 
+  void UpdateComplete(int thread_id,
+                      int provider_id,
+                      int request_id,
+                      ServiceWorkerStatusCode status,
+                      const std::string& status_message,
+                      int64 registration_id);
+
   void UnregistrationComplete(int thread_id,
                               int request_id,
                               ServiceWorkerStatusCode status);
@@ -159,6 +172,13 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
       int request_id,
       ServiceWorkerStatusCode status,
       const scoped_refptr<ServiceWorkerRegistration>& registration);
+
+  void GetRegistrationsComplete(
+      int thread_id,
+      int provider_id,
+      int request_id,
+      const std::vector<scoped_refptr<ServiceWorkerRegistration>>&
+          registrations);
 
   void GetRegistrationForReadyComplete(
       int thread_id,
@@ -171,6 +191,11 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
                              ServiceWorkerStatusCode status,
                              const std::string& status_message);
 
+  void SendUpdateError(int thread_id,
+                       int request_id,
+                       ServiceWorkerStatusCode status,
+                       const std::string& status_message);
+
   void SendUnregistrationError(int thread_id,
                                int request_id,
                                ServiceWorkerStatusCode status);
@@ -178,6 +203,10 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
   void SendGetRegistrationError(int thread_id,
                                 int request_id,
                                 ServiceWorkerStatusCode status);
+
+  void SendGetRegistrationsError(int thread_id,
+                                 int request_id,
+                                 ServiceWorkerStatusCode status);
 
   ServiceWorkerContextCore* GetContext();
 

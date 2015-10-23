@@ -163,6 +163,11 @@ bool WebAudioSourceProviderImpl::SetVolume(double volume) {
   return true;
 }
 
+OutputDevice* WebAudioSourceProviderImpl::GetOutputDevice() {
+  base::AutoLock auto_lock(sink_lock_);
+  return sink_->GetOutputDevice();
+}
+
 void WebAudioSourceProviderImpl::Initialize(
     const AudioParameters& params,
     RenderCallback* renderer) {

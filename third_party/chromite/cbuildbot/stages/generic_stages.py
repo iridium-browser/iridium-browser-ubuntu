@@ -22,7 +22,6 @@ try:
 except ImportError:
   mox = None
 
-from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import results_lib
@@ -301,10 +300,10 @@ class BuilderStage(object):
         build config at self._run.config.
 
     Raises:
-      See cbuildbot_config.GetSlavesForMaster for details.
+      See config_lib.Config.GetSlavesForMaster for details.
     """
-    return cbuildbot_config.GetSlavesForMaster(self._run.config,
-                                               self._run.options)
+    return self._run.site_config.GetSlavesForMaster(
+        self._run.config, self._run.options)
 
   def _Begin(self):
     """Can be overridden.  Called before a stage is performed."""

@@ -388,6 +388,11 @@ static struct NaClDescVtbl const kNaClDescImcConnectedDescVtbl = {
   NaClDescPReadNotImplemented,
   NaClDescPWriteNotImplemented,
   NaClDescFstatNotImplemented,
+  NaClDescFchdirNotImplemented,
+  NaClDescFchmodNotImplemented,
+  NaClDescFsyncNotImplemented,
+  NaClDescFdatasyncNotImplemented,
+  NaClDescFtruncateNotImplemented,
   NaClDescGetdentsNotImplemented,
   NaClDescExternalizeSizeNotImplemented,
   NaClDescExternalizeNotImplemented,
@@ -428,6 +433,11 @@ static struct NaClDescVtbl const kNaClDescImcDescVtbl = {
   NaClDescPReadNotImplemented,
   NaClDescPWriteNotImplemented,
   NaClDescImcDescFstat,  /* diff */
+  NaClDescFchdirNotImplemented,
+  NaClDescFchmodNotImplemented,
+  NaClDescFsyncNotImplemented,
+  NaClDescFdatasyncNotImplemented,
+  NaClDescFtruncateNotImplemented,
   NaClDescGetdentsNotImplemented,
   NaClDescExternalizeSizeNotImplemented,
   NaClDescExternalizeNotImplemented,
@@ -468,6 +478,11 @@ static struct NaClDescVtbl const kNaClDescXferableDataDescVtbl = {
   NaClDescPReadNotImplemented,
   NaClDescPWriteNotImplemented,
   NaClDescXferableDataDescFstat,  /* diff */
+  NaClDescFchdirNotImplemented,
+  NaClDescFchmodNotImplemented,
+  NaClDescFsyncNotImplemented,
+  NaClDescFdatasyncNotImplemented,
+  NaClDescFtruncateNotImplemented,
   NaClDescGetdentsNotImplemented,
   NaClDescXferableDataDescExternalizeSize,  /* diff */
   NaClDescXferableDataDescExternalize,  /* diff */
@@ -498,12 +513,10 @@ static struct NaClDescVtbl const kNaClDescXferableDataDescVtbl = {
 
 int NaClDescXferableDataDescInternalize(
     struct NaClDesc               **baseptr,
-    struct NaClDescXferState      *xfer,
-    struct NaClDescQuotaInterface *quota_interface) {
+    struct NaClDescXferState      *xfer) {
   int                             rv;
   struct NaClDescXferableDataDesc *ndxdp;
 
-  UNREFERENCED_PARAMETER(quota_interface);
   NaClLog(4, "Entered NaClDescXferableDataDescInternalize\n");
 
   ndxdp = malloc(sizeof *ndxdp);

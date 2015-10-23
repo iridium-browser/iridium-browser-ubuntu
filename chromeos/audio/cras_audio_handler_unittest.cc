@@ -4,9 +4,12 @@
 
 #include "chromeos/audio/cras_audio_handler.h"
 
+#include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chromeos/audio/audio_devices_pref_handler_stub.h"
 #include "chromeos/dbus/audio_node.h"
@@ -15,6 +18,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
+namespace {
 
 const uint64 kInternalSpeakerId = 10001;
 const uint64 kHeadphoneId = 10002;
@@ -188,14 +192,15 @@ const AudioNode kUSBCameraInput(true,
 
 class TestObserver : public chromeos::CrasAudioHandler::AudioObserver {
  public:
-  TestObserver() : active_output_node_changed_count_(0),
-                   active_input_node_changed_count_(0),
-                   audio_nodes_changed_count_(0),
-                   output_mute_changed_count_(0),
-                   input_mute_changed_count_(0),
-                   output_volume_changed_count_(0),
-                   input_gain_changed_count_(0) {
-  }
+  TestObserver()
+      : active_output_node_changed_count_(0),
+        active_input_node_changed_count_(0),
+        audio_nodes_changed_count_(0),
+        output_mute_changed_count_(0),
+        input_mute_changed_count_(0),
+        output_volume_changed_count_(0),
+        input_gain_changed_count_(0),
+        output_mute_by_system_(false) {}
 
   int active_output_node_changed_count() const {
     return active_output_node_changed_count_;
@@ -221,6 +226,8 @@ class TestObserver : public chromeos::CrasAudioHandler::AudioObserver {
     return output_mute_changed_count_;
   }
 
+  void reset_output_mute_changed_count() { input_mute_changed_count_ = 0; }
+
   int input_mute_changed_count() const {
     return input_mute_changed_count_;
   }
@@ -232,6 +239,8 @@ class TestObserver : public chromeos::CrasAudioHandler::AudioObserver {
   int input_gain_changed_count() const {
     return input_gain_changed_count_;
   }
+
+  bool output_mute_by_system() const { return output_mute_by_system_; }
 
   ~TestObserver() override {}
 
@@ -247,8 +256,9 @@ class TestObserver : public chromeos::CrasAudioHandler::AudioObserver {
 
   void OnAudioNodesChanged() override { ++audio_nodes_changed_count_; }
 
-  void OnOutputMuteChanged(bool /* mute_on */) override {
+  void OnOutputMuteChanged(bool /* mute_on */, bool system_adjust) override {
     ++output_mute_changed_count_;
+    output_mute_by_system_ = system_adjust;
   }
 
   void OnInputMuteChanged(bool /* mute_on */) override {
@@ -272,9 +282,12 @@ class TestObserver : public chromeos::CrasAudioHandler::AudioObserver {
   int input_mute_changed_count_;
   int output_volume_changed_count_;
   int input_gain_changed_count_;
+  bool output_mute_by_system_;  // output mute state adjusted by system.
 
   DISALLOW_COPY_AND_ASSIGN(TestObserver);
 };
+
+}  // namespace
 
 class CrasAudioHandlerTest : public testing::Test {
  public:
@@ -343,6 +356,18 @@ class CrasAudioHandlerTest : public testing::Test {
     return num_active_nodes;
   }
 
+  void SetActiveHDMIRediscover() {
+    cras_audio_handler_->SetActiveHDMIOutoutRediscoveringIfNecessary(true);
+  }
+
+  void SetHDMIRediscoverGracePeriodDuration(int duration_in_ms) {
+    cras_audio_handler_->SetHDMIRediscoverGracePeriodForTesting(duration_in_ms);
+  }
+
+  bool IsDuringHDMIRediscoverGracePeriod() {
+    return cras_audio_handler_->hdmi_rediscovering();
+  }
+
  protected:
   base::MessageLoopForUI message_loop_;
   CrasAudioHandler* cras_audio_handler_;  // Not owned.
@@ -352,6 +377,46 @@ class CrasAudioHandlerTest : public testing::Test {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CrasAudioHandlerTest);
+};
+
+class HDMIRediscoverWaiter {
+ public:
+  HDMIRediscoverWaiter(CrasAudioHandlerTest* cras_audio_handler_test,
+                       int grace_period_duration_in_ms)
+      : cras_audio_handler_test_(cras_audio_handler_test),
+        grace_period_duration_in_ms_(grace_period_duration_in_ms) {}
+
+  void WaitUntilTimeOut(int wait_duration_in_ms) {
+    base::RunLoop run_loop;
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, run_loop.QuitClosure(),
+        base::TimeDelta::FromMilliseconds(wait_duration_in_ms));
+    run_loop.Run();
+  }
+
+  void CheckHDMIRediscoverGracePeriodEnd(const base::Closure& quit_loop_func) {
+    if (!cras_audio_handler_test_->IsDuringHDMIRediscoverGracePeriod()) {
+      quit_loop_func.Run();
+      return;
+    }
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&HDMIRediscoverWaiter::CheckHDMIRediscoverGracePeriodEnd,
+                   base::Unretained(this), quit_loop_func),
+        base::TimeDelta::FromMilliseconds(grace_period_duration_in_ms_ / 4));
+  }
+
+  void WaitUntilHDMIRediscoverGracePeriodEnd() {
+    base::RunLoop run_loop;
+    CheckHDMIRediscoverGracePeriodEnd(run_loop.QuitClosure());
+    run_loop.Run();
+  }
+
+ private:
+  CrasAudioHandlerTest* cras_audio_handler_test_;  // not owned
+  int grace_period_duration_in_ms_;
+
+  DISALLOW_COPY_AND_ASSIGN(HDMIRediscoverWaiter);
 };
 
 TEST_F(CrasAudioHandlerTest, InitializeWithOnlyDefaultAudioDevices) {
@@ -2491,6 +2556,105 @@ TEST_F(CrasAudioHandlerTest, ActiveNodeLostDuringLoginSession) {
   const AudioDevice* headphone_resumed = GetDeviceFromId(kHeadphone.id);
   EXPECT_EQ(kHeadphone.id, headphone_resumed->id);
   EXPECT_TRUE(headphone_resumed->active);
+}
+
+// This test HDMI output rediscovering case in crbug.com/503667.
+TEST_F(CrasAudioHandlerTest, HDMIOutputRediscover) {
+  AudioNodeList audio_nodes;
+  audio_nodes.push_back(kInternalSpeaker);
+  audio_nodes.push_back(kHDMIOutput);
+  SetUpCrasAudioHandler(audio_nodes);
+
+  // Verify the HDMI device has been selected as the active output, and audio
+  // output is not muted.
+  AudioDevice active_output;
+  EXPECT_TRUE(
+      cras_audio_handler_->GetPrimaryActiveOutputDevice(&active_output));
+  EXPECT_EQ(kHDMIOutput.id, active_output.id);
+  EXPECT_EQ(kHDMIOutput.id, cras_audio_handler_->GetPrimaryActiveOutputNode());
+  EXPECT_TRUE(cras_audio_handler_->has_alternative_output());
+  EXPECT_FALSE(cras_audio_handler_->IsOutputMuted());
+
+  // Trigger HDMI rediscovering grace period, and remove the HDMI node.
+  const int grace_period_in_ms = 200;
+  SetHDMIRediscoverGracePeriodDuration(grace_period_in_ms);
+  SetActiveHDMIRediscover();
+  AudioNodeList audio_nodes_lost_hdmi;
+  audio_nodes_lost_hdmi.push_back(kInternalSpeaker);
+  ChangeAudioNodes(audio_nodes_lost_hdmi);
+
+  // Verify the active output is switched to internal speaker, it is not muted
+  // by preference, but the system output is muted during the grace period.
+  EXPECT_TRUE(
+      cras_audio_handler_->GetPrimaryActiveOutputDevice(&active_output));
+  EXPECT_EQ(kInternalSpeaker.id, active_output.id);
+  EXPECT_FALSE(
+      cras_audio_handler_->IsOutputMutedForDevice(kInternalSpeaker.id));
+  EXPECT_TRUE(cras_audio_handler_->IsOutputMuted());
+
+  // Re-attach the HDMI device after a little delay.
+  HDMIRediscoverWaiter waiter(this, grace_period_in_ms);
+  waiter.WaitUntilTimeOut(grace_period_in_ms / 4);
+  ChangeAudioNodes(audio_nodes);
+
+  // After HDMI re-discover grace period, verify HDMI output is selected as the
+  // active device and not muted.
+  waiter.WaitUntilHDMIRediscoverGracePeriodEnd();
+  EXPECT_TRUE(
+      cras_audio_handler_->GetPrimaryActiveOutputDevice(&active_output));
+  EXPECT_EQ(kHDMIOutput.id, active_output.id);
+  EXPECT_EQ(kHDMIOutput.id, cras_audio_handler_->GetPrimaryActiveOutputNode());
+  EXPECT_FALSE(cras_audio_handler_->IsOutputMuted());
+}
+
+// This tests the case of output unmuting event is notified after the hdmi
+// output re-discover grace period ends, see crbug.com/512601.
+TEST_F(CrasAudioHandlerTest, HDMIOutputUnplugDuringSuspension) {
+  AudioNodeList audio_nodes;
+  audio_nodes.push_back(kInternalSpeaker);
+  audio_nodes.push_back(kHDMIOutput);
+  SetUpCrasAudioHandler(audio_nodes);
+
+  // Verify the HDMI device has been selected as the active output, and audio
+  // output is not muted.
+  AudioDevice active_output;
+  EXPECT_TRUE(
+      cras_audio_handler_->GetPrimaryActiveOutputDevice(&active_output));
+  EXPECT_EQ(kHDMIOutput.id, active_output.id);
+  EXPECT_EQ(kHDMIOutput.id, cras_audio_handler_->GetPrimaryActiveOutputNode());
+  EXPECT_TRUE(cras_audio_handler_->has_alternative_output());
+  EXPECT_FALSE(cras_audio_handler_->IsOutputMuted());
+
+  // Trigger HDMI rediscovering grace period, and remove the HDMI node.
+  const int grace_period_in_ms = 200;
+  SetHDMIRediscoverGracePeriodDuration(grace_period_in_ms);
+  SetActiveHDMIRediscover();
+  AudioNodeList audio_nodes_lost_hdmi;
+  audio_nodes_lost_hdmi.push_back(kInternalSpeaker);
+  ChangeAudioNodes(audio_nodes_lost_hdmi);
+
+  // Verify the active output is switched to internal speaker, it is not muted
+  // by preference, but the system output is muted during the grace period.
+  EXPECT_TRUE(
+      cras_audio_handler_->GetPrimaryActiveOutputDevice(&active_output));
+  EXPECT_EQ(kInternalSpeaker.id, active_output.id);
+  EXPECT_FALSE(
+      cras_audio_handler_->IsOutputMutedForDevice(kInternalSpeaker.id));
+  EXPECT_TRUE(cras_audio_handler_->IsOutputMuted());
+
+  // After HDMI re-discover grace period, verify internal speaker is still the
+  // active output and not muted, and unmute event by system is notified.
+  test_observer_->reset_output_mute_changed_count();
+  HDMIRediscoverWaiter waiter(this, grace_period_in_ms);
+  waiter.WaitUntilHDMIRediscoverGracePeriodEnd();
+  EXPECT_TRUE(
+      cras_audio_handler_->GetPrimaryActiveOutputDevice(&active_output));
+  EXPECT_EQ(kInternalSpeaker.id, active_output.id);
+  EXPECT_EQ(kInternalSpeaker.id,
+            cras_audio_handler_->GetPrimaryActiveOutputNode());
+  EXPECT_FALSE(cras_audio_handler_->IsOutputMuted());
+  EXPECT_EQ(1, test_observer_->output_mute_changed_count());
+  EXPECT_TRUE(test_observer_->output_mute_by_system());
 }
 
 }  // namespace chromeos

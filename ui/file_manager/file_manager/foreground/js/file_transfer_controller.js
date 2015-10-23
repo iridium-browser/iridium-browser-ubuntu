@@ -115,7 +115,7 @@ function FileTransferController(doc,
 
   /**
    * The array of pending task ID.
-   * @type {Array.<string>}
+   * @type {Array<string>}
    */
   this.pendingTaskIds = [];
 
@@ -130,7 +130,7 @@ function FileTransferController(doc,
   /**
    * File objects for selected files.
    *
-   * @type {Object.<string, FileAsyncData>}
+   * @type {Object<FileAsyncData>}
    * @private
    */
   this.selectedAsyncData_ = {};
@@ -330,7 +330,7 @@ FileTransferController.prototype.cutOrCopy_ =
 };
 
 /**
- * @return {Object.<string, string>} Drag and drop global data object.
+ * @return {Object<string>} Drag and drop global data object.
  * @private
  */
 FileTransferController.prototype.getDragAndDropGlobalData_ = function() {
@@ -387,7 +387,7 @@ FileTransferController.prototype.isMissingFileContents_ =
 /**
  * Obtains entries that need to share with me.
  * The method also observers child entries of the given entries.
- * @param {Array.<Entry>} entries Entries.
+ * @param {Array<Entry>} entries Entries.
  * @return {Promise} Promise to be fulfilled with the entries that need to
  *     share.
  * @private
@@ -412,13 +412,10 @@ FileTransferController.prototype.getMultiProfileShareEntries_ =
   // Check all file entries and keeps only those need sharing operation.
   var processFileEntries = function(entries) {
     return new Promise(function(callback) {
-      // TODO(mtomasz): Move conversion from entry to url to custom bindings.
-      // crbug.com/345527.
-      var urls = util.entriesToURLs(entries);
       // Do not use metadata cache here because the urls come from the different
       // profile.
       chrome.fileManagerPrivate.getEntryProperties(
-          urls, ['hosted', 'sharedWithMe'], callback);
+          entries, ['hosted', 'sharedWithMe'], callback);
     }).then(function(metadatas) {
       return entries.filter(function(entry, i) {
         var metadata = metadatas[i];
@@ -556,7 +553,7 @@ FileTransferController.prototype.paste =
                           return;
                         return new Promise(function(fulfill) {
                           chrome.fileManagerPrivate.requestDriveShare(
-                              shareEntries[index].toURL(),
+                              shareEntries[index],
                               dialogResult,
                               function() {
                                 // TODO(hirono): Check chrome.runtime.lastError

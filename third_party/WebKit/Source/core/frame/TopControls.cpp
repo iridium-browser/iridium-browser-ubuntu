@@ -6,7 +6,6 @@
 #include "TopControls.h"
 
 #include "core/frame/FrameHost.h"
-#include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
 #include "platform/geometry/FloatSize.h"
 #include <algorithm> // for std::min and std::max
@@ -47,7 +46,7 @@ FloatSize TopControls::scrollBy(FloatSize pendingDelta)
         return pendingDelta;
 
     float oldOffset = contentOffset();
-    float pageScale = m_frameHost->pinchViewport().scale();
+    float pageScale = m_frameHost->visualViewport().scale();
 
     // Update accumulated vertical scroll and apply it to top controls
     // Compute scroll delta in viewport space by applying page scale
@@ -95,7 +94,7 @@ void TopControls::setShownRatio(float shownRatio)
         return;
 
     m_shownRatio = shownRatio;
-    m_frameHost->chrome().client().didUpdateTopControls();
+    m_frameHost->chromeClient().didUpdateTopControls();
 }
 
 void TopControls::updateConstraints(WebTopControlsState constraints)
@@ -110,7 +109,7 @@ void TopControls::setHeight(float height, bool shrinkViewport)
 
     m_height = height;
     m_shrinkViewport = shrinkViewport;
-    m_frameHost->chrome().client().didUpdateTopControls();
+    m_frameHost->chromeClient().didUpdateTopControls();
 }
 
 } // namespace blink

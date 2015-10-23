@@ -4782,11 +4782,124 @@ static void testIssue3838(skiatest::Reporter* reporter,const char* filename) {
     testSimplify(reporter, path, filename);
 }
 
+static void testIssue3838_3(skiatest::Reporter* reporter,const char* filename) {
+    SkPath path;
+    path.moveTo(40, 10);
+    path.lineTo(60, 10);
+    path.lineTo(60, 30);
+    path.lineTo(40, 30);
+    path.lineTo(40, 10);
+    path.moveTo(41, 11);
+    path.lineTo(41, 29);
+    path.lineTo(59, 29);
+    path.lineTo(59, 11);
+    path.lineTo(41, 11);
+    testSimplify(reporter, path, filename);
+}
+
+static void testQuads65(skiatest::Reporter* reporter,const char* filename) {
+    SkPath path;
+    path.moveTo(1, 2);
+    path.quadTo(3, 2, 0, 3);
+    path.lineTo(1, 3);
+    path.close();
+    path.moveTo(1, 0);
+    path.lineTo(1, 2);
+    path.quadTo(3, 2, 1, 3);
+    path.close();
+    testSimplify(reporter, path, filename);
+}
+
+static void fuzz864a(skiatest::Reporter* reporter,const char* filename) {
+    SkPath path;
+    path.moveTo(10, 90);
+    path.lineTo(10, 90);
+    path.lineTo(10, 30);
+    path.lineTo(10, 30);
+    path.lineTo(10, 90);
+    path.close();
+    path.moveTo(10, 90);
+    path.lineTo(10, 90);
+    path.lineTo(10, 30);
+    path.lineTo(10, 30);
+    path.lineTo(10, 90);
+    path.close();
+    path.moveTo(10, 90);
+    path.lineTo(110, 90);
+    path.lineTo(110, 30);
+    path.lineTo(10, 30);
+    path.lineTo(10, 90);
+    path.close();
+    path.moveTo(10, 30);
+    path.lineTo(32678, 30);
+    path.lineTo(32678, 30);
+    path.lineTo(10, 30);
+    path.close();
+    path.moveTo(10, 3.35545e+07f);
+    path.lineTo(110, 3.35545e+07f);
+    path.lineTo(110, 30);
+    path.lineTo(10, 30);
+    path.lineTo(10, 3.35545e+07f);
+    path.close();
+    path.moveTo(10, 315);
+    path.lineTo(110, 315);
+    path.lineTo(110, 255);
+    path.lineTo(10, 255);
+    path.lineTo(10, 315);
+    path.close();
+    path.moveTo(0, 60);
+    path.lineTo(100, 60);
+    path.lineTo(100, 0);
+    path.lineTo(0, 0);
+    path.lineTo(0, 60);
+    path.close();
+    path.moveTo(10, 90);
+    path.lineTo(110, 90);
+    path.lineTo(110, 30);
+    path.lineTo(10, 30);
+    path.lineTo(10, 90);
+    path.close();
+    path.moveTo(10, 3.35545e+07f);
+    path.lineTo(110, 3.35545e+07f);
+    path.lineTo(110, 30);
+    path.lineTo(10, 30);
+    path.lineTo(10, 3.35545e+07f);
+    path.close();
+    path.moveTo(10, 90);
+    path.lineTo(110, 90);
+    path.lineTo(110, 30);
+    path.lineTo(10, 30);
+    path.lineTo(10, 90);
+    path.close();
+    testSimplify(reporter, path, filename);
+}
+
+static void cr514118(skiatest::Reporter* reporter,const char* filename) {
+    SkPath path;
+path.moveTo(SkBits2Float(0x42c80000), SkBits2Float(0x42480000));  // 100, 50
+path.conicTo(SkBits2Float(0x42c80000), SkBits2Float(0x00000000), SkBits2Float(0x42480000), SkBits2Float(0x00000000), SkBits2Float(0x3f3504f3));  // 100, 0, 50, 0, 0.707107f
+path.conicTo(SkBits2Float(0x00000000), SkBits2Float(0x00000000), SkBits2Float(0x00000000), SkBits2Float(0x42480000), SkBits2Float(0x3f3504f3));  // 0, 0, 0, 50, 0.707107f
+path.conicTo(SkBits2Float(0x00000000), SkBits2Float(0x42c80000), SkBits2Float(0x42480000), SkBits2Float(0x42c80000), SkBits2Float(0x3f3504f3));  // 0, 100, 50, 100, 0.707107f
+path.conicTo(SkBits2Float(0x42c80000), SkBits2Float(0x42c80000), SkBits2Float(0x42c80000), SkBits2Float(0x42480000), SkBits2Float(0x3f3504f3));  // 100, 100, 100, 50, 0.707107f
+path.close();
+path.moveTo(SkBits2Float(0x42c80133), SkBits2Float(0x42480000));  // 100.002f, 50
+path.conicTo(SkBits2Float(0x42c80133), SkBits2Float(0x00000000), SkBits2Float(0x42480267), SkBits2Float(0x00000000), SkBits2Float(0x3f3504f3));  // 100.002f, 0, 50.0023f, 0, 0.707107f
+path.conicTo(SkBits2Float(0x3b19b530), SkBits2Float(0x00000000), SkBits2Float(0x3b19b530), SkBits2Float(0x42480000), SkBits2Float(0x3f3504f3));  // 0.00234539f, 0, 0.00234539f, 50, 0.707107f
+path.conicTo(SkBits2Float(0x3b19b530), SkBits2Float(0x42c80000), SkBits2Float(0x42480267), SkBits2Float(0x42c80000), SkBits2Float(0x3f3504f3));  // 0.00234539f, 100, 50.0023f, 100, 0.707107f
+path.conicTo(SkBits2Float(0x42c80133), SkBits2Float(0x42c80000), SkBits2Float(0x42c80133), SkBits2Float(0x42480000), SkBits2Float(0x3f3504f3));  // 100.002f, 100, 100.002f, 50, 0.707107f
+path.close();
+    testSimplify(reporter, path, filename);
+}
+
 static void (*skipTest)(skiatest::Reporter* , const char* filename) = 0;
 static void (*firstTest)(skiatest::Reporter* , const char* filename) = 0;
 static void (*stopTest)(skiatest::Reporter* , const char* filename) = 0;
 
 static TestDesc tests[] = {
+    TEST(cr514118),
+    TEST(fuzz864a),
+    TEST(testQuads65),
+    TEST(testIssue3838_3),
     TEST(testIssue3838),
     TEST(testArc),
     TEST(testTriangle2),

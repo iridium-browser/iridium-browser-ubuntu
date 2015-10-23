@@ -46,7 +46,8 @@ void ManagePasswordsTest::ExecuteManagePasswordsCommand() {
 void ManagePasswordsTest::SetupManagingPasswords() {
   base::string16 kTestUsername = base::ASCIIToUTF16("test_username");
   autofill::PasswordFormMap map;
-  map[kTestUsername] = test_form();
+  map.insert(kTestUsername,
+             make_scoped_ptr(new autofill::PasswordForm(*test_form())));
   GetController()->OnPasswordAutofilled(map);
 }
 
@@ -56,6 +57,9 @@ void ManagePasswordsTest::SetupPendingPassword() {
   scoped_ptr<password_manager::PasswordFormManager> test_form_manager(
       new password_manager::PasswordFormManager(
           NULL, &client, driver.AsWeakPtr(), *test_form(), false));
+  test_form_manager->SimulateFetchMatchingLoginsFromPasswordStore();
+  ScopedVector<autofill::PasswordForm> best_matches;
+  test_form_manager->OnGetPasswordStoreResults(best_matches.Pass());
   GetController()->OnPasswordSubmitted(test_form_manager.Pass());
 }
 
@@ -72,7 +76,8 @@ void ManagePasswordsTest::SetupBlackistedPassword() {
   test_form()->blacklisted_by_user = true;
   test_form()->username_value.clear();
   autofill::PasswordFormMap map;
-  map[test_form()->username_value] = test_form();
+  map.insert(test_form()->username_value,
+             make_scoped_ptr(new autofill::PasswordForm(*test_form())));
   GetController()->OnBlacklistBlockedAutofill(map);
 }
 
@@ -82,7 +87,8 @@ void ManagePasswordsTest::SetupChooseCredentials(
     const GURL& origin) {
   base::string16 kTestUsername = base::ASCIIToUTF16("test_username");
   autofill::PasswordFormMap map;
-  map[kTestUsername] = test_form();
+  map.insert(kTestUsername,
+             make_scoped_ptr(new autofill::PasswordForm(*test_form())));
   GetController()->OnChooseCredentials(
       local_credentials.Pass(), federated_credentials.Pass(), origin,
       base::Bind(&ManagePasswordsTest::OnChooseCredential, this));
@@ -93,12 +99,11 @@ void ManagePasswordsTest::SetupAutoSignin(
   GetController()->OnAutoSignin(local_credentials.Pass());
 }
 
-base::HistogramSamples* ManagePasswordsTest::GetSamples(
+scoped_ptr<base::HistogramSamples> ManagePasswordsTest::GetSamples(
     const char* histogram) {
   // Ensure that everything has been properly recorded before pulling samples.
   content::RunAllPendingInMessageLoop();
-  return histogram_tester_.GetHistogramSamplesSinceCreation(histogram)
-      .release();
+  return histogram_tester_.GetHistogramSamplesSinceCreation(histogram).Pass();
 }
 
 ManagePasswordsUIController* ManagePasswordsTest::GetController() {

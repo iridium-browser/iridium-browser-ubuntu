@@ -10,11 +10,13 @@
 #include "base/format_macros.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/metrics/field_trial.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
@@ -30,6 +32,7 @@
 #include "sync/internal_api/public/write_node.h"
 #include "sync/internal_api/public/write_transaction.h"
 #include "sync/internal_api/syncapi_internal.h"
+#include "sync/syncable/entry.h"
 #include "sync/syncable/syncable_write_transaction.h"
 #include "sync/util/cryptographer.h"
 #include "sync/util/data_type_histogram.h"
@@ -65,6 +68,14 @@ const char kOtherBookmarksTag[] = "other_bookmarks";
 // Maximum number of bytes to allow in a title (must match sync's internal
 // limits; see write_node.cc).
 const int kTitleLimitBytes = 255;
+
+// TODO(stanisc): crbug.com/456876: Remove this once the optimistic association
+// experiment has ended.
+bool IsOptimisticAssociationEnabled() {
+  const std::string group_name =
+      base::FieldTrialList::FindFullName("SyncOptimisticBookmarkAssociation");
+  return group_name == "Enabled";
+}
 
 // Provides the following abstraction: given a parent bookmark node, find best
 // matching child node for many sync nodes.
@@ -208,7 +219,9 @@ BookmarkModelAssociator::Context::Context(
     syncer::SyncMergeResult* syncer_merge_result)
     : local_merge_result_(local_merge_result),
       syncer_merge_result_(syncer_merge_result),
-      duplicate_count_(0) {
+      duplicate_count_(0),
+      native_model_sync_state_(UNSET),
+      id_index_initialized_(false) {
 }
 
 BookmarkModelAssociator::Context::~Context() {
@@ -269,6 +282,11 @@ void BookmarkModelAssociator::Context::IncrementSyncItemsAdded() {
       syncer_merge_result_->num_items_added() + 1);
 }
 
+void BookmarkModelAssociator::Context::IncrementSyncItemsDeleted(int count) {
+  syncer_merge_result_->set_num_items_deleted(
+      syncer_merge_result_->num_items_deleted() + count);
+}
+
 void BookmarkModelAssociator::Context::UpdateDuplicateCount(
     const base::string16& title,
     const GURL& url) {
@@ -285,6 +303,54 @@ void BookmarkModelAssociator::Context::UpdateDuplicateCount(
   }
 }
 
+void BookmarkModelAssociator::Context::AddBookmarkRoot(
+    const bookmarks::BookmarkNode* root) {
+  bookmark_roots_.push_back(root);
+}
+
+void BookmarkModelAssociator::Context::BuildIdIndex() {
+  DCHECK(!id_index_initialized_);
+  BookmarkStack stack;
+  for (BookmarkList::const_iterator it = bookmark_roots_.begin();
+       it != bookmark_roots_.end(); ++it) {
+    stack.push(*it);
+  }
+
+  while (!stack.empty()) {
+    const BookmarkNode* parent = stack.top();
+    stack.pop();
+    DCHECK(parent->is_folder());
+    for (int i = 0; i < parent->child_count(); ++i) {
+      const BookmarkNode* node = parent->GetChild(i);
+      DCHECK(id_index_.find(node->id()) == id_index_.end());
+      id_index_.insert(std::make_pair(node->id(), node));
+      if (node->is_folder())
+        stack.push(node);
+    }
+  }
+
+  id_index_initialized_ = true;
+}
+
+const BookmarkNode* BookmarkModelAssociator::Context::LookupNodeInIdIndex(
+    int64 native_id) {
+  if (!id_index_initialized_) {
+    // Build the index on demand.
+    DCHECK(!bookmark_roots_.empty());
+    BuildIdIndex();
+  }
+
+  IdIndex::const_iterator it = id_index_.find(native_id);
+  if (it == id_index_.end())
+    return nullptr;
+  return it->second;
+}
+
+void BookmarkModelAssociator::Context::MarkForVersionUpdate(
+    const bookmarks::BookmarkNode* node) {
+  bookmarks_for_version_update_.push_back(node);
+}
+
 BookmarkModelAssociator::BookmarkModelAssociator(
     BookmarkModel* bookmark_model,
     Profile* profile,
@@ -296,6 +362,7 @@ BookmarkModelAssociator::BookmarkModelAssociator(
       user_share_(user_share),
       unrecoverable_error_handler_(unrecoverable_error_handler),
       expect_mobile_bookmarks_folder_(expect_mobile_bookmarks_folder),
+      optimistic_association_enabled_(IsOptimisticAssociationEnabled()),
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(bookmark_model_);
@@ -464,7 +531,16 @@ syncer::SyncError BookmarkModelAssociator::AssociateModels(
       new ScopedAssociationUpdater(bookmark_model_));
   DisassociateModels();
 
-  return BuildAssociations(&context);
+  error = BuildAssociations(&context);
+  if (error.IsSet()) {
+    // Clear version on bookmark model so that the conservative association
+    // algorithm is used on the next association.
+    bookmark_model_->SetNodeSyncTransactionVersion(
+        bookmark_model_->root_node(),
+        syncer::syncable::kInvalidTransactionVersion);
+  }
+
+  return error;
 }
 
 syncer::SyncError BookmarkModelAssociator::AssociatePermanentFolders(
@@ -496,14 +572,17 @@ syncer::SyncError BookmarkModelAssociator::AssociatePermanentFolders(
   int64 bookmark_bar_sync_id =
       GetSyncIdFromChromeId(bookmark_model_->bookmark_bar_node()->id());
   DCHECK_NE(bookmark_bar_sync_id, syncer::kInvalidId);
+  context->AddBookmarkRoot(bookmark_model_->bookmark_bar_node());
   int64 other_bookmarks_sync_id =
       GetSyncIdFromChromeId(bookmark_model_->other_node()->id());
   DCHECK_NE(other_bookmarks_sync_id, syncer::kInvalidId);
+  context->AddBookmarkRoot(bookmark_model_->other_node());
   int64 mobile_bookmarks_sync_id =
       GetSyncIdFromChromeId(bookmark_model_->mobile_node()->id());
-  if (expect_mobile_bookmarks_folder_) {
+  if (expect_mobile_bookmarks_folder_)
     DCHECK_NE(syncer::kInvalidId, mobile_bookmarks_sync_id);
-  }
+  if (mobile_bookmarks_sync_id != syncer::kInvalidId)
+    context->AddBookmarkRoot(bookmark_model_->mobile_node());
 
   // WARNING: The order in which we push these should match their order in the
   // bookmark model (see BookmarkModel::DoneLoading(..)).
@@ -560,69 +639,92 @@ void BookmarkModelAssociator::SetNumItemsAfterAssociation(
 
 syncer::SyncError BookmarkModelAssociator::BuildAssociations(Context* context) {
   DCHECK(bookmark_model_->loaded());
+  DCHECK_NE(context->native_model_sync_state(), AHEAD);
 
-  syncer::WriteTransaction trans(FROM_HERE, user_share_);
+  int initial_duplicate_count = 0;
+  int64 new_version = syncer::syncable::kInvalidTransactionVersion;
+  {
+    syncer::WriteTransaction trans(FROM_HERE, user_share_, &new_version);
 
-  syncer::SyncError error = AssociatePermanentFolders(&trans, context);
-  if (error.IsSet())
-    return error;
-
-  SetNumItemsBeforeAssociation(&trans, context);
-
-  int initial_duplicate_count = context->duplicate_count();
-
-  // Remove obsolete bookmarks according to sync delete journal.
-  // TODO(stanisc): crbug.com/456876: rewrite this to avoid a separate
-  // traversal and instead perform deletes at the end of the loop below where
-  // the unmatched bookmark nodes are created as sync nodes.
-  ApplyDeletesFromSyncJournal(&trans, context);
-
-  // Algorithm description:
-  // Match up the roots and recursively do the following:
-  // * For each sync node for the current sync parent node, find the best
-  //   matching bookmark node under the corresponding bookmark parent node.
-  //   If no matching node is found, create a new bookmark node in the same
-  //   position as the corresponding sync node.
-  //   If a matching node is found, update the properties of it from the
-  //   corresponding sync node.
-  // * When all children sync nodes are done, add the extra children bookmark
-  //   nodes to the sync parent node.
-  //
-  // The best match algorithm uses folder title or bookmark title/url to
-  // perform the primary match. If there are multiple match candidates it
-  // selects the preferred one based on sync node external ID match to the
-  // bookmark folder ID.
-  int64 sync_parent_id;
-  while (context->PopNode(&sync_parent_id)) {
-    syncer::ReadNode sync_parent(&trans);
-    if (sync_parent.InitByIdLookup(sync_parent_id) !=
-        syncer::BaseNode::INIT_OK) {
-      return unrecoverable_error_handler_->CreateAndUploadError(
-          FROM_HERE, "Failed to lookup node.", model_type());
-    }
-    // Only folder nodes are pushed on to the stack.
-    DCHECK(sync_parent.GetIsFolder());
-
-    const BookmarkNode* parent_node = GetChromeNodeFromSyncId(sync_parent_id);
-    if (!parent_node) {
-      return unrecoverable_error_handler_->CreateAndUploadError(
-          FROM_HERE, "Failed to find bookmark node for sync id.", model_type());
-    }
-    DCHECK(parent_node->is_folder());
-
-    std::vector<int64> children;
-    sync_parent.GetChildIds(&children);
-    error = BuildAssociations(&trans, parent_node, children, context);
+    syncer::SyncError error = AssociatePermanentFolders(&trans, context);
     if (error.IsSet())
       return error;
+
+    SetNumItemsBeforeAssociation(&trans, context);
+    initial_duplicate_count = context->duplicate_count();
+
+    // Remove obsolete bookmarks according to sync delete journal.
+    // TODO(stanisc): crbug.com/456876: rewrite this to avoid a separate
+    // traversal and instead perform deletes at the end of the loop below where
+    // the unmatched bookmark nodes are created as sync nodes.
+    ApplyDeletesFromSyncJournal(&trans, context);
+
+    // Algorithm description:
+    // Match up the roots and recursively do the following:
+    // * For each sync node for the current sync parent node, find the best
+    //   matching bookmark node under the corresponding bookmark parent node.
+    //   If no matching node is found, create a new bookmark node in the same
+    //   position as the corresponding sync node.
+    //   If a matching node is found, update the properties of it from the
+    //   corresponding sync node.
+    // * When all children sync nodes are done, add the extra children bookmark
+    //   nodes to the sync parent node.
+    //
+    // The best match algorithm uses folder title or bookmark title/url to
+    // perform the primary match. If there are multiple match candidates it
+    // selects the preferred one based on sync node external ID match to the
+    // bookmark folder ID.
+    int64 sync_parent_id;
+    while (context->PopNode(&sync_parent_id)) {
+      syncer::ReadNode sync_parent(&trans);
+      if (sync_parent.InitByIdLookup(sync_parent_id) !=
+          syncer::BaseNode::INIT_OK) {
+        return unrecoverable_error_handler_->CreateAndUploadError(
+            FROM_HERE, "Failed to lookup node.", model_type());
+      }
+      // Only folder nodes are pushed on to the stack.
+      DCHECK(sync_parent.GetIsFolder());
+
+      const BookmarkNode* parent_node = GetChromeNodeFromSyncId(sync_parent_id);
+      if (!parent_node) {
+        return unrecoverable_error_handler_->CreateAndUploadError(
+            FROM_HERE, "Failed to find bookmark node for sync id.",
+            model_type());
+      }
+      DCHECK(parent_node->is_folder());
+
+      std::vector<int64> children;
+      sync_parent.GetChildIds(&children);
+
+      if (optimistic_association_enabled_ &&
+          context->native_model_sync_state() == IN_SYNC) {
+        // Optimistic case where based on the version check there shouldn't
+        // be any new sync changes.
+        error =
+            BuildAssociationsOptimistic(&trans, parent_node, children, context);
+      } else {
+        error = BuildAssociations(&trans, parent_node, children, context);
+      }
+      if (error.IsSet())
+        return error;
+    }
+
+    SetNumItemsAfterAssociation(&trans, context);
   }
 
-  SetNumItemsAfterAssociation(&trans, context);
+  BookmarkChangeProcessor::UpdateTransactionVersion(
+      new_version, bookmark_model_, context->bookmarks_for_version_update());
 
   UMA_HISTOGRAM_COUNTS("Sync.BookmarksDuplicationsAtAssociation",
                        context->duplicate_count());
   UMA_HISTOGRAM_COUNTS("Sync.BookmarksNewDuplicationsAtAssociation",
                        context->duplicate_count() - initial_duplicate_count);
+
+  if (context->duplicate_count() > initial_duplicate_count) {
+    UMA_HISTOGRAM_ENUMERATION("Sync.BookmarksModelSyncStateAtNewDuplication",
+                              context->native_model_sync_state(),
+                              NATIVE_MODEL_SYNC_STATE_COUNT);
+  }
 
   return syncer::SyncError();
 }
@@ -658,21 +760,140 @@ syncer::SyncError BookmarkModelAssociator::BuildAssociations(
       bookmark_model_->Move(child_node, parent_node, index);
       context->IncrementLocalItemsModified();
     } else {
-      DCHECK_LE(index, parent_node->child_count());
-
-      base::string16 title = base::UTF8ToUTF16(sync_child_node.GetTitle());
-      child_node = BookmarkChangeProcessor::CreateBookmarkNode(
-          title, url, &sync_child_node, parent_node, bookmark_model_, profile_,
-          index);
+      syncer::SyncError error;
+      child_node = CreateBookmarkNode(parent_node, index, &sync_child_node, url,
+                                      context, &error);
       if (!child_node) {
-        return unrecoverable_error_handler_->CreateAndUploadError(
-            FROM_HERE, "Failed to create bookmark node with title " +
-                           sync_child_node.GetTitle() + " and url " +
-                           url.possibly_invalid_spec(),
-            model_type());
+        if (error.IsSet()) {
+          return error;
+        } else {
+          // Skip this node and continue. Don't increment index in this case.
+          continue;
+        }
       }
-      context->UpdateDuplicateCount(title, url);
       context->IncrementLocalItemsAdded();
+    }
+
+    Associate(child_node, sync_child_node);
+    // All bookmarks are marked for version update because
+    // all bookmarks are always updated with data. This could be optimized -
+    // see the note above.
+    context->MarkForVersionUpdate(child_node);
+
+    if (sync_child_node.GetIsFolder())
+      context->PushNode(sync_child_id);
+    ++index;
+  }
+
+  // At this point all the children nodes of the parent sync node have
+  // corresponding children in the parent bookmark node and they are all in
+  // the right positions: from 0 to index - 1.
+  // So the children starting from index in the parent bookmark node are the
+  // ones that are not present in the parent sync node. So create them.
+  for (int i = index; i < parent_node->child_count(); ++i) {
+    int64 sync_child_id = BookmarkChangeProcessor::CreateSyncNode(
+        parent_node, bookmark_model_, i, trans, this,
+        unrecoverable_error_handler_);
+    if (syncer::kInvalidId == sync_child_id) {
+      return unrecoverable_error_handler_->CreateAndUploadError(
+          FROM_HERE, "Failed to create sync node.", model_type());
+    }
+
+    context->IncrementSyncItemsAdded();
+    const BookmarkNode* child_node = parent_node->GetChild(i);
+    context->MarkForVersionUpdate(child_node);
+    if (child_node->is_folder())
+      context->PushNode(sync_child_id);
+  }
+
+  return syncer::SyncError();
+}
+
+syncer::SyncError BookmarkModelAssociator::BuildAssociationsOptimistic(
+    syncer::WriteTransaction* trans,
+    const BookmarkNode* parent_node,
+    const std::vector<int64>& sync_ids,
+    Context* context) {
+  BookmarkNodeFinder node_finder(parent_node);
+
+  // TODO(stanisc): crbug/456876: Review optimistic case specific logic here.
+  // This is the case when the transcation version of the native model
+  // matches the transaction version on the sync side.
+  // For now the logic is exactly the same as for the regular case with
+  // the exception of not propagating sync data for matching nodes.
+  int index = 0;
+  for (std::vector<int64>::const_iterator it = sync_ids.begin();
+       it != sync_ids.end(); ++it) {
+    int64 sync_child_id = *it;
+    syncer::ReadNode sync_child_node(trans);
+    if (sync_child_node.InitByIdLookup(sync_child_id) !=
+        syncer::BaseNode::INIT_OK) {
+      return unrecoverable_error_handler_->CreateAndUploadError(
+          FROM_HERE, "Failed to lookup node.", model_type());
+    }
+
+    int64 external_id = sync_child_node.GetExternalId();
+    GURL url(sync_child_node.GetBookmarkSpecifics().url());
+    const BookmarkNode* child_node = node_finder.FindBookmarkNode(
+        url, sync_child_node.GetTitle(), sync_child_node.GetIsFolder(),
+        external_id);
+    if (child_node) {
+      // If the child node is matched assume it is in sync and skip
+      // propagated data.
+      // TODO(stanisc): crbug/456876: Replace the code that moves
+      // the local node with the sync node reordering code.
+      // The local node has the correct position in this particular case,
+      // not the sync node.
+      if (parent_node->GetChild(index) != child_node) {
+        bookmark_model_->Move(child_node, parent_node, index);
+        context->IncrementLocalItemsModified();
+      }
+    } else {
+      if (external_id != 0) {
+        const BookmarkNode* matching_node =
+            context->LookupNodeInIdIndex(external_id);
+        if (matching_node) {
+          // There is another matching node which means the local node
+          // has been either moved or edited.
+          // In this case assume the local model to be correct, delete the
+          // sync node, and let the matching node to be propagated to Sync.
+          // TODO(stanisc): crbug/456876: this should really be handled with
+          // a move, but the move depends on the traversal order.
+          int num = RemoveSyncNodeHierarchy(trans, sync_child_node.GetId());
+          context->IncrementSyncItemsDeleted(num);
+          continue;
+        }
+      } else {
+        // Existing sync node isn't associated. This is unexpected during
+        // optimistic association unless there the previous association failed
+        // to
+        // persist extern IDs (that might be the case because persisting
+        // external
+        // IDs is delayed).
+        // Report this error only once per session.
+        static bool g_unmatched_unassociated_node_reported = false;
+        if (!g_unmatched_unassociated_node_reported) {
+          g_unmatched_unassociated_node_reported = true;
+          unrecoverable_error_handler_->CreateAndUploadError(
+              FROM_HERE,
+              "Unassociated sync node detected during optimistic association",
+              model_type());
+        }
+      }
+
+      syncer::SyncError error;
+      child_node = CreateBookmarkNode(parent_node, index, &sync_child_node, url,
+                                      context, &error);
+      if (!child_node) {
+        if (error.IsSet()) {
+          return error;
+        } else {
+          // Skip this node and continue. Don't increment index in this case.
+          continue;
+        }
+      }
+      context->IncrementLocalItemsAdded();
+      context->MarkForVersionUpdate(child_node);
     }
 
     Associate(child_node, sync_child_node);
@@ -696,11 +917,67 @@ syncer::SyncError BookmarkModelAssociator::BuildAssociations(
           FROM_HERE, "Failed to create sync node.", model_type());
     }
     context->IncrementSyncItemsAdded();
-    if (parent_node->GetChild(i)->is_folder())
+    const BookmarkNode* child_node = parent_node->GetChild(i);
+    context->MarkForVersionUpdate(child_node);
+    if (child_node->is_folder())
       context->PushNode(sync_child_id);
   }
 
   return syncer::SyncError();
+}
+
+const BookmarkNode* BookmarkModelAssociator::CreateBookmarkNode(
+    const BookmarkNode* parent_node,
+    int bookmark_index,
+    const syncer::BaseNode* sync_child_node,
+    const GURL& url,
+    Context* context,
+    syncer::SyncError* error) {
+  DCHECK_LE(bookmark_index, parent_node->child_count());
+
+  const std::string& sync_title = sync_child_node->GetTitle();
+
+  if (!sync_child_node->GetIsFolder() && !url.is_valid()) {
+    unrecoverable_error_handler_->CreateAndUploadError(
+        FROM_HERE, "Cannot associate sync node " +
+                       sync_child_node->GetEntry()->GetId().value() +
+                       " with invalid url " + url.possibly_invalid_spec() +
+                       " and title " + sync_title,
+        model_type());
+    // Don't propagate the error to the model_type in this case.
+    return nullptr;
+  }
+
+  base::string16 bookmark_title = base::UTF8ToUTF16(sync_title);
+  const BookmarkNode* child_node = BookmarkChangeProcessor::CreateBookmarkNode(
+      bookmark_title, url, sync_child_node, parent_node, bookmark_model_,
+      profile_, bookmark_index);
+  if (!child_node) {
+    *error = unrecoverable_error_handler_->CreateAndUploadError(
+        FROM_HERE, "Failed to create bookmark node with title " + sync_title +
+                       " and url " + url.possibly_invalid_spec(),
+        model_type());
+    return nullptr;
+  }
+
+  context->UpdateDuplicateCount(bookmark_title, url);
+  return child_node;
+}
+
+int BookmarkModelAssociator::RemoveSyncNodeHierarchy(
+    syncer::WriteTransaction* trans,
+    int64 sync_id) {
+  syncer::WriteNode sync_node(trans);
+  if (sync_node.InitByIdLookup(sync_id) != syncer::BaseNode::INIT_OK) {
+    syncer::SyncError error(FROM_HERE, syncer::SyncError::DATATYPE_ERROR,
+                            "Could not lookup bookmark node for ID deletion.",
+                            syncer::BOOKMARKS);
+    unrecoverable_error_handler_->OnSingleDataTypeUnrecoverableError(error);
+    return 0;
+  }
+
+  return BookmarkChangeProcessor::RemoveSyncNodeHierarchy(trans, &sync_node,
+                                                          this);
 }
 
 struct FolderInfo {
@@ -731,13 +1008,11 @@ void BookmarkModelAssociator::ApplyDeletesFromSyncJournal(
   }
 
   // Check bookmark model from top to bottom.
-  std::stack<const BookmarkNode*> dfs_stack;
-  dfs_stack.push(bookmark_model_->bookmark_bar_node());
-  dfs_stack.push(bookmark_model_->other_node());
-  if (expect_mobile_bookmarks_folder_)
-    dfs_stack.push(bookmark_model_->mobile_node());
-  // Note: the root node may have additional extra nodes. Currently none of
-  // them are meant to sync.
+  BookmarkStack dfs_stack;
+  for (BookmarkList::const_iterator it = context->bookmark_roots().begin();
+       it != context->bookmark_roots().end(); ++it) {
+    dfs_stack.push(*it);
+  }
 
   // Remember folders that match delete journals in first pass but don't delete
   // them in case there are bookmarks left under them. After non-folder
@@ -821,11 +1096,9 @@ void BookmarkModelAssociator::PostPersistAssociationsTask() {
   // No need to post a task if a task is already pending.
   if (weak_factory_.HasWeakPtrs())
     return;
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(
-          &BookmarkModelAssociator::PersistAssociations,
-          weak_factory_.GetWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&BookmarkModelAssociator::PersistAssociations,
+                            weak_factory_.GetWeakPtr()));
 }
 
 void BookmarkModelAssociator::PersistAssociations() {
@@ -881,6 +1154,7 @@ bool BookmarkModelAssociator::CryptoReadyIfNecessary() {
 
 syncer::SyncError BookmarkModelAssociator::CheckModelSyncState(
     Context* context) const {
+  DCHECK_EQ(context->native_model_sync_state(), UNSET);
   int64 native_version =
       bookmark_model_->root_node()->sync_transaction_version();
   if (native_version != syncer::syncable::kInvalidTransactionVersion) {
@@ -888,7 +1162,9 @@ syncer::SyncError BookmarkModelAssociator::CheckModelSyncState(
     int64 sync_version = trans.GetModelVersion(syncer::BOOKMARKS);
     context->SetPreAssociationVersions(native_version, sync_version);
 
-    if (native_version != sync_version) {
+    if (native_version == sync_version) {
+      context->set_native_model_sync_state(IN_SYNC);
+    } else {
       UMA_HISTOGRAM_ENUMERATION("Sync.LocalModelOutOfSync",
                                 ModelTypeToHistogramInt(syncer::BOOKMARKS),
                                 syncer::MODEL_TYPE_COUNT);
@@ -900,7 +1176,8 @@ syncer::SyncError BookmarkModelAssociator::CheckModelSyncState(
 
       // If the native version is higher, there was a sync persistence failure,
       // and we need to delay association until after a GetUpdates.
-      if (sync_version < native_version) {
+      if (native_version > sync_version) {
+        context->set_native_model_sync_state(AHEAD);
         std::string message = base::StringPrintf(
             "Native version (%" PRId64 ") does not match sync version (%"
                 PRId64 ")",
@@ -910,6 +1187,8 @@ syncer::SyncError BookmarkModelAssociator::CheckModelSyncState(
                                  syncer::SyncError::PERSISTENCE_ERROR,
                                  message,
                                  syncer::BOOKMARKS);
+      } else {
+        context->set_native_model_sync_state(BEHIND);
       }
     }
   }

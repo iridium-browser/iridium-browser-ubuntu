@@ -47,9 +47,11 @@
 #include "native_client/src/trusted/interval_multiset/nacl_interval_range_tree.h"
 
 #include "native_client/src/trusted/service_runtime/dyn_array.h"
+#include "native_client/src/trusted/service_runtime/include/bits/nacl_syscalls.h"
 #include "native_client/src/trusted/service_runtime/nacl_error_code.h"
 #include "native_client/src/trusted/service_runtime/nacl_resource.h"
 #include "native_client/src/trusted/service_runtime/nacl_secure_service.h"
+#include "native_client/src/trusted/service_runtime/nacl_syscall_handlers.h"
 #include "native_client/src/trusted/service_runtime/sel_addrspace.h"
 #include "native_client/src/trusted/service_runtime/sel_mem.h"
 #include "native_client/src/trusted/service_runtime/sel_rt.h"
@@ -68,7 +70,6 @@ EXTERN_C_BEGIN
 struct NaClAppThread;
 struct NaClDesc;  /* see native_client/src/trusted/desc/nacl_desc_base.h */
 struct NaClDynamicRegion;
-struct NaClDescQuotaInterface;
 struct NaClSignalContext;
 struct NaClThreadInterface;  /* see sel_ldr_thread_interface.h */
 struct NaClValidationCache;
@@ -232,17 +233,12 @@ struct NaClApp {
   int                       threads_launching;
 #endif
 
-  /*
-   * An array of NaCl syscall handlers. The length of the array must be
-   * at least NACL_MAX_SYSCALLS.
-   */
-  struct NaClSyscallTableEntry *syscall_table;
+  /* Array of NaCl syscall handlers. */
+  struct NaClSyscallTableEntry syscall_table[NACL_MAX_SYSCALLS];
 
   struct NaClSecureService          *secure_service;
 
   struct NaClResourceNaClApp        resources;
-
-  struct NaClDescQuotaInterface     *desc_quota_interface;
 
   /*
    * The ordering in this enum is important. We use the ordering
@@ -364,9 +360,7 @@ struct NaClApp {
   struct DynArray           desc_tbl;  /* NaClDesc pointers */
 
   const struct NaClDebugCallbacks *debug_stub_callbacks;
-#if NACL_WINDOWS
-  uint16_t                        debug_stub_port;
-#endif
+
   struct NaClDesc                 *main_nexe_desc;
   struct NaClDesc                 *irt_nexe_desc;
 
@@ -433,24 +427,6 @@ struct NaClApp {
 void  NaClAppIncrVerbosity(void);
 
 /*
- * Initializes a NaCl application with the default parameters
- * and the specified syscall table.
- *
- * If invoked after the outer sandbox is enabled, the caller is
- * responsible for initializing the sc_nprocessors_onln member to a
- * sane value.
- *
- * nap is a pointer to the NaCl object that is being filled in.
- *
- * table is the NaCl syscall table. The syscall table must contain at least
- * NACL_MAX_SYSCALLS valid entries.
- *
- * Caution! Syscall handlers must be extremely careful with respect to
- * argument validation, including time-of-check vs time-of-use defense, etc.
- */
-int NaClAppWithSyscallTableCtor(struct NaClApp               *nap,
-                                struct NaClSyscallTableEntry *table) NACL_WUR;
-/*
  * Standard Ctor for NaClApp objects.  Installs default syscall
  * handlers.
  *
@@ -461,6 +437,13 @@ int NaClAppWithSyscallTableCtor(struct NaClApp               *nap,
  * nap is a pointer to the NaCl object that is being filled in.
  */
 int NaClAppCtor(struct NaClApp  *nap) NACL_WUR;
+
+/*
+ * This is the same as NaClAppCtor(), except that it initializes the
+ * NaClApp without registering any syscall handlers.  Syscall handlers
+ * can be added explicitly using NACL_REGISTER_SYSCALL.
+ */
+int NaClAppWithEmptySyscallTableCtor(struct NaClApp *nap) NACL_WUR;
 
 /*
  * Loads a NaCl ELF file into memory in preparation for running it.
@@ -528,6 +511,9 @@ NaClErrorCode NaClValidateImage(struct NaClApp  *nap) NACL_WUR;
 
 int NaClAddrIsValidEntryPt(struct NaClApp *nap,
                            uintptr_t      addr);
+
+int NaClAddrIsValidIrtEntryPt(struct NaClApp *nap,
+                              uintptr_t      addr);
 
 /*
  * Takes ownership of descriptor, i.e., when NaCl app closes, it's gone.
@@ -655,9 +641,6 @@ void NaClAppLoadModule(struct NaClApp      *self,
                        void                (*load_cb)(void *instance_data,
                                                       NaClErrorCode status),
                        void                *instance_data);
-
-int NaClAppDescQuotaSetup(struct NaClApp                *self,
-                          struct NaClDescQuotaInterface *rev_quota);
 
 /*
  * Starts the NaCl app, the |start_cb| callback is invoked before the

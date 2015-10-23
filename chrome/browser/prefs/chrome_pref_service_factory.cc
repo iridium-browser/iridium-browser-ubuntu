@@ -30,10 +30,8 @@
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable_factory.h"
 #include "chrome/browser/prefs/profile_pref_store_manager.h"
-#include "chrome/browser/prefs/tracked/pref_hash_filter.h"
 #include "chrome/browser/profiles/file_path_verifier_win.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search_engines/default_search_pref_migration.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/ui/profile_error_dialog.h"
 #include "chrome/common/chrome_constants.h"
@@ -43,8 +41,10 @@
 #include "components/component_updater/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/search_engines/default_search_manager.h"
+#include "components/search_engines/default_search_pref_migration.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/sync_driver/pref_names.h"
+#include "components/user_prefs/tracked/pref_names.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/browser_resources.h"
@@ -190,7 +190,7 @@ const PrefHashFilter::TrackedPreferenceMetadata kTrackedPrefs[] = {
     //     a reset in FilterOnLoad and SegregatedPrefStore will not look for it
     //     in the protected JsonPrefStore unless it's declared as a protected
     //     preference here.
-    15, prefs::kPreferenceResetTime,
+    15, user_prefs::kPreferenceResetTime,
     PrefHashFilter::ENFORCE_ON_LOAD,
     PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
     PrefHashFilter::VALUE_IMPERSONAL
@@ -210,12 +210,6 @@ const PrefHashFilter::TrackedPreferenceMetadata kTrackedPrefs[] = {
 #if defined(OS_WIN)
   {
     19, prefs::kSwReporterPromptVersion,
-    PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
-    PrefHashFilter::VALUE_IMPERSONAL
-  },
-  {
-    20, prefs::kSwReporterPromptReason,
     PrefHashFilter::ENFORCE_ON_LOAD,
     PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
     PrefHashFilter::VALUE_IMPERSONAL
@@ -373,8 +367,7 @@ void HandleReadError(PersistentPrefStore::PrefReadError error) {
     // an example problem that this can cause.
     // Do some diagnosis and try to avoid losing data.
     int message_id = 0;
-    if (error <= PersistentPrefStore::PREF_READ_ERROR_JSON_TYPE ||
-        error == PersistentPrefStore::PREF_READ_ERROR_LEVELDB_CORRUPTION) {
+    if (error <= PersistentPrefStore::PREF_READ_ERROR_JSON_TYPE) {
       message_id = IDS_PREFERENCES_CORRUPT_ERROR;
     } else if (error != PersistentPrefStore::PREF_READ_ERROR_NO_FILE) {
       message_id = IDS_PREFERENCES_UNREADABLE_ERROR;

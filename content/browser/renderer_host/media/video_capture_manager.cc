@@ -9,11 +9,14 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/task_runner_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "content/browser/media/capture/web_contents_video_capture_device.h"
 #include "content/browser/media/media_internals.h"
@@ -23,8 +26,9 @@
 #include "content/public/browser/desktop_media_id.h"
 #include "content/public/common/media_stream_request.h"
 #include "media/base/bind_to_current_loop.h"
-#include "media/video/capture/video_capture_device.h"
-#include "media/video/capture/video_capture_device_factory.h"
+#include "media/base/media_switches.h"
+#include "media/capture/video/video_capture_device.h"
+#include "media/capture/video/video_capture_device_factory.h"
 
 #if defined(ENABLE_SCREEN_CAPTURE)
 #include "content/browser/media/capture/desktop_capture_device.h"
@@ -67,14 +71,16 @@ void ConsolidateCaptureFormats(media::VideoCaptureFormats* formats) {
   // anyhow: the actual pixel format is decided at the device level.
   for (media::VideoCaptureFormats::iterator it = formats->begin();
        it != formats->end(); ++it) {
-    it->pixel_format = media::PIXEL_FORMAT_I420;
+    it->pixel_format = media::VIDEO_CAPTURE_PIXEL_FORMAT_I420;
   }
 }
 
 // The maximum number of buffers in the capture pipeline. See
 // VideoCaptureController ctor comments for more details.
 const int kMaxNumberOfBuffers = 3;
-const int kMaxNumberOfBuffersForTabCapture = 5;
+// TODO(miu): The value for tab capture should be determined programmatically.
+// http://crbug.com/460318
+const int kMaxNumberOfBuffersForTabCapture = 10;
 
 // Used for logging capture events.
 // Elements in this enum should not be deleted or rearranged; the only
@@ -224,9 +230,9 @@ int VideoCaptureManager::Open(const StreamDeviceInfo& device_info) {
   // Notify our listener asynchronously; this ensures that we return
   // |capture_session_id| to the caller of this function before using that same
   // id in a listener event.
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-      base::Bind(&VideoCaptureManager::OnOpened, this,
-                 device_info.device.type, capture_session_id));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&VideoCaptureManager::OnOpened, this,
+                            device_info.device.type, capture_session_id));
   return capture_session_id;
 }
 
@@ -255,9 +261,9 @@ void VideoCaptureManager::Close(int capture_session_id) {
   }
 
   // Notify listeners asynchronously, and forget the session.
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-      base::Bind(&VideoCaptureManager::OnClosed, this, session_it->second.type,
-                 capture_session_id));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&VideoCaptureManager::OnClosed, this,
+                            session_it->second.type, capture_session_id));
   sessions_.erase(session_it);
 }
 
@@ -409,15 +415,12 @@ VideoCaptureManager::DoStartDeviceOnDeviceThread(
     case MEDIA_DESKTOP_VIDEO_CAPTURE: {
 #if defined(ENABLE_SCREEN_CAPTURE)
       DesktopMediaID desktop_id = DesktopMediaID::Parse(id);
+      if (!desktop_id.is_null()) {
 #if defined(USE_AURA)
-      if (desktop_id.type == DesktopMediaID::TYPE_AURA_WINDOW) {
-        video_capture_device.reset(
-            DesktopCaptureDeviceAura::Create(desktop_id));
-      } else
+        video_capture_device = DesktopCaptureDeviceAura::Create(desktop_id);
 #endif
-      if (desktop_id.type != DesktopMediaID::TYPE_NONE &&
-          desktop_id.type != DesktopMediaID::TYPE_AURA_WINDOW) {
-        video_capture_device = DesktopCaptureDevice::Create(desktop_id);
+        if (!video_capture_device)
+          video_capture_device = DesktopCaptureDevice::Create(desktop_id);
       }
 #endif  // defined(ENABLE_SCREEN_CAPTURE)
       break;
@@ -445,9 +448,9 @@ void VideoCaptureManager::StartCaptureForClient(
     VideoCaptureControllerEventHandler* client_handler,
     const DoneCB& done_cb) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DVLOG(1) << "VideoCaptureManager::StartCaptureForClient, "
-           << params.requested_format.frame_size.ToString() << ", "
-           << params.requested_format.frame_rate << ", #" << session_id << ")";
+  DVLOG(1) << "VideoCaptureManager::StartCaptureForClient #" << session_id
+           << ", request: "
+           << media::VideoCaptureFormat::ToString(params.requested_format);
 
   DeviceEntry* entry = GetOrCreateDeviceEntry(session_id);
   if (!entry) {
@@ -643,11 +646,8 @@ void VideoCaptureManager::MaybePostDesktopCaptureWindowId(
 
   DCHECK_EQ(MEDIA_DESKTOP_VIDEO_CAPTURE, existing_device->stream_type);
   DesktopMediaID id = DesktopMediaID::Parse(existing_device->id);
-  if (id.type == DesktopMediaID::TYPE_NONE ||
-      id.type == DesktopMediaID::TYPE_AURA_WINDOW) {
-    VLOG(2) << "Video capture device type mismatch.";
+  if (id.is_null())
     return;
-  }
 
   auto window_id_it = notification_window_ids_.find(session_id);
   if (window_id_it == notification_window_ids_.end()) {
@@ -794,8 +794,11 @@ VideoCaptureManager::GetDeviceEntryForController(
 
 void VideoCaptureManager::DestroyDeviceEntryIfNoClients(DeviceEntry* entry) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  // Removal of the last client stops the device.
-  if (entry->video_capture_controller()->GetClientCount() == 0) {
+  // Removal of the last active client stops the device. It is important to only
+  // check active clients and not all clients, because otherwise this class gets
+  // into a bad state and might crash next time VideoCaptureManager::Open() is
+  // called.
+  if (entry->video_capture_controller()->GetActiveClientCount() == 0) {
     DVLOG(1) << "VideoCaptureManager stopping device (type = "
              << entry->stream_type << ", id = " << entry->id << ")";
 

@@ -131,6 +131,15 @@ ES3FormatCombinationSet BuildES3FormatSet()
     InsertES3FormatCombo(&set, GL_ALPHA,              GL_ALPHA,           GL_UNSIGNED_BYTE                 );
     InsertES3FormatCombo(&set, GL_SRGB_ALPHA_EXT,     GL_SRGB_ALPHA_EXT,  GL_UNSIGNED_BYTE                 );
     InsertES3FormatCombo(&set, GL_SRGB_EXT,           GL_SRGB_EXT,        GL_UNSIGNED_BYTE                 );
+    InsertES3FormatCombo(&set, GL_RG,                 GL_RG,              GL_UNSIGNED_BYTE                 );
+    InsertES3FormatCombo(&set, GL_RG,                 GL_RG,              GL_FLOAT                         );
+    InsertES3FormatCombo(&set, GL_RG,                 GL_RG,              GL_HALF_FLOAT                    );
+    InsertES3FormatCombo(&set, GL_RG,                 GL_RG,              GL_HALF_FLOAT_OES                );
+    InsertES3FormatCombo(&set, GL_RED,                GL_RED,             GL_UNSIGNED_BYTE                 );
+    InsertES3FormatCombo(&set, GL_RED,                GL_RED,             GL_FLOAT                         );
+    InsertES3FormatCombo(&set, GL_RED,                GL_RED,             GL_HALF_FLOAT                    );
+    InsertES3FormatCombo(&set, GL_RED,                GL_RED,             GL_HALF_FLOAT_OES                );
+    InsertES3FormatCombo(&set, GL_DEPTH_STENCIL,      GL_DEPTH_STENCIL,   GL_UNSIGNED_INT_24_8             );
 
     // Depth stencil formats
     InsertES3FormatCombo(&set, GL_DEPTH_COMPONENT16,  GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT                );
@@ -1132,9 +1141,15 @@ bool ValidateES3RenderbufferStorageParameters(gl::Context *context, GLenum targe
     return true;
 }
 
-bool ValidateInvalidateFramebufferParameters(Context *context, GLenum target, GLsizei numAttachments,
-                                             const GLenum* attachments)
+bool ValidateInvalidateFramebuffer(Context *context, GLenum target, GLsizei numAttachments,
+                                   const GLenum *attachments)
 {
+    if (context->getClientVersion() < 3)
+    {
+        context->recordError(Error(GL_INVALID_OPERATION, "Operation only supported on ES 3.0 and above"));
+        return false;
+    }
+
     bool defaultFramebuffer = false;
 
     switch (target)
@@ -1147,56 +1162,11 @@ bool ValidateInvalidateFramebufferParameters(Context *context, GLenum target, GL
         defaultFramebuffer = context->getState().getReadFramebuffer()->id() == 0;
         break;
       default:
-          context->recordError(Error(GL_INVALID_ENUM));
-          return false;
+        context->recordError(Error(GL_INVALID_ENUM, "Invalid framebuffer target"));
+        return false;
     }
 
-    for (int i = 0; i < numAttachments; ++i)
-    {
-        if (attachments[i] >= GL_COLOR_ATTACHMENT0 && attachments[i] <= GL_COLOR_ATTACHMENT15)
-        {
-            if (defaultFramebuffer)
-            {
-                context->recordError(Error(GL_INVALID_ENUM));
-                return false;
-            }
-
-            if (attachments[i] >= GL_COLOR_ATTACHMENT0 + context->getCaps().maxColorAttachments)
-            {
-                context->recordError(Error(GL_INVALID_OPERATION));
-                return false;
-            }
-        }
-        else
-        {
-            switch (attachments[i])
-            {
-              case GL_DEPTH_ATTACHMENT:
-              case GL_STENCIL_ATTACHMENT:
-              case GL_DEPTH_STENCIL_ATTACHMENT:
-                if (defaultFramebuffer)
-                {
-                    context->recordError(Error(GL_INVALID_ENUM));
-                    return false;
-                }
-                break;
-              case GL_COLOR:
-              case GL_DEPTH:
-              case GL_STENCIL:
-                if (!defaultFramebuffer)
-                {
-                    context->recordError(Error(GL_INVALID_ENUM));
-                    return false;
-                }
-                break;
-              default:
-                context->recordError(Error(GL_INVALID_ENUM));
-                return false;
-            }
-        }
-    }
-
-    return true;
+    return ValidateDiscardFramebufferBase(context, target, numAttachments, attachments, defaultFramebuffer);
 }
 
 bool ValidateClearBuffer(Context *context)
@@ -1279,4 +1249,47 @@ bool ValidateReadBuffer(Context *context, GLenum src)
     return true;
 }
 
+bool ValidateCompressedTexImage3D(Context *context,
+                                  GLenum target,
+                                  GLint level,
+                                  GLenum internalformat,
+                                  GLsizei width,
+                                  GLsizei height,
+                                  GLsizei depth,
+                                  GLint border,
+                                  GLsizei imageSize,
+                                  const GLvoid *data)
+{
+    if (context->getClientVersion() < 3)
+    {
+        context->recordError(Error(GL_INVALID_OPERATION));
+        return false;
+    }
+
+    const InternalFormat &formatInfo = GetInternalFormatInfo(internalformat);
+    if (imageSize < 0 ||
+        static_cast<GLuint>(imageSize) !=
+            formatInfo.computeBlockSize(GL_UNSIGNED_BYTE, width, height))
+    {
+        context->recordError(Error(GL_INVALID_VALUE));
+        return false;
+    }
+
+    // 3D texture target validation
+    if (target != GL_TEXTURE_3D && target != GL_TEXTURE_2D_ARRAY)
+    {
+        context->recordError(
+            Error(GL_INVALID_ENUM, "Must specify a valid 3D texture destination target"));
+        return false;
+    }
+
+    // validateES3TexImageFormat sets the error code if there is an error
+    if (!ValidateES3TexImageParameters(context, target, level, internalformat, true, false, 0, 0, 0,
+                                       width, height, depth, border, GL_NONE, GL_NONE, data))
+    {
+        return false;
+    }
+
+    return true;
+}
 }

@@ -9,7 +9,8 @@
 #include "base/command_line.h"
 #include "base/debug/profiler.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread.h"
 #include "chrome/common/chrome_switches.h"
@@ -57,7 +58,7 @@ std::string GetProfileName() {
         command_line.GetSwitchValueASCII(switches::kProcessType);
     std::string type = process_type.empty() ?
         std::string("browser") : std::string(process_type);
-    ReplaceSubstringsAfterOffset(&profile_name, 0, "{type}", type.c_str());
+    base::ReplaceSubstringsAfterOffset(&profile_name, 0, "{type}", type);
   }
   return profile_name;
 }
@@ -82,9 +83,8 @@ void FlushProfilingData(base::Thread* thread) {
       flush_seconds = kProfilingFlushSeconds;
     }
   }
-  thread->message_loop()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&FlushProfilingData, thread),
+  thread->task_runner()->PostDelayedTask(
+      FROM_HERE, base::Bind(&FlushProfilingData, thread),
       base::TimeDelta::FromSeconds(flush_seconds));
 }
 
@@ -99,8 +99,8 @@ class ProfilingThreadControl {
       return;
     thread_ = new base::Thread("Profiling_Flush");
     thread_->Start();
-    thread_->message_loop()->PostTask(
-        FROM_HERE, base::Bind(&FlushProfilingData, thread_));
+    thread_->task_runner()->PostTask(FROM_HERE,
+                                     base::Bind(&FlushProfilingData, thread_));
   }
 
   void Stop() {

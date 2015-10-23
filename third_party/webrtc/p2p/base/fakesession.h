@@ -177,6 +177,12 @@ class FakeTransportChannel : public TransportChannelImpl,
       SignalConnectionRemoved(this);
   }
 
+  void SetReceiving(bool receiving) {
+    set_receiving(receiving);
+  }
+
+  void SetReceivingTimeout(int timeout) override {}
+
   virtual int SendPacket(const char* data, size_t len,
                          const rtc::PacketOptions& options, int flags) {
     if (state_ != STATE_CONNECTED) {

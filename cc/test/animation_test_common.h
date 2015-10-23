@@ -14,6 +14,7 @@
 #include "cc/test/geometry_test_utils.h"
 
 namespace cc {
+class AnimationPlayer;
 class LayerImpl;
 class Layer;
 }
@@ -84,6 +85,7 @@ class FakeLayerAnimationValueObserver : public LayerAnimationValueObserver {
   void OnTransformAnimated(const gfx::Transform& transform) override;
   void OnScrollOffsetAnimated(const gfx::ScrollOffset& scroll_offset) override;
   void OnAnimationWaitingForDeletion() override;
+  void OnTransformIsPotentiallyAnimatingChanged(bool is_animating) override;
   bool IsActive() const override;
 
   const FilterOperations& filters() const { return filters_; }
@@ -95,12 +97,15 @@ class FakeLayerAnimationValueObserver : public LayerAnimationValueObserver {
     return animation_waiting_for_deletion_;
   }
 
+  bool transform_is_animating() { return transform_is_animating_; }
+
  private:
   FilterOperations filters_;
   float opacity_;
   gfx::Transform transform_;
   gfx::ScrollOffset scroll_offset_;
   bool animation_waiting_for_deletion_;
+  bool transform_is_animating_;
 };
 
 class FakeInactiveLayerAnimationValueObserver
@@ -178,6 +183,28 @@ int AddAnimatedFilterToLayer(LayerImpl* layer,
                              double duration,
                              float start_brightness,
                              float end_brightness);
+
+int AddAnimatedTransformToPlayer(AnimationPlayer* player,
+                                 double duration,
+                                 int delta_x,
+                                 int delta_y);
+
+int AddOpacityTransitionToPlayer(AnimationPlayer* player,
+                                 double duration,
+                                 float start_opacity,
+                                 float end_opacity,
+                                 bool use_timing_function);
+
+int AddAnimatedFilterToPlayer(AnimationPlayer* player,
+                              double duration,
+                              float start_brightness,
+                              float end_brightness);
+
+int AddOpacityStepsToController(LayerAnimationController* target,
+                                double duration,
+                                float start_opacity,
+                                float end_opacity,
+                                int num_steps);
 
 }  // namespace cc
 

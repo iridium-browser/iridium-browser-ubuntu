@@ -45,28 +45,25 @@ UniqueClientEntity::UniqueClientEntity(
     int64 last_modified_time)
     : FakeServerEntity(id, model_type, version, name),
       client_defined_unique_tag_(client_defined_unique_tag),
-      specifics_(specifics),
       creation_time_(creation_time),
-      last_modified_time_(last_modified_time) { }
+      last_modified_time_(last_modified_time) {
+  SetSpecifics(specifics);
+}
 
 UniqueClientEntity::~UniqueClientEntity() { }
 
 // static
-FakeServerEntity* UniqueClientEntity::Create(
+scoped_ptr<FakeServerEntity> UniqueClientEntity::Create(
     const sync_pb::SyncEntity& client_entity) {
   CHECK(client_entity.has_client_defined_unique_tag())
       << "A UniqueClientEntity must have a client-defined unique tag.";
   ModelType model_type =
       syncer::GetModelTypeFromSpecifics(client_entity.specifics());
   string id = EffectiveIdForClientTaggedEntity(client_entity);
-  return new UniqueClientEntity(id,
-                                model_type,
-                                client_entity.version(),
-                                client_entity.name(),
-                                client_entity.client_defined_unique_tag(),
-                                client_entity.specifics(),
-                                client_entity.ctime(),
-                                client_entity.mtime());
+  return scoped_ptr<FakeServerEntity>(new UniqueClientEntity(
+      id, model_type, client_entity.version(), client_entity.name(),
+      client_entity.client_defined_unique_tag(), client_entity.specifics(),
+      client_entity.ctime(), client_entity.mtime()));
 }
 
 // static
@@ -98,27 +95,16 @@ std::string UniqueClientEntity::EffectiveIdForClientTaggedEntity(
 string UniqueClientEntity::GetParentId() const {
   // The parent ID for this type of entity should always be its ModelType's
   // root node.
-  return FakeServerEntity::GetTopLevelId(model_type_);
+  return FakeServerEntity::GetTopLevelId(GetModelType());
 }
 
-void UniqueClientEntity::SerializeAsProto(sync_pb::SyncEntity* proto) {
+void UniqueClientEntity::SerializeAsProto(sync_pb::SyncEntity* proto) const {
   FakeServerEntity::SerializeBaseProtoFields(proto);
-
-  sync_pb::EntitySpecifics* specifics = proto->mutable_specifics();
-  specifics->CopyFrom(specifics_);
 
   proto->set_parent_id_string(GetParentId());
   proto->set_client_defined_unique_tag(client_defined_unique_tag_);
   proto->set_ctime(creation_time_);
   proto->set_mtime(last_modified_time_);
-}
-
-bool UniqueClientEntity::IsDeleted() const {
-  return false;
-}
-
-bool UniqueClientEntity::IsFolder() const {
-  return false;
 }
 
 }  // namespace fake_server

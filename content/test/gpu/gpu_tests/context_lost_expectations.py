@@ -15,3 +15,10 @@ class ContextLostExpectations(GpuTestExpectations):
     # AMD Radeon 6450
     self.Fail('ContextLost.WebGLContextLostFromGPUProcessExit',
         ['linux', ('amd', 0x6779)], bug=479975)
+
+    # Flaky on Mac 10.7 and 10.8 resulting in crashes during browser
+    # startup, so skip this test in those configurations.
+    self.Skip('ContextLost.WebGLContextLostFromSelectElement',
+              ['mountainlion', 'debug'], bug=497411)
+    self.Skip('ContextLost.WebGLContextLostFromSelectElement',
+              ['lion', 'debug'], bug=498149)

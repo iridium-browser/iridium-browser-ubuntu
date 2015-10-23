@@ -68,7 +68,6 @@ class Session {
                                       const TransportRoute& route) = 0;
   };
 
-
   Session() {}
   virtual ~Session() {}
 
@@ -82,25 +81,16 @@ class Session {
   // JID of the other side.
   virtual const std::string& jid() = 0;
 
-  // Configuration of the protocol that was sent or received in the
-  // session-initiate jingle message. Returned pointer is valid until
-  // connection is closed.
-  virtual const CandidateSessionConfig* candidate_config() = 0;
-
   // Protocol configuration. Can be called only after session has been accepted.
   // Returned pointer is valid until connection is closed.
   virtual const SessionConfig& config() = 0;
-
-  // Set protocol configuration for an incoming session. Must be
-  // called on the host before the connection is accepted, from
-  // ChromotocolServer::IncomingConnectionCallback.
-  virtual void set_config(scoped_ptr<SessionConfig> config) = 0;
 
   // GetTransportChannelFactory() returns a factory that creates a new transport
   // channel for each logical channel. GetMultiplexedChannelFactory() channels
   // share a single underlying transport channel
   virtual StreamChannelFactory* GetTransportChannelFactory() = 0;
   virtual StreamChannelFactory* GetMultiplexedChannelFactory() = 0;
+  virtual StreamChannelFactory* GetQuicChannelFactory() = 0;
 
   // Closes connection. Callbacks are guaranteed not to be called
   // after this method returns. Must be called before the object is

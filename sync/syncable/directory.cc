@@ -105,8 +105,8 @@ Directory::Kernel::~Kernel() {
 
 Directory::Directory(
     DirectoryBackingStore* store,
-    UnrecoverableErrorHandler* unrecoverable_error_handler,
-    ReportUnrecoverableErrorFunction report_unrecoverable_error_function,
+    const WeakHandle<UnrecoverableErrorHandler>& unrecoverable_error_handler,
+    const base::Closure& report_unrecoverable_error_function,
     NigoriHandler* nigori_handler,
     Cryptographer* cryptographer)
     : kernel_(NULL),
@@ -117,8 +117,7 @@ Directory::Directory(
       nigori_handler_(nigori_handler),
       cryptographer_(cryptographer),
       invariant_check_level_(VERIFY_CHANGES),
-      weak_ptr_factory_(this) {
-}
+      weak_ptr_factory_(this) {}
 
 Directory::~Directory() {
   Close();
@@ -232,8 +231,9 @@ void Directory::OnUnrecoverableError(const BaseTransaction* trans,
                                      const std::string & message) {
   DCHECK(trans != NULL);
   unrecoverable_error_set_ = true;
-  unrecoverable_error_handler_->OnUnrecoverableError(location,
-                                                     message);
+  unrecoverable_error_handler_.Call(
+      FROM_HERE, &UnrecoverableErrorHandler::OnUnrecoverableError, location,
+      message);
 }
 
 EntryKernel* Directory::GetEntryById(const Id& id) {
@@ -985,9 +985,9 @@ bool Directory::InitialSyncEndedForType(ModelType type) {
 
 bool Directory::InitialSyncEndedForType(
     BaseTransaction* trans, ModelType type) {
-  // True iff the type's root node has been received and applied.
+  // True iff the type's root node has been created.
   syncable::Entry entry(trans, syncable::GET_TYPE_ROOT, type);
-  return entry.good() && entry.GetBaseVersion() != CHANGES_VERSION;
+  return entry.good();
 }
 
 string Directory::store_birthday() const {
@@ -1029,6 +1029,12 @@ NigoriHandler* Directory::GetNigoriHandler() {
 Cryptographer* Directory::GetCryptographer(const BaseTransaction* trans) {
   DCHECK_EQ(this, trans->directory());
   return cryptographer_;
+}
+
+void Directory::ReportUnrecoverableError() {
+  if (!report_unrecoverable_error_function_.is_null()) {
+    report_unrecoverable_error_function_.Run();
+  }
 }
 
 void Directory::GetAllMetaHandles(BaseTransaction* trans,
@@ -1462,7 +1468,9 @@ void Directory::PutPredecessor(EntryKernel* e, EntryKernel* predecessor) {
   // Another mixed valid and invalid position case.  This one could be supported
   // in theory, but we're trying to deprecate support for siblings with and
   // without valid positions.  See TODO above.
-  DCHECK(successor->ref(UNIQUE_POSITION).IsValid());
+  // Using a release CHECK here because the following UniquePosition::Between
+  // call crashes anyway when the position string is empty (see crbug/332371).
+  CHECK(successor->ref(UNIQUE_POSITION).IsValid()) << *successor;
 
   // Finally, the normal case: inserting between two elements.
   UniquePosition pos = UniquePosition::Between(

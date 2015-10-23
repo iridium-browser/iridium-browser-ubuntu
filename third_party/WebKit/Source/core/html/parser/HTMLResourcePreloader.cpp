@@ -29,6 +29,7 @@
 #include "core/dom/Document.h"
 #include "core/fetch/FetchInitiatorInfo.h"
 #include "core/fetch/ResourceFetcher.h"
+#include "core/loader/DocumentLoader.h"
 #include "public/platform/Platform.h"
 
 namespace blink {
@@ -48,11 +49,42 @@ DEFINE_TRACE(HTMLResourcePreloader)
     visitor->trace(m_document);
 }
 
-void HTMLResourcePreloader::preload(PassOwnPtr<PreloadRequest> preload)
+static void preconnectHost(PreloadRequest* request, const NetworkHintsInterface& networkHintsInterface)
 {
+    ASSERT(request);
+    ASSERT(request->isPreconnect());
+    KURL host(request->baseURL(), request->resourceURL());
+    if (!host.isValid() || !host.protocolIsInHTTPFamily())
+        return;
+    CrossOriginAttributeValue crossOrigin = CrossOriginAttributeNotSet;
+    if (request->isCORS()) {
+        if (request->isAllowCredentials())
+            crossOrigin = CrossOriginAttributeUseCredentials;
+        else
+            crossOrigin = CrossOriginAttributeAnonymous;
+    }
+    networkHintsInterface.preconnectHost(host, crossOrigin);
+}
+
+void HTMLResourcePreloader::preload(PassOwnPtr<PreloadRequest> preload, const NetworkHintsInterface& networkHintsInterface)
+{
+    if (preload->isPreconnect()) {
+        preconnectHost(preload.get(), networkHintsInterface);
+        return;
+    }
+    // TODO(yoichio): Should preload if document is imported.
+    if (!m_document->loader())
+        return;
     FetchRequest request = preload->resourceRequest(m_document);
+    // TODO(dgozman): This check should go to HTMLPreloadScanner, but this requires
+    // making Document::completeURLWithOverride logic to be statically accessible.
+    if (request.url().protocolIsData())
+        return;
+    if (preload->resourceType() == Resource::Script || preload->resourceType() == Resource::CSSStyleSheet || preload->resourceType() == Resource::ImportResource)
+        request.setCharset(preload->charset().isEmpty() ? m_document->charset().string() : preload->charset());
+    request.setForPreload(true);
     Platform::current()->histogramCustomCounts("WebCore.PreloadDelayMs", static_cast<int>(1000 * (monotonicallyIncreasingTime() - preload->discoveryTime())), 0, 2000, 20);
-    m_document->fetcher()->preload(preload->resourceType(), request, preload->charset());
+    m_document->loader()->startPreload(preload->resourceType(), request);
 }
 
 } // namespace blink

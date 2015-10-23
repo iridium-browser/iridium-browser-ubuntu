@@ -5,6 +5,7 @@
 #ifndef FetchEvent_h
 #define FetchEvent_h
 
+#include "bindings/core/v8/ScriptPromise.h"
 #include "modules/EventModules.h"
 #include "modules/ModulesExport.h"
 #include "modules/fetch/Request.h"
@@ -26,15 +27,15 @@ class MODULES_EXPORT FetchEvent final : public ExtendableEvent {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<FetchEvent> create();
-    static PassRefPtrWillBeRawPtr<FetchEvent> create(const AtomicString& type, FetchEventInit&);
-    static PassRefPtrWillBeRawPtr<FetchEvent> create(const AtomicString& type, FetchEventInit&, RespondWithObserver*);
+    static PassRefPtrWillBeRawPtr<FetchEvent> create(const AtomicString& type, const FetchEventInit&);
+    static PassRefPtrWillBeRawPtr<FetchEvent> create(const AtomicString& type, const FetchEventInit&, RespondWithObserver*);
 
     Request* request() const;
     bool isReload() const;
 
-    void respondWith(ScriptState*, const ScriptValue&, ExceptionState&);
+    void respondWith(ScriptState*, ScriptPromise, ExceptionState&);
 
-    virtual const AtomicString& interfaceName() const override;
+    const AtomicString& interfaceName() const override;
 
     DECLARE_VIRTUAL_TRACE();
 

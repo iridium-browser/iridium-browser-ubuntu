@@ -20,10 +20,10 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
-#include "chrome/common/attrition_experiments.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/grit/chromium_strings.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
@@ -56,7 +56,7 @@ base::string16 LocalizeUrl(const wchar_t* url) {
   base::string16 language;
   if (!GoogleUpdateSettings::GetLanguage(&language))
     language = L"en-US";  // Default to US English.
-  return ReplaceStringPlaceholders(url, language.c_str(), NULL);
+  return base::ReplaceStringPlaceholders(url, language.c_str(), NULL);
 }
 
 base::string16 GetWelcomeBackUrl() {
@@ -69,7 +69,7 @@ base::string16 GetWelcomeBackUrl() {
 // 100 nanosecond units. For example 5:30 pm of June 15, 2009 is 3580464.
 int FileTimeToHours(const FILETIME& time) {
   const ULONGLONG k100sNanoSecsToHours = 10000000LL * 60 * 60;
-  ULARGE_INTEGER uli = {time.dwLowDateTime, time.dwHighDateTime};
+  ULARGE_INTEGER uli = {{time.dwLowDateTime, time.dwHighDateTime}};
   return static_cast<int>(uli.QuadPart / k100sNanoSecsToHours);
 }
 
@@ -275,8 +275,10 @@ void SetClient(const base::string16& experiment_group, bool last_write) {
     // Use it to write the experiment results.
     GoogleUpdateSettings::WriteGoogleUpdateSystemClientKey(
         reg_key_handle, google_update::kRegClientField, experiment_group);
-    if (last_write)
-      CloseHandle((HANDLE) reg_key_handle);
+    if (last_write) {
+      CloseHandle(
+          reinterpret_cast<HANDLE>(static_cast<uintptr_t>(reg_key_handle)));
+    }
   } else {
     // Write to HKCU.
     GoogleUpdateSettings::SetClient(experiment_group);
@@ -306,7 +308,6 @@ bool CreateExperimentDetails(int flavor, ExperimentDetails* experiment) {
   // The experiment in Feb 2011 used SJxx SKxx SLxx SMxx.
   // The experiment in Mar 2012 used ZAxx ZBxx ZCxx.
   // The experiment in Jan 2013 uses DAxx.
-  using namespace attrition_experiments;
 
   static const struct UserExperimentSpecs {
     const wchar_t* locale;  // Locale to show this experiment for (* for all).
@@ -354,13 +355,10 @@ bool CreateExperimentDetails(int flavor, ExperimentDetails* experiment) {
     if (experiment_locale != locale && experiment_locale != L"*")
       continue;
 
-    std::vector<base::string16> brand_codes;
-    base::SplitString(kExperiments[i].brands, L',', &brand_codes);
-    if (brand_codes.empty())
-      return false;
-    for (std::vector<base::string16>::iterator it = brand_codes.begin();
-         it != brand_codes.end(); ++it) {
-      if (*it != brand && *it != L"*")
+    for (const base::string16& cur : base::SplitString(
+             kExperiments[i].brands, L",",
+             base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
+      if (cur != brand && cur != L"*")
         continue;
       // We have found our match.
       const UserExperimentSpecs& match = kExperiments[i];

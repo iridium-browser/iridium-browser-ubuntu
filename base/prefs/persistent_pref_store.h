@@ -33,9 +33,6 @@ class BASE_PREFS_EXPORT PersistentPrefStore : public WriteablePrefStore {
     // Indicates that ReadPrefs() couldn't complete synchronously and is waiting
     // for an asynchronous task to complete first.
     PREF_READ_ERROR_ASYNCHRONOUS_TASK_INCOMPLETE = 10,
-    PREF_READ_ERROR_LEVELDB_IO = 11,
-    PREF_READ_ERROR_LEVELDB_CORRUPTION_READ_ONLY = 12,
-    PREF_READ_ERROR_LEVELDB_CORRUPTION = 13,
     PREF_READ_ERROR_MAX_ENUM
   };
 
@@ -66,6 +63,12 @@ class BASE_PREFS_EXPORT PersistentPrefStore : public WriteablePrefStore {
 
   // Lands any pending writes to disk.
   virtual void CommitPendingWrite() = 0;
+
+  // Schedule a write if there is any lossy data pending. Unlike
+  // CommitPendingWrite() this does not immediately sync to disk, instead it
+  // triggers an eventual write if there is lossy data pending and if there
+  // isn't one scheduled already.
+  virtual void SchedulePendingLossyWrites() = 0;
 
  protected:
   ~PersistentPrefStore() override {}

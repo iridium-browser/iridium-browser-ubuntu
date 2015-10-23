@@ -292,35 +292,6 @@ void SkTwoPointConicalGradient::TwoPointConicalGradientContext::shadeSpan(
     }
 }
 
-SkShader::BitmapType SkTwoPointConicalGradient::asABitmap(
-    SkBitmap* bitmap, SkMatrix* matrix, SkShader::TileMode* xy) const {
-    SkPoint diff = fCenter2 - fCenter1;
-    SkScalar diffLen = 0;
-
-    if (bitmap) {
-        this->getGradientTableBitmap(bitmap);
-    }
-    if (matrix) {
-        diffLen = diff.length();
-    }
-    if (matrix) {
-        if (diffLen) {
-            SkScalar invDiffLen = SkScalarInvert(diffLen);
-            // rotate to align circle centers with the x-axis
-            matrix->setSinCos(-SkScalarMul(invDiffLen, diff.fY),
-                              SkScalarMul(invDiffLen, diff.fX));
-        } else {
-            matrix->reset();
-        }
-        matrix->preTranslate(-fCenter1.fX, -fCenter1.fY);
-    }
-    if (xy) {
-        xy[0] = fTileMode;
-        xy[1] = kClamp_TileMode;
-    }
-    return kTwoPointConical_BitmapType;
-}
-
 // Returns the original non-sorted version of the gradient
 SkShader::GradientType SkTwoPointConicalGradient::asAGradient(
     GradientInfo* info) const {
@@ -394,11 +365,13 @@ bool SkTwoPointConicalGradient::asFragmentProcessor(GrContext* context,
                                                     const SkMatrix& viewM,
                                                     const SkMatrix* localMatrix,
                                                     GrColor* paintColor,
+                                                    GrProcessorDataManager* procDataManager,
                                                     GrFragmentProcessor** fp)  const {
     SkASSERT(context);
     SkASSERT(fPtsToUnit.isIdentity());
 
-    *fp = Gr2PtConicalGradientEffect::Create(context, *this, fTileMode, localMatrix);
+    *fp = Gr2PtConicalGradientEffect::Create(context, procDataManager, *this, fTileMode,
+                                             localMatrix);
     *paintColor = SkColor2GrColorJustAlpha(paint.getColor());
     return true;
 }
@@ -407,7 +380,8 @@ bool SkTwoPointConicalGradient::asFragmentProcessor(GrContext* context,
 
 bool SkTwoPointConicalGradient::asFragmentProcessor(GrContext*, const SkPaint&,
                                                     const SkMatrix&, const SkMatrix*,
-                                                    GrColor*, GrFragmentProcessor**)  const {
+                                                    GrColor*, GrProcessorDataManager*,
+                                                    GrFragmentProcessor**)  const {
     SkDEBUGFAIL("Should not call in GPU-less build");
     return false;
 }

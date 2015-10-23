@@ -185,6 +185,14 @@ cr.define('print_preview', function() {
         new print_preview.ticket_items.SelectionOnly(this.documentInfo_);
 
     /**
+     * Print friendly ticket item.
+     * @type {!print_preview.ticket_items.DistillPage}
+     * @private
+     */
+    this.distillPage_ = new print_preview.ticket_items.DistillPage(
+        this.documentInfo_);
+
+    /**
      * Vendor ticket items.
      * @type {!print_preview.ticket_items.VendorItems}
      * @private
@@ -265,6 +273,10 @@ cr.define('print_preview', function() {
 
     get headerFooter() {
       return this.headerFooter_;
+    },
+
+    get distillPage() {
+      return this.distillPage_;
     },
 
     get mediaSize() {
@@ -376,7 +388,7 @@ cr.define('print_preview', function() {
       if (this.appState_.hasField(
           print_preview.AppState.Field.VENDOR_OPTIONS)) {
         this.vendorItems_.updateValue(
-            /** @type {!Object<string, string>} */(this.appState_.getField(
+            /** @type {!Object<string>} */(this.appState_.getField(
             print_preview.AppState.Field.VENDOR_OPTIONS)));
     }
     },

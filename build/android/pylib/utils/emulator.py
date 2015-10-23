@@ -18,6 +18,7 @@ import time
 from pylib import cmd_helper
 from pylib import constants
 from pylib import pexpect
+from pylib.device import adb_wrapper
 from pylib.device import device_errors
 from pylib.device import device_utils
 from pylib.utils import time_profile
@@ -86,17 +87,19 @@ def _KillAllEmulators():
   """Kill all running emulators that look like ones we started.
 
   There are odd 'sticky' cases where there can be no emulator process
-  running but a device slot is taken.  A little bot trouble and and
-  we're out of room forever.
+  running but a device slot is taken.  A little bot trouble and we're out of
+  room forever.
   """
-  emulators = [d for d in device_utils.HealthyDevices() if d.adb.is_emulator]
+  emulators = [device_utils.DeviceUtils(a)
+               for a in adb_wrapper.AdbWrapper.Devices()
+               if a.is_emulator]
   if not emulators:
     return
   for e in emulators:
     e.adb.Emu(['kill'])
   logging.info('Emulator killing is async; give a few seconds for all to die.')
   for _ in range(5):
-    if not any(d.adb.is_emulator for d in device_utils.HealthyDevices()):
+    if not any(a.is_emulator for a in adb_wrapper.AdbWrapper.Devices()):
       return
     time.sleep(1)
 
@@ -140,7 +143,9 @@ class PortPool(object):
 def _GetAvailablePort():
   """Returns an available TCP port for the console."""
   used_ports = []
-  emulators = [d for d in device_utils.HealthyDevices() if d.adb.is_emulator]
+  emulators = [device_utils.DeviceUtils(a)
+               for a in adb_wrapper.AdbWrapper.Devices()
+               if a.is_emulator]
   for emulator in emulators:
     used_ports.append(emulator.adb.GetDeviceSerial().split('-')[1])
   for port in PortPool.port_range():

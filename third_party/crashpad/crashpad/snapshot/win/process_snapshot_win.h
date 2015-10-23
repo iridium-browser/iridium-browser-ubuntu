@@ -31,10 +31,13 @@
 #include "snapshot/process_snapshot.h"
 #include "snapshot/system_snapshot.h"
 #include "snapshot/thread_snapshot.h"
+#include "snapshot/win/exception_snapshot_win.h"
 #include "snapshot/win/module_snapshot_win.h"
 #include "snapshot/win/system_snapshot_win.h"
+#include "snapshot/win/thread_snapshot_win.h"
 #include "util/misc/initialization_state_dcheck.h"
 #include "util/misc/uuid.h"
+#include "util/win/address_types.h"
 #include "util/stdlib/pointer_container.h"
 
 namespace crashpad {
@@ -53,6 +56,21 @@ class ProcessSnapshotWin final : public ProcessSnapshot {
   //! \return `true` if the snapshot could be created, `false` otherwise with
   //!     an appropriate message logged.
   bool Initialize(HANDLE process);
+
+  //! \brief Initializes the object's exception.
+  //!
+  //! This populates the data to be returned by Exception().
+  //!
+  //! This method must not be called until after a successful call to
+  //! Initialize().
+  //!
+  //! \param[in] exception_information_address The address in the client
+  //!     process's address space of an ExceptionInformation structure.
+  //!
+  //! \return `true` if the exception information could be initialized, `false`
+  //!     otherwise with an appropriate message logged. When this method returns
+  //!     `false`, the ProcessSnapshotWin object's validity remains unchanged.
+  bool InitializeException(WinVMAddress exception_information_address);
 
   //! \brief Sets the value to be returned by ReportID().
   //!
@@ -104,15 +122,15 @@ class ProcessSnapshotWin final : public ProcessSnapshot {
 
  private:
   // Initializes threads_ on behalf of Initialize().
-  // TODO(scottmg): void InitializeThreads();
+  void InitializeThreads();
 
   // Initializes modules_ on behalf of Initialize().
   void InitializeModules();
 
   internal::SystemSnapshotWin system_;
-  // TODO(scottmg): PointerVector<internal::ThreadSnapshotWin> threads_;
+  PointerVector<internal::ThreadSnapshotWin> threads_;
   PointerVector<internal::ModuleSnapshotWin> modules_;
-  // TODO(scottmg): scoped_ptr<internal::ExceptionSnapshotWin> exception_;
+  scoped_ptr<internal::ExceptionSnapshotWin> exception_;
   ProcessReaderWin process_reader_;
   UUID report_id_;
   UUID client_id_;

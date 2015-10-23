@@ -50,7 +50,8 @@ static inline GLenum GetTexInternalFormat(GLenum internal_format,
   // g_version_info must be initialized when this function is bound.
   DCHECK(gfx::g_version_info);
   if (gfx::g_version_info->is_es3) {
-    if (format == GL_RED_EXT) {
+    if (internal_format == GL_RED_EXT) {
+      // GL_EXT_texture_rg case in ES2.
       switch (type) {
         case GL_UNSIGNED_BYTE:
           gl_internal_format = GL_R8_EXT;
@@ -66,7 +67,8 @@ static inline GLenum GetTexInternalFormat(GLenum internal_format,
           break;
       }
       return gl_internal_format;
-    } else if (format == GL_RG_EXT) {
+    } else if (internal_format == GL_RG_EXT) {
+      // GL_EXT_texture_rg case in ES2.
       switch (type) {
         case GL_UNSIGNED_BYTE:
           gl_internal_format = GL_RG8_EXT;
@@ -108,7 +110,8 @@ static inline GLenum GetTexInternalFormat(GLenum internal_format,
     return gl_internal_format;
 
   if (type == GL_FLOAT) {
-    switch (format) {
+    switch (internal_format) {
+      // We need to map all the unsized internal formats from ES2 clients.
       case GL_RGBA:
         gl_internal_format = GL_RGBA32F_ARB;
         break;
@@ -125,11 +128,12 @@ static inline GLenum GetTexInternalFormat(GLenum internal_format,
         gl_internal_format = GL_ALPHA32F_ARB;
         break;
       default:
-        NOTREACHED();
+        // We can't assert here because if the client context is ES3,
+        // all sized internal_format will reach here.
         break;
     }
   } else if (type == GL_HALF_FLOAT_OES) {
-    switch (format) {
+    switch (internal_format) {
       case GL_RGBA:
         gl_internal_format = GL_RGBA16F_ARB;
         break;
@@ -330,6 +334,7 @@ const GLVersionInfo* GetGLVersionInfo() {
 }
 
 void InitializeDynamicGLBindingsGL(GLContext* context) {
+  g_real_gl->InitializeFilteredExtensions();
   g_driver_gl.InitializeCustomDynamicBindings(context);
   DCHECK(context && context->IsCurrent(NULL) && !g_version_info);
   g_version_info = new GLVersionInfo(
@@ -399,6 +404,9 @@ void GLApiBase::InitializeBase(DriverGL* driver) {
 }
 
 RealGLApi::RealGLApi() {
+#if DCHECK_IS_ON()
+  filtered_exts_initialized_ = false;
+#endif
 }
 
 RealGLApi::~RealGLApi() {
@@ -413,47 +421,20 @@ void RealGLApi::InitializeWithCommandLine(DriverGL* driver,
   DCHECK(command_line);
   InitializeBase(driver);
 
-  DCHECK(filtered_exts_.empty() && filtered_exts_str_.empty());
-
   const std::string disabled_extensions = command_line->GetSwitchValueASCII(
       switches::kDisableGLExtensions);
   if (!disabled_extensions.empty()) {
-    std::vector<std::string> disabled_extensions_vec;
-    Tokenize(disabled_extensions, ", ;", &disabled_extensions_vec);
-
-    // Fill in filtered_exts_ vector first.
-    if (gfx::GetGLImplementation() !=
-        gfx::kGLImplementationDesktopGLCoreProfile) {
-      const char* gl_extensions = reinterpret_cast<const char*>(
-          GLApiBase::glGetStringFn(GL_EXTENSIONS));
-      if (gl_extensions)
-        base::SplitString(gl_extensions, ' ', &filtered_exts_);
-    } else {
-      GLint num_extensions = 0;
-      GLApiBase::glGetIntegervFn(GL_NUM_EXTENSIONS, &num_extensions);
-      for (GLint i = 0; i < num_extensions; ++i) {
-        const char* gl_extension = reinterpret_cast<const char*>(
-            GLApiBase::glGetStringiFn(GL_EXTENSIONS, i));
-        DCHECK(gl_extension != NULL);
-        filtered_exts_.push_back(gl_extension);
-      }
-    }
-
-    // Filter out extensions from the command line.
-    for (const std::string& disabled_ext : disabled_extensions_vec) {
-      filtered_exts_.erase(std::remove(filtered_exts_.begin(),
-                                       filtered_exts_.end(),
-                                       disabled_ext),
-                           filtered_exts_.end());
-    }
-
-    // Construct filtered extensions string for GL_EXTENSIONS string lookups.
-    filtered_exts_str_ = JoinString(filtered_exts_, " ");
+    disabled_exts_ = base::SplitString(
+        disabled_extensions, ", ;",
+        base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   }
 }
 
 void RealGLApi::glGetIntegervFn(GLenum pname, GLint* params) {
-  if (!filtered_exts_.empty() && pname == GL_NUM_EXTENSIONS) {
+  if (pname == GL_NUM_EXTENSIONS && disabled_exts_.size()) {
+#if DCHECK_IS_ON()
+    DCHECK(filtered_exts_initialized_);
+#endif
     *params = static_cast<GLint>(filtered_exts_.size());
   } else {
     GLApiBase::glGetIntegervFn(pname, params);
@@ -461,14 +442,20 @@ void RealGLApi::glGetIntegervFn(GLenum pname, GLint* params) {
 }
 
 const GLubyte* RealGLApi::glGetStringFn(GLenum name) {
-  if (!filtered_exts_.empty() && name == GL_EXTENSIONS) {
+  if (name == GL_EXTENSIONS && disabled_exts_.size()) {
+#if DCHECK_IS_ON()
+    DCHECK(filtered_exts_initialized_);
+#endif
     return reinterpret_cast<const GLubyte*>(filtered_exts_str_.c_str());
   }
   return GLApiBase::glGetStringFn(name);
 }
 
 const GLubyte* RealGLApi::glGetStringiFn(GLenum name, GLuint index) {
-  if (!filtered_exts_str_.empty() && name == GL_EXTENSIONS) {
+  if (name == GL_EXTENSIONS && disabled_exts_.size()) {
+#if DCHECK_IS_ON()
+    DCHECK(filtered_exts_initialized_);
+#endif
     if (index >= filtered_exts_.size()) {
       return NULL;
     }
@@ -483,6 +470,36 @@ void RealGLApi::glFlushFn() {
 
 void RealGLApi::glFinishFn() {
   GLApiBase::glFinishFn();
+}
+
+void RealGLApi::InitializeFilteredExtensions() {
+  if (disabled_exts_.size()) {
+    filtered_exts_.clear();
+    if (gfx::WillUseGLGetStringForExtensions()) {
+      filtered_exts_str_ =
+          FilterGLExtensionList(reinterpret_cast<const char*>(
+                                    GLApiBase::glGetStringFn(GL_EXTENSIONS)),
+                                disabled_exts_);
+      filtered_exts_ = base::SplitString(
+          filtered_exts_str_, " ", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    } else {
+      GLint num_extensions = 0;
+      GLApiBase::glGetIntegervFn(GL_NUM_EXTENSIONS, &num_extensions);
+      for (GLint i = 0; i < num_extensions; ++i) {
+        const char* gl_extension = reinterpret_cast<const char*>(
+            GLApiBase::glGetStringiFn(GL_EXTENSIONS, i));
+        DCHECK(gl_extension != NULL);
+        if (std::find(disabled_exts_.begin(), disabled_exts_.end(),
+                      gl_extension) == disabled_exts_.end()) {
+          filtered_exts_.push_back(gl_extension);
+        }
+      }
+      filtered_exts_str_ = base::JoinString(filtered_exts_, " ");
+    }
+#if DCHECK_IS_ON()
+    filtered_exts_initialized_ = true;
+#endif
+  }
 }
 
 TraceGLApi::~TraceGLApi() {
@@ -507,19 +524,7 @@ void VirtualGLApi::Initialize(DriverGL* driver, GLContext* real_context) {
   real_context_ = real_context;
 
   DCHECK(real_context->IsCurrent(NULL));
-  std::string ext_string = real_context->GetExtensions();
-  std::vector<std::string> ext;
-  Tokenize(ext_string, " ", &ext);
-
-  std::vector<std::string>::iterator it;
-  // We can't support GL_EXT_occlusion_query_boolean which is
-  // based on GL_ARB_occlusion_query without a lot of work virtualizing
-  // queries.
-  it = std::find(ext.begin(), ext.end(), "GL_EXT_occlusion_query_boolean");
-  if (it != ext.end())
-    ext.erase(it);
-
-  extensions_ = JoinString(ext, " ");
+  extensions_ = real_context->GetExtensions();
 }
 
 bool VirtualGLApi::MakeCurrent(GLContext* virtual_context, GLSurface* surface) {
@@ -559,9 +564,19 @@ bool VirtualGLApi::MakeCurrent(GLContext* virtual_context, GLSurface* surface) {
     GLApi* temp = GetCurrentGLApi();
     SetGLToRealGLApi();
     if (virtual_context->GetGLStateRestorer()->IsInitialized()) {
-      virtual_context->GetGLStateRestorer()->RestoreState(
-          (current_context_ && !state_dirtied_externally && !switched_contexts)
-              ? current_context_->GetGLStateRestorer()
+      GLStateRestorer* virtual_state = virtual_context->GetGLStateRestorer();
+      GLStateRestorer* current_state = current_context_ ?
+                                       current_context_->GetGLStateRestorer() :
+                                       nullptr;
+      if (switched_contexts || virtual_context != current_context_) {
+        if (current_state)
+          current_state->PauseQueries();
+        virtual_state->ResumeQueries();
+      }
+
+      virtual_state->RestoreState(
+          (current_state && !state_dirtied_externally && !switched_contexts)
+              ? current_state
               : NULL);
     }
     SetGLApi(temp);
@@ -597,15 +612,6 @@ void VirtualGLApi::glFlushFn() {
 
 void VirtualGLApi::glFinishFn() {
   GLApiBase::glFinishFn();
-}
-
-ScopedSetGLToRealGLApi::ScopedSetGLToRealGLApi()
-    : old_gl_api_(GetCurrentGLApi()) {
-  SetGLToRealGLApi();
-}
-
-ScopedSetGLToRealGLApi::~ScopedSetGLToRealGLApi() {
-  SetGLApi(old_gl_api_);
 }
 
 }  // namespace gfx

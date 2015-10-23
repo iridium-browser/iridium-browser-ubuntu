@@ -11,12 +11,17 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/debug/leak_tracker.h"
+#include "base/location.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/prefs/pref_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
 #include "chrome/browser/safe_browsing/download_protection_service.h"
 #include "chrome/browser/safe_browsing/malware_details.h"
@@ -27,7 +32,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/startup_metric_utils/startup_metric_utils.h"
+#include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "url/url_constants.h"
@@ -750,10 +755,8 @@ SafeBrowsingDatabase* LocalSafeBrowsingDatabaseManager::GetDatabase() {
 
   if (database_)
     return database_;
-  startup_metric_utils::ScopedSlowStartupUMA
-      scoped_timer("Startup.SlowStartupSafeBrowsingGetDatabase");
-  const base::TimeTicks before = base::TimeTicks::Now();
 
+  const base::TimeTicks before = base::TimeTicks::Now();
   SafeBrowsingDatabase* database = SafeBrowsingDatabase::Create(
       safe_browsing_task_runner_, enable_download_protection_,
       enable_csd_whitelist_, enable_download_whitelist_,
@@ -813,20 +816,58 @@ void LocalSafeBrowsingDatabaseManager::OnCheckDone(SafeBrowsingCheck* check) {
     // Reset the start time so that we can measure the network time without the
     // database time.
     check->start = base::TimeTicks::Now();
-    // Note: If |this| is deleted or stopped, the protocol_manager will
-    // be destroyed as well - hence it's OK to do unretained in this case.
-    bool is_download = check->check_type == safe_browsing_util::BINURL;
-    sb_service_->protocol_manager()->GetFullHash(
-        check->prefix_hits,
-        base::Bind(&LocalSafeBrowsingDatabaseManager::HandleGetHashResults,
-                   base::Unretained(this),
-                   check),
-        is_download);
+
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&LocalSafeBrowsingDatabaseManager::OnRequestFullHash, this,
+                   check));
   } else {
     // We may have cached results for previous GetHash queries.  Since
     // this data comes from cache, don't histogram hits.
     HandleOneCheck(check, check->cache_hits);
   }
+}
+
+void LocalSafeBrowsingDatabaseManager::OnRequestFullHash(
+    SafeBrowsingCheck* check) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  check->is_extended_reporting = GetExtendedReporting();
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&LocalSafeBrowsingDatabaseManager::RequestFullHash, this,
+                 check));
+}
+
+bool LocalSafeBrowsingDatabaseManager::GetExtendedReporting() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  // Determine if the last used profile is opted into extended reporting.
+  // Note: It is possible that the last used profile is not the one triggers
+  // the hash request, but not very likely.
+  bool is_extended_reporting = false;
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  if (profile_manager) {
+    Profile* profile = profile_manager->GetLastUsedProfile();
+    is_extended_reporting = profile &&
+                            profile->GetPrefs()->GetBoolean(
+                                prefs::kSafeBrowsingExtendedReportingEnabled);
+  }
+  return is_extended_reporting;
+}
+
+void LocalSafeBrowsingDatabaseManager::RequestFullHash(
+    SafeBrowsingCheck* check) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  if (!enabled_)
+    return;
+
+  bool is_download = check->check_type == safe_browsing_util::BINURL;
+  sb_service_->protocol_manager()->GetFullHash(
+      check->prefix_hits,
+      base::Bind(&LocalSafeBrowsingDatabaseManager::HandleGetHashResults,
+                 base::Unretained(this), check),
+      is_download, check->is_extended_reporting);
 }
 
 void LocalSafeBrowsingDatabaseManager::GetAllChunksFromDatabase(
@@ -845,17 +886,34 @@ void LocalSafeBrowsingDatabaseManager::GetAllChunksFromDatabase(
   }
 
   BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(
+          &LocalSafeBrowsingDatabaseManager::BeforeGetAllChunksFromDatabase,
+          this, lists, database_error, callback));
+}
+
+void LocalSafeBrowsingDatabaseManager::BeforeGetAllChunksFromDatabase(
+    const std::vector<SBListChunkRanges>& lists,
+    bool database_error,
+    GetChunksCallback callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  bool is_extended_reporting = GetExtendedReporting();
+
+  BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&LocalSafeBrowsingDatabaseManager::OnGetAllChunksFromDatabase,
-                 this, lists, database_error, callback));
+                 this, lists, database_error, is_extended_reporting, callback));
 }
 
 void LocalSafeBrowsingDatabaseManager::OnGetAllChunksFromDatabase(
-    const std::vector<SBListChunkRanges>& lists, bool database_error,
+    const std::vector<SBListChunkRanges>& lists,
+    bool database_error,
+    bool is_extended_reporting,
     GetChunksCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (enabled_)
-    callback.Run(lists, database_error);
+    callback.Run(lists, database_error, is_extended_reporting);
 }
 
 void LocalSafeBrowsingDatabaseManager::OnAddChunksComplete(
@@ -1112,9 +1170,9 @@ void LocalSafeBrowsingDatabaseManager::StartSafeBrowsingCheck(
       safe_browsing_task_runner_.get(), FROM_HERE, task,
       base::Bind(&LocalSafeBrowsingDatabaseManager::OnAsyncCheckDone,
                  check->weak_ptr_factory_->GetWeakPtr(), check));
-  base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::TimeoutCallback,
-                 check->weak_ptr_factory_->GetWeakPtr(), check),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&LocalSafeBrowsingDatabaseManager::TimeoutCallback,
+                            check->weak_ptr_factory_->GetWeakPtr(), check),
       check_timeout_);
 }
 

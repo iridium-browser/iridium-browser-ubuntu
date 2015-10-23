@@ -172,9 +172,6 @@ class Builder(CommandRunner):
     if toolname not in ['newlib', 'glibc']:
       raise Error('Toolchain of type %s not supported.' % toolname)
 
-    if arch == 'arm' and toolname == 'glibc':
-      raise Error('arm glibc not yet supported.')
-
     if arch == 'mips' and toolname == 'glibc':
       raise Error('mips glibc not supported.')
 
@@ -243,8 +240,6 @@ class Builder(CommandRunner):
         self.compile_options.extend(['--pnacl-allow-translate',
                                      '--pnacl-allow-native',
                                      '-arch', self.arch])
-        # Also use fast translation because we are still translating libc/libc++
-        self.link_options.append('-Wt,-O0')
 
     self.irt_linker = options.irt_linker
     self.Log('Compile options: %s' % self.compile_options)
@@ -412,6 +407,11 @@ class Builder(CommandRunner):
   def GetGomaConfig(self, gomadir, arch, toolname):
     """Returns a goma config dictionary if goma is available or {}."""
 
+    # Goma is enabled only if gomadir is given.
+    # We do not use gomacc in GOMA_DIR or PATH anymore.
+    if not gomadir:
+      return {}
+
     # Start goma support from os/arch/toolname that have been tested.
     # Set NO_NACL_GOMA=true to force to avoid using goma.
     default_no_nacl_goma = True if pynacl.platform.IsWindows() else False
@@ -421,44 +421,19 @@ class Builder(CommandRunner):
         or IsEnvFlagTrue('GOMA_DISABLED')):
       return {}
 
-    goma_config = {}
     gomacc_base = 'gomacc.exe' if pynacl.platform.IsWindows() else 'gomacc'
-    # Search order of gomacc:
-    # --gomadir command argument -> GOMA_DIR env. -> PATH env.
-    search_path = []
-    # 1. --gomadir in the command argument.
-    if gomadir:
-      search_path.append(gomadir)
-    # 2. Use GOMA_DIR environment variable if exist.
-    goma_dir_env = os.environ.get('GOMA_DIR')
-    if goma_dir_env:
-      search_path.append(goma_dir_env)
-    # 3. Append PATH env.
-    path_env = os.environ.get('PATH')
-    if path_env:
-      search_path.extend(path_env.split(os.path.pathsep))
+    # TODO(yyanagisawa): not to set gomadir on use_goma=0.
+    gomacc = os.path.join(gomadir, gomacc_base)
+    if not os.path.exists(gomacc):
+      return {}
 
-    for directory in search_path:
-      gomacc = os.path.join(directory, gomacc_base)
-      if os.path.isfile(gomacc):
-        try:
-          port = int(subprocess.Popen(
-              [gomacc, 'port'],
-              stdout=subprocess.PIPE).communicate()[0].strip())
-          status = urllib2.urlopen(
-              'http://127.0.0.1:%d/healthz' % port).read().strip()
-          if status == 'ok':
-            goma_config['gomacc'] = gomacc
-            break
-        except (OSError, ValueError, urllib2.URLError) as e:
-          # Try another gomacc in the search path.
-          self.Log('Strange gomacc %s found, try another one: %s' % (gomacc, e))
-
-    if goma_config:
-      goma_config['burst'] = IsEnvFlagTrue('NACL_GOMA_BURST')
-      default_processes = 100 if pynacl.platform.IsLinux() else 10
-      goma_config['processes'] = GetIntegerEnv('NACL_GOMA_PROCESSES',
-                                               default=default_processes)
+    goma_config = {
+        'gomacc': gomacc,
+        'burst': IsEnvFlagTrue('NACL_GOMA_BURST'),
+    }
+    default_processes = 100 if pynacl.platform.IsLinux() else 10
+    goma_config['processes'] = GetIntegerEnv('NACL_GOMA_PROCESSES',
+                                             default=default_processes)
     return goma_config
 
   def NeedsRebuild(self, outd, out, src, rebuilt=False):
@@ -644,13 +619,13 @@ class Builder(CommandRunner):
       raise Error('FAILED with %d: %s' % (err, ' '.join(cmd_line)))
     return out
 
-  def VerifyArchive(self, archive_file, verbose=False):
+  def ListInvalidObjectsInArchive(self, archive_file, verbose=False):
     """Check the object size from the result of 'ar tv foo.a'.
 
     'ar tv foo.a' shows information like the following:
-    rw-r--r-- 0/0  1024 Jan  1 09:00 something1.o
-    rw-r--r-- 0/0 12023 Jan  1 09:00 something2.o
-    rw-r--r-- 0/0  1124 Jan  1 09:00 something3.o
+    rw-r--r-- 0/0  1024 Jan  1 09:00 1970 something1.o
+    rw-r--r-- 0/0 12023 Jan  1 09:00 1970 something2.o
+    rw-r--r-- 0/0  1124 Jan  1 09:00 1970 something3.o
 
     the third column is the size of object file. We parse it, and verify
     the object size is not 0.
@@ -660,7 +635,7 @@ class Builder(CommandRunner):
       verbose: print information if True.
 
     Returns:
-      True if succeeded. False if archive_file looks corrupted.
+      list of 0 byte files.
     """
 
     cmd_line = [self.GetAr(), 'tv', archive_file]
@@ -669,6 +644,7 @@ class Builder(CommandRunner):
     if verbose:
       print output
 
+    result = []
     for line in output.splitlines():
       xs = line.split()
       if len(xs) < 3:
@@ -676,10 +652,11 @@ class Builder(CommandRunner):
 
       object_size = xs[2]
       if object_size == '0':
-        return False
-    return True
+        result.append(xs[-1])
 
-  def Archive(self, srcs):
+    return result
+
+  def Archive(self, srcs, obj_to_src=None):
     """Archive these objects with predetermined options and output name."""
     out = self.ArchiveOutputName()
     self.Log('\nArchive %s' % out)
@@ -719,19 +696,35 @@ class Builder(CommandRunner):
     if needs_verify:
       ok = False
       for retry in xrange(3):
-        if self.VerifyArchive(out):
+        invalid_obj_names = self.ListInvalidObjectsInArchive(out)
+        if not invalid_obj_names:
           ok = True
           break
 
-        time.sleep(1)
-        print ('WARNING: found 0 byte object in %s. re-archive. (try=%d)'
+        print ('WARNING: found 0 byte objects in %s. '
+               'Recompile them without goma (try=%d)'
                % (out, retry + 1))
+
+        time.sleep(1)
+        if obj_to_src:
+          for invalid_obj_name in invalid_obj_names:
+            src = obj_to_src.get(invalid_obj_name)
+
+            if not src:
+              print ('Couldn\'t find the corresponding src for %s' %
+                     invalid_obj_name)
+              raise Error('ERROR archive is corrupted: %s' % out)
+
+            print 'Recompile without goma:', src
+            self.gomacc = None
+            self.Compile(src)
+
         RunArchive()
 
       if not ok:
         # Show the contents of archive if not ok.
-        self.VerifyArchive(out, verbose=True)
-        raise Error('ERROR: archive is corrupted : %s' % out)
+        self.ListInvalidObjectsInArchive(out, verbose=True)
+        raise Error('ERROR: archive is corrupted: %s' % out)
 
     return out
 
@@ -785,7 +778,7 @@ class Builder(CommandRunner):
       raise Error('FAILED with %d: %s' % (err, ' '.join(cmd_line)))
     return out
 
-  def Generate(self, srcs):
+  def Generate(self, srcs, obj_to_src=None):
     """Generate final output file.
 
     Link or Archive the final output file, from the compiled sources.
@@ -798,7 +791,7 @@ class Builder(CommandRunner):
       elif self.strip_all or self.strip_debug:
         self.Strip(out)
     elif self.outtype in ['nlib', 'plib']:
-      out = self.Archive(srcs)
+      out = self.Archive(srcs, obj_to_src)
       if self.strip_debug:
         self.Strip(out)
       elif self.strip_all:
@@ -1013,6 +1006,7 @@ def Main(argv):
       build.Translate(list(files)[0])
       return 0
 
+    obj_to_src = {}
     if build.IsGomaParallelBuild():
       inputs = multiprocessing.Queue()
       returns = multiprocessing.Queue()
@@ -1053,6 +1047,12 @@ def Main(argv):
           raise out[0], out[1], None
         elif out and len(out) == 2:
           src_to_obj[out[0]] = out[1]
+          # Sometimes out[1] is None.
+          if out[1]:
+            basename = os.path.basename(out[1])
+            if basename in obj_to_src:
+              raise Error('multiple same name objects detected: %s' % basename)
+            obj_to_src[basename] = out[0]
         else:
           raise Error('Unexpected element in CompileProcess output_queue %s' %
                       out)
@@ -1062,6 +1062,7 @@ def Main(argv):
       for filename in files:
         # If input file to build.Compile is something it cannot handle, it
         # returns None.
+
         if src_to_obj[filename]:
           obj_name = src_to_obj[filename]
           objs.append(obj_name)
@@ -1087,6 +1088,10 @@ def Main(argv):
       for filename in files:
         out = build.Compile(filename)
         if out:
+          basename = os.path.basename(out)
+          if basename in obj_to_src:
+            raise Error('multiple same name objects detected: %s' % basename)
+          obj_to_src[basename] = out
           objs.append(out)
 
     # Do not link if building an object. However we still want the output file
@@ -1096,7 +1101,7 @@ def Main(argv):
         raise Error('--compile mode cannot be used with multiple sources')
       shutil.copy(objs[0], options.name)
     else:
-      build.Generate(objs)
+      build.Generate(objs, obj_to_src)
     return 0
   except Error as e:
     sys.stderr.write('%s\n' % e)

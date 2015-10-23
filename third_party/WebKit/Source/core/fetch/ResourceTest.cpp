@@ -11,10 +11,7 @@
 #include "platform/testing/URLTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "wtf/Vector.h"
-
 #include <gtest/gtest.h>
-
-using namespace blink;
 
 namespace blink {
 
@@ -22,7 +19,7 @@ namespace {
 
 class MockPlatform final : public Platform {
 public:
-    MockPlatform() { }
+    MockPlatform() : m_oldPlatform(Platform::current()) { }
     ~MockPlatform() override { }
 
     // From blink::Platform:
@@ -30,17 +27,31 @@ public:
     {
         m_cachedURLs.append(url);
     }
-    void cryptographicallyRandomValues(unsigned char* buffer, size_t length) override
-    {
-        ASSERT_NOT_REACHED();
-    }
 
     const Vector<WebURL>& cachedURLs() const
     {
         return m_cachedURLs;
     }
 
+    WebThread* currentThread() override
+    {
+        return m_oldPlatform->currentThread();
+    }
+
+    // These blink::Platform methods must be overriden to make a usable object.
+    void cryptographicallyRandomValues(unsigned char* buffer, size_t length) override
+    {
+        ASSERT_NOT_REACHED();
+    }
+
+    const unsigned char* getTraceCategoryEnabledFlag(const char* categoryName) override
+    {
+        static const unsigned char tracingIsDisabled = 0;
+        return &tracingIsDisabled;
+    }
+
 private:
+    Platform* m_oldPlatform; // Not owned.
     Vector<WebURL> m_cachedURLs;
 };
 
@@ -78,7 +89,7 @@ void createTestResourceAndSetCachedMetadata(const ResourceResponse* response)
     return;
 }
 
-} // namespace
+} // anonymous namespace
 
 TEST(ResourceTest, SetCachedMetadata_SendsMetadataToPlatform)
 {

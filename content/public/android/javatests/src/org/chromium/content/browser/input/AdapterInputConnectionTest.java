@@ -231,10 +231,12 @@ public class AdapterInputConnectionTest extends ContentShellTestBase {
         public void onImeEvent() {}
 
         @Override
-        public void onDismissInput() {}
+        public void onKeyboardBoundsUnchanged() {}
 
         @Override
-        public void onKeyboardBoundsUnchanged() {}
+        public boolean performContextMenuAction(int id) {
+            return false;
+        }
 
         @Override
         public View getAttachedView() {

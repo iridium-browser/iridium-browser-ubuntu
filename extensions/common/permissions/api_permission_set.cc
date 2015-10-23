@@ -212,7 +212,7 @@ PermissionIDSet::~PermissionIDSet() {
 }
 
 void PermissionIDSet::insert(APIPermission::ID permission_id) {
-  permissions_.insert(PermissionID(permission_id, base::string16()));
+  insert(permission_id, base::string16());
 }
 
 void PermissionIDSet::insert(APIPermission::ID permission_id,
@@ -226,6 +226,16 @@ void PermissionIDSet::InsertAll(const PermissionIDSet& permission_set) {
   }
 }
 
+void PermissionIDSet::erase(APIPermission::ID permission_id) {
+  auto lower_bound = permissions_.lower_bound(PermissionID(permission_id));
+  auto upper_bound = lower_bound;
+  while (upper_bound != permissions_.end() &&
+         upper_bound->id() == permission_id) {
+    ++upper_bound;
+  }
+  permissions_.erase(lower_bound, upper_bound);
+}
+
 std::vector<base::string16> PermissionIDSet::GetAllPermissionParameters()
     const {
   std::vector<base::string16> params;
@@ -233,6 +243,11 @@ std::vector<base::string16> PermissionIDSet::GetAllPermissionParameters()
     params.push_back(permission.parameter());
   }
   return params;
+}
+
+bool PermissionIDSet::ContainsID(APIPermission::ID permission_id) const {
+  auto it = permissions_.lower_bound(PermissionID(permission_id));
+  return it != permissions_.end() && it->id() == permission_id;
 }
 
 bool PermissionIDSet::ContainsAllIDs(
@@ -243,6 +258,26 @@ bool PermissionIDSet::ContainsAllIDs(
                            const PermissionIDCompareHelper& rhs) {
                          return lhs.id < rhs.id;
                        });
+}
+
+bool PermissionIDSet::ContainsAnyID(
+    const std::set<APIPermission::ID>& permission_ids) const {
+  for (APIPermission::ID id : permission_ids) {
+    if (ContainsID(id))
+      return true;
+  }
+  return false;
+}
+
+PermissionIDSet PermissionIDSet::GetAllPermissionsWithID(
+    APIPermission::ID permission_id) const {
+  PermissionIDSet subset;
+  auto it = permissions_.lower_bound(PermissionID(permission_id));
+  while (it != permissions_.end() && it->id() == permission_id) {
+    subset.permissions_.insert(*it);
+    ++it;
+  }
+  return subset;
 }
 
 PermissionIDSet PermissionIDSet::GetAllPermissionsWithIDs(
@@ -271,20 +306,6 @@ PermissionIDSet PermissionIDSet::Difference(const PermissionIDSet& set_1,
       set_1.permissions_, set_2.permissions_));
 }
 
-// static
-PermissionIDSet PermissionIDSet::Intersection(const PermissionIDSet& set_1,
-                                              const PermissionIDSet& set_2) {
-  return PermissionIDSet(base::STLSetIntersection<std::set<PermissionID>>(
-      set_1.permissions_, set_2.permissions_));
-}
-
-// static
-PermissionIDSet PermissionIDSet::Union(const PermissionIDSet& set_1,
-                                       const PermissionIDSet& set_2) {
-  return PermissionIDSet(base::STLSetUnion<std::set<PermissionID>>(
-      set_1.permissions_, set_2.permissions_));
-}
-
 size_t PermissionIDSet::size() const {
   return permissions_.size();
 }
@@ -295,11 +316,6 @@ bool PermissionIDSet::empty() const {
 
 PermissionIDSet::PermissionIDSet(const std::set<PermissionID>& permissions)
     : permissions_(permissions) {
-}
-
-bool PermissionIDSet::ContainsID(APIPermission::ID permission_id) const {
-  auto it = permissions_.lower_bound(PermissionID(permission_id));
-  return it != permissions_.end() && it->id() == permission_id;
 }
 
 }  // namespace extensions

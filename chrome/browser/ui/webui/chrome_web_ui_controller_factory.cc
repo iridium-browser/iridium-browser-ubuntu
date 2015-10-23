@@ -12,7 +12,6 @@
 #include "base/prefs/pref_service.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/about_flags.h"
-#include "chrome/browser/bookmarks/enhanced_bookmarks_features.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -47,6 +46,7 @@
 #include "chrome/browser/ui/webui/signin/profile_signin_confirmation_ui.h"
 #include "chrome/browser/ui/webui/signin/user_manager_ui.h"
 #include "chrome/browser/ui/webui/signin_internals_ui.h"
+#include "chrome/browser/ui/webui/supervised_user_internals_ui.h"
 #include "chrome/browser/ui/webui/sync_internals_ui.h"
 #include "chrome/browser/ui/webui/translate_internals/translate_internals_ui.h"
 #include "chrome/browser/ui/webui/user_actions/user_actions_ui.h"
@@ -55,6 +55,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/dom_distiller/core/dom_distiller_constants.h"
+#include "components/dom_distiller/core/dom_distiller_features.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/dom_distiller/webui/dom_distiller_ui.h"
@@ -69,7 +70,6 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_utils.h"
 #include "ui/gfx/favicon_size.h"
-#include "ui/oobe/oobe_md_ui.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
 #include "url/gurl.h"
 
@@ -89,7 +89,7 @@
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #endif
 
-#if defined(ENABLE_MEDIA_ROUTER)
+#if defined(ENABLE_MEDIA_ROUTER) && !defined(OS_ANDROID)
 #include "chrome/browser/ui/webui/media_router/media_router_ui.h"
 #endif
 
@@ -105,15 +105,15 @@
 #include "chrome/browser/ui/webui/net_export_ui.h"
 #else
 #include "chrome/browser/devtools/device/webrtc/webrtc_device_provider.h"
+#include "chrome/browser/signin/easy_unlock_service.h"
+#include "chrome/browser/signin/easy_unlock_service_factory.h"
 #include "chrome/browser/ui/webui/copresence_ui.h"
 #include "chrome/browser/ui/webui/devtools_ui.h"
 #include "chrome/browser/ui/webui/inspect_ui.h"
-#include "components/proximity_auth/webui/proximity_auth_ui.h"
-#include "components/proximity_auth/webui/url_constants.h"
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/oobe/oobe.h"
+#include "base/sys_info.h"
 #include "chrome/browser/ui/webui/chromeos/bluetooth_pairing_ui.h"
 #include "chrome/browser/ui/webui/chromeos/certificate_manager_dialog_ui.h"
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
@@ -127,13 +127,18 @@
 #include "chrome/browser/ui/webui/chromeos/network_ui.h"
 #include "chrome/browser/ui/webui/chromeos/nfc_debug_ui.h"
 #include "chrome/browser/ui/webui/chromeos/power_ui.h"
-#include "chrome/browser/ui/webui/chromeos/provided_file_systems_ui.h"
 #include "chrome/browser/ui/webui/chromeos/proxy_settings_ui.h"
 #include "chrome/browser/ui/webui/chromeos/salsa_ui.h"
 #include "chrome/browser/ui/webui/chromeos/set_time_ui.h"
 #include "chrome/browser/ui/webui/chromeos/sim_unlock_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_trace_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_ui.h"
+#include "components/proximity_auth/webui/proximity_auth_ui.h"
+#include "components/proximity_auth/webui/url_constants.h"
+#endif
+
+#if !defined(OFFICIAL_BUILD) && defined(OS_CHROMEOS) && !defined(NDEBUG)
+#include "chrome/browser/ui/webui/chromeos/emulator/device_emulator_ui.h"
 #endif
 
 #if !defined(OS_CHROMEOS)
@@ -180,7 +185,6 @@
 
 using content::WebUI;
 using content::WebUIController;
-using ui::ExternalWebDialogUI;
 using ui::WebDialogUI;
 
 namespace {
@@ -217,10 +221,14 @@ WebUIController* NewWebUI<chromeos::OobeUI>(WebUI* web_ui, const GURL& url) {
   return new chromeos::OobeUI(web_ui, url);
 }
 
+// Special case for chrome://proximity_auth.
 template <>
-WebUIController* NewWebUI<OobeMdUI>(WebUI* web_ui, const GURL& url) {
-  chromeos::Oobe::Register();
-  return new OobeMdUI(web_ui, url.host());
+WebUIController* NewWebUI<proximity_auth::ProximityAuthUI>(WebUI* web_ui,
+                                                           const GURL& url) {
+  content::BrowserContext* browser_context =
+      web_ui->GetWebContents()->GetBrowserContext();
+  return new proximity_auth::ProximityAuthUI(
+      web_ui, EasyUnlockServiceFactory::GetForBrowserContext(browser_context));
 }
 #endif
 
@@ -266,14 +274,16 @@ bool IsAboutUI(const GURL& url) {
           || url.host() == chrome::kChromeUITermsHost
 #endif
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
-          || url.host() == chrome::kChromeUILinuxProxyConfigHost
-          || url.host() == chrome::kChromeUISandboxHost
+          || url.host() == chrome::kChromeUILinuxProxyConfigHost ||
+          url.host() == chrome::kChromeUISandboxHost
 #endif
 #if defined(OS_CHROMEOS)
-          || url.host() == chrome::kChromeUIDiscardsHost
           || url.host() == chrome::kChromeUIOSCreditsHost
 #endif
-         );  // NOLINT
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+          || url.host() == chrome::kChromeUIDiscardsHost
+#endif
+          );  // NOLINT
 }
 
 // Returns a function that can be used to create the right type of WebUI for a
@@ -303,10 +313,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   // All platform builds of Chrome will need to have a cloud printing
   // dialog as backup.  It's just that on Chrome OS, it's the only
   // print dialog.
-  if (url.host() == chrome::kChromeUICloudPrintResourcesHost)
-    return &NewWebUI<ExternalWebDialogUI>;
-  if (url.host() == chrome::kChromeUICloudPrintSetupHost)
-    return &NewWebUI<WebDialogUI>;
   if (url.host() == chrome::kChromeUIComponentsHost)
     return &NewWebUI<ComponentsUI>;
   if (url.spec() == chrome::kChromeUIConstrainedHTMLTestURL)
@@ -343,6 +349,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<ProfilerUI>;
   if (url.host() == chrome::kChromeUISignInInternalsHost)
     return &NewWebUI<SignInInternalsUI>;
+  if (url.host() == chrome::kChromeUISupervisedUserInternalsHost)
+    return &NewWebUI<SupervisedUserInternalsUI>;
   if (url.host() == chrome::kChromeUISupervisedUserPassphrasePageHost)
     return &NewWebUI<ConstrainedWebDialogUI>;
   if (url.host() == chrome::kChromeUISyncInternalsHost)
@@ -390,7 +398,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<NewTabUI>;
   if (url.host() == chrome::kChromeUIMdSettingsHost &&
       ::switches::MdSettingsEnabled()) {
-    return &NewWebUI<MdSettingsUI>;
+    return &NewWebUI<settings::MdSettingsUI>;
   }
   // Android does not support plugins for now.
   if (url.host() == chrome::kChromeUIPluginsHost)
@@ -447,12 +455,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::NfcDebugUI>;
   if (url.host() == chrome::kChromeUIOobeHost)
     return &NewWebUI<chromeos::OobeUI>;
-  if (url.host() == chrome::kChromeUIOobeMdHost)
-    return &NewWebUI<OobeMdUI>;
   if (url.host() == chrome::kChromeUIPowerHost)
     return &NewWebUI<chromeos::PowerUI>;
-  if (url.host() == chrome::kChromeUIProvidedFileSystemsHost)
-    return &NewWebUI<chromeos::ProvidedFileSystemsUI>;
+  if (url.host() == proximity_auth::kChromeUIProximityAuthHost)
+    return &NewWebUI<proximity_auth::ProximityAuthUI>;
   if (url.host() == chrome::kChromeUIProxySettingsHost)
     return &NewWebUI<chromeos::ProxySettingsUI>;
   if (url.host() == chrome::kChromeUISalsaHost)
@@ -466,6 +472,12 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUISlowTraceHost)
     return &NewWebUI<chromeos::SlowTraceController>;
 #endif  // defined(OS_CHROMEOS)
+#if !defined(OFFICIAL_BUILD) && defined(OS_CHROMEOS) && !defined(NDEBUG)
+  if (!base::SysInfo::IsRunningOnChromeOS()) {
+    if (url.host() == chrome::kChromeUIDeviceEmulatorHost)
+      return &NewWebUI<DeviceEmulatorUI>;
+  }
+#endif // !defined(OFFICIAL_BUILD) && defined(OS_CHROMEOS) && !defined(NDEBUG)
 #if defined(OS_ANDROID) || defined(OS_IOS)
   if (url.host() == chrome::kChromeUINetExportHost)
     return &NewWebUI<NetExportUI>;
@@ -476,8 +488,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<InlineLoginUI>;
   if (url.SchemeIs(content::kChromeDevToolsScheme))
     return &NewWebUI<DevToolsUI>;
-  if (url.host() == proximity_auth::kChromeUIProximityAuthHost)
-    return &NewWebUI<proximity_auth::ProximityAuthUI>;
   if (url.host() == chrome::kChromeUIWebRTCDeviceProviderHost)
     return &NewWebUI<WebRTCDeviceProvider::WebUI>;
 
@@ -553,7 +563,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIWebRtcLogsHost)
     return &NewWebUI<WebRtcLogsUI>;
 #endif
-#if defined(ENABLE_MEDIA_ROUTER)
+#if defined(ENABLE_MEDIA_ROUTER) && !defined(OS_ANDROID)
   if (url.host() == chrome::kChromeUIMediaRouterHost &&
       switches::MediaRouterEnabled()) {
     return &NewWebUI<media_router::MediaRouterUI>;
@@ -562,7 +572,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (IsAboutUI(url))
     return &NewWebUI<AboutUI>;
 
-  if (IsEnableDomDistillerSet() &&
+  if (dom_distiller::IsEnableDomDistillerSet() &&
       url.host() == dom_distiller::kChromeUIDomDistillerHost) {
     return &NewWebUI<dom_distiller::DomDistillerUi>;
   }

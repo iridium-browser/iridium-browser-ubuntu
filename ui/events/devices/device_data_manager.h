@@ -20,6 +20,10 @@
 
 namespace ui {
 
+namespace test {
+class DeviceDataManagerTestAPI;
+}  // namespace test
+
 class InputDeviceEventObserver;
 
 // Keeps track of device mappings and event transformations.
@@ -30,6 +34,7 @@ class EVENTS_DEVICES_EXPORT DeviceDataManager
   ~DeviceDataManager() override;
 
   static void CreateInstance();
+  static void DeleteInstance();
   static DeviceDataManager* GetInstance();
   static bool HasInstance();
 
@@ -53,6 +58,8 @@ class EVENTS_DEVICES_EXPORT DeviceDataManager
     return keyboard_devices_;
   }
 
+  bool device_lists_complete() const { return device_lists_complete_; }
+
   void AddObserver(InputDeviceEventObserver* observer);
   void RemoveObserver(InputDeviceEventObserver* observer);
 
@@ -60,6 +67,8 @@ class EVENTS_DEVICES_EXPORT DeviceDataManager
   DeviceDataManager();
 
   static DeviceDataManager* instance();
+
+  static void set_instance(DeviceDataManager* instance);
 
   // DeviceHotplugEventObserver:
   void OnTouchscreenDevicesUpdated(
@@ -70,11 +79,20 @@ class EVENTS_DEVICES_EXPORT DeviceDataManager
       const std::vector<InputDevice>& devices) override;
   void OnTouchpadDevicesUpdated(
       const std::vector<InputDevice>& devices) override;
+  void OnDeviceListsComplete() override;
 
  private:
+  friend class test::DeviceDataManagerTestAPI;
+
   static DeviceDataManager* instance_;
 
   bool IsTouchDeviceIdValid(int touch_device_id) const;
+
+  void NotifyObserversTouchscreenDeviceConfigurationChanged();
+  void NotifyObserversKeyboardDeviceConfigurationChanged();
+  void NotifyObserversMouseDeviceConfigurationChanged();
+  void NotifyObserversTouchpadDeviceConfigurationChanged();
+  void NotifyObserversDeviceListsComplete();
 
   double touch_radius_scale_map_[kMaxDeviceNum];
 
@@ -87,8 +105,9 @@ class EVENTS_DEVICES_EXPORT DeviceDataManager
   std::vector<KeyboardDevice> keyboard_devices_;
   std::vector<InputDevice> mouse_devices_;
   std::vector<InputDevice> touchpad_devices_;
+  bool device_lists_complete_ = false;
 
-  ObserverList<InputDeviceEventObserver> observers_;
+  base::ObserverList<InputDeviceEventObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(DeviceDataManager);
 };

@@ -10,6 +10,7 @@
 #include <map>
 #include <queue>
 
+#include "base/containers/scoped_ptr_map.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -22,6 +23,7 @@
 #include "media/video/video_decode_accelerator.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_context_cgl.h"
+#include "ui/gl/gl_image_io_surface.h"
 
 namespace content {
 
@@ -33,8 +35,9 @@ bool InitializeVideoToolbox();
 class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
  public:
   explicit VTVideoDecodeAccelerator(
-      CGLContextObj cgl_context,
-      const base::Callback<bool(void)>& make_context_current);
+      const base::Callback<bool(void)>& make_context_current,
+      const base::Callback<void(uint32, uint32, scoped_refptr<gfx::GLImage>)>&
+          bind_image);
   ~VTVideoDecodeAccelerator() override;
 
   // VideoDecodeAccelerator implementation.
@@ -85,7 +88,7 @@ class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   };
 
   struct Frame {
-    Frame(int32_t bitstream_id);
+    explicit Frame(int32_t bitstream_id);
     ~Frame();
 
     // ID of the bitstream buffer this Frame will be decoded from.
@@ -112,6 +115,26 @@ class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
 
     TaskType type;
     linked_ptr<Frame> frame;
+  };
+
+  struct PictureInfo {
+    PictureInfo(uint32_t client_texture_id, uint32_t service_texture_id);
+    ~PictureInfo();
+
+    // Image buffer, kept alive while they are bound to pictures.
+    base::ScopedCFTypeRef<CVImageBufferRef> cv_image;
+
+    // The GLImage representation of |cv_image|. This is kept around to ensure
+    // that Destroy is called on it before it hits its destructor (there is a
+    // DCHECK that requires this).
+    scoped_refptr<gfx::GLImageIOSurface> gl_image;
+
+    // Texture IDs for the image buffer.
+    const uint32_t client_texture_id;
+    const uint32_t service_texture_id;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(PictureInfo);
   };
 
   //
@@ -163,8 +186,8 @@ class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   //
   // GPU thread state.
   //
-  CGLContextObj cgl_context_;
   base::Callback<bool(void)> make_context_current_;
+  base::Callback<void(uint32, uint32, scoped_refptr<gfx::GLImage>)> bind_image_;
   media::VideoDecodeAccelerator::Client* client_;
   State state_;
 
@@ -202,14 +225,11 @@ class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   // released immediately because we need the reuse event to free the binding.)
   std::set<int32_t> assigned_picture_ids_;
 
-  // Texture IDs of assigned pictures.
-  std::map<int32_t, uint32_t> texture_ids_;
+  // Texture IDs and image buffers of assigned pictures.
+  base::ScopedPtrMap<int32_t, scoped_ptr<PictureInfo>> picture_info_map_;
 
   // Pictures ready to be rendered to.
   std::vector<int32_t> available_picture_ids_;
-
-  // Image buffers kept alive while they are bound to pictures.
-  std::map<int32_t, base::ScopedCFTypeRef<CVImageBufferRef>> picture_bindings_;
 
   //
   // Decoder thread state.

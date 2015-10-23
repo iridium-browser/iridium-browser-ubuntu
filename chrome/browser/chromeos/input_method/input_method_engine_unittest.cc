@@ -95,7 +95,8 @@ class TestObserver : public InputMethodEngineInterface::Observer {
   void OnSurroundingTextChanged(const std::string& engine_id,
                                 const std::string& text,
                                 int cursor_pos,
-                                int anchor_pos) override {}
+                                int anchor_pos,
+                                int offset) override {}
   void OnCompositionBoundsChanged(
       const std::vector<gfx::Rect>& bounds) override {
     calls_bitmap_ |= ONCOMPOSITIONBOUNDSCHANGED;
@@ -239,15 +240,17 @@ TEST_F(InputMethodEngineTest, TestHistograms) {
   FocusIn(ui::TEXT_INPUT_TYPE_TEXT);
   engine_->Enable(kTestImeComponentId);
   std::vector<InputMethodEngineInterface::SegmentInfo> segments;
-  engine_->SetComposition(
-      engine_->GetCotextIdForTesting(), "test", 0, 0, 0, segments, NULL);
+  int context = engine_->GetCotextIdForTesting();
   std::string error;
   base::HistogramTester histograms;
-  engine_->CommitText(1, "input", &error);
-  engine_->CommitText(1,
+  engine_->SetComposition(context, "test", 0, 0, 0, segments, NULL);
+  engine_->CommitText(context, "input", &error);
+  engine_->SetComposition(context, "test", 0, 0, 0, segments, NULL);
+  engine_->CommitText(context,
                       "\xE5\x85\xA5\xE5\x8A\x9B",  // 2 UTF-8 characters
                       &error);
-  engine_->CommitText(1, "input\xE5\x85\xA5\xE5\x8A\x9B", &error);
+  engine_->SetComposition(context, "test", 0, 0, 0, segments, NULL);
+  engine_->CommitText(context, "input\xE5\x85\xA5\xE5\x8A\x9B", &error);
   histograms.ExpectTotalCount("InputMethod.CommitLength", 3);
   histograms.ExpectBucketCount("InputMethod.CommitLength", 5, 1);
   histograms.ExpectBucketCount("InputMethod.CommitLength", 2, 1);

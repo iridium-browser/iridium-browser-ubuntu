@@ -43,14 +43,15 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/SubresourceIntegrity.h"
+#include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
-#include "core/html/LinkDefaultPresentation.h"
 #include "core/html/LinkManifest.h"
 #include "core/html/imports/LinkImport.h"
 #include "core/inspector/ConsoleMessage.h"
-#include "core/style/StyleInheritedData.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
+#include "core/loader/NetworkHintsInterface.h"
+#include "core/style/StyleInheritedData.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "wtf/StdLibExtras.h"
 
@@ -183,6 +184,7 @@ void HTMLLinkElement::parseAttribute(const QualifiedName& name, const AtomicStri
         m_media = value.lower();
         process();
     } else if (name == disabledAttr) {
+        UseCounter::count(document(), UseCounter::HTMLLinkElementDisabled);
         if (LinkStyle* link = linkStyle())
             link->setDisabledState(!value.isNull());
     } else {
@@ -202,7 +204,7 @@ bool HTMLLinkElement::shouldLoadLink()
 
 bool HTMLLinkElement::loadLink(const String& type, const String& as, const KURL& url)
 {
-    return m_linkLoader.loadLink(m_relAttribute, fastGetAttribute(HTMLNames::crossoriginAttr), type, as, url, document());
+    return m_linkLoader.loadLink(m_relAttribute, fastGetAttribute(HTMLNames::crossoriginAttr), type, as, url, document(), NetworkHintsInterfaceImpl());
 }
 
 LinkResource* HTMLLinkElement::linkResourceToProcess()
@@ -218,12 +220,12 @@ LinkResource* HTMLLinkElement::linkResourceToProcess()
             m_link = LinkImport::create(this);
         } else if (m_relAttribute.isManifest()) {
             m_link = LinkManifest::create(this);
-        } else if (m_relAttribute.isDefaultPresentation()) {
-            m_link = LinkDefaultPresentation::create(this);
         } else {
             OwnPtrWillBeRawPtr<LinkStyle> link = LinkStyle::create(this);
-            if (fastHasAttribute(disabledAttr) || m_relAttribute.isTransitionExitingStylesheet())
+            if (fastHasAttribute(disabledAttr)) {
+                UseCounter::count(document(), UseCounter::HTMLLinkElementDisabled);
                 link->setDisabledState(true);
+            }
             m_link = link.release();
         }
     }
@@ -256,14 +258,6 @@ void HTMLLinkElement::process()
 {
     if (LinkResource* link = linkResourceToProcess())
         link->process();
-}
-
-void HTMLLinkElement::setEnabledIfExitTransitionStyle(bool enabled)
-{
-    if (m_relAttribute.isTransitionExitingStylesheet()) {
-        if (LinkStyle* link = linkStyle())
-            link->setDisabledState(!enabled);
-    }
 }
 
 Node::InsertionNotificationRequest HTMLLinkElement::insertedInto(ContainerNode* insertionPoint)
@@ -516,6 +510,8 @@ void LinkStyle::setCSSStyleSheet(const String& href, const KURL& baseURL, const 
         return;
     }
 
+    // See the comment in ScriptLoader.cpp about why this check is necessary
+    // here. https://crbug.com/500701.
     if (!cachedStyleSheet->errorOccurred() && !SubresourceIntegrity::CheckSubresourceIntegrity(*m_owner, cachedStyleSheet->sheetText(), KURL(baseURL, href), *cachedStyleSheet)) {
         m_loading = false;
         removePendingSheet();
@@ -710,8 +706,7 @@ void LinkStyle::process()
     if (!m_owner->loadLink(type, as, builder.url()))
         return;
 
-    if ((m_disabledState != Disabled) && (m_owner->relAttribute().isStyleSheet() || m_owner->relAttribute().isTransitionExitingStylesheet())
-        && shouldLoadResource() && builder.url().isValid()) {
+    if (m_disabledState != Disabled && m_owner->relAttribute().isStyleSheet() && shouldLoadResource() && builder.url().isValid()) {
 
         if (resource()) {
             removePendingSheet();
@@ -744,7 +739,7 @@ void LinkStyle::process()
             request.setCrossOriginAccessControl(document().securityOrigin(), crossOriginMode);
             setFetchFollowingCORS();
         }
-        setResource(document().fetcher()->fetchCSSStyleSheet(request));
+        setResource(CSSStyleSheetResource::fetch(request, document().fetcher()));
 
         if (!resource()) {
             // The request may have been denied if (for example) the stylesheet is local and the document is remote, or if there was a Content Security Policy Failure.

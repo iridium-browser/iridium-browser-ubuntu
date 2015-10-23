@@ -13,7 +13,7 @@ namespace content {
 
 // static
 BrowserAccessibilityManager* BrowserAccessibilityManager::Create(
-    const ui::AXTreeUpdate& initial_tree,
+    const SimpleAXTreeUpdate& initial_tree,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory) {
   return new BrowserAccessibilityManagerMac(
@@ -22,7 +22,7 @@ BrowserAccessibilityManager* BrowserAccessibilityManager::Create(
 
 BrowserAccessibilityManagerMac::BrowserAccessibilityManagerMac(
     NSView* parent_view,
-    const ui::AXTreeUpdate& initial_tree,
+    const SimpleAXTreeUpdate& initial_tree,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory)
     : BrowserAccessibilityManager(delegate, factory),
@@ -31,13 +31,14 @@ BrowserAccessibilityManagerMac::BrowserAccessibilityManagerMac(
 }
 
 // static
-ui::AXTreeUpdate BrowserAccessibilityManagerMac::GetEmptyDocument() {
+SimpleAXTreeUpdate
+    BrowserAccessibilityManagerMac::GetEmptyDocument() {
   ui::AXNodeData empty_document;
   empty_document.id = 0;
   empty_document.role = ui::AX_ROLE_ROOT_WEB_AREA;
   empty_document.state =
       1 << ui::AX_STATE_READ_ONLY;
-  ui::AXTreeUpdate update;
+  SimpleAXTreeUpdate update;
   update.nodes.push_back(empty_document);
   return update;
 }
@@ -161,8 +162,11 @@ void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
 }
 
 void BrowserAccessibilityManagerMac::OnAtomicUpdateFinished(
-    bool root_changed, const std::vector<ui::AXTreeDelegate::Change>& changes) {
-  BrowserAccessibilityManager::OnAtomicUpdateFinished(root_changed, changes);
+    ui::AXTree* tree,
+    bool root_changed,
+    const std::vector<ui::AXTreeDelegate::Change>& changes) {
+  BrowserAccessibilityManager::OnAtomicUpdateFinished(
+      tree, root_changed, changes);
 
   bool created_live_region = false;
   for (size_t i = 0; i < changes.size(); ++i) {
@@ -185,8 +189,10 @@ void BrowserAccessibilityManagerMac::OnAtomicUpdateFinished(
   // internal state and find newly-added live regions this time.
   BrowserAccessibilityMac* root =
       static_cast<BrowserAccessibilityMac*>(GetRoot());
-  root->RecreateNativeObject();
-  NotifyAccessibilityEvent(ui::AX_EVENT_CHILDREN_CHANGED, root);
+  if (root) {
+    root->RecreateNativeObject();
+    NotifyAccessibilityEvent(ui::AX_EVENT_CHILDREN_CHANGED, root);
+  }
 }
 
 }  // namespace content

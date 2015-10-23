@@ -50,10 +50,8 @@ class NavigationItemImpl : public web::NavigationItem {
   const GURL& GetVirtualURL() const override;
   void SetTitle(const base::string16& title) override;
   const base::string16& GetTitle() const override;
-  void SetPageID(int page_id) override;
-  int32 GetPageID() const override;
-  void SetPageScrollState(const PageScrollState& scroll_state) override;
-  const PageScrollState& GetPageScrollState() const override;
+  void SetPageDisplayState(const PageDisplayState& display_state) override;
+  const PageDisplayState& GetPageDisplayState() const override;
   const base::string16& GetTitleForDisplay(
       const std::string& languages) const override;
   void SetTransitionType(ui::PageTransition transition_type) override;
@@ -116,8 +114,7 @@ class NavigationItemImpl : public web::NavigationItem {
   Referrer referrer_;
   GURL virtual_url_;
   base::string16 title_;
-  int32 page_id_;
-  PageScrollState page_scroll_state_;
+  PageDisplayState page_display_state_;
   ui::PageTransition transition_type_;
   FaviconStatus favicon_;
   SSLStatus ssl_;

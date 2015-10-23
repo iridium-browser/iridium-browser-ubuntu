@@ -202,7 +202,7 @@ void FamilyInfoFetcher::OnURLFetchComplete(
     access_token_expired_ = true;
     OAuth2TokenService::ScopeSet scopes;
     scopes.insert(kScope);
-    token_service_->InvalidateToken(account_id_, scopes, access_token_);
+    token_service_->InvalidateAccessToken(account_id_, scopes, access_token_);
     StartFetching();
     return;
   }
@@ -269,7 +269,7 @@ void FamilyInfoFetcher::ParseProfile(const base::DictionaryValue* dict,
 }
 
 void FamilyInfoFetcher::FamilyProfileFetched(const std::string& response) {
-  scoped_ptr<base::Value> value(base::JSONReader::Read(response));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(response);
   const base::DictionaryValue* dict = NULL;
   if (!value || !value->GetAsDictionary(&dict)) {
     consumer_->OnFailure(SERVICE_ERROR);
@@ -299,7 +299,7 @@ void FamilyInfoFetcher::FamilyProfileFetched(const std::string& response) {
 }
 
 void FamilyInfoFetcher::FamilyMembersFetched(const std::string& response) {
-  scoped_ptr<base::Value> value(base::JSONReader::Read(response));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(response);
   const base::DictionaryValue* dict = NULL;
   if (!value || !value->GetAsDictionary(&dict)) {
     consumer_->OnFailure(SERVICE_ERROR);

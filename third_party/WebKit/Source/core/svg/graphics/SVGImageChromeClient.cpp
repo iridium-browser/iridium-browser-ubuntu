@@ -45,6 +45,11 @@ SVGImageChromeClient::SVGImageChromeClient(SVGImage* image)
 {
 }
 
+PassOwnPtrWillBeRawPtr<SVGImageChromeClient> SVGImageChromeClient::create(SVGImage* image)
+{
+    return adoptPtrWillBeNoop(new SVGImageChromeClient(image));
+}
+
 bool SVGImageChromeClient::isSVGImageChromeClient() const
 {
     return true;
@@ -52,7 +57,7 @@ bool SVGImageChromeClient::isSVGImageChromeClient() const
 
 void SVGImageChromeClient::chromeDestroyed()
 {
-    m_image = 0;
+    m_image = nullptr;
 }
 
 void SVGImageChromeClient::invalidateRect(const IntRect& r)
@@ -101,7 +106,7 @@ void SVGImageChromeClient::animationTimerFired(Timer<SVGImageChromeClient>*)
     // to render this protection redundant.
     RefPtr<SVGImage> protect(m_image);
     m_image->frameView()->page()->animator().serviceScriptedAnimations(monotonicallyIncreasingTime());
-    m_image->frameView()->updateLayoutAndStyleForPainting();
+    m_image->frameView()->updateAllLifecyclePhases();
 }
 
 } // namespace blink

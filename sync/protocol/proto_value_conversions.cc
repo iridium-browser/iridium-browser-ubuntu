@@ -358,6 +358,16 @@ scoped_ptr<base::DictionaryValue> AutofillProfileSpecificsToValue(
   return value;
 }
 
+scoped_ptr<base::DictionaryValue> WalletMetadataSpecificsToValue(
+    const sync_pb::WalletMetadataSpecifics& proto) {
+  scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
+  SET_ENUM(type, GetWalletMetadataTypeString);
+  SET_STR(id);
+  SET_INT64(use_count);
+  SET_INT64(use_date);
+  return value;
+}
+
 scoped_ptr<base::DictionaryValue> AutofillWalletSpecificsToValue(
     const sync_pb::AutofillWalletSpecifics& proto) {
   scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
@@ -367,7 +377,7 @@ scoped_ptr<base::DictionaryValue> AutofillWalletSpecificsToValue(
     value->Set("masked_card",
                WalletMaskedCreditCardToValue(proto.masked_card()));
   } else if (proto.type() == sync_pb::AutofillWalletSpecifics::POSTAL_ADDRESS) {
-    value->Set("masked_card",
+    value->Set("address",
                WalletPostalAddressToValue(proto.address()));
   }
   return value;
@@ -456,10 +466,11 @@ scoped_ptr<base::DictionaryValue> ExtensionSpecificsToValue(
   SET_STR(update_url);
   SET_BOOL(enabled);
   SET_BOOL(incognito_enabled);
+  SET_STR(name);
   SET_BOOL(remote_install);
   SET_BOOL(installed_by_custodian);
   SET_BOOL(all_urls_enabled);
-  SET_STR(name);
+  SET_INT32(disable_reasons);
   return value;
 }
 
@@ -561,6 +572,7 @@ scoped_ptr<base::DictionaryValue> NigoriSpecificsToValue(
   SET_BOOL(encrypt_articles);
   SET_BOOL(encrypt_app_list);
   SET_BOOL(encrypt_everything);
+  SET_BOOL(server_only_was_missing_keystore_migration_time);
   SET_BOOL(sync_tab_favicons);
   SET_ENUM(passphrase_type, PassphraseTypeString);
   SET(keystore_decryptor_token, EncryptedDataToValue);
@@ -729,6 +741,7 @@ scoped_ptr<base::DictionaryValue> EntitySpecificsToValue(
   SET_FIELD(autofill, AutofillSpecificsToValue);
   SET_FIELD(autofill_profile, AutofillProfileSpecificsToValue);
   SET_FIELD(autofill_wallet, AutofillWalletSpecificsToValue);
+  SET_FIELD(wallet_metadata, WalletMetadataSpecificsToValue);
   SET_FIELD(bookmark, BookmarkSpecificsToValue);
   SET_FIELD(device_info, DeviceInfoSpecificsToValue);
   SET_FIELD(dictionary, DictionarySpecificsToValue);

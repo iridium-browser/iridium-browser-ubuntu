@@ -120,6 +120,17 @@ def should_generate_code(definitions):
     return definitions.interfaces or definitions.dictionaries
 
 
+def depends_on_union_types(idl_type):
+    """Returns true when a given idl_type depends on union containers
+    directly.
+    """
+    if idl_type.is_union_type:
+        return True
+    if idl_type.is_array_or_sequence_type:
+        return idl_type.element_type.is_union_type
+    return False
+
+
 class TypedefResolver(Visitor):
     def __init__(self, info_provider):
         self.info_provider = info_provider
@@ -150,7 +161,7 @@ class TypedefResolver(Visitor):
             if not idl_type:
                 continue
             resolved_idl_type = idl_type.resolve_typedefs(self.typedefs)
-            if resolved_idl_type.is_union_type:
+            if depends_on_union_types(resolved_idl_type):
                 self.additional_includes.add(
                     self.info_provider.include_path_for_union_types)
             # Need to re-assign the attribute, not just mutate idl_type, since
@@ -234,10 +245,9 @@ class CodeGeneratorV8(CodeGeneratorBase):
             header_template_filename = 'interface.h'
             cpp_template_filename = 'interface.cpp'
             interface_context = v8_interface.interface_context
-        header_template = self.jinja_env.get_template(header_template_filename)
-        cpp_template = self.jinja_env.get_template(cpp_template_filename)
 
         template_context = interface_context(interface)
+        includes.update(interface_info.get('cpp_includes', {}).get(component, set()))
         if not interface.is_partial and not is_testing_target(full_path):
             template_context['header_includes'].add(self.info_provider.include_path_for_export)
             template_context['exported'] = self.info_provider.specifier_for_export
@@ -246,6 +256,9 @@ class CodeGeneratorV8(CodeGeneratorBase):
             template_context['header_includes'].add('core/dom/DOMTypedArray.h')
         elif interface_info['include_path']:
             template_context['header_includes'].add(interface_info['include_path'])
+
+        header_template = self.jinja_env.get_template(header_template_filename)
+        cpp_template = self.jinja_env.get_template(cpp_template_filename)
         header_text, cpp_text = render_template(
             include_paths, header_template, cpp_template, template_context,
             component)

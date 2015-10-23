@@ -7,7 +7,8 @@
 
 #include "base/callback.h"
 #include "base/memory/scoped_vector.h"
-#include "mojo/common/handle_watcher.h"
+#include "base/memory/weak_ptr.h"
+#include "mojo/message_pump/handle_watcher.h"
 #include "third_party/mojo/src/mojo/public/cpp/system/data_pipe.h"
 
 namespace mojo {
@@ -19,10 +20,11 @@ namespace mojo {
 // See also: WebSocketWriteQueue
 class WebSocketReadQueue {
  public:
-  WebSocketReadQueue(DataPipeConsumerHandle handle);
+  explicit WebSocketReadQueue(DataPipeConsumerHandle handle);
   ~WebSocketReadQueue();
 
-  void Read(uint32_t num_bytes, base::Callback<void(const char*)> callback);
+  void Read(uint32_t num_bytes,
+            const base::Callback<void(const char*)>& callback);
 
  private:
   struct Operation;
@@ -34,7 +36,8 @@ class WebSocketReadQueue {
   DataPipeConsumerHandle handle_;
   common::HandleWatcher handle_watcher_;
   ScopedVector<Operation> queue_;
-  bool is_waiting_;
+  bool is_busy_;
+  base::WeakPtrFactory<WebSocketReadQueue> weak_factory_;
 };
 
 }  // namespace mojo

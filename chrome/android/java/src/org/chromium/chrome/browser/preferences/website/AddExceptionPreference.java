@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.preferences.website;
 
-import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.res.Resources;
@@ -15,6 +14,7 @@ import android.os.Vibrator;
 import android.preference.Preference;
 import android.preference.Preference.OnPreferenceClickListener;
 import android.provider.Settings;
+import android.support.v7.app.AlertDialog;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
@@ -25,6 +25,7 @@ import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
+import org.chromium.ui.UiUtils;
 
 /**
  * A utility class for the UI recording exceptions to the blocked list for site
@@ -108,14 +109,22 @@ public class AddExceptionPreference extends Preference implements OnPreferenceCl
             }
         };
 
-        AlertDialog.Builder alert = new AlertDialog.Builder(getContext());
+        AlertDialog.Builder alert = new AlertDialog.Builder(getContext(), R.style.AlertDialogTheme);
         AlertDialog alertDialog = alert
                 .setTitle(R.string.website_settings_add_site_dialog_title)
                 .setMessage(mDialogMessage)
                 .setView(view)
                 .setPositiveButton(R.string.website_settings_add_site_add_button, onClickListener)
                 .setNegativeButton(R.string.cancel, onClickListener)
-                .show();
+                .create();
+        alertDialog.getDelegate().setHandleNativeActionModesEnabled(false);
+        alertDialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override
+            public void onShow(DialogInterface dialog) {
+                UiUtils.showKeyboard(input);
+            }
+        });
+        alertDialog.show();
         final Button okButton = alertDialog.getButton(AlertDialog.BUTTON_POSITIVE);
         okButton.setEnabled(false);
 

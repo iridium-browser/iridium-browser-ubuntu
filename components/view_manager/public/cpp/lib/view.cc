@@ -361,24 +361,41 @@ void View::SetSurfaceId(SurfaceIdPtr id) {
   }
 }
 
+void View::SetTextInputState(TextInputStatePtr state) {
+  if (manager_) {
+    static_cast<ViewManagerClientImpl*>(manager_)
+        ->SetViewTextInputState(id_, state.Pass());
+  }
+}
+
+void View::SetImeVisibility(bool visible, TextInputStatePtr state) {
+  // SetImeVisibility() shouldn't be used if the view is not editable.
+  DCHECK(state.is_null() || state->type != TEXT_INPUT_TYPE_NONE);
+  if (manager_) {
+    static_cast<ViewManagerClientImpl*>(manager_)
+        ->SetImeVisibility(id_, visible, state.Pass());
+  }
+}
+
 void View::SetFocus() {
   if (manager_)
     static_cast<ViewManagerClientImpl*>(manager_)->SetFocus(id_);
 }
 
-void View::Embed(const String& url) {
-  static_cast<ViewManagerClientImpl*>(manager_)->Embed(url, id_);
-}
-
-void View::Embed(const String& url,
-                 InterfaceRequest<ServiceProvider> services,
-                 ServiceProviderPtr exposed_services) {
-  static_cast<ViewManagerClientImpl*>(manager_)
-      ->Embed(url, id_, services.Pass(), exposed_services.Pass());
+bool View::HasFocus() const {
+  return manager_ && manager_->GetFocusedView() == this;
 }
 
 void View::Embed(ViewManagerClientPtr client) {
-  static_cast<ViewManagerClientImpl*>(manager_)->Embed(id_, client.Pass());
+  if (PrepareForEmbed())
+    static_cast<ViewManagerClientImpl*>(manager_)->Embed(id_, client.Pass());
+}
+
+void View::EmbedAllowingReembed(mojo::URLRequestPtr request) {
+  if (PrepareForEmbed()) {
+    static_cast<ViewManagerClientImpl*>(manager_)
+        ->EmbedAllowingReembed(request.Pass(), id_);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -388,7 +405,7 @@ namespace {
 
 ViewportMetricsPtr CreateEmptyViewportMetrics() {
   ViewportMetricsPtr metrics = ViewportMetrics::New();
-  metrics->size = Size::New();
+  metrics->size_in_pixels = Size::New();
   // TODO(vtl): The |.Pass()| below is only needed due to an MSVS bug; remove it
   // once that's fixed.
   return metrics.Pass();
@@ -431,6 +448,9 @@ View::~View() {
   prop_map_.clear();
 
   FOR_EACH_OBSERVER(ViewObserver, observers_, OnViewDestroyed(this));
+
+  if (manager_ && manager_->GetRoot() == this)
+    static_cast<ViewManagerClientImpl*>(manager_)->OnRootDestroyed(this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -584,6 +604,17 @@ void View::NotifyViewVisibilityChangedUp(View* target) {
     bool ret = view->NotifyViewVisibilityChangedAtReceiver(target);
     DCHECK(ret);
   }
+}
+
+bool View::PrepareForEmbed() {
+  if (!OwnsView(manager_, this) &&
+      !static_cast<ViewManagerClientImpl*>(manager_)->is_embed_root()) {
+    return false;
+  }
+
+  while (!children_.empty())
+    RemoveChild(children_[0]);
+  return true;
 }
 
 }  // namespace mojo

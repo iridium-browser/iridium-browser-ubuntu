@@ -43,6 +43,8 @@
       'autoclick/autoclick_controller.h',
       'cancel_mode.cc',
       'cancel_mode.h',
+      'cast_config_delegate.cc',
+      'cast_config_delegate.h',
       'content/display/display_color_manager_chromeos.cc',
       'content/display/display_color_manager_chromeos.h',
       'content/display/screen_orientation_controller_chromeos.cc',
@@ -67,8 +69,8 @@
       'display/display_change_observer_chromeos.h',
       'display/display_configurator_animation.cc',
       'display/display_configurator_animation.h',
-      'display/display_controller.cc',
-      'display/display_controller.h',
+      'display/window_tree_host_manager.cc',
+      'display/window_tree_host_manager.h',
       'display/display_error_observer_chromeos.cc',
       'display/display_error_observer_chromeos.h',
       'display/display_info.cc',
@@ -160,12 +162,16 @@
       'host/root_window_transformer.h',
       'host/transformer_helper.cc',
       'host/transformer_helper.h',
+      'ime/input_method_event_handler.cc',
+      'ime/input_method_event_handler.h',
       'keyboard_uma_event_filter.cc',
       'keyboard_uma_event_filter.h',
       'magnifier/magnification_controller.cc',
       'magnifier/magnification_controller.h',
       'magnifier/partial_magnification_controller.cc',
       'magnifier/partial_magnification_controller.h',
+      'metrics/desktop_task_switch_metric_recorder.cc',
+      'metrics/desktop_task_switch_metric_recorder.h',
       'metrics/task_switch_metrics_recorder.cc',
       'metrics/task_switch_metrics_recorder.h',
       'metrics/task_switch_time_tracker.cc',
@@ -244,6 +250,8 @@
       'shelf/shelf_util.h',
       'shelf/shelf_view.cc',
       'shelf/shelf_view.h',
+      'shelf/shelf_button_pressed_metric_tracker.cc',
+      'shelf/shelf_button_pressed_metric_tracker.h',
       'shelf/shelf_widget.cc',
       'shelf/shelf_widget.h',
       'shelf/shelf_window_watcher.cc',
@@ -276,6 +284,8 @@
       'system/bluetooth/tray_bluetooth.cc',
       'system/bluetooth/tray_bluetooth.h',
       'system/brightness_control_delegate.h',
+      'system/cast/tray_cast.cc',
+      'system/cast/tray_cast.h',
       'system/chromeos/audio/audio_detailed_view.cc',
       'system/chromeos/audio/audio_detailed_view.h',
       'system/chromeos/audio/tray_audio_chromeos.cc',
@@ -288,6 +298,8 @@
       'system/chromeos/brightness/brightness_controller_chromeos.h',
       'system/chromeos/brightness/tray_brightness.cc',
       'system/chromeos/brightness/tray_brightness.h',
+      'system/chromeos/devicetype_utils.cc',
+      'system/chromeos/devicetype_utils.h',
       'system/chromeos/enterprise/enterprise_domain_observer.h',
       'system/chromeos/enterprise/tray_enterprise.cc',
       'system/chromeos/enterprise/tray_enterprise.h',
@@ -687,6 +699,8 @@
       'test/mirror_window_test_api.h',
       'test/overflow_bubble_view_test_api.cc',
       'test/overflow_bubble_view_test_api.h',
+      'test/shelf_button_pressed_metric_tracker_test_api.cc',
+      'test/shelf_button_pressed_metric_tracker_test_api.h',
       'test/shelf_item_delegate_manager_test_api.cc',
       'test/shelf_item_delegate_manager_test_api.h',
       'test/shelf_test_api.cc',
@@ -727,6 +741,8 @@
       'test/test_user_wallpaper_delegate.h',
       'test/test_volume_control_delegate.cc',
       'test/test_volume_control_delegate.h',
+      'test/tray_cast_test_api.cc',
+      'test/tray_cast_test_api.h',
       'test/ui_controls_factory_ash.cc',
       'test/ui_controls_factory_ash.h',
       'test/user_metrics_recorder_test_api.cc',
@@ -782,7 +798,7 @@
       'dip_unittest.cc',
       'display/cursor_window_controller_unittest.cc',
       'display/display_change_observer_chromeos_unittest.cc',
-      'display/display_controller_unittest.cc',
+      'display/window_tree_host_manager_unittest.cc',
       'display/display_error_observer_chromeos_unittest.cc',
       'display/display_info_unittest.cc',
       'display/display_manager_unittest.cc',
@@ -807,13 +823,16 @@
       'keyboard_overlay/keyboard_overlay_delegate_unittest.cc',
       'keyboard_overlay/keyboard_overlay_view_unittest.cc',
       'magnifier/magnification_controller_unittest.cc',
+      'metrics/desktop_task_switch_metric_recorder_unittest.cc',
       'metrics/task_switch_metrics_recorder_unittest.cc',
       'metrics/task_switch_time_tracker_unittest.cc',
       'metrics/user_metrics_recorder_unittest.cc',
       'popup_message_unittest.cc',
       'root_window_controller_unittest.cc',
+      'rotator/screen_rotation_animation_unittest.cc',
       'screen_util_unittest.cc',
       'shelf/scoped_observer_with_duplicated_sources_unittest.cc',
+      'shelf/shelf_button_pressed_metric_tracker_unittest.cc',
       'shelf/shelf_layout_manager_unittest.cc',
       'shelf/shelf_model_unittest.cc',
       'shelf/shelf_navigator_unittest.cc',
@@ -875,6 +894,7 @@
       'wm/panels/panel_window_resizer_unittest.cc',
       'wm/resize_shadow_and_cursor_unittest.cc',
       'wm/screen_dimmer_unittest.cc',
+      'wm/session_state_animator_impl_unittest.cc',
       'wm/stacking_controller_unittest.cc',
       'wm/system_gesture_event_filter_unittest.cc',
       'wm/system_modal_container_layout_manager_unittest.cc',
@@ -1085,6 +1105,21 @@
       ],
     },
     {
+      # GN version: //ash:interactive_ui_test_support
+      'target_name': 'ash_interactive_ui_test_support',
+      'type': 'static_library',
+      'dependencies': [
+        '../skia/skia.gyp:skia',
+        '../testing/gtest.gyp:gtest',
+        'ash',
+        'ash_test_support',
+      ],
+      'sources': [
+        'test/ash_interactive_ui_test_base.cc',
+        'test/ash_interactive_ui_test_base.h',
+      ],
+    },
+    {
       # GN version: //ash:ash_unittests
       'target_name': 'ash_unittests',
       'type': 'executable',
@@ -1193,11 +1228,6 @@
             'ldflags': ['-rdynamic'],
           },
         }],
-        ['use_ozone==1', {
-          'sources!': [
-            'sticky_keys/sticky_keys_unittest.cc',  # crbug.com/354035
-          ],
-        }],
       ],
     },
     {
@@ -1270,38 +1300,6 @@
         ['chromeos==1', {
           'dependencies': [
             '../device/bluetooth/bluetooth.gyp:device_bluetooth',
-          ],
-        }],
-        ['OS=="win" and component!="shared_library" and win_use_allocator_shim==1', {
-          'dependencies': [
-            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
-          ],
-        }],
-      ],
-    },
-    {
-      # GN version: //ash:ash_shell_unittests
-      'target_name': 'ash_shell_unittests',
-      'type': 'executable',
-      'dependencies': [
-        '../base/base.gyp:test_support_base',
-        '../components/components.gyp:user_manager',
-        '../content/content_shell_and_tests.gyp:test_support_content',
-        '../skia/skia.gyp:skia',
-        '../testing/gtest.gyp:gtest',
-        '../ui/accessibility/accessibility.gyp:ax_gen',
-        'ash_shell_lib',
-        'ash_test_support',
-      ],
-      'sources': [
-        # Note: file list duplicated in GN build.
-        'shell/window_watcher_unittest.cc',
-        'test/ash_unittests.cc',
-      ],
-      'conditions': [
-        ['chromeos==1', {
-          'dependencies': [
-            '../ui/display/display.gyp:display',
           ],
         }],
         ['OS=="win" and component!="shared_library" and win_use_allocator_shim==1', {

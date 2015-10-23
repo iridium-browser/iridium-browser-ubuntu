@@ -96,7 +96,9 @@ static int urandom_get_fd_locked(void) {
     return urandom_fd;
   }
 
-  urandom_fd = open("/dev/urandom", O_RDONLY);
+  do {
+    urandom_fd = open("/dev/urandom", O_RDONLY);
+  } while (urandom_fd == -1 && errno == EINTR);
   return urandom_fd;
 }
 
@@ -115,6 +117,21 @@ void RAND_cleanup(void) {
   }
   urandom_fd = -2;
   list_head = NULL;
+  CRYPTO_STATIC_MUTEX_unlock(&global_lock);
+}
+
+void RAND_set_urandom_fd(int fd) {
+  CRYPTO_STATIC_MUTEX_lock_write(&global_lock);
+  if (urandom_fd != -2) {
+    /* |RAND_set_urandom_fd| may not be called after the RNG is used. */
+    abort();
+  }
+  do {
+    urandom_fd = dup(fd);
+  } while (urandom_fd == -1 && errno == EINTR);
+  if (urandom_fd < 0) {
+    abort();
+  }
   CRYPTO_STATIC_MUTEX_unlock(&global_lock);
 }
 

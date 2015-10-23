@@ -1,0 +1,114 @@
+<!DOCTYPE HTML>
+<!--
+Copyright (c) 2015 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+<link rel="import" href="/perf_insights/map_single_trace.html">
+<link rel="import" href="/perf_insights/value/run_info.html">
+<link rel="import" href="/perf_insights/results/results.html">
+
+<script>
+'use strict';
+
+tr.exportTo('pi', function() {
+
+  var FailureValue = pi.v.FailureValue;
+
+  function getMapFunctionFromMapFunctionHandle(mapFunctionHandle) {
+    if (mapFunctionHandle.mapFunctionFileName !== undefined)
+      return loadMapFunctionFromFileName(mapFunctionHandle.mapFunctionFileName);
+
+    // Find the mapper by name.
+    loadHTML('/perf_insights/perf_insights_full_config.html')
+    var typeInfo = pi.MapFunction.findTypeInfoMatching(function(typeInfo) {
+      return typeInfo.constructor.name === mapFunctionHandle.mapFunctionName;
+    })
+    if (typeInfo === undefined)  {
+      var err = new Error(
+          'No mapper registered in perf_insights_full_config named ' +
+          mapFunctionHandle.mapFunctionName);
+      err.name = 'MapFunctionLoadingError';
+      throw err;
+    }
+
+    return typeInfo.constructor;
+  }
+
+  function loadMapFunctionFromFileName(mapFunctionFileName) {
+    // Load the mapper.
+    var allTypeInfos = pi.MapFunction.getAllRegisteredTypeInfos();
+    try {
+      var numTypeInfosBefore = allTypeInfos.length;
+      loadHTMLFile(mapFunctionFileName, mapFunctionFileName);
+    } catch (err) {
+      err.name = 'MapFunctionLoadingError';
+      throw err;
+    }
+
+    // Verify a mapFunction was defined.
+    var numTypeInfosNow = allTypeInfos.length;
+    if (numTypeInfosNow !== (numTypeInfosBefore + 1)) {
+      var err = new Error(mapFunctionFileName + ' did not call defineMapFunction');
+      err.name = 'MapFunctionNotDefinedError';
+      throw err;
+    }
+
+    var mapFunction = allTypeInfos[allTypeInfos.length - 1].constructor;
+    return mapFunction;
+  }
+
+
+  function mapSingleTraceMain(args) {
+    if (args.length !== 4)
+      throw new Error('Must provide four arguments');
+
+    var options = {
+      run_info: pi.v.RunInfo.fromDict(JSON.parse(args[0])),
+      mapFunctionHandle: JSON.parse(args[1]),
+      filenameToMap: args[2],
+      metadata: JSON.parse(args[3])
+    };
+
+    var results = new pi.r.Results();
+    results.willRun(options.run_info);
+
+    pi.runAndConvertErrorsToFailureValues(
+        results, options.run_info,
+        function() {
+          var mapFunction = getMapFunctionFromMapFunctionHandle(
+              options.mapFunctionHandle)
+
+          // Read the mapfile.
+          try {
+            var traceData = tr.b.getSync('file://' + options.filenameToMap);
+          } catch (ex) {
+            var err = new Error('Could not open ' + options.filenameToMap);
+            err.name = 'TraceImportError';
+            throw err;
+          }
+
+          pi.mapSingleTrace(results, options.run_info, traceData,
+                            mapFunction, options.metadata);
+        });
+
+    results.didRun(options.run_info);
+    results.didFinishAllRuns();
+
+    results.all_values.forEach(function(value) {
+      valueAsDict = value.asDict();
+      console.log('MAP_RESULT_VALUE: ' + JSON.stringify(valueAsDict));
+    });
+    return 0;
+  }
+
+  return {
+    mapSingleTraceMain: mapSingleTraceMain
+  };
+});
+
+if (tr.isHeadless)
+  quit(pi.mapSingleTraceMain(sys.argv.slice(1)));
+
+</script>
+

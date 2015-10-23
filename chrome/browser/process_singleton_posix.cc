@@ -58,13 +58,15 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/posix/safe_strerror.h"
 #include "base/rand_util.h"
-#include "base/safe_strerror_posix.h"
 #include "base/sequenced_task_runner_helpers.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -135,7 +137,7 @@ int SetCloseOnExec(int fd) {
 // Close a socket and check return value.
 void CloseSocket(int fd) {
   int rv = IGNORE_EINTR(close(fd));
-  DCHECK_EQ(0, rv) << "Error closing socket: " << safe_strerror(errno);
+  DCHECK_EQ(0, rv) << "Error closing socket: " << base::safe_strerror(errno);
 }
 
 // Write a message to a socket fd.
@@ -682,8 +684,9 @@ void ProcessSingleton::LinuxWatcher::SocketReader::OnFileCanReadWithoutBlocking(
   }
 
   std::string str(buf_, bytes_read_);
-  std::vector<std::string> tokens;
-  base::SplitString(str, kTokenDelimiter, &tokens);
+  std::vector<std::string> tokens = base::SplitString(
+      str, std::string(1, kTokenDelimiter),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
   if (tokens.size() < 3 || tokens[0] != kStartToken) {
     LOG(ERROR) << "Wrong message format: " << str;
@@ -702,12 +705,9 @@ void ProcessSingleton::LinuxWatcher::SocketReader::OnFileCanReadWithoutBlocking(
   tokens.erase(tokens.begin());
 
   // Return to the UI thread to handle opening a new browser tab.
-  ui_message_loop_->PostTask(FROM_HERE, base::Bind(
-      &ProcessSingleton::LinuxWatcher::HandleMessage,
-      parent_,
-      current_dir,
-      tokens,
-      this));
+  ui_message_loop_->task_runner()->PostTask(
+      FROM_HERE, base::Bind(&ProcessSingleton::LinuxWatcher::HandleMessage,
+                            parent_, current_dir, tokens, this));
   fd_reader_.StopWatchingFileDescriptor();
 
   // LinuxWatcher::HandleMessage() is in charge of destroying this SocketReader
@@ -1010,7 +1010,7 @@ bool ProcessSingleton::Create() {
   }
 
   if (listen(sock, 5) < 0)
-    NOTREACHED() << "listen failed: " << safe_strerror(errno);
+    NOTREACHED() << "listen failed: " << base::safe_strerror(errno);
 
   DCHECK(BrowserThread::IsMessageLoopValid(BrowserThread::IO));
   BrowserThread::PostTask(
@@ -1069,5 +1069,5 @@ void ProcessSingleton::KillProcess(int pid) {
   // ESRCH = No Such Process (can happen if the other process is already in
   // progress of shutting down and finishes before we try to kill it).
   DCHECK(rv == 0 || errno == ESRCH) << "Error killing process: "
-                                    << safe_strerror(errno);
+                                    << base::safe_strerror(errno);
 }

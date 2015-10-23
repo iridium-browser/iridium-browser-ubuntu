@@ -9,6 +9,8 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -772,10 +774,22 @@ void NativeThemeBase::PaintMenuList(
   paint.setAntiAlias(true);
   paint.setStyle(SkPaint::kFill_Style);
 
+  static const int kArrowWidth = 6;
+  static const int kArrowHeight = 6;
+
+  gfx::Rect arrow(
+    menu_list.arrow_x,
+    menu_list.arrow_y - (kArrowHeight / 2),
+    kArrowWidth,
+    kArrowHeight);
+
+  // Constrain to the paint rect.
+  arrow.Intersect(rect);
+
   SkPath path;
-  path.moveTo(menu_list.arrow_x, menu_list.arrow_y - 3);
-  path.rLineTo(6, 0);
-  path.rLineTo(-3, 6);
+  path.moveTo(arrow.x(), arrow.y());
+  path.lineTo(arrow.right(), arrow.y());
+  path.lineTo(arrow.x() + arrow.width() / 2, arrow.bottom());
   path.close();
   canvas->drawPath(path, paint);
 }

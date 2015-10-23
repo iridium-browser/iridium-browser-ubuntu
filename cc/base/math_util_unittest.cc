@@ -32,6 +32,32 @@ TEST(MathUtilTest, ProjectionOfPerpendicularPlane) {
   EXPECT_TRUE(projected_rect.IsEmpty());
 }
 
+TEST(MathUtilTest, ProjectionOfAlmostPerpendicularPlane) {
+  // In this case, the m33() element of the transform becomes almost zero, which
+  // could cause a divide-by-zero when projecting points/quads.
+
+  gfx::Transform transform;
+  // The transform is from an actual test page:
+  // [ +1.0000 +0.0000 -1.0000 +3144132.0000
+  //   +0.0000 +1.0000 +0.0000 +0.0000
+  //   +16331238407143424.0000 +0.0000 -0.0000 +51346917453137000267776.0000
+  //   +0.0000 +0.0000 +0.0000 +1.0000 ]
+  transform.MakeIdentity();
+  transform.matrix().set(0, 2, static_cast<SkMScalar>(-1));
+  transform.matrix().set(0, 3, static_cast<SkMScalar>(3144132.0));
+  transform.matrix().set(2, 0, static_cast<SkMScalar>(16331238407143424.0));
+  transform.matrix().set(2, 2, static_cast<SkMScalar>(-1e-33));
+  transform.matrix().set(2, 3,
+                         static_cast<SkMScalar>(51346917453137000267776.0));
+
+  gfx::RectF rect = gfx::RectF(0, 0, 1, 1);
+  gfx::RectF projected_rect = MathUtil::ProjectClippedRect(transform, rect);
+
+  EXPECT_EQ(0, projected_rect.x());
+  EXPECT_EQ(0, projected_rect.y());
+  EXPECT_TRUE(projected_rect.IsEmpty()) << projected_rect.ToString();
+}
+
 TEST(MathUtilTest, EnclosingClippedRectUsesCorrectInitialBounds) {
   HomogeneousCoordinate h1(-100, -100, 0, 1);
   HomogeneousCoordinate h2(-10, -10, 0, 1);
@@ -191,6 +217,73 @@ TEST(MathUtilTest, MapEnclosedRectWith2dAxisAlignedTransform) {
   output =
       MathUtil::MapEnclosedRectWith2dAxisAlignedTransform(transform, input);
   EXPECT_EQ(gfx::Rect(2, 4, 6, 8), output);
+}
+
+TEST(MathUtilTest, RoundUp) {
+  for (int multiplier = 1; multiplier <= 10; ++multiplier) {
+    // Try attempts in descending order, so that we can
+    // determine the correct value before it's needed.
+    int correct;
+    for (int attempt = 5 * multiplier; attempt >= -5 * multiplier; --attempt) {
+      if ((attempt % multiplier) == 0)
+        correct = attempt;
+      EXPECT_EQ(correct, MathUtil::UncheckedRoundUp(attempt, multiplier))
+          << "attempt=" << attempt << " multiplier=" << multiplier;
+    }
+  }
+
+  for (unsigned multiplier = 1; multiplier <= 10; ++multiplier) {
+    // Try attempts in descending order, so that we can
+    // determine the correct value before it's needed.
+    unsigned correct;
+    for (unsigned attempt = 5 * multiplier; attempt > 0; --attempt) {
+      if ((attempt % multiplier) == 0)
+        correct = attempt;
+      EXPECT_EQ(correct, MathUtil::UncheckedRoundUp(attempt, multiplier))
+          << "attempt=" << attempt << " multiplier=" << multiplier;
+    }
+    EXPECT_EQ(0u, MathUtil::UncheckedRoundUp(0u, multiplier))
+        << "attempt=0 multiplier=" << multiplier;
+  }
+}
+
+TEST(MathUtilTest, RoundUpOverflow) {
+  // Rounding up 123 by 50 is 150, which overflows int8_t, but fits in uint8_t.
+  EXPECT_FALSE(MathUtil::VerifyRoundup<int8_t>(123, 50));
+  EXPECT_TRUE(MathUtil::VerifyRoundup<uint8_t>(123, 50));
+}
+
+TEST(MathUtilTest, RoundDown) {
+  for (int multiplier = 1; multiplier <= 10; ++multiplier) {
+    // Try attempts in ascending order, so that we can
+    // determine the correct value before it's needed.
+    int correct;
+    for (int attempt = -5 * multiplier; attempt <= 5 * multiplier; ++attempt) {
+      if ((attempt % multiplier) == 0)
+        correct = attempt;
+      EXPECT_EQ(correct, MathUtil::UncheckedRoundDown(attempt, multiplier))
+          << "attempt=" << attempt << " multiplier=" << multiplier;
+    }
+  }
+
+  for (unsigned multiplier = 1; multiplier <= 10; ++multiplier) {
+    // Try attempts in ascending order, so that we can
+    // determine the correct value before it's needed.
+    unsigned correct;
+    for (unsigned attempt = 0; attempt <= 5 * multiplier; ++attempt) {
+      if ((attempt % multiplier) == 0)
+        correct = attempt;
+      EXPECT_EQ(correct, MathUtil::UncheckedRoundDown(attempt, multiplier))
+          << "attempt=" << attempt << " multiplier=" << multiplier;
+    }
+  }
+}
+
+TEST(MathUtilTest, RoundDownUnderflow) {
+  // Rounding down -123 by 50 is -150, which underflows int8_t, but fits in
+  // int16_t.
+  EXPECT_FALSE(MathUtil::VerifyRoundDown<int8_t>(-123, 50));
+  EXPECT_TRUE(MathUtil::VerifyRoundDown<int16_t>(-123, 50));
 }
 
 }  // namespace

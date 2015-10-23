@@ -17,6 +17,7 @@ class Browser;
 class ExtensionAction;
 class ExtensionActionPlatformDelegate;
 class GURL;
+class IconWithBadgeImageSource;
 class ToolbarActionsBar;
 
 namespace extensions {
@@ -47,10 +48,10 @@ class ExtensionActionViewController
   ~ExtensionActionViewController() override;
 
   // ToolbarActionViewController:
-  const std::string& GetId() const override;
+  std::string GetId() const override;
   void SetDelegate(ToolbarActionViewDelegate* delegate) override;
-  gfx::Image GetIcon(content::WebContents* web_contents) override;
-  gfx::ImageSkia GetIconWithBadge() override;
+  gfx::Image GetIcon(content::WebContents* web_contents,
+                     const gfx::Size& size) override;
   base::string16 GetActionName() const override;
   base::string16 GetAccessibleName(content::WebContents* web_contents) const
       override;
@@ -65,10 +66,8 @@ class ExtensionActionViewController
   bool CanDrag() const override;
   bool ExecuteAction(bool by_user) override;
   void UpdateState() override;
-  void PaintExtra(gfx::Canvas* canvas,
-                  const gfx::Rect& bounds,
-                  content::WebContents* web_contents) const override;
   void RegisterCommand() override;
+  bool DisabledClickOpensMenu() const override;
 
   // ExtensionContextMenuModel::PopupDelegate:
   void InspectPopup() override;
@@ -91,6 +90,10 @@ class ExtensionActionViewController
   void set_icon_observer(ExtensionActionIconFactory::Observer* icon_observer) {
     icon_observer_ = icon_observer;
   }
+
+  scoped_ptr<IconWithBadgeImageSource> GetIconImageSourceForTesting(
+      content::WebContents* web_contents,
+      const gfx::Size& size);
 
  private:
   // ExtensionActionIconFactory::Observer:
@@ -134,6 +137,11 @@ class ExtensionActionViewController
 
   // Handles cleanup after the popup closes.
   void OnPopupClosed();
+
+  // Returns the image source for the icon.
+  scoped_ptr<IconWithBadgeImageSource> GetIconImageSource(
+      content::WebContents* web_contents,
+      const gfx::Size& size);
 
   // The extension associated with the action we're displaying.
   scoped_refptr<const extensions::Extension> extension_;

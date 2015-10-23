@@ -2,14 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.core import wpr_modes
 from telemetry import decorators
+from telemetry.internal.results import page_test_results
 from telemetry.page import page as page_module
-from telemetry.results import page_test_results
+from telemetry.testing import options_for_unittests
+from telemetry.testing import page_test_test_case
 from telemetry.timeline import model as model_module
 from telemetry.timeline import slice as slice_data
-from telemetry.unittest_util import options_for_unittests
-from telemetry.unittest_util import page_test_test_case
+from telemetry.util import wpr_modes
 
 from measurements import task_execution_time
 
@@ -225,7 +225,7 @@ class TaskExecutionTimeUnitTest(page_test_test_case.PageTestTestCase):
     self._measurement = task_execution_time.TaskExecutionTime()
     self._page_set = self.CreateEmptyPageSet()
     page = TestTaskExecutionTimePage(self._page_set, self._page_set.base_dir)
-    self._page_set.AddUserStory(page)
+    self._page_set.AddStory(page)
 
     # Get the name of a thread used by task_execution_time metric and set up
     # some dummy execution data pretending to be from that thread & process.

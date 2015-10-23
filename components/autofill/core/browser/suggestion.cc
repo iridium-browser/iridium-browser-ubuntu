@@ -10,26 +10,9 @@
 
 namespace autofill {
 
-SuggestionBackendID::SuggestionBackendID()
-    : variant(0) {
-}
-
-SuggestionBackendID::SuggestionBackendID(const std::string& g, size_t v)
-    : guid(g),
-      variant(v) {
-}
-
-SuggestionBackendID::~SuggestionBackendID() {
-}
-
-bool SuggestionBackendID::operator<(const SuggestionBackendID& other) const {
-  if (variant != other.variant)
-    return variant < other.variant;
-  return guid < other.guid;
-}
-
 Suggestion::Suggestion()
-    : frontend_id(0) {
+    : frontend_id(0),
+      match(PREFIX_MATCH) {
 }
 
 Suggestion::Suggestion(const Suggestion& other)
@@ -37,12 +20,14 @@ Suggestion::Suggestion(const Suggestion& other)
       frontend_id(other.frontend_id),
       value(other.value),
       label(other.label),
-      icon(other.icon) {
+      icon(other.icon),
+      match(other.match) {
 }
 
 Suggestion::Suggestion(const base::string16& v)
     : frontend_id(0),
-      value(v) {
+      value(v),
+      match(PREFIX_MATCH) {
 }
 
 Suggestion::Suggestion(const std::string& v,
@@ -52,7 +37,8 @@ Suggestion::Suggestion(const std::string& v,
     : frontend_id(fid),
       value(base::UTF8ToUTF16(v)),
       label(base::UTF8ToUTF16(l)),
-      icon(base::UTF8ToUTF16(i)) {
+      icon(base::UTF8ToUTF16(i)),
+      match(PREFIX_MATCH) {
 }
 
 Suggestion::~Suggestion() {

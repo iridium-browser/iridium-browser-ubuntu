@@ -60,7 +60,6 @@
     '<(skia_src_path)/effects/SkTableMaskFilter.cpp',
     '<(skia_src_path)/effects/SkTestImageFilters.cpp',
     '<(skia_src_path)/effects/SkTileImageFilter.cpp',
-    '<(skia_src_path)/effects/SkTransparentShader.cpp',
     '<(skia_src_path)/effects/SkXfermodeImageFilter.cpp',
 
     '<(skia_src_path)/effects/gradients/SkClampRange.cpp',
@@ -83,7 +82,6 @@
 
     '<(skia_include_path)/effects/Sk1DPathEffect.h',
     '<(skia_include_path)/effects/Sk2DPathEffect.h',
-    '<(skia_include_path)/effects/SkXfermodeImageFilter.h',
     '<(skia_include_path)/effects/SkAlphaThresholdFilter.h',
     '<(skia_include_path)/effects/SkArithmeticMode.h',
     '<(skia_include_path)/effects/SkBitmapSource.h',
@@ -107,8 +105,9 @@
     '<(skia_include_path)/effects/SkLerpXfermode.h',
     '<(skia_include_path)/effects/SkLightingImageFilter.h',
     '<(skia_include_path)/effects/SkLumaColorFilter.h',
-    '<(skia_include_path)/effects/SkOffsetImageFilter.h',
+    '<(skia_include_path)/effects/SkMagnifierImageFilter.h',
     '<(skia_include_path)/effects/SkMorphologyImageFilter.h',
+    '<(skia_include_path)/effects/SkOffsetImageFilter.h',
     '<(skia_include_path)/effects/SkPaintFlagsDrawFilter.h',
     '<(skia_include_path)/effects/SkPerlinNoiseShader.h',
     '<(skia_include_path)/effects/SkPixelXorXfermode.h',
@@ -116,7 +115,6 @@
     '<(skia_include_path)/effects/SkTableColorFilter.h',
     '<(skia_include_path)/effects/SkTableMaskFilter.h',
     '<(skia_include_path)/effects/SkTileImageFilter.h',
-    '<(skia_include_path)/effects/SkTransparentShader.h',
-    '<(skia_include_path)/effects/SkMagnifierImageFilter.h',
+    '<(skia_include_path)/effects/SkXfermodeImageFilter.h',
   ],
 }

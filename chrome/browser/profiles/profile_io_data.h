@@ -18,6 +18,7 @@
 #include "base/prefs/pref_member.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
+#include "chrome/browser/devtools/devtools_network_controller_handle.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/storage_partition_descriptor.h"
@@ -34,8 +35,6 @@
 class ChromeHttpUserAgentSettings;
 class ChromeNetworkDelegate;
 class ChromeURLRequestContextGetter;
-class CookieSettings;
-class DevToolsNetworkController;
 class HostContentSettingsMap;
 class MediaDeviceIDSalt;
 class ProtocolHandlerRegistry;
@@ -45,19 +44,24 @@ namespace chrome_browser_net {
 class ResourcePrefetchPredictorObserver;
 }
 
+namespace content_settings {
+class CookieSettings;
+}
+
 namespace data_reduction_proxy {
 class DataReductionProxyIOData;
 }
 
 namespace extensions {
+class ExtensionThrottleManager;
 class InfoMap;
 }
 
 namespace net {
+class CertificateReportSender;
 class CertVerifier;
 class ChannelIDService;
 class CookieStore;
-class FraudulentCertificateReporter;
 class FtpTransactionFactory;
 class HttpServerProperties;
 class HttpTransactionFactory;
@@ -104,6 +108,9 @@ class ProfileIOData {
       net::URLRequestJobFactoryImpl* job_factory,
       content::ProtocolHandlerMap* protocol_handlers);
 
+  // Sets a global CertVerifier to use when initializing all profiles.
+  static void SetCertVerifierForTesting(net::CertVerifier* cert_verifier);
+
   // Called by Profile.
   content::ResourceContext* GetResourceContext() const;
 
@@ -132,7 +139,8 @@ class ProfileIOData {
   // with a content::ResourceContext, and they want access to Chrome data for
   // that profile.
   extensions::InfoMap* GetExtensionInfoMap() const;
-  CookieSettings* GetCookieSettings() const;
+  extensions::ExtensionThrottleManager* GetExtensionThrottleManager() const;
+  content_settings::CookieSettings* GetCookieSettings() const;
   HostContentSettingsMap* GetHostContentSettingsMap() const;
 
   IntegerPrefMember* session_startup_pref() const {
@@ -165,8 +173,8 @@ class ProfileIOData {
 
   content::ResourceContext::SaltCallback GetMediaDeviceIDSalt() const;
 
-  DevToolsNetworkController* network_controller() const {
-    return network_controller_.get();
+  DevToolsNetworkControllerHandle* network_controller_handle() const {
+    return &network_controller_handle_;
   }
 
   net::TransportSecurityState* transport_security_state() const {
@@ -272,7 +280,7 @@ class ProfileIOData {
 
     base::FilePath path;
     IOThread* io_thread;
-    scoped_refptr<CookieSettings> cookie_settings;
+    scoped_refptr<content_settings::CookieSettings> cookie_settings;
     scoped_refptr<HostContentSettingsMap> host_content_settings_map;
     scoped_refptr<net::SSLConfigService> ssl_config_service;
     scoped_refptr<net::CookieMonster::Delegate> cookie_monster_delegate;
@@ -348,10 +356,6 @@ class ProfileIOData {
       scoped_ptr<data_reduction_proxy::DataReductionProxyIOData>
           data_reduction_proxy_io_data) const;
 
-  net::FraudulentCertificateReporter* fraudulent_certificate_reporter() const {
-    return fraudulent_certificate_reporter_.get();
-  }
-
   net::ProxyService* proxy_service() const {
     return proxy_service_.get();
   }
@@ -384,7 +388,8 @@ class ProfileIOData {
       net::HttpNetworkSession* shared_session,
       net::HttpCache::BackendFactory* backend) const;
 
-  void SetCookieSettingsForTesting(CookieSettings* cookie_settings);
+  void SetCookieSettingsForTesting(
+      content_settings::CookieSettings* cookie_settings);
 
  private:
   class ResourceContext : public content::ResourceContext {
@@ -534,8 +539,6 @@ class ProfileIOData {
   mutable scoped_ptr<data_reduction_proxy::DataReductionProxyIOData>
       data_reduction_proxy_io_data_;
 
-  mutable scoped_ptr<net::FraudulentCertificateReporter>
-      fraudulent_certificate_reporter_;
   mutable scoped_ptr<net::ProxyService> proxy_service_;
   mutable scoped_ptr<net::TransportSecurityState> transport_security_state_;
   mutable scoped_ptr<net::HttpServerProperties>
@@ -543,14 +546,15 @@ class ProfileIOData {
 #if defined(OS_CHROMEOS)
   // Set to |cert_verifier_| if it references a PolicyCertVerifier. In that
   // case, the verifier is owned by  |cert_verifier_|. Otherwise, set to NULL.
-  mutable policy::PolicyCertVerifier* policy_cert_verifier_;
   mutable scoped_ptr<net::CertVerifier> cert_verifier_;
+  mutable policy::PolicyCertVerifier* policy_cert_verifier_;
   mutable std::string username_hash_;
   mutable bool use_system_key_slot_;
 #endif
 
   mutable scoped_ptr<net::TransportSecurityPersister>
       transport_security_persister_;
+  mutable scoped_ptr<net::CertificateReportSender> certificate_report_sender_;
 
   // These are only valid in between LazyInitialize() and their accessor being
   // called.
@@ -562,7 +566,7 @@ class ProfileIOData {
 
   mutable scoped_ptr<ResourceContext> resource_context_;
 
-  mutable scoped_refptr<CookieSettings> cookie_settings_;
+  mutable scoped_refptr<content_settings::CookieSettings> cookie_settings_;
 
   mutable scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
 
@@ -577,7 +581,13 @@ class ProfileIOData {
       supervised_user_url_filter_;
 #endif
 
-  mutable scoped_ptr<DevToolsNetworkController> network_controller_;
+#if defined(ENABLE_EXTENSIONS)
+  // Is NULL if switches::kDisableExtensionsHttpThrottling is on.
+  mutable scoped_ptr<extensions::ExtensionThrottleManager>
+      extension_throttle_manager_;
+#endif
+
+  mutable DevToolsNetworkControllerHandle network_controller_handle_;
 
   // TODO(jhawkins): Remove once crbug.com/102004 is fixed.
   bool initialized_on_UI_thread_;

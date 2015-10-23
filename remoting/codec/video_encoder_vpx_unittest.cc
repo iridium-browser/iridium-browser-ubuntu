@@ -39,22 +39,22 @@ static scoped_ptr<webrtc::DesktopFrame> CreateTestFrame(
   return frame.Pass();
 }
 
-TEST(VideoEncoderVpxTest, TestVp8VideoEncoder) {
+TEST(VideoEncoderVpxTest, Vp8) {
   scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP8());
   TestVideoEncoder(encoder.get(), false);
 }
 
-TEST(VideoEncoderVpxTest, TestVp9VideoEncoder) {
+TEST(VideoEncoderVpxTest, Vp9) {
   scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP9());
   // VP9 encoder defaults to lossless encode and lossy (I420) color.
   TestVideoEncoder(encoder.get(), false);
 }
 
 // Test that the VP9 encoder can switch between lossy & lossless encode.
-TEST(VideoEncoderVpxTest, TestVp9VideoEncoderLossyEncode) {
+TEST(VideoEncoderVpxTest, Vp9LossyEncodeSwitching) {
   scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP9());
 
-  webrtc::DesktopSize frame_size(1024, 768);
+  webrtc::DesktopSize frame_size(100, 100);
   scoped_ptr<webrtc::DesktopFrame> frame(CreateTestFrame(frame_size));
 
   // Lossy encode the first frame.
@@ -77,10 +77,10 @@ TEST(VideoEncoderVpxTest, TestVp9VideoEncoderLossyEncode) {
 }
 
 // Test that the VP9 encoder can switch between lossy & lossless color.
-TEST(VideoEncoderVpxTest, TestVp9VideoEncoderLossyColor) {
+TEST(VideoEncoderVpxTest, Vp9LossyColorSwitching) {
   scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP9());
 
-  webrtc::DesktopSize frame_size(1024, 768);
+  webrtc::DesktopSize frame_size(100, 100);
   scoped_ptr<webrtc::DesktopFrame> frame(CreateTestFrame(frame_size));
 
   // Lossy encode the first frame.
@@ -97,10 +97,10 @@ TEST(VideoEncoderVpxTest, TestVp9VideoEncoderLossyColor) {
 }
 
 // Test that the VP8 encoder ignores lossless modes without crashing.
-TEST(VideoEncoderVpxTest, TestVp8VideoEncoderIgnoreLossy) {
+TEST(VideoEncoderVpxTest, Vp8IgnoreLossy) {
   scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP8());
 
-  webrtc::DesktopSize frame_size(1024, 768);
+  webrtc::DesktopSize frame_size(100, 100);
   scoped_ptr<webrtc::DesktopFrame> frame(CreateTestFrame(frame_size));
 
   // Encode a frame, to give the encoder a chance to crash if misconfigured.
@@ -112,8 +112,8 @@ TEST(VideoEncoderVpxTest, TestVp8VideoEncoderIgnoreLossy) {
 
 // Test that calling Encode with a larger frame size than the initial one
 // does not cause VP8 to crash.
-TEST(VideoEncoderVpxTest, TestVp8SizeChangeNoCrash) {
-  webrtc::DesktopSize frame_size(1000, 1000);
+TEST(VideoEncoderVpxTest, Vp8SizeChangeNoCrash) {
+  webrtc::DesktopSize frame_size(100, 100);
 
   scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP8());
 
@@ -131,8 +131,8 @@ TEST(VideoEncoderVpxTest, TestVp8SizeChangeNoCrash) {
 
 // Test that calling Encode with a larger frame size than the initial one
 // does not cause VP9 to crash.
-TEST(VideoEncoderVpxTest, TestVp9SizeChangeNoCrash) {
-  webrtc::DesktopSize frame_size(1000, 1000);
+TEST(VideoEncoderVpxTest, Vp9SizeChangeNoCrash) {
+  webrtc::DesktopSize frame_size(100, 100);
 
   scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP9());
 
@@ -149,8 +149,8 @@ TEST(VideoEncoderVpxTest, TestVp9SizeChangeNoCrash) {
 }
 
 // Test that the DPI information is correctly propagated from the
-// media::ScreenCaptureData to the VideoPacket.
-TEST(VideoEncoderVpxTest, TestDpiPropagation) {
+// webrtc::DesktopFrame to the VideoPacket.
+TEST(VideoEncoderVpxTest, DpiPropagation) {
   webrtc::DesktopSize frame_size(32, 32);
 
   scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP8());
@@ -160,6 +160,25 @@ TEST(VideoEncoderVpxTest, TestDpiPropagation) {
   scoped_ptr<VideoPacket> packet = encoder->Encode(*frame);
   EXPECT_EQ(packet->format().x_dpi(), 96);
   EXPECT_EQ(packet->format().y_dpi(), 97);
+}
+
+TEST(VideoEncoderVpxTest, Vp8EncodeUnchangedFrame) {
+  scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP8());
+  TestVideoEncoderEmptyFrames(encoder.get(), 0);
+}
+
+TEST(VideoEncoderVpxTest, Vp9LosslessUnchangedFrame) {
+  scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP9());
+  encoder->SetLosslessEncode(true);
+  TestVideoEncoderEmptyFrames(encoder.get(), 0);
+}
+
+TEST(VideoEncoderVpxTest, Vp9LossyUnchangedFrame) {
+  scoped_ptr<VideoEncoderVpx> encoder(VideoEncoderVpx::CreateForVP9());
+  encoder->SetLosslessEncode(false);
+  // Expect that VP9+CR should generate no more than 10 top-off frames
+  // per cycle, and take no more than 2 cycles to top-off.
+  TestVideoEncoderEmptyFrames(encoder.get(), 20);
 }
 
 }  // namespace remoting

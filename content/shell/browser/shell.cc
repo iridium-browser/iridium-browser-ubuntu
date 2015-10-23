@@ -6,11 +6,13 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -89,8 +91,8 @@ Shell::~Shell() {
   if (windows_.empty() && quit_message_loop_) {
     if (headless_)
       PlatformExit();
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::MessageLoop::QuitClosure());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::MessageLoop::QuitClosure());
   }
 }
 
@@ -121,8 +123,8 @@ void Shell::CloseAllWindows() {
   std::vector<Shell*> open_windows(windows_);
   for (size_t i = 0; i < open_windows.size(); ++i)
     open_windows[i]->Close();
-  PlatformExit();
   base::MessageLoop::current()->RunUntilIdle();
+  PlatformExit();
 }
 
 void Shell::SetShellCreatedCallback(
@@ -378,13 +380,6 @@ void Shell::ActivateContents(WebContents* contents) {
 
 void Shell::DeactivateContents(WebContents* contents) {
   contents->GetRenderViewHost()->Blur();
-}
-
-void Shell::WorkerCrashed(WebContents* source) {
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kRunLayoutTest))
-    return;
-  BlinkTestController::Get()->WorkerCrashed();
 }
 
 bool Shell::HandleContextMenu(const content::ContextMenuParams& params) {

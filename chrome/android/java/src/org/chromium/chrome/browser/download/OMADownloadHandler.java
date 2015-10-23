@@ -16,18 +16,19 @@ import android.os.AsyncTask;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.provider.Browser;
-import android.support.v4.util.LongSparseArray;
 import android.support.v7.app.AlertDialog;
 import android.text.TextUtils;
 import android.util.Log;
+import android.util.LongSparseArray;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.webkit.URLUtil;
 import android.widget.TextView;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromiumApplication;
+import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.content.browser.DownloadInfo;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -584,9 +585,14 @@ public class OMADownloadHandler {
         if (mimeType == null) {
             mimeType = getOpennableType(mContext.getPackageManager(), omaInfo);
         }
+        String fileName = omaInfo.getValue(OMA_NAME);
+        String url = omaInfo.getValue(OMA_OBJECT_URI);
+        if (TextUtils.isEmpty(fileName)) {
+            fileName = URLUtil.guessFileName(url, null, mimeType);
+        }
         DownloadInfo newInfo = DownloadInfo.Builder.fromDownloadInfo(downloadInfo)
-                .setFileName(omaInfo.getValue(OMA_NAME))
-                .setUrl(omaInfo.getValue(OMA_OBJECT_URI))
+                .setFileName(fileName)
+                .setUrl(url)
                 .setMimeType(mimeType)
                 .setDownloadId((int) downloadId)
                 .setDescription(omaInfo.getValue(OMA_DESCRIPTION))
@@ -666,7 +672,7 @@ public class OMADownloadHandler {
                 urlConnection.setRequestMethod("POST");
                 String userAgent = mDownloadInfo.getUserAgent();
                 if (TextUtils.isEmpty(userAgent)) {
-                    userAgent = ChromiumApplication.getBrowserUserAgent();
+                    userAgent = ChromeApplication.getBrowserUserAgent();
                 }
                 urlConnection.setRequestProperty("User-Agent", userAgent);
                 urlConnection.setRequestProperty("cookie", mDownloadInfo.getCookie());

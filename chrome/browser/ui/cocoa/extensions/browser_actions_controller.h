@@ -9,6 +9,7 @@
 
 #import "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
+#import "chrome/browser/ui/cocoa/has_weak_browser_pointer.h"
 #include "ui/gfx/geometry/size.h"
 
 class Browser;
@@ -28,7 +29,8 @@ extern NSString* const kBrowserActionVisibilityChangedNotification;
 
 // Handles state and provides an interface for controlling the Browser Actions
 // container within the Toolbar.
-@interface BrowserActionsController : NSObject<NSMenuDelegate> {
+@interface BrowserActionsController
+    : NSObject<NSMenuDelegate, HasWeakBrowserPointer> {
  @private
   // Reference to the current browser. Weak.
   Browser* browser_;
@@ -64,6 +66,10 @@ extern NSString* const kBrowserActionVisibilityChangedNotification;
 
   // The bubble that is actively showing, if any.
   ToolbarActionsBarBubbleMac* activeBubble_;
+
+  // The index of the currently-focused view in the overflow menu, or -1 if
+  // no view is focused.
+  NSInteger focusedViewIndex_;
 }
 
 @property(readonly, nonatomic) BrowserActionsContainerView* containerView;
@@ -112,6 +118,12 @@ extern NSString* const kBrowserActionVisibilityChangedNotification;
 
 // Returns the associated ToolbarActionsBar.
 - (ToolbarActionsBar*)toolbarActionsBar;
+
+// Sets whether or not the overflow container is focused in the wrench menu.
+- (void)setFocusedInOverflow:(BOOL)focused;
+
+// Returns the size for the provided |maxWidth| of the overflow menu.
+- (gfx::Size)sizeForOverflowWidth:(int)maxWidth;
 
 @end  // @interface BrowserActionsController
 

@@ -618,7 +618,7 @@ struct VideoCodecVP8 {
   }
 };
 
-// VP9 specific
+// VP9 specific.
 struct VideoCodecVP9 {
   VideoCodecComplexity complexity;
   int                  resilience;
@@ -627,6 +627,8 @@ struct VideoCodecVP9 {
   bool                 frameDroppingOn;
   int                  keyFrameInterval;
   bool                 adaptiveQpMode;
+  unsigned char        numberOfSpatialLayers;
+  bool                 flexibleMode;
 };
 
 // H264 specific.
@@ -758,12 +760,11 @@ struct OverUseDetectorOptions {
         initial_e(),
         initial_process_noise(),
         initial_avg_noise(0.0),
-        initial_var_noise(50),
-        initial_threshold(25.0) {
+        initial_var_noise(50) {
     initial_e[0][0] = 100;
     initial_e[1][1] = 1e-1;
     initial_e[0][1] = initial_e[1][0] = 0;
-    initial_process_noise[0] = 1e-10;
+    initial_process_noise[0] = 1e-13;
     initial_process_noise[1] = 1e-2;
   }
   double initial_slope;
@@ -772,7 +773,6 @@ struct OverUseDetectorOptions {
   double initial_process_noise[2];
   double initial_avg_noise;
   double initial_var_noise;
-  double initial_threshold;
 };
 
 // This structure will have the information about when packet is actually
@@ -804,6 +804,7 @@ struct RTPHeaderExtension {
   // Audio Level includes both level in dBov and voiced/unvoiced bit. See:
   // https://datatracker.ietf.org/doc/draft-lennox-avt-rtp-audio-level-exthdr/
   bool hasAudioLevel;
+  bool voiceActivity;
   uint8_t audioLevel;
 
   // For Coordination of Video Orientation. See

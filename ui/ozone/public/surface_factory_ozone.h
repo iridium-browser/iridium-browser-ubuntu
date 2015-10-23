@@ -8,20 +8,15 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/native_library.h"
-#include "ui/gfx/geometry/point.h"
-#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/buffer_types.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/overlay_transform.h"
 #include "ui/ozone/ozone_base_export.h"
 
-class SkBitmap;
-class SkCanvas;
-
 namespace ui {
 
 class NativePixmap;
-class OverlayCandidatesOzone;
 class SurfaceOzoneCanvas;
 class SurfaceOzoneEGL;
 
@@ -58,31 +53,10 @@ class SurfaceOzoneEGL;
 // modes (See comments bellow for descriptions).
 class OZONE_BASE_EXPORT SurfaceFactoryOzone {
  public:
-  // Describes overlay buffer format.
-  // TODO: this is a placeholder for now and will be populated with more
-  // formats once we know what sorts of content, video, etc. we can support.
-  enum BufferFormat {
-    UNKNOWN,
-    BGRA_8888,
-    RGBX_8888,
-    RGB_888,
-  };
-
-  enum BufferUsage {
-    MAP,
-    SCANOUT,
-  };
-
   typedef void* (*GLGetProcAddressProc)(const char* name);
   typedef base::Callback<void(base::NativeLibrary)> AddGLLibraryCallback;
   typedef base::Callback<void(GLGetProcAddressProc)>
       SetGLGetProcAddressProcCallback;
-
-  SurfaceFactoryOzone();
-  virtual ~SurfaceFactoryOzone();
-
-  // Returns the singleton instance.
-  static SurfaceFactoryOzone* GetInstance();
 
   // Returns native platform display handle. This is used to obtain the EGL
   // display connection for the native display.
@@ -122,10 +96,6 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   // caller. desired_list contains list of desired EGL properties and values.
   virtual const int32* GetEGLSurfaceProperties(const int32* desired_list);
 
-  // Get the hal struct to check for overlay support.
-  virtual OverlayCandidatesOzone* GetOverlayCandidates(
-      gfx::AcceleratedWidget w);
-
   // Create a single native buffer to be used for overlay planes or zero copy
   // for |widget| representing a particular display controller or default
   // display controller for kNullAcceleratedWidget.
@@ -133,38 +103,20 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   virtual scoped_refptr<NativePixmap> CreateNativePixmap(
       gfx::AcceleratedWidget widget,
       gfx::Size size,
-      BufferFormat format,
-      BufferUsage usage);
-
-  // Sets the overlay plane to switch to at the next page flip.
-  // |w| specifies the screen to display this overlay plane on.
-  // |plane_z_order| specifies the stacking order of the plane relative to the
-  // main framebuffer located at index 0.
-  // |plane_transform| specifies how the buffer is to be transformed during.
-  // composition.
-  // |buffer| to be presented by the overlay.
-  // |display_bounds| specify where it is supposed to be on the screen.
-  // |crop_rect| specifies the region within the buffer to be placed
-  // inside |display_bounds|. This is specified in texture coordinates, in the
-  // range of [0,1].
-  virtual bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
-                                    int plane_z_order,
-                                    gfx::OverlayTransform plane_transform,
-                                    scoped_refptr<NativePixmap> buffer,
-                                    const gfx::Rect& display_bounds,
-                                    const gfx::RectF& crop_rect);
+      gfx::BufferFormat format,
+      gfx::BufferUsage usage);
 
   // Returns true if overlays can be shown at z-index 0, replacing the main
   // surface. Combined with surfaceless extensions, it allows for an
   // overlay-only mode.
   virtual bool CanShowPrimaryPlaneAsOverlay();
 
-  // Returns true if the platform is able to create buffers for a specific usage
-  // such as MAP for zero copy or SCANOUT for display controller.
-  virtual bool CanCreateNativePixmap(BufferUsage usage);
+ protected:
+  SurfaceFactoryOzone();
+  virtual ~SurfaceFactoryOzone();
 
  private:
-  static SurfaceFactoryOzone* impl_;  // not owned
+  DISALLOW_COPY_AND_ASSIGN(SurfaceFactoryOzone);
 };
 
 }  // namespace ui

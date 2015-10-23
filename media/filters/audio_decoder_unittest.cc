@@ -99,12 +99,12 @@ class AudioDecoderTest : public testing::TestWithParam<DecoderTestData> {
         last_decode_status_(AudioDecoder::kDecodeError) {
     switch (GetParam().decoder_type) {
       case FFMPEG:
-        decoder_.reset(new FFmpegAudioDecoder(
-            message_loop_.message_loop_proxy(), LogCB()));
+        decoder_.reset(new FFmpegAudioDecoder(message_loop_.task_runner(),
+                                              new MediaLog()));
         break;
       case OPUS:
         decoder_.reset(
-            new OpusAudioDecoder(message_loop_.message_loop_proxy()));
+            new OpusAudioDecoder(message_loop_.task_runner()));
         break;
     }
   }
@@ -150,8 +150,8 @@ class AudioDecoderTest : public testing::TestWithParam<DecoderTestData> {
     ASSERT_TRUE(reader_->SeekForTesting(start_timestamp_));
 
     AudioDecoderConfig config;
-    AVCodecContextToAudioDecoderConfig(
-        reader_->codec_context_for_testing(), false, &config, false);
+    AVCodecContextToAudioDecoderConfig(reader_->codec_context_for_testing(),
+                                       false, &config);
 
     EXPECT_EQ(GetParam().codec, config.codec());
     EXPECT_EQ(GetParam().samples_per_second, config.samples_per_second());
@@ -161,14 +161,13 @@ class AudioDecoderTest : public testing::TestWithParam<DecoderTestData> {
   }
 
   void InitializeDecoder(const AudioDecoderConfig& config) {
-    InitializeDecoderWithStatus(config, PIPELINE_OK);
+    InitializeDecoderWithResult(config, true);
   }
 
-  void InitializeDecoderWithStatus(const AudioDecoderConfig& config,
-                                   PipelineStatus status) {
+  void InitializeDecoderWithResult(const AudioDecoderConfig& config,
+                                   bool success) {
     decoder_->Initialize(
-        config,
-        NewExpectedStatusCB(status),
+        config, NewExpectedBoolCB(success),
         base::Bind(&AudioDecoderTest::OnDecoderOutput, base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
   }
@@ -382,7 +381,6 @@ TEST_P(OpusAudioDecoderBehavioralTest, InitializeWithNoCodecDelay) {
                             kOpusExtraData,
                             arraysize(kOpusExtraData),
                             false,
-                            false,
                             base::TimeDelta::FromMilliseconds(80),
                             0);
   InitializeDecoder(decoder_config);
@@ -399,11 +397,10 @@ TEST_P(OpusAudioDecoderBehavioralTest, InitializeWithBadCodecDelay) {
       kOpusExtraData,
       arraysize(kOpusExtraData),
       false,
-      false,
       base::TimeDelta::FromMilliseconds(80),
       // Use a different codec delay than in the extradata.
       100);
-  InitializeDecoderWithStatus(decoder_config, DECODER_ERROR_NOT_SUPPORTED);
+  InitializeDecoderWithResult(decoder_config, false);
 }
 
 TEST_P(FFmpegAudioDecoderBehavioralTest, InitializeWithBadConfig) {
@@ -415,14 +412,22 @@ TEST_P(FFmpegAudioDecoderBehavioralTest, InitializeWithBadConfig) {
                                           NULL,
                                           0,
                                           false);
-  InitializeDecoderWithStatus(decoder_config, DECODER_ERROR_NOT_SUPPORTED);
+  InitializeDecoderWithResult(decoder_config, false);
 }
 
+#if defined(OPUS_FIXED_POINT)
+const DecodedBufferExpectations kSfxOpusExpectations[] = {
+    {0, 13500, "-2.70,-1.41,-0.78,-1.27,-2.56,-3.73,"},
+    {13500, 20000, "5.48,5.93,6.05,5.83,5.54,5.46,"},
+    {33500, 20000, "-3.44,-3.34,-3.57,-4.11,-4.74,-5.13,"},
+};
+#else
 const DecodedBufferExpectations kSfxOpusExpectations[] = {
     {0, 13500, "-2.70,-1.41,-0.78,-1.27,-2.56,-3.73,"},
     {13500, 20000, "5.48,5.93,6.04,5.83,5.54,5.45,"},
     {33500, 20000, "-3.45,-3.35,-3.57,-4.12,-4.74,-5.14,"},
 };
+#endif
 
 const DecodedBufferExpectations kBearOpusExpectations[] = {
     {500, 3500, "-0.26,0.87,1.36,0.84,-0.30,-1.22,"},

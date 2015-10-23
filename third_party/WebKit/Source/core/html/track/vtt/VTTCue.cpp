@@ -145,22 +145,18 @@ static void setInlineStylePropertyIfNotEmpty(Element& element,
         element.setInlineStyleProperty(propertyID, value);
 }
 
-VTTCueBox::VTTCueBox(Document& document, VTTCue* cue)
+VTTCueBox::VTTCueBox(Document& document)
     : HTMLDivElement(document)
-    , m_cue(cue)
+    , m_snapToLinesPosition(std::numeric_limits<float>::quiet_NaN())
 {
     setShadowPseudoId(AtomicString("-webkit-media-text-track-display", AtomicString::ConstructFromLiteral));
 }
 
 void VTTCueBox::applyCSSProperties(const VTTDisplayParameters& displayParameters)
 {
-    // FIXME: Apply all the initial CSS positioning properties. http://wkb.ug/79916
-    if (!m_cue->regionId().isEmpty()) {
-        setInlineStyleProperty(CSSPropertyPosition, CSSValueRelative);
-        return;
-    }
+    // http://dev.w3.org/html5/webvtt/#applying-css-properties-to-webvtt-node-objects
 
-    // 3.5.1 On the (root) List of WebVTT Node Objects:
+    // Initialize the (root) list of WebVTT Node Objects with the following CSS settings:
 
     // the 'position' property must be set to 'absolute'
     setInlineStyleProperty(CSSPropertyPosition, CSSValueAbsolute);
@@ -177,27 +173,30 @@ void VTTCueBox::applyCSSProperties(const VTTDisplayParameters& displayParameters
     const FloatPoint& position = displayParameters.position;
 
     // the 'top' property must be set to top,
-    setInlineStyleProperty(CSSPropertyTop, position.y(), CSSPrimitiveValue::CSS_PERCENTAGE);
+    setInlineStyleProperty(CSSPropertyTop, position.y(), CSSPrimitiveValue::UnitType::Percentage);
 
     // the 'left' property must be set to left
-    setInlineStyleProperty(CSSPropertyLeft, position.x(), CSSPrimitiveValue::CSS_PERCENTAGE);
+    setInlineStyleProperty(CSSPropertyLeft, position.x(), CSSPrimitiveValue::UnitType::Percentage);
 
     // the 'width' property must be set to width, and the 'height' property  must be set to height
-    if (m_cue->vertical() == horizontalKeyword()) {
-        setInlineStyleProperty(CSSPropertyWidth, displayParameters.size, CSSPrimitiveValue::CSS_PERCENTAGE);
+    if (displayParameters.writingMode == CSSValueHorizontalTb) {
+        setInlineStyleProperty(CSSPropertyWidth, displayParameters.size, CSSPrimitiveValue::UnitType::Percentage);
         setInlineStyleProperty(CSSPropertyHeight, CSSValueAuto);
     } else {
         setInlineStyleProperty(CSSPropertyWidth, CSSValueAuto);
-        setInlineStyleProperty(CSSPropertyHeight, displayParameters.size,  CSSPrimitiveValue::CSS_PERCENTAGE);
+        setInlineStyleProperty(CSSPropertyHeight, displayParameters.size,  CSSPrimitiveValue::UnitType::Percentage);
     }
 
     // The 'text-align' property on the (root) List of WebVTT Node Objects must
     // be set to the value in the second cell of the row of the table below
-    // whose first cell is the value of the corresponding cue's text track cue
-    // alignment:
-    setInlineStyleProperty(CSSPropertyTextAlign, displayAlignmentMap[m_cue->cueAlignment()]);
+    // whose first cell is the value of the corresponding cue's WebVTT cue
+    // text alignment:
+    setInlineStyleProperty(CSSPropertyTextAlign, displayParameters.textAlign);
 
-    if (!m_cue->snapToLines()) {
+    // TODO(philipj): The position adjustment for non-snap-to-lines cues has
+    // been removed from the spec:
+    // https://www.w3.org/Bugs/Public/show_bug.cgi?id=19178
+    if (std::isnan(displayParameters.snapToLinesPosition)) {
         // 10.13.1 Set up x and y:
         // Note: x and y are set through the CSS left and top above.
 
@@ -213,17 +212,21 @@ void VTTCueBox::applyCSSProperties(const VTTDisplayParameters& displayParameters
 
         setInlineStyleProperty(CSSPropertyWhiteSpace, CSSValuePre);
     }
+
+    // The snap-to-lines position is propagated to LayoutVTTCue.
+    m_snapToLinesPosition = displayParameters.snapToLinesPosition;
 }
 
-LayoutObject* VTTCueBox::createLayoutObject(const ComputedStyle&)
+LayoutObject* VTTCueBox::createLayoutObject(const ComputedStyle& style)
 {
-    return new LayoutVTTCue(this);
-}
+    // If WebVTT Regions are used, the regular WebVTT layout algorithm is no
+    // longer necessary, since cues having the region parameter set do not have
+    // any positioning parameters. Also, in this case, the regions themselves
+    // have positioning information.
+    if (style.position() == RelativePosition)
+        return HTMLDivElement::createLayoutObject(style);
 
-DEFINE_TRACE(VTTCueBox)
-{
-    visitor->trace(m_cue);
-    HTMLDivElement::trace(visitor);
+    return new LayoutVTTCue(this, m_snapToLinesPosition);
 }
 
 VTTCue::VTTCue(Document& document, double startTime, double endTime, const String& text)
@@ -245,15 +248,6 @@ VTTCue::VTTCue(Document& document, double startTime, double endTime, const Strin
 
 VTTCue::~VTTCue()
 {
-    // Using oilpan, if m_displayTree is in the document it will strongly keep
-    // the cue alive. Thus, if the cue is dead, either m_displayTree is not in
-    // the document or the entire document is dead too.
-#if !ENABLE(OILPAN)
-    // FIXME: This is scary, we should make the life cycle smarter so the destructor
-    // doesn't need to do DOM mutations.
-    if (m_displayTree)
-        m_displayTree->remove(ASSERT_NO_EXCEPTION);
-#endif
 }
 
 #ifndef NDEBUG
@@ -330,10 +324,9 @@ void VTTCue::line(DoubleOrAutoKeyword& result) const
 void VTTCue::setLine(const DoubleOrAutoKeyword& position)
 {
     // http://dev.w3.org/html5/webvtt/#dfn-vttcue-line
-    // On setting, the text track cue line position must be set to the new
-    // value; if the new value is the string "auto", then it must be
-    // interpreted as the special value auto.
-    // ("auto" is translated to NaN.)
+    // On setting, the WebVTT cue line must be set to the new value; if the new
+    // value is the string "auto", then it must be interpreted as the special
+    // value auto.  ("auto" is translated to NaN.)
     float floatPosition;
     if (position.isAutoKeyword()) {
         if (lineIsAuto())
@@ -368,9 +361,9 @@ void VTTCue::setPosition(const DoubleOrAutoKeyword& position, ExceptionState& ex
 {
     // http://dev.w3.org/html5/webvtt/#dfn-vttcue-position
     // On setting, if the new value is negative or greater than 100, then an
-    // IndexSizeError exception must be thrown. Otherwise, the text track cue
-    // text position must be set to the new value; if the new value is the
-    // string "auto", then it must be interpreted as the special value auto.
+    // IndexSizeError exception must be thrown. Otherwise, the WebVTT cue
+    // position must be set to the new value; if the new value is the string
+    // "auto", then it must be interpreted as the special value auto.
     float floatPosition;
     if (position.isAutoKeyword()) {
         if (textPositionIsAuto())
@@ -392,13 +385,13 @@ void VTTCue::setPosition(const DoubleOrAutoKeyword& position, ExceptionState& ex
 
 void VTTCue::setSize(double size, ExceptionState& exceptionState)
 {
-    // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-video-element.html#dom-texttrackcue-size
-    // On setting, if the new value is negative or greater than 100, then throw an IndexSizeError
-    // exception. Otherwise, set the text track cue size to the new value.
+    // http://dev.w3.org/html5/webvtt/#dfn-vttcue-size
+    // On setting, if the new value is negative or greater than 100, then throw
+    // an IndexSizeError exception.
     if (isInvalidPercentage(size, exceptionState))
         return;
 
-    // Otherwise, set the text track cue line position to the new value.
+    // Otherwise, set the WebVTT cue size to the new value.
     float floatSize = narrowPrecisionToFloat(size);
     if (m_cueSize == floatSize)
         return;
@@ -504,33 +497,32 @@ void VTTCue::setRegionId(const String& regionId)
 
 float VTTCue::calculateComputedLinePosition() const
 {
-    // http://dev.w3.org/html5/webvtt/#dfn-text-track-cue-computed-line-position
-    // A text track cue has a text track cue computed line position whose value
-    // is that returned by the following algorithm, which is defined in terms
-    // of the other aspects of the cue:
+    // http://dev.w3.org/html5/webvtt/#dfn-cue-computed-line
+    // A WebVTT cue has a computed line whose value is that returned by the
+    // following algorithm, which is defined in terms of the other aspects of
+    // the cue:
 
-    // 1. If the text track cue line position is numeric, the text track cue
-    //    snap-to-lines flag of the text track cue is not set, and the text
-    //    track cue line position is negative or greater than 100, then return
-    //    100 and abort these steps.
+    // 1. If the line is numeric, the WebVTT cue snap-to-lines flag of the
+    //    WebVTT cue is not set, and the line is negative or greater than 100,
+    //    then return 100 and abort these steps.
     if (!lineIsAuto() && !m_snapToLines && isInvalidPercentage(m_linePosition))
         return 100;
 
-    // 2. If the text track cue line position is numeric, return the value of
-    //    the text track cue line position and abort these steps. (Either the
-    //    text track cue snap-to-lines flag is set, so any value, not just
-    //    those in the range 0..100, is valid, or the value is in the range
-    //    0..100 and is thus valid regardless of the value of that flag.)
+    // 2. If the line is numeric, return the value of the WebVTT cue line and
+    //    abort these steps. (Either the WebVTT cue snap-to-lines flag is set,
+    //    so any value, not just those in the range 0..100, is valid, or the
+    //    value is in the range 0..100 and is thus valid regardless of the
+    //    value of that flag.)
     if (!lineIsAuto())
         return m_linePosition;
 
-    // 3. If the text track cue snap-to-lines flag of the text track cue is not
-    //    set, return the value 100 and abort these steps. (The text track cue
-    //    line position is the special value auto.)
+    // 3. If the WebVTT cue snap-to-lines flag of the WebVTT cue is not set,
+    //    return the value 100 and abort these steps. (The WebVTT cue line is
+    //    the special value auto.)
     if (!m_snapToLines)
         return 100;
 
-    // 4. Let cue be the text track cue.
+    // 4. Let cue be the WebVTT cue.
     // 5. If cue is not in a list of cues of a text track, or if that text
     //    track is not in the list of text tracks of a media element, return -1
     //    and abort these steps.
@@ -604,24 +596,23 @@ static CSSValueID determineTextDirection(DocumentFragment* vttRoot)
 
 float VTTCue::calculateComputedTextPosition() const
 {
-    // http://dev.w3.org/html5/webvtt/#dfn-text-track-cue-computed-text-position
+    // http://dev.w3.org/html5/webvtt/#dfn-cue-computed-position
 
-    // 1. If the text track cue text position is numeric, then return the value
-    // of the text track cue text position and abort these steps. (Otherwise,
-    // the text track cue text position is the special value auto.)
+    // 1. If the position is numeric, then return the value of the position and
+    // abort these steps. (Otherwise, the position is the special value auto.)
     if (!textPositionIsAuto())
         return m_textPosition;
 
     switch (m_cueAlignment) {
-    // 2. If the text track cue text alignment is start or left, return 0 and abort these steps.
+    // 2. If the cue text alignment is start or left, return 0 and abort these steps.
     case Start:
     case Left:
         return 0;
-    // 3. If the text track cue text alignment is end or right, return 100 and abort these steps.
+    // 3. If the cue text alignment is end or right, return 100 and abort these steps.
     case End:
     case Right:
         return 100;
-    // 4. If the text track cue text alignment is middle, return 50 and abort these steps.
+    // 4. If the cue text alignment is middle, return 50 and abort these steps.
     case Middle:
         return 50;
     default:
@@ -645,24 +636,30 @@ VTTCue::CueAlignment VTTCue::calculateComputedCueAlignment() const
 VTTDisplayParameters::VTTDisplayParameters()
     : size(std::numeric_limits<float>::quiet_NaN())
     , direction(CSSValueNone)
-    , writingMode(CSSValueNone) { }
+    , textAlign(CSSValueNone)
+    , writingMode(CSSValueNone)
+    , snapToLinesPosition(std::numeric_limits<float>::quiet_NaN()) { }
 
 VTTDisplayParameters VTTCue::calculateDisplayParameters() const
 {
     // http://dev.w3.org/html5/webvtt/#dfn-apply-webvtt-cue-settings
 
     VTTDisplayParameters displayParameters;
+
     // Steps 1 and 2.
     displayParameters.direction = determineTextDirection(m_vttNodeTree.get());
 
     if (displayParameters.direction == CSSValueRtl)
         UseCounter::count(document(), UseCounter::VTTCueRenderRtl);
 
-    // 3. If the text track cue writing direction is horizontal, then let
-    // block-flow be 'tb'. Otherwise, if the text track cue writing direction is
-    // vertical growing left, then let block-flow be 'lr'. Otherwise, the text
-    // track cue writing direction is vertical growing right; let block-flow be
-    // 'rl'.
+    // Note: The 'text-align' property is also determined here so that
+    // VTTCueBox::applyCSSProperties need not have access to a VTTCue.
+    displayParameters.textAlign = displayAlignmentMap[cueAlignment()];
+
+    // 3. If the cue writing direction is horizontal, then let block-flow be
+    // 'tb'. Otherwise, if the cue writing direction is vertical growing left,
+    // then let block-flow be 'lr'. Otherwise, the cue writing direction is
+    // vertical growing right; let block-flow be 'rl'.
     displayParameters.writingMode = displayWritingModeMap[m_writingDirection];
 
     // Resolve the cue alignment to one of the values {start, end, middle}.
@@ -683,11 +680,11 @@ VTTDisplayParameters VTTCue::calculateDisplayParameters() const
         ASSERT_NOT_REACHED();
     }
 
-    // 5. If the text track cue size is less than maximum size, then let size
-    // be text track cue size. Otherwise, let size be maximum size.
+    // 5. If the cue size is less than maximum size, then let size
+    // be cue size. Otherwise, let size be maximum size.
     displayParameters.size = std::min(m_cueSize, maximumSize);
 
-    // 6. If the text track cue writing direction is horizontal, then let width
+    // 6. If the cue writing direction is horizontal, then let width
     // be 'size vw' and height be 'auto'. Otherwise, let width be 'auto' and
     // height be 'size vh'. (These are CSS values used by the next section to
     // set CSS properties for the rendering; 'vw' and 'vh' are CSS units.)
@@ -726,8 +723,8 @@ VTTDisplayParameters VTTCue::calculateDisplayParameters() const
         }
     }
 
-    // A text track cue has a text track cue computed line position whose value
-    // is defined in terms of the other aspects of the cue.
+    // A cue has a computed line whose value is defined in terms of
+    // the other aspects of the cue.
     float computedLinePosition = calculateComputedLinePosition();
 
     // 8. Determine the value of whichever of x-position or y-position is not
@@ -746,6 +743,11 @@ VTTDisplayParameters VTTCue::calculateDisplayParameters() const
     }
 
     // Step 9 not implemented (margin == 0).
+
+    // The snap-to-lines position is propagated to LayoutVTTCue.
+    displayParameters.snapToLinesPosition = m_snapToLines
+        ? computedLinePosition
+        : std::numeric_limits<float>::quiet_NaN();
 
     ASSERT(std::isfinite(displayParameters.size));
     ASSERT(displayParameters.direction != CSSValueNone);
@@ -800,7 +802,7 @@ PassRefPtrWillBeRawPtr<VTTCueBox> VTTCue::getDisplayTree()
     ASSERT(track() && track()->isRendered() && isActive());
 
     if (!m_displayTree) {
-        m_displayTree = VTTCueBox::create(document(), this);
+        m_displayTree = VTTCueBox::create(document());
         m_displayTree->appendChild(m_cueBackgroundBox);
     }
 
@@ -819,8 +821,15 @@ PassRefPtrWillBeRawPtr<VTTCueBox> VTTCue::getDisplayTree()
     m_cueBackgroundBox->removeChildren();
     m_vttNodeTree->cloneChildNodes(m_cueBackgroundBox.get());
 
-    VTTDisplayParameters displayParameters = calculateDisplayParameters();
-    m_displayTree->applyCSSProperties(displayParameters);
+    // TODO(philipj): The region identifier may be non-empty without there being
+    // a corresponding region, in which case this VTTCueBox will be added
+    // directly to the text track container in updateDisplay().
+    if (regionId().isEmpty()) {
+        VTTDisplayParameters displayParameters = calculateDisplayParameters();
+        m_displayTree->applyCSSProperties(displayParameters);
+    } else {
+        m_displayTree->setInlineStyleProperty(CSSPropertyPosition, CSSValueRelative);
+    }
 
     // Apply user override settings for text tracks
     applyUserOverrideCSSProperties();
@@ -873,16 +882,16 @@ void VTTCue::updateDisplay(HTMLDivElement& container)
         region = track()->regions()->getRegionById(regionId());
 
     if (!region) {
-        // If cue has an empty text track cue region identifier or there is no
-        // WebVTT region whose region identifier is identical to cue's text
-        // track cue region identifier, run the following substeps:
+        // If cue has an empty region identifier or there is no WebVTT region
+        // whose region identifier is identical to cue's region identifier, run
+        // the following substeps:
         if (displayBox->hasChildren() && !container.contains(displayBox.get())) {
             // Note: the display tree of a cue is removed when the active flag of the cue is unset.
             container.appendChild(displayBox);
         }
     } else {
-        // Let region be the WebVTT region whose region identifier
-        // matches the text track cue region identifier of cue.
+        // Let region be the WebVTT region whose region identifier matches the
+        // region identifier of cue.
         RefPtrWillBeRawPtr<HTMLDivElement> regionNode = region->getDisplayTree(document());
 
         // Append the region to the viewport, if it was not already.
@@ -965,13 +974,13 @@ void VTTCue::parseSettings(const String& inputString)
         case Vertical: {
             // If name is a case-sensitive match for "vertical"
             // 1. If value is a case-sensitive match for the string "rl", then
-            //    let cue's text track cue writing direction be vertical
+            //    let cue's WebVTT cue writing direction be vertical
             //    growing left.
             if (input.scanRun(valueRun, verticalGrowingLeftKeyword()))
                 m_writingDirection = VerticalGrowingLeft;
 
             // 2. Otherwise, if value is a case-sensitive match for the string
-            //    "lr", then let cue's text track cue writing direction be
+            //    "lr", then let cue's WebVTT cue writing direction be
             //    vertical growing right.
             else if (input.scanRun(valueRun, verticalGrowingRightKeyword()))
                 m_writingDirection = VerticalGrowingRight;
@@ -1008,10 +1017,10 @@ void VTTCue::parseSettings(const String& inputString)
             }
             if (!input.isAt(valueRun.end()))
                 break;
-            // 5. Let cue's text track cue line position be number.
+            // 5. Let cue's WebVTT cue line be number.
             m_linePosition = number;
             // 6. If the last character in linepos is a U+0025 PERCENT SIGN
-            //    character (%), then let cue's text track cue snap-to-lines
+            //    character (%), then let cue's WebVTT cue snap-to-lines
             //    flag be false. Otherwise, let it be true.
             m_snapToLines = !isPercentage;
             // Steps 7 - 9 skipped.
@@ -1029,7 +1038,7 @@ void VTTCue::parseSettings(const String& inputString)
                 break;
             if (!input.isAt(valueRun.end()))
                 break;
-            // 4. Let cue's text track cue text position be number.
+            // 4. Let cue's cue position be number.
             m_textPosition = number;
             // Steps 5 - 7 skipped.
             break;
@@ -1044,34 +1053,34 @@ void VTTCue::parseSettings(const String& inputString)
                 break;
             if (!input.isAt(valueRun.end()))
                 break;
-            // 2. Let cue's text track cue size be number.
+            // 2. Let cue's WebVTT cue size be number.
             m_cueSize = number;
             break;
         }
         case Align: {
             // If name is a case-sensitive match for "align"
             // 1. If value is a case-sensitive match for the string "start",
-            //    then let cue's text track cue alignment be start alignment.
+            //    then let cue's WebVTT cue text alignment be start alignment.
             if (input.scanRun(valueRun, startKeyword()))
                 m_cueAlignment = Start;
 
             // 2. If value is a case-sensitive match for the string "middle",
-            //    then let cue's text track cue alignment be middle alignment.
+            //    then let cue's WebVTT cue text alignment be middle alignment.
             else if (input.scanRun(valueRun, middleKeyword()))
                 m_cueAlignment = Middle;
 
             // 3. If value is a case-sensitive match for the string "end", then
-            //    let cue's text track cue alignment be end alignment.
+            //    let cue's WebVTT cue text alignment be end alignment.
             else if (input.scanRun(valueRun, endKeyword()))
                 m_cueAlignment = End;
 
             // 4. If value is a case-sensitive match for the string "left",
-            //    then let cue's text track cue alignment be left alignment.
+            //    then let cue's WebVTT cue text alignment be left alignment.
             else if (input.scanRun(valueRun, leftKeyword()))
                 m_cueAlignment = Left;
 
             // 5. If value is a case-sensitive match for the string "right",
-            //    then let cue's text track cue alignment be right alignment.
+            //    then let cue's WebVTT cue text alignment be right alignment.
             else if (input.scanRun(valueRun, rightKeyword()))
                 m_cueAlignment = Right;
             break;

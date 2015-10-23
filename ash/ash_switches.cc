@@ -54,14 +54,18 @@ const char kAshEnableMagnifierKeyScroller[] =
 // Enables unified desktop mode.
 const char kAshEnableUnifiedDesktop[] = "ash-enable-unified-desktop";
 
+// Enables the observation of accelerometer events to enter touch-view mode.
+const char kAshEnableTouchView[] = "enable-touchview";
 #endif
 
 // Enables mirrored screen.
 const char kAshEnableMirroredScreen[] = "ash-enable-mirrored-screen";
 
-// Enables quick, non-cancellable locking of the screen when in maximize mode.
-const char kAshEnablePowerButtonQuickLock[] =
-    "ash-enable-power-button-quick-lock";
+// Enables / disables a stable order between overview sessions, independent of
+// the MRU order which attempts to preserve relative window positions.
+const char kAshDisableStableOverviewOrder[] =
+    "ash-disable-stable-overview-order";
+const char kAshEnableStableOverviewOrder[] = "ash-enable-stable-overview-order";
 
 // Specifies the screen rotation animation to use. Possible values are:
 // "partial-rotation", "partial-rotation-slow", "full-rotation", and
@@ -128,11 +132,6 @@ bool ConstrainPointerToRoot() {
   return base::SysInfo::IsRunningOnChromeOS() ||
          base::CommandLine::ForCurrentProcess()->HasSwitch(
              kAshConstrainPointerToRoot);
-}
-
-bool UnifiedDesktopEnabled() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      kAshEnableUnifiedDesktop);
 }
 
 #endif

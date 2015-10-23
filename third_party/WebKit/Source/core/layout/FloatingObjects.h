@@ -49,9 +49,11 @@ public:
     // Note that Type uses bits so you can use FloatLeftRight as a mask to query for both left and right.
     enum Type { FloatLeft = 1, FloatRight = 2, FloatLeftRight = 3 };
 
+    enum Ownership { DirectlyContained, IndirectlyContained, IntrudingNonDescendant };
+
     static PassOwnPtr<FloatingObject> create(LayoutBox*);
 
-    PassOwnPtr<FloatingObject> copyToNewContainer(LayoutSize, bool shouldPaint = false, bool isDescendant = false) const;
+    PassOwnPtr<FloatingObject> copyToNewContainer(LayoutSize, Ownership) const;
 
     PassOwnPtr<FloatingObject> unsafeClone() const;
 
@@ -83,10 +85,10 @@ public:
     void setIsInPlacedTree(bool value) { m_isInPlacedTree = value; }
 #endif
 
-    bool shouldPaint() const { return m_shouldPaint; }
-    void setShouldPaint(bool shouldPaint) { m_shouldPaint = shouldPaint; }
-    bool isDescendant() const { return m_isDescendant; }
-    void setIsDescendant(bool isDescendant) { m_isDescendant = isDescendant; }
+    bool isDirectlyContained() const { return m_ownership == DirectlyContained; }
+    bool isDescendant() const { return m_ownership == DirectlyContained || m_ownership == IndirectlyContained; }
+    bool isLowestNonOverhangingFloatInChild() const { return m_isLowestNonOverhangingFloatInChild; }
+    void setIsLowestNonOverhangingFloatInChild(bool isLowestNonOverhangingFloatInChild) { m_isLowestNonOverhangingFloatInChild = isLowestNonOverhangingFloatInChild; }
 
     // FIXME: Callers of these methods are dangerous and should be whitelisted explicitly or removed.
     RootInlineBox* originatingLine() const { return m_originatingLine; }
@@ -94,7 +96,7 @@ public:
 
 private:
     explicit FloatingObject(LayoutBox*);
-    FloatingObject(LayoutBox*, Type, const LayoutRect&, bool shouldPaint, bool isDescendant);
+    FloatingObject(LayoutBox*, Type, const LayoutRect&, Ownership, bool isLowestNonOverhangingFloatInChild);
 
     LayoutBox* m_layoutObject;
     RootInlineBox* m_originatingLine;
@@ -102,9 +104,9 @@ private:
     int m_paginationStrut; // FIXME: Is this class size-sensitive? Does this need 32-bits?
 
     unsigned m_type : 2; // Type (left or right aligned)
-    unsigned m_shouldPaint : 1;
-    unsigned m_isDescendant : 1;
+    unsigned m_ownership : 2; // Ownership
     unsigned m_isPlaced : 1;
+    unsigned m_isLowestNonOverhangingFloatInChild : 1;
 #if ENABLE(ASSERT)
     unsigned m_isInPlacedTree : 1;
 #endif
@@ -142,8 +144,8 @@ public:
     void moveAllToFloatInfoMap(LayoutBoxToFloatInfoMap&);
     FloatingObject* add(PassOwnPtr<FloatingObject>);
     void remove(FloatingObject*);
-    void addPlacedObject(FloatingObject*);
-    void removePlacedObject(FloatingObject*);
+    void addPlacedObject(FloatingObject&);
+    void removePlacedObject(FloatingObject&);
     void setHorizontalWritingMode(bool b = true) { m_horizontalWritingMode = b; }
 
     bool hasLeftObjects() const { return m_leftObjectsCount > 0; }
@@ -158,11 +160,12 @@ public:
     LayoutUnit logicalRightOffsetForPositioningFloat(LayoutUnit fixedOffset, LayoutUnit logicalTop, LayoutUnit* heightRemaining);
 
     LayoutUnit lowestFloatLogicalBottom(FloatingObject::Type);
+    FloatingObject* lowestFloatingObject() const;
 
 private:
     bool hasLowestFloatLogicalBottomCached(bool isHorizontal, FloatingObject::Type floatType) const;
     LayoutUnit getCachedlowestFloatLogicalBottom(FloatingObject::Type floatType) const;
-    void setCachedLowestFloatLogicalBottom(bool isHorizontal, FloatingObject::Type floatType, LayoutUnit value);
+    void setCachedLowestFloatLogicalBottom(bool isHorizontal, FloatingObject::Type floatType, FloatingObject*);
     void markLowestFloatLogicalBottomCacheAsDirty();
 
     void computePlacedFloatsTree();
@@ -174,7 +177,7 @@ private:
     }
     void increaseObjectsCount(FloatingObject::Type);
     void decreaseObjectsCount(FloatingObject::Type);
-    FloatingObjectInterval intervalForFloatingObject(FloatingObject*);
+    FloatingObjectInterval intervalForFloatingObject(FloatingObject&);
 
     FloatingObjectSet m_set;
     FloatingObjectTree m_placedFloatsTree;
@@ -185,7 +188,7 @@ private:
 
     struct FloatBottomCachedValue {
         FloatBottomCachedValue();
-        LayoutUnit value;
+        FloatingObject* floatingObject;
         bool dirty;
     };
     FloatBottomCachedValue m_lowestFloatBottomCache[2];

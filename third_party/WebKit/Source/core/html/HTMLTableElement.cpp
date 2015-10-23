@@ -35,7 +35,6 @@
 #include "core/dom/Attribute.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeListsNodeData.h"
-#include "core/frame/UseCounter.h"
 #include "core/html/HTMLTableCaptionElement.h"
 #include "core/html/HTMLTableCellElement.h"
 #include "core/html/HTMLTableRowElement.h"
@@ -290,7 +289,7 @@ void HTMLTableElement::collectStyleForPresentationAttribute(const QualifiedName&
     } else if (name == heightAttr) {
         addHTMLLengthToStyle(style, CSSPropertyHeight, value);
     } else if (name == borderAttr) {
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyBorderWidth, parseBorderWidthAttribute(value), CSSPrimitiveValue::CSS_PX);
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyBorderWidth, parseBorderWidthAttribute(value), CSSPrimitiveValue::UnitType::Pixels);
     } else if (name == bordercolorAttr) {
         if (!value.isEmpty())
             addHTMLColorToStyle(style, CSSPropertyBorderColor, value);
@@ -309,10 +308,6 @@ void HTMLTableElement::collectStyleForPresentationAttribute(const QualifiedName&
     } else if (name == cellspacingAttr) {
         if (!value.isEmpty())
             addHTMLLengthToStyle(style, CSSPropertyBorderSpacing, value);
-    } else if (name == vspaceAttr) {
-        UseCounter::countDeprecation(document(), UseCounter::HTMLTableElementVspace);
-    } else if (name == hspaceAttr) {
-        UseCounter::countDeprecation(document(), UseCounter::HTMLTableElementHspace);
     } else if (name == alignAttr) {
         if (!value.isEmpty()) {
             if (equalIgnoringCase(value, "center")) {
@@ -472,12 +467,12 @@ PassRefPtrWillBeRawPtr<StylePropertySet> HTMLTableElement::createSharedCellStyle
         style->setProperty(CSSPropertyBorderColor, cssValuePool().createInheritedValue());
         break;
     case SolidBorders:
-        style->setProperty(CSSPropertyBorderWidth, cssValuePool().createValue(1, CSSPrimitiveValue::CSS_PX));
+        style->setProperty(CSSPropertyBorderWidth, cssValuePool().createValue(1, CSSPrimitiveValue::UnitType::Pixels));
         style->setProperty(CSSPropertyBorderStyle, cssValuePool().createIdentifierValue(CSSValueSolid));
         style->setProperty(CSSPropertyBorderColor, cssValuePool().createInheritedValue());
         break;
     case InsetBorders:
-        style->setProperty(CSSPropertyBorderWidth, cssValuePool().createValue(1, CSSPrimitiveValue::CSS_PX));
+        style->setProperty(CSSPropertyBorderWidth, cssValuePool().createValue(1, CSSPrimitiveValue::UnitType::Pixels));
         style->setProperty(CSSPropertyBorderStyle, cssValuePool().createIdentifierValue(CSSValueInset));
         style->setProperty(CSSPropertyBorderColor, cssValuePool().createInheritedValue());
         break;
@@ -487,7 +482,7 @@ PassRefPtrWillBeRawPtr<StylePropertySet> HTMLTableElement::createSharedCellStyle
     }
 
     if (m_padding)
-        style->setProperty(CSSPropertyPadding, cssValuePool().createValue(m_padding, CSSPrimitiveValue::CSS_PX));
+        style->setProperty(CSSPropertyPadding, cssValuePool().createValue(m_padding, CSSPrimitiveValue::UnitType::Pixels));
 
     return style.release();
 }

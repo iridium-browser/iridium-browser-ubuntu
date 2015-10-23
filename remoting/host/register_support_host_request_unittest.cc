@@ -48,8 +48,9 @@ ACTION_P(RemoveListener, list) {
 
 class MockCallback {
  public:
-  MOCK_METHOD3(OnResponse, void(bool result, const std::string& support_id,
-                                const base::TimeDelta& lifetime));
+  MOCK_METHOD3(OnResponse, void(const std::string& support_id,
+                                const base::TimeDelta& lifetime,
+                                const std::string& error_message));
 };
 
 }  // namespace
@@ -71,7 +72,7 @@ class RegisterSupportHostRequestTest : public testing::Test {
 
   base::MessageLoop message_loop_;
   MockSignalStrategy signal_strategy_;
-  ObserverList<SignalStrategy::Listener, true> signal_strategy_listeners_;
+  base::ObserverList<SignalStrategy::Listener, true> signal_strategy_listeners_;
   scoped_refptr<RsaKeyPair> key_pair_;
   MockCallback callback_;
 };
@@ -127,8 +128,9 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
   EXPECT_EQ(expected_signature, signature->BodyText());
 
   // Generate response and verify that callback is called.
-  EXPECT_CALL(callback_, OnResponse(true, kSupportId,
-                                    base::TimeDelta::FromSeconds(300)));
+  EXPECT_CALL(callback_, OnResponse(kSupportId,
+                                    base::TimeDelta::FromSeconds(300),
+                                    ""));
 
   scoped_ptr<XmlElement> response(new XmlElement(buzz::QN_IQ));
   response->AddAttr(QName(std::string(), "from"), kTestBotJid);
@@ -150,7 +152,7 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
   result->AddElement(support_id_lifetime);
 
   int consumed = 0;
-  ObserverListBase<SignalStrategy::Listener>::Iterator it(
+  base::ObserverListBase<SignalStrategy::Listener>::Iterator it(
       &signal_strategy_listeners_);
   SignalStrategy::Listener* listener;
   while ((listener = it.GetNext()) != nullptr) {

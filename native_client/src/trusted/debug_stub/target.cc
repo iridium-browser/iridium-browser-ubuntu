@@ -26,6 +26,8 @@
 #include "native_client/src/trusted/service_runtime/nacl_app_thread.h"
 #include "native_client/src/trusted/service_runtime/sel_ldr.h"
 #include "native_client/src/trusted/service_runtime/thread_suspension.h"
+#include "native_client/src/trusted/validator/ncvalidate.h"
+#include "native_client/src/trusted/validator_arm/model.h"
 
 #if NACL_WINDOWS
 #define snprintf sprintf_s
@@ -34,7 +36,7 @@
 using std::string;
 
 using port::IPlatform;
-using port::IThread;
+using port::Thread;
 using port::MutexLock;
 
 namespace gdb_rsp {
@@ -110,6 +112,44 @@ void Target::Destroy() {
 bool Target::AddBreakpoint(uint32_t user_address) {
   const Abi::BPDef *bp = abi_->GetBreakpointDef();
 
+  // Don't allow breakpoints within instructions / pseudo-instructions.
+  // Except on ARM since single step uses breakpoints we need to allow
+  // breakpoints mid super instruction. However we still need to ensure
+  // breakpoints are on instr boundaries and cannot be set in constant pools.
+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm
+  // 0x3 is a 4 byte mask to check the address falls on a instr boundary.
+  if ((user_address & ~0x3) != user_address) {
+    NaClLog(LOG_ERROR,
+            "Failed to set breakpoint at 0x%x, not on instr boundary\n",
+            user_address);
+    return false;
+  }
+
+  uint32_t bundle_addr = user_address & ~(NACL_INSTR_BLOCK_SIZE - 1);
+  uint32_t bundle_head;
+
+  uintptr_t sys_bundle_addr =
+      NaClUserToSysAddrRange(nap_, bundle_addr, sizeof(uint32_t));
+  if (sys_bundle_addr == kNaClBadAddress)
+    return false;
+
+  // Get first instr of bundle.
+  if (!IPlatform::GetMemory(sys_bundle_addr, sizeof(uint32_t), &bundle_head))
+    return false;
+
+  if (nacl_arm_dec::IsBreakPointAndConstantPoolHead(bundle_head)) {
+    NaClLog(LOG_ERROR,
+            "Failed to set breakpoint at 0x%x, within constant pool\n",
+            user_address);
+    return false;
+  }
+#else
+  if (!IsOnValidInstBoundary(user_address)) {
+    NaClLog(LOG_ERROR, "Failed to set breakpoint at 0x%x\n", user_address);
+    return false;
+  }
+#endif
+
   // If we already have a breakpoint here then don't add it
   if (breakpoint_map_.find(user_address) != breakpoint_map_.end())
     return false;
@@ -161,10 +201,10 @@ bool Target::RemoveBreakpoint(uint32_t user_address) {
   return true;
 }
 
-void Target::CopyFaultSignalFromAppThread(IThread *thread) {
+void Target::CopyFaultSignalFromAppThread(Thread *thread) {
   if (thread->GetFaultSignal() == 0 && thread->HasThreadFaulted()) {
     int signal =
-        IThread::ExceptionToSignal(thread->GetAppThread()->fault_signal);
+        Thread::ExceptionToSignal(thread->GetAppThread()->fault_signal);
     // If a thread hits a breakpoint, we want to ensure that it is
     // reported as SIGTRAP rather than SIGSEGV.  This is necessary
     // because we use HLT (which produces SIGSEGV) rather than the
@@ -261,6 +301,41 @@ bool Target::IsInitialBreakpointActive() {
   return initial_breakpoint_addr_ != 0;
 }
 
+bool Target::IsOnValidInstBoundary(uint32_t addr) {
+  // No implementation exists for mips, and this would break breakpoints.
+#if NACL_ARCH(NACL_BUILD_ARCH) != NACL_mips
+  uint8_t code_buf[NACL_INSTR_BLOCK_SIZE];
+  // Calculate nearest bundle address.
+  uint32_t bundle_addr = addr & ~(NACL_INSTR_BLOCK_SIZE - 1);
+  uintptr_t code_addr = NaClUserToSysAddrRange(
+    nap_, bundle_addr, NACL_INSTR_BLOCK_SIZE);
+
+  if (code_addr == kNaClBadAddress)
+    return false;
+
+  // Read memory.  This checks whether the memory is mapped.
+  if (!IPlatform::GetMemory(code_addr, NACL_INSTR_BLOCK_SIZE, code_buf))
+    return false;
+
+  // We want the validator validating the original code without breakpoints.
+  EraseBreakpointsFromCopyOfMemory(bundle_addr, code_buf,
+                                   NACL_INSTR_BLOCK_SIZE);
+
+  // The IsOnInstBoundary() validator function hasn't been
+  // implemented for mips. Therefore this will criple debugging
+  // on mips, including breakpoints, until it is implemented in
+  // the validator.
+  return nap_->validator->IsOnInstBoundary(
+                  bundle_addr, addr,
+                  code_buf,
+                  NACL_INSTR_BLOCK_SIZE,
+                  nap_->cpu_features) == NaClValidationSucceeded;
+#else
+  UNREFERENCED_PARAMETER(addr);
+  return true;
+#endif
+}
+
 void Target::WaitForDebugEvent() {
   if (all_threads_suspended_) {
     // If all threads are suspended (which may be left over from a previous
@@ -287,7 +362,7 @@ void Target::ProcessDebugEvent() {
     // This is why we must check the status of a specific thread --
     // we cannot call UnqueueAnyFaultedThread() and expect it to
     // return step_over_breakpoint_thread_.
-    IThread *thread = threads_[step_over_breakpoint_thread_];
+    Thread *thread = threads_[step_over_breakpoint_thread_];
     if (!thread->HasThreadFaulted()) {
       // The thread has not faulted.  Nothing to do, so try again.
       // Note that we do not respond to input from GDB while in this
@@ -363,6 +438,11 @@ void Target::ProcessCommands() {
     // Don't process commands if we haven't stopped all threads.
     return;
   }
+
+  // Ensure sp register is always masked on ARM. This is used to
+  // defensively ensure the invariant whenever we have all untrusted
+  // threads suspended and start processing commands.
+  MaskAlwaysValidRegisters();
 
   // Now we are ready to process commands.
   // Loop through packets until we process a continue packet or a detach.
@@ -607,17 +687,13 @@ bool Target::ProcessPacket(Packet* pktIn, Packet* pktOut) {
     // IN : $g
     // OUT: $xx...xx
     case 'g': {
-      IThread *thread = GetRegThread();
+      Thread *thread = GetRegThread();
       if (NULL == thread) {
         err = BAD_ARGS;
         break;
       }
 
-      // Copy OS preserved registers to GDB payload
-      for (uint32_t a = 0; a < abi_->GetRegisterCount(); a++) {
-        const Abi::RegDef *def = abi_->GetRegisterDef(a);
-        thread->GetRegister(a, &ctx_[def->offset_], def->bytes_);
-      }
+      thread->GetRegisters(ctx_);
 
       pktOut->AddBlock(ctx_, abi_->GetContextSize());
       break;
@@ -626,7 +702,7 @@ bool Target::ProcessPacket(Packet* pktIn, Packet* pktOut) {
     // IN : $Gxx..xx
     // OUT: $OK
     case 'G': {
-      IThread *thread = GetRegThread();
+      Thread *thread = GetRegThread();
       if (NULL == thread) {
         err = BAD_ARGS;
         break;
@@ -634,13 +710,16 @@ bool Target::ProcessPacket(Packet* pktIn, Packet* pktOut) {
 
       pktIn->GetBlock(ctx_, abi_->GetContextSize());
 
-      // GDB payload to OS registers
-      for (uint32_t a = 0; a < abi_->GetRegisterCount(); a++) {
-        const Abi::RegDef *def = abi_->GetRegisterDef(a);
-        thread->SetRegister(a, &ctx_[def->offset_], def->bytes_);
+      uint32_t new_pc = static_cast<uint32_t>(
+          reinterpret_cast<NaClSignalContext *>(ctx_)->prog_ctr);
+
+      if (!IsOnValidInstBoundary(new_pc) || !thread->SetRegisters(ctx_)) {
+        NaClLog(LOG_ERROR, "Invalid register change\n");
+        err = FAILED;
+      } else {
+        pktOut->AddString("OK");
       }
 
-      pktOut->AddString("OK");
       break;
     }
 
@@ -817,7 +896,7 @@ bool Target::ProcessPacket(Packet* pktIn, Packet* pktOut) {
     }
 
     case 's': {
-      IThread *thread = GetRunThread();
+      Thread *thread = GetRunThread();
       if (thread) thread->SetStep(true);
       return true;
     }
@@ -1005,7 +1084,7 @@ void Target::TrackThread(struct NaClAppThread *natp) {
   uint32_t id = natp->thread_num + 1;
   MutexLock lock(&mutex_);
   CHECK(threads_[id] == 0);
-  threads_[id] = IThread::Create(id, natp);
+  threads_[id] = new Thread(id, natp);
 }
 
 void Target::IgnoreThread(struct NaClAppThread *natp) {
@@ -1042,7 +1121,7 @@ void Target::Kill() {
   should_exit_ = true;
 }
 
-IThread* Target::GetRegThread() {
+Thread* Target::GetRegThread() {
   ThreadMap_t::const_iterator itr;
 
   switch (reg_thread_) {
@@ -1062,7 +1141,7 @@ IThread* Target::GetRegThread() {
   return itr->second;
 }
 
-IThread* Target::GetRunThread() {
+Thread* Target::GetRunThread() {
   // This is used to select a thread for "s" (step) command only.
   // For multi-threaded targets, "s" is deprecated in favor of "vCont", which
   // always specifies the thread explicitly when needed. However, we want
@@ -1074,7 +1153,7 @@ IThread* Target::GetRunThread() {
   return NULL;
 }
 
-IThread* Target::GetThread(uint32_t id) {
+Thread* Target::GetThread(uint32_t id) {
   ThreadMap_t::const_iterator itr;
   itr = threads_.find(id);
   if (itr != threads_.end()) return itr->second;
@@ -1087,7 +1166,7 @@ void Target::SuspendAllThreads() {
   for (ThreadMap_t::const_iterator iter = threads_.begin();
        iter != threads_.end();
        ++iter) {
-    IThread *thread = iter->second;
+    Thread *thread = iter->second;
     thread->CopyRegistersFromAppThread();
     CopyFaultSignalFromAppThread(thread);
   }
@@ -1110,7 +1189,7 @@ void Target::UnqueueAnyFaultedThread(uint32_t *thread_id, int8_t *signal) {
   for (ThreadMap_t::const_iterator iter = threads_.begin();
        iter != threads_.end();
        ++iter) {
-    IThread *thread = iter->second;
+    Thread *thread = iter->second;
     if (thread->GetFaultSignal() != 0) {
       *signal = thread->GetFaultSignal();
       *thread_id = thread->GetId();
@@ -1120,5 +1199,21 @@ void Target::UnqueueAnyFaultedThread(uint32_t *thread_id, int8_t *signal) {
   }
   NaClLog(LOG_FATAL, "UnqueueAnyFaultedThread: No threads queued\n");
 }
+
+  // On ARM its important to make sure the sp register is always masked,
+  // this isn't a problem on x86 since registers are always masked first
+  // in super instructions. This is not the case for sp in ARM.
+  //
+  // https://developer.chrome.com/native-client/reference/sandbox_internals/
+  // arm-32-bit-sandbox#the-stack-pointer-thread-pointer-and-program-counter
+  void Target::MaskAlwaysValidRegisters() {
+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm
+    for (ThreadMap_t::const_iterator iter = threads_.begin();
+         iter != threads_.end();
+         ++iter) {
+      iter->second->MaskSPRegister();
+    }
+#endif
+  }
 
 }  // namespace gdb_rsp

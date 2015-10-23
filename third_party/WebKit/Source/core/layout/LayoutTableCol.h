@@ -58,14 +58,14 @@ public:
     LayoutTableCol* enclosingColumnGroupIfAdjacentBefore() const
     {
         if (previousSibling())
-            return 0;
+            return nullptr;
         return enclosingColumnGroup();
     }
 
     LayoutTableCol* enclosingColumnGroupIfAdjacentAfter() const
     {
         if (nextSibling())
-            return 0;
+            return nullptr;
         return enclosingColumnGroup();
     }
 
@@ -78,27 +78,27 @@ public:
     const BorderValue& borderAdjoiningCellBefore(const LayoutTableCell*) const;
     const BorderValue& borderAdjoiningCellAfter(const LayoutTableCell*) const;
 
-    virtual const char* name() const override { return "LayoutTableCol"; }
+    const char* name() const override { return "LayoutTableCol"; }
 
 private:
-    virtual LayoutObjectChildList* virtualChildren() override { return children(); }
-    virtual const LayoutObjectChildList* virtualChildren() const override { return children(); }
+    LayoutObjectChildList* virtualChildren() override { return children(); }
+    const LayoutObjectChildList* virtualChildren() const override { return children(); }
 
-    virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectLayoutTableCol || LayoutBox::isOfType(type); }
-    virtual void updateFromElement() override;
-    virtual void computePreferredLogicalWidths() override { ASSERT_NOT_REACHED(); }
+    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectLayoutTableCol || LayoutBox::isOfType(type); }
+    void updateFromElement() override;
+    void computePreferredLogicalWidths() override { ASSERT_NOT_REACHED(); }
 
-    virtual void insertedIntoTree() override;
-    virtual void willBeRemovedFromTree() override;
+    void insertedIntoTree() override;
+    void willBeRemovedFromTree() override;
 
-    virtual bool isChildAllowed(LayoutObject*, const ComputedStyle&) const override;
-    virtual bool canHaveChildren() const override;
-    virtual DeprecatedPaintLayerType layerTypeRequired() const override { return NoDeprecatedPaintLayer; }
+    bool isChildAllowed(LayoutObject*, const ComputedStyle&) const override;
+    bool canHaveChildren() const override;
+    DeprecatedPaintLayerType layerTypeRequired() const override { return NoDeprecatedPaintLayer; }
 
-    virtual LayoutRect clippedOverflowRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState* = 0) const override;
-    virtual void imageChanged(WrappedImagePtr, const IntRect* = 0) override;
+    LayoutRect clippedOverflowRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState* = nullptr) const override;
+    void imageChanged(WrappedImagePtr, const IntRect* = nullptr) override;
 
-    virtual void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
+    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
 
     LayoutTable* table() const;
 

@@ -15,6 +15,18 @@ option optimize_for = LITE_RUNTIME;
 
 package safe_browsing;
 
+// Protocol buffer describing the Chrome user population of the user reporting
+// data.
+message ChromeUserPopulation {
+  enum UserPopulation {
+    UNKNOWN_USER_POPULATION = 0;
+    SAFE_BROWSING = 1;
+    EXTENDED_REPORTING = 2;
+  }
+  optional UserPopulation user_population = 1;
+}
+
+
 message ClientPhishingRequest {
   // URL that the client visited.  The CGI parameters are stripped by the
   // client.
@@ -71,6 +83,12 @@ message ClientPhishingRequest {
 
   // List of shingle hashes we extracted.
   repeated uint32 shingle_hashes = 12 [packed = true];
+
+  // The model filename (basename) that was used by the client.
+  optional string model_filename = 13;
+
+  // Population that the reporting user is part of.
+  optional ChromeUserPopulation population = 14;
 }
 
 message ClientPhishingResponse {
@@ -117,6 +135,9 @@ message ClientMalwareRequest {
 
   // List of resource urls that match the malware IP list.
   repeated UrlInfo bad_ip_url_info = 7;
+
+  // Population that the reporting user is part of.
+  optional ChromeUserPopulation population = 9;
 }
 
 message ClientMalwareResponse {
@@ -198,9 +219,11 @@ message ClientDownloadRequest {
     // True if the signature was trusted on the client.
     optional bool trusted = 2;
 
-    // PKCS#7 SignedData blobs extracted from a portable executable image's
-    // attribute certificate table. The presence of these does not imply that
-    // the signatures were deemed trusted by the client.
+    // On Windows, PKCS#7 SignedData blobs extracted from a portable executable
+    // image's attribute certificate table. The presence of these does not imply
+    // that the signatures were deemed trusted by the client.
+    // On Mac, this is the code signature blob referenced by the
+    // LC_CODE_SIGNATURE load command.
     repeated bytes signed_data = 3;
   }
 
@@ -226,6 +249,7 @@ message ClientDownloadRequest {
     ZIPPED_EXECUTABLE = 3;
     MAC_EXECUTABLE = 4;  // .dmg, .pkg, etc.
     ZIPPED_ARCHIVE = 5;  // .zip file containing another archive.
+    ARCHIVE = 6;         // Archive that doesn't have a specific DownloadType.
   }
   optional DownloadType download_type = 10 [default = WIN_EXECUTABLE];
 
@@ -255,9 +279,28 @@ message ClientDownloadRequest {
     repeated DebugData debug_data = 7;
   }
 
+  message MachOHeaders {
+    // The mach_header or mach_header_64 struct.
+    required bytes mach_header = 1;
+
+    message LoadCommand {
+      // |command_id| is the first uint32 of |command| as well, but is
+      // extracted for easier processing.
+      required uint32 command_id = 1;
+      // The entire data stream of the load command.
+      required bytes command = 2;
+    }
+
+    // All the load commands of the Mach-O file.
+    repeated LoadCommand load_commands = 2;
+  }
+
   message ImageHeaders {
     // Windows Portable Executable image headers.
     optional PEImageHeaders pe_headers = 1;
+
+    // OS X Mach-O image headers.
+    repeated MachOHeaders mach_o_headers = 2;
   };
 
   // Fields 12-17 are reserved for server-side use and are never sent by the
@@ -279,6 +322,9 @@ message ClientDownloadRequest {
   }
 
   repeated ArchivedBinary archived_binary = 22;
+
+  // Population that the reporting user is part of.
+  optional ChromeUserPopulation population = 24;
 }
 
 message ClientDownloadResponse {
@@ -424,6 +470,20 @@ message ClientIncidentReport {
     message OS {
       optional string os_name = 1;
       optional string os_version = 2;
+
+      message RegistryValue {
+        optional string name = 1;
+        optional uint32 type = 2;
+        optional bytes data = 3;
+      }
+
+      message RegistryKey {
+        optional string name = 1;
+        repeated RegistryValue value = 2;
+        repeated RegistryKey key = 3;
+      }
+
+      repeated RegistryKey registry_key = 3;
     }
     optional OS os = 1;
     message Machine {
@@ -475,7 +535,7 @@ message ClientIncidentReport {
         }
         optional string name = 1;
         optional ModifiedState modified_state = 2;
-        repeated string modified_export = 3;
+        repeated string OBSOLETE_modified_export = 3;
 
         message Modification {
           optional uint32 file_offset = 1;
@@ -491,6 +551,9 @@ message ClientIncidentReport {
   }
 
   optional EnvironmentData environment = 3;
+
+  // Population that the reporting user is part of.
+  optional ChromeUserPopulation population = 7;
 }
 
 message ClientIncidentResponse {

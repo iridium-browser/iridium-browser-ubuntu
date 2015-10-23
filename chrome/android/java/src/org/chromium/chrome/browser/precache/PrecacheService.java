@@ -13,8 +13,8 @@ import android.net.ConnectivityManager;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
-import android.util.Log;
 
+import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryProcessType;
@@ -30,7 +30,7 @@ import org.chromium.content.browser.BrowserStartupController;
  * either precaching finishes successfully, or the conditions are no longer met.
  */
 public class PrecacheService extends Service {
-    private static final String TAG = "PrecacheService";
+    private static final String TAG = "cr.Precache";
 
     public static final String ACTION_START_PRECACHE =
             "org.chromium.chrome.browser.precache.PrecacheService.START_PRECACHE";
@@ -72,15 +72,15 @@ public class PrecacheService extends Service {
     }
 
     @VisibleForTesting
-    void handlePrecacheCompleted() {
-        if (mIsPrecaching) finishPrecaching();
+    void handlePrecacheCompleted(boolean tryAgainSoon) {
+        if (mIsPrecaching) finishPrecaching(tryAgainSoon);
     }
 
     /** PrecacheLauncher used to run precaching. */
     private PrecacheLauncher mPrecacheLauncher = new PrecacheLauncher() {
         @Override
-        protected void onPrecacheCompleted() {
-            handlePrecacheCompleted();
+        protected void onPrecacheCompleted(boolean tryAgainSoon) {
+            handlePrecacheCompleted(tryAgainSoon);
         }
     };
 
@@ -161,9 +161,9 @@ public class PrecacheService extends Service {
     }
 
     /** End a precache cycle. */
-    private void finishPrecaching() {
+    private void finishPrecaching(boolean tryAgainSoon) {
         Log.v(TAG, "Finish precaching");
-        shutdownPrecaching();
+        shutdownPrecaching(tryAgainSoon);
     }
 
     /** Cancel a precache cycle. */
@@ -172,15 +172,16 @@ public class PrecacheService extends Service {
         prepareNativeLibraries();
         mPrecacheLauncher.cancel();
 
-        shutdownPrecaching();
+        shutdownPrecaching(true);
     }
 
     /**
      * Update state to indicate that precaching is no longer in progress, and stop the service.
      */
-    private void shutdownPrecaching() {
+    private void shutdownPrecaching(boolean tryAgainSoon) {
         mIsPrecaching = false;
         releasePrecachingWakeLock();
+        PrecacheServiceLauncher.precachingFinished(getApplicationContext(), tryAgainSoon);
         stopSelf();
     }
 

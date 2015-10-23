@@ -21,6 +21,7 @@
 #include "cc/resources/scoped_resource.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
+#include "cc/test/fake_resource_provider.h"
 #include "cc/test/test_context_support.h"
 #include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_shared_bitmap_manager.h"
@@ -96,7 +97,6 @@ class PerfContextProvider : public ContextProvider {
   }
   void SetupLock() override {}
   base::Lock* GetLock() override { return &context_lock_; }
-  bool IsContextLost() override { return false; }
   void VerifyContexts() override {}
   void DeleteCachedResources() override {}
   bool DestroyedOnMainThread() override { return false; }
@@ -160,7 +160,8 @@ class PerfRasterTaskImpl : public RasterTask {
 
   // Overridden from TileTask:
   void ScheduleOnOriginThread(TileTaskClient* client) override {
-    raster_buffer_ = client->AcquireBufferForRaster(resource());
+    // No tile ids are given to support partial updates.
+    raster_buffer_ = client->AcquireBufferForRaster(resource(), 0, 0);
   }
   void CompleteOnOriginThread(TileTaskClient* client) override {
     client->ReleaseBufferForRaster(raster_buffer_.Pass());
@@ -264,12 +265,11 @@ class TileTaskWorkerPoolPerfTest
         break;
       case TILE_TASK_WORKER_POOL_TYPE_ONE_COPY:
         Create3dOutputSurfaceAndResourceProvider();
-        staging_resource_pool_ = ResourcePool::Create(resource_provider_.get(),
-                                                      GL_TEXTURE_2D);
         tile_task_worker_pool_ = OneCopyTileTaskWorkerPool::Create(
             task_runner_.get(), task_graph_runner_.get(),
             context_provider_.get(), resource_provider_.get(),
-            staging_resource_pool_.get());
+            std::numeric_limits<int>::max(), false,
+            std::numeric_limits<int>::max());
         break;
       case TILE_TASK_WORKER_POOL_TYPE_GPU:
         Create3dOutputSurfaceAndResourceProvider();
@@ -400,18 +400,16 @@ class TileTaskWorkerPoolPerfTest
   void Create3dOutputSurfaceAndResourceProvider() {
     output_surface_ = FakeOutputSurface::Create3d(context_provider_).Pass();
     CHECK(output_surface_->BindToClient(&output_surface_client_));
-    resource_provider_ = ResourceProvider::Create(output_surface_.get(), NULL,
-                                                  &gpu_memory_buffer_manager_,
-                                                  NULL, 0, false, 1).Pass();
+    resource_provider_ = FakeResourceProvider::Create(
+        output_surface_.get(), nullptr, &gpu_memory_buffer_manager_);
   }
 
   void CreateSoftwareOutputSurfaceAndResourceProvider() {
     output_surface_ = FakeOutputSurface::CreateSoftware(
         make_scoped_ptr(new SoftwareOutputDevice));
     CHECK(output_surface_->BindToClient(&output_surface_client_));
-    resource_provider_ =
-        ResourceProvider::Create(output_surface_.get(), &shared_bitmap_manager_,
-                                 NULL, NULL, 0, false, 1).Pass();
+    resource_provider_ = FakeResourceProvider::Create(
+        output_surface_.get(), &shared_bitmap_manager_, nullptr);
   }
 
   std::string TestModifierString() const {
@@ -431,7 +429,6 @@ class TileTaskWorkerPoolPerfTest
     return std::string();
   }
 
-  scoped_ptr<ResourcePool> staging_resource_pool_;
   scoped_ptr<TileTaskWorkerPool> tile_task_worker_pool_;
   TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
   TestSharedBitmapManager shared_bitmap_manager_;
@@ -481,8 +478,7 @@ class TileTaskWorkerPoolCommonPerfTest : public TileTaskWorkerPoolPerfTestBase,
     output_surface_ = FakeOutputSurface::Create3d(context_provider_).Pass();
     CHECK(output_surface_->BindToClient(&output_surface_client_));
     resource_provider_ =
-        ResourceProvider::Create(output_surface_.get(), NULL, NULL, NULL, 0,
-                                 false, 1).Pass();
+        FakeResourceProvider::Create(output_surface_.get(), nullptr);
   }
 
   void RunBuildTileTaskQueueTest(const std::string& test_name,

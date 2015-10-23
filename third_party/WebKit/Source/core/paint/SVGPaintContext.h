@@ -28,9 +28,9 @@
 #include "core/layout/svg/LayoutSVGResourceClipper.h"
 #include "core/layout/svg/LayoutSVGResourcePaintServer.h"
 #include "core/paint/CompositingRecorder.h"
-#include "core/paint/FloatClipRecorder.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/SVGClipPainter.h"
+#include "core/paint/SVGFilterPainter.h"
 #include "platform/graphics/paint/ClipPathRecorder.h"
 #include "platform/transforms/AffineTransform.h"
 
@@ -84,16 +84,16 @@ private:
 
     bool isIsolationInstalled() const;
 
-    RawPtrWillBeMember<LayoutObject> m_object;
+    LayoutObject* m_object;
     PaintInfo m_paintInfo;
     const PaintInfo* m_originalPaintInfo;
-    RawPtrWillBeMember<LayoutSVGResourceFilter> m_filter;
-    RawPtrWillBeMember<LayoutSVGResourceClipper> m_clipper;
+    LayoutSVGResourceFilter* m_filter;
+    LayoutSVGResourceClipper* m_clipper;
     SVGClipPainter::ClipperState m_clipperState;
-    RawPtrWillBeMember<LayoutSVGResourceMasker> m_masker;
+    LayoutSVGResourceMasker* m_masker;
     OwnPtr<CompositingRecorder> m_compositingRecorder;
-    OwnPtr<FloatClipRecorder> m_clipRecorder;
     OwnPtr<ClipPathRecorder> m_clipPathRecorder;
+    OwnPtr<SVGFilterRecordingContext> m_filterRecordingContext;
 #if ENABLE(ASSERT)
     bool m_applyClipMaskAndFilterIfNecessaryCalled;
 #endif

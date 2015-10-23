@@ -7,14 +7,45 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 
 from pylib import constants
 from pylib.base import base_test_result
 from pylib.base import test_instance
+from pylib.utils import apk_helper
 
 sys.path.append(os.path.join(
     constants.DIR_SOURCE_ROOT, 'build', 'util', 'lib', 'common'))
 import unittest_util
+
+
+BROWSER_TEST_SUITES = [
+  'components_browsertests',
+  'content_browsertests',
+]
+
+
+_DEFAULT_ISOLATE_FILE_PATHS = {
+    'base_unittests': 'base/base_unittests.isolate',
+    'blink_heap_unittests':
+      'third_party/WebKit/Source/platform/heap/BlinkHeapUnitTests.isolate',
+    'breakpad_unittests': 'breakpad/breakpad_unittests.isolate',
+    'cc_perftests': 'cc/cc_perftests.isolate',
+    'components_browsertests': 'components/components_browsertests.isolate',
+    'components_unittests': 'components/components_unittests.isolate',
+    'content_browsertests': 'content/content_browsertests.isolate',
+    'content_unittests': 'content/content_unittests.isolate',
+    'media_perftests': 'media/media_perftests.isolate',
+    'media_unittests': 'media/media_unittests.isolate',
+    'midi_unittests': 'media/midi/midi_unittests.isolate',
+    'net_unittests': 'net/net_unittests.isolate',
+    'sql_unittests': 'sql/sql_unittests.isolate',
+    'sync_unit_tests': 'sync/sync_unit_tests.isolate',
+    'ui_base_unittests': 'ui/base/ui_base_tests.isolate',
+    'unit_tests': 'chrome/unit_tests.isolate',
+    'webkit_unit_tests':
+      'third_party/WebKit/Source/web/WebKitUnitTests.isolate',
+}
 
 
 # Used for filtering large data deps at a finer grain than what's allowed in
@@ -39,6 +70,13 @@ _DEPS_EXCLUSION_LIST = [
     'webkit/data/ico_decoder',
 ]
 
+
+_EXTRA_NATIVE_TEST_ACTIVITY = (
+    'org.chromium.native_test.NativeTestInstrumentationTestRunner.'
+        'NativeTestActivity')
+_EXTRA_SHARD_SIZE_LIMIT =(
+    'org.chromium.native_test.NativeTestInstrumentationTestRunner.'
+        'ShardSizeLimit')
 
 # TODO(jbudorick): Remove these once we're no longer parsing stdout to generate
 # results.
@@ -92,20 +130,27 @@ class GtestTestInstance(test_instance.TestInstance):
       raise ValueError('Platform mode currently supports only 1 gtest suite')
     self._suite = args.suite_name[0]
 
-    if (self._suite == 'content_browsertests' or
-        self._suite == 'components_browsertests'):
-      error_func('%s are not currently supported '
-                 'in platform mode.' % self._suite)
-      self._apk_path = os.path.join(
-          constants.GetOutDirectory(), 'apks', '%s.apk' % self._suite)
-    else:
-      self._apk_path = os.path.join(
-          constants.GetOutDirectory(), '%s_apk' % self._suite,
-          '%s-debug.apk' % self._suite)
+    self._apk_path = os.path.join(
+        constants.GetOutDirectory(), '%s_apk' % self._suite,
+        '%s-debug.apk' % self._suite)
     self._exe_path = os.path.join(constants.GetOutDirectory(),
                                   self._suite)
     if not os.path.exists(self._apk_path):
       self._apk_path = None
+      self._activity = None
+      self._package = None
+      self._runner = None
+    else:
+      helper = apk_helper.ApkHelper(self._apk_path)
+      self._activity = helper.GetActivityName()
+      self._package = helper.GetPackageName()
+      self._runner = helper.GetInstrumentationName()
+      self._extras = {
+        _EXTRA_NATIVE_TEST_ACTIVITY: self._activity,
+      }
+      if self._suite in BROWSER_TEST_SUITES:
+        self._extras[_EXTRA_SHARD_SIZE_LIMIT] = 1
+
     if not os.path.exists(self._exe_path):
       self._exe_path = None
     if not self._apk_path and not self._exe_path:
@@ -119,6 +164,13 @@ class GtestTestInstance(test_instance.TestInstance):
         self._gtest_filter = ':'.join(l.strip() for l in f)
     else:
       self._gtest_filter = None
+
+    if not args.isolate_file_path:
+      default_isolate_file_path = _DEFAULT_ISOLATE_FILE_PATHS.get(self._suite)
+      if default_isolate_file_path:
+        args.isolate_file_path = os.path.join(
+            constants.DIR_SOURCE_ROOT, default_isolate_file_path)
+
     if args.isolate_file_path:
       self._isolate_abs_path = os.path.abspath(args.isolate_file_path)
       self._isolate_delegate = isolate_delegate
@@ -127,6 +179,17 @@ class GtestTestInstance(test_instance.TestInstance):
     else:
       logging.warning('No isolate file provided. No data deps will be pushed.');
       self._isolate_delegate = None
+
+    if args.app_data_files:
+      self._app_data_files = args.app_data_files
+      if args.app_data_file_dir:
+        self._app_data_file_dir = args.app_data_file_dir
+      else:
+        self._app_data_file_dir = tempfile.mkdtemp()
+        logging.critical('Saving app files to %s', self._app_data_file_dir)
+    else:
+      self._app_data_files = None
+      self._app_data_file_dir = None
 
   #override
   def TestType(self):
@@ -229,12 +292,36 @@ class GtestTestInstance(test_instance.TestInstance):
       self._isolate_delegate.Clear()
 
   @property
+  def activity(self):
+    return self._activity
+
+  @property
   def apk(self):
     return self._apk_path
 
   @property
+  def app_file_dir(self):
+    return self._app_data_file_dir
+
+  @property
+  def app_files(self):
+    return self._app_data_files
+
+  @property
   def exe(self):
     return self._exe_path
+
+  @property
+  def extras(self):
+    return self._extras
+
+  @property
+  def package(self):
+    return self._package
+
+  @property
+  def runner(self):
+    return self._runner
 
   @property
   def suite(self):

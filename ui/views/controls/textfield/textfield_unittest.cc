@@ -16,21 +16,23 @@
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/ime/input_method_base.h"
+#include "ui/base/ime/input_method_delegate.h"
+#include "ui/base/ime/input_method_factory.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_switches_util.h"
 #include "ui/events/event.h"
+#include "ui/events/event_processor.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/events/test/event_generator.h"
 #include "ui/gfx/render_text.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/controls/textfield/textfield_model.h"
 #include "ui/views/controls/textfield/textfield_test_api.h"
 #include "ui/views/focus/focus_manager.h"
-#include "ui/views/ime/mock_input_method.h"
 #include "ui/views/test/test_views_delegate.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/test/widget_test.h"
@@ -49,6 +51,10 @@
 #include "ui/events/event_utils.h"
 #endif
 
+#if defined(OS_MACOSX) && !defined(USE_AURA)
+#include "ui/events/test/event_generator.h"
+#endif
+
 using base::ASCIIToUTF16;
 using base::UTF8ToUTF16;
 using base::WideToUTF16;
@@ -58,6 +64,180 @@ using base::WideToUTF16;
 namespace {
 
 const base::char16 kHebrewLetterSamekh = 0x05E1;
+
+class MockInputMethod : public ui::InputMethodBase {
+ public:
+  MockInputMethod();
+  ~MockInputMethod() override;
+
+  // Overridden from InputMethod:
+  bool OnUntranslatedIMEMessage(const base::NativeEvent& event,
+                                NativeEventResult* result) override;
+  void DispatchKeyEvent(ui::KeyEvent* key) override;
+  void OnTextInputTypeChanged(const ui::TextInputClient* client) override;
+  void OnCaretBoundsChanged(const ui::TextInputClient* client) override {}
+  void CancelComposition(const ui::TextInputClient* client) override;
+  void OnInputLocaleChanged() override {}
+  std::string GetInputLocale() override;
+  bool IsCandidatePopupOpen() const override;
+  void ShowImeIfNeeded() override {}
+
+  bool untranslated_ime_message_called() const {
+    return untranslated_ime_message_called_;
+  }
+  bool text_input_type_changed() const { return text_input_type_changed_; }
+  bool cancel_composition_called() const { return cancel_composition_called_; }
+
+  // Clears all internal states and result.
+  void Clear();
+
+  void SetCompositionTextForNextKey(const ui::CompositionText& composition);
+  void SetResultTextForNextKey(const base::string16& result);
+
+ private:
+  // Overridden from InputMethodBase.
+  void OnWillChangeFocusedClient(ui::TextInputClient* focused_before,
+                                 ui::TextInputClient* focused) override;
+
+  // Clears boolean states defined below.
+  void ClearStates();
+
+  // Whether a mock composition or result is scheduled for the next key event.
+  bool HasComposition();
+
+  // Clears only composition information and result text.
+  void ClearComposition();
+
+  // Composition information for the next key event. It'll be cleared
+  // automatically after dispatching the next key event.
+  ui::CompositionText composition_;
+
+  // Result text for the next key event. It'll be cleared automatically after
+  // dispatching the next key event.
+  base::string16 result_text_;
+
+  // Record call state of corresponding methods. They will be set to false
+  // automatically before dispatching a key event.
+  bool untranslated_ime_message_called_;
+  bool text_input_type_changed_;
+  bool cancel_composition_called_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockInputMethod);
+};
+
+MockInputMethod::MockInputMethod()
+    : untranslated_ime_message_called_(false),
+      text_input_type_changed_(false),
+      cancel_composition_called_(false) {
+}
+
+MockInputMethod::~MockInputMethod() {
+}
+
+bool MockInputMethod::OnUntranslatedIMEMessage(const base::NativeEvent& event,
+                                               NativeEventResult* result) {
+  if (result)
+    *result = NativeEventResult();
+  return false;
+}
+
+void MockInputMethod::DispatchKeyEvent(ui::KeyEvent* key) {
+  // Checks whether the key event is from EventGenerator on Windows which will
+  // generate key event for WM_CHAR.
+  // The MockInputMethod will insert char on WM_KEYDOWN so ignore WM_CHAR here.
+  if (key->is_char() && key->HasNativeEvent())
+    return;
+
+  bool handled = !IsTextInputTypeNone() && HasComposition();
+  ClearStates();
+  if (handled) {
+    DCHECK(!key->is_char());
+    ui::KeyEvent mock_key(ui::ET_KEY_PRESSED,
+                          ui::VKEY_PROCESSKEY,
+                          key->flags());
+    DispatchKeyEventPostIME(&mock_key);
+  } else {
+    DispatchKeyEventPostIME(key);
+  }
+
+  ui::TextInputClient* client = GetTextInputClient();
+  if (client) {
+    if (handled) {
+      if (result_text_.length())
+        client->InsertText(result_text_);
+      if (composition_.text.length())
+        client->SetCompositionText(composition_);
+      else
+        client->ClearCompositionText();
+    } else if (key->type() == ui::ET_KEY_PRESSED) {
+      base::char16 ch = key->GetCharacter();
+      if (ch)
+        client->InsertChar(ch, key->flags());
+    }
+  }
+
+  ClearComposition();
+}
+
+void MockInputMethod::OnTextInputTypeChanged(
+    const ui::TextInputClient* client) {
+  if (IsTextInputClientFocused(client))
+    text_input_type_changed_ = true;
+  InputMethodBase::OnTextInputTypeChanged(client);
+}
+
+void MockInputMethod::CancelComposition(const ui::TextInputClient* client) {
+  if (IsTextInputClientFocused(client)) {
+    cancel_composition_called_ = true;
+    ClearComposition();
+  }
+}
+
+std::string MockInputMethod::GetInputLocale() {
+  return "en-US";
+}
+
+bool MockInputMethod::IsCandidatePopupOpen() const {
+  return false;
+}
+
+void MockInputMethod::OnWillChangeFocusedClient(
+    ui::TextInputClient* focused_before,
+    ui::TextInputClient* focused) {
+  ui::TextInputClient* client = GetTextInputClient();
+  if (client && client->HasCompositionText())
+    client->ConfirmCompositionText();
+  ClearComposition();
+}
+
+void MockInputMethod::Clear() {
+  ClearStates();
+  ClearComposition();
+}
+
+void MockInputMethod::SetCompositionTextForNextKey(
+    const ui::CompositionText& composition) {
+  composition_ = composition;
+}
+
+void MockInputMethod::SetResultTextForNextKey(const base::string16& result) {
+  result_text_ = result;
+}
+
+void MockInputMethod::ClearStates() {
+  untranslated_ime_message_called_ = false;
+  text_input_type_changed_ = false;
+  cancel_composition_called_ = false;
+}
+
+bool MockInputMethod::HasComposition() {
+  return composition_.text.length() || result_text_.length();
+}
+
+void MockInputMethod::ClearComposition() {
+  composition_.Clear();
+  result_text_.clear();
+}
 
 // A Textfield wrapper to intercept OnKey[Pressed|Released]() ressults.
 class TestTextfield : public views::Textfield {
@@ -139,6 +319,7 @@ class TextfieldDestroyerController : public views::TextfieldController {
   // views::TextfieldController:
   bool HandleKeyEvent(views::Textfield* sender,
                       const ui::KeyEvent& key_event) override {
+    target_->OnBlur();
     target_.reset();
     return false;
   }
@@ -171,6 +352,8 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
         on_before_user_action_(0),
         on_after_user_action_(0),
         copied_to_clipboard_(ui::CLIPBOARD_TYPE_LAST) {
+    input_method_ = new MockInputMethod();
+    ui::SetUpInputMethodForTesting(input_method_);
   }
 
   // ::testing::Test:
@@ -224,6 +407,8 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
 
     params.bounds = gfx::Rect(100, 100, 100, 100);
     widget_->Init(params);
+    input_method_->SetDelegate(
+        test::WidgetTest::GetInputMethodDelegateForWidget(widget_));
     View* container = new View();
     widget_->SetContentsView(container);
     container->AddChildView(textfield_);
@@ -240,9 +425,6 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
     model_ = test_api_->model();
     model_->ClearEditHistory();
 
-    input_method_ = new MockInputMethod();
-    widget_->ReplaceInputMethod(input_method_);
-
     // Since the window type is activatable, showing the widget will also
     // activate it. Calling Activate directly is insufficient, since that does
     // not also _focus_ an aura::Window (i.e. using the FocusClient). Both the
@@ -254,10 +436,11 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
     // don't want parallel tests to steal active status either, so fake it.
 #if defined(OS_MACOSX) && !defined(USE_AURA)
     fake_activation_ = test::WidgetTest::FakeWidgetIsActiveAlways();
-#endif
 
+    // This is only used on Mac. See comment regarding |event_generator_| below.
     event_generator_.reset(
         new ui::test::EventGenerator(GetContext(), widget_->GetNativeWindow()));
+#endif
   }
 
   ui::MenuModel* GetContextMenuModel() {
@@ -293,7 +476,17 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
                 (command ? ui::EF_COMMAND_DOWN : 0) |
                 (caps_lock ? ui::EF_CAPS_LOCK_DOWN : 0);
 
+#if defined(OS_MACOSX) && !defined(USE_AURA)
+    // The Mac EventGenerator hooks in before IME. It sends events first to an
+    // NSResponder, which is necessary to interpret keyboard events into
+    // appropriate editing commands.
     event_generator_->PressKey(key_code, flags);
+#else
+    // TODO(shuchen): making EventGenerator support input method and using
+    // EventGenerator here. crbug.com/512315.
+    ui::KeyEvent event(ui::ET_KEY_PRESSED, key_code, flags);
+    input_method_->DispatchKeyEvent(&event);
+#endif
   }
 
   void SendKeyEvent(ui::KeyboardCode key_code,
@@ -316,7 +509,7 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
       // For unicode characters, assume they come from IME rather than the
       // keyboard. So they are dispatched directly to the input method.
       ui::KeyEvent event(ch, ui::VKEY_UNKNOWN, ui::EF_NONE);
-      input_method_->DispatchKeyEvent(event);
+      input_method_->DispatchKeyEvent(&event);
     }
   }
 
@@ -464,7 +657,10 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
  private:
   ui::ClipboardType copied_to_clipboard_;
   scoped_ptr<test::WidgetTest::FakeActivation> fake_activation_;
+
+#if defined(OS_MACOSX) && !defined(USE_AURA)
   scoped_ptr<ui::test::EventGenerator> event_generator_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(TextfieldTest);
 };
@@ -1017,7 +1213,7 @@ TEST_F(TextfieldTest, DragAndDrop_AcceptDrop) {
   ui::OSExchangeData bad_data;
   bad_data.SetFilename(base::FilePath(FILE_PATH_LITERAL("x")));
   ui::OSExchangeData::CustomFormat fmt = ui::Clipboard::GetBitmapFormatType();
-  bad_data.SetPickledData(fmt, Pickle());
+  bad_data.SetPickledData(fmt, base::Pickle());
   bad_data.SetFileContents(base::FilePath(L"x"), "x");
   bad_data.SetHtml(base::string16(ASCIIToUTF16("x")), GURL("x.org"));
   ui::OSExchangeData::DownloadFileInfo download(base::FilePath(), NULL);
@@ -1283,7 +1479,7 @@ TEST_F(TextfieldTest, ReadOnlyTest) {
 
 TEST_F(TextfieldTest, TextInputClientTest) {
   InitTextfield();
-  ui::TextInputClient* client = textfield_->GetTextInputClient();
+  ui::TextInputClient* client = textfield_;
   EXPECT_TRUE(client);
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_TEXT, client->GetTextInputType());
 
@@ -1380,24 +1576,21 @@ TEST_F(TextfieldTest, TextInputClientTest) {
 
   // Changing the Textfield to readonly shouldn't change the input client, since
   // it's still required for selections and clipboard copy.
-  ui::TextInputClient* text_input_client = textfield_->GetTextInputClient();
+  ui::TextInputClient* text_input_client = textfield_;
   EXPECT_TRUE(text_input_client);
   EXPECT_NE(ui::TEXT_INPUT_TYPE_NONE, text_input_client->GetTextInputType());
   textfield_->SetReadOnly(true);
   EXPECT_TRUE(input_method_->text_input_type_changed());
-  EXPECT_EQ(text_input_client, textfield_->GetTextInputClient());
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_NONE, text_input_client->GetTextInputType());
 
   input_method_->Clear();
   textfield_->SetReadOnly(false);
   EXPECT_TRUE(input_method_->text_input_type_changed());
-  EXPECT_EQ(text_input_client, textfield_->GetTextInputClient());
   EXPECT_NE(ui::TEXT_INPUT_TYPE_NONE, text_input_client->GetTextInputType());
 
   input_method_->Clear();
   textfield_->SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
   EXPECT_TRUE(input_method_->text_input_type_changed());
-  EXPECT_TRUE(textfield_->GetTextInputClient());
 }
 
 TEST_F(TextfieldTest, UndoRedoTest) {
@@ -1908,7 +2101,7 @@ TEST_F(TextfieldTest, GetCompositionCharacterBoundsTest) {
   ui::CompositionText composition;
   composition.text = UTF8ToUTF16("abc123");
   const uint32 char_count = static_cast<uint32>(composition.text.length());
-  ui::TextInputClient* client = textfield_->GetTextInputClient();
+  ui::TextInputClient* client = textfield_;
 
   // Compare the composition character bounds with surrounding cursor bounds.
   for (uint32 i = 0; i < char_count; ++i) {
@@ -1954,7 +2147,7 @@ TEST_F(TextfieldTest, GetCompositionCharacterBounds_ComplexText) {
 
   ui::CompositionText composition;
   composition.text.assign(kUtf16Chars, kUtf16Chars + kUtf16CharsCount);
-  ui::TextInputClient* client = textfield_->GetTextInputClient();
+  ui::TextInputClient* client = textfield_;
   client->SetCompositionText(composition);
 
   // Make sure GetCompositionCharacterBounds never fails for index.

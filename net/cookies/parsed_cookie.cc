@@ -95,8 +95,8 @@ inline bool SeekBackPast(std::string::const_iterator* it,
   return *it == end;
 }
 
-// Validate whether |value| is a valid token according to [RFC2616],
-// Section 2.2.
+// Validate whether |value| is a valid token according to [RFC7230],
+// Section 3.2.6.
 bool IsValidToken(const std::string& value) {
   if (value.empty())
     return false;
@@ -398,7 +398,7 @@ void ParsedCookie::ParseTokenValuePairs(const std::string& cookie_line) {
 
     // From RFC2109: "Attributes (names) (attr) are case-insensitive."
     if (pair_num != 0)
-      base::StringToLowerASCII(&pair.first);
+      pair.first = base::ToLowerASCII(pair.first);
     // Ignore Set-Cookie directives contaning control characters. See
     // http://crbug.com/238041.
     if (!IsValidCookieAttributeValue(pair.first) ||

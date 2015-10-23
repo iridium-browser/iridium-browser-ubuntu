@@ -16,10 +16,16 @@
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/test/test_views.h"
+#include "ui/views/test/test_views_delegate.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_delegate.h"
 #include "ui/wm/public/dispatcher_client.h"
+
+#if defined(OS_WIN)
+#include "ui/views/win/hwnd_util.h"
+#endif
 
 namespace views {
 namespace test {
@@ -247,9 +253,7 @@ TEST_F(DesktopNativeWidgetAuraTest, WidgetCanBeDestroyedFromNestedLoop) {
 // 1. Child window destroyed which should lead to the destruction of the
 //    parent.
 // 2. Parent window destroyed which should lead to the child being destroyed.
-class DesktopAuraTopLevelWindowTest
-    : public views::TestViewsDelegate,
-      public aura::WindowObserver {
+class DesktopAuraTopLevelWindowTest : public aura::WindowObserver {
  public:
   DesktopAuraTopLevelWindowTest()
       : top_level_widget_(NULL),
@@ -263,13 +267,6 @@ class DesktopAuraTopLevelWindowTest
     EXPECT_TRUE(owned_window_destroyed_);
     top_level_widget_ = NULL;
     owned_window_ = NULL;
-  }
-
-  // views::TestViewsDelegate overrides.
-  void OnBeforeWidgetInit(Widget::InitParams* params,
-                          internal::NativeWidgetDelegate* delegate) override {
-    if (!params->native_widget)
-      params->native_widget = new views::DesktopNativeWidgetAura(delegate);
   }
 
   void CreateTopLevelWindow(const gfx::Rect& bounds, bool fullscreen) {
@@ -361,10 +358,20 @@ class DesktopAuraTopLevelWindowTest
   DISALLOW_COPY_AND_ASSIGN(DesktopAuraTopLevelWindowTest);
 };
 
-typedef WidgetTest DesktopAuraWidgetTest;
+class DesktopAuraWidgetTest : public WidgetTest {
+ public:
+  DesktopAuraWidgetTest() {}
+
+  void SetUp() override {
+    ViewsTestBase::SetUp();
+    views_delegate()->set_use_desktop_native_widgets(true);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(DesktopAuraWidgetTest);
+};
 
 TEST_F(DesktopAuraWidgetTest, FullscreenWindowDestroyedBeforeOwnerTest) {
-  ViewsDelegate::views_delegate = NULL;
   DesktopAuraTopLevelWindowTest fullscreen_window;
   ASSERT_NO_FATAL_FAILURE(fullscreen_window.CreateTopLevelWindow(
       gfx::Rect(0, 0, 200, 200), true));
@@ -375,8 +382,6 @@ TEST_F(DesktopAuraWidgetTest, FullscreenWindowDestroyedBeforeOwnerTest) {
 }
 
 TEST_F(DesktopAuraWidgetTest, FullscreenWindowOwnerDestroyed) {
-  ViewsDelegate::views_delegate = NULL;
-
   DesktopAuraTopLevelWindowTest fullscreen_window;
   ASSERT_NO_FATAL_FAILURE(fullscreen_window.CreateTopLevelWindow(
       gfx::Rect(0, 0, 200, 200), true));
@@ -387,7 +392,6 @@ TEST_F(DesktopAuraWidgetTest, FullscreenWindowOwnerDestroyed) {
 }
 
 TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupTest) {
-  ViewsDelegate::views_delegate = NULL;
   DesktopAuraTopLevelWindowTest popup_window;
   ASSERT_NO_FATAL_FAILURE(popup_window.CreateTopLevelWindow(
       gfx::Rect(0, 0, 200, 200), false));
@@ -400,7 +404,6 @@ TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupTest) {
 // This test validates that when a top level owned popup Aura window is
 // resized, the widget is resized as well.
 TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupResizeTest) {
-  ViewsDelegate::views_delegate = NULL;
   DesktopAuraTopLevelWindowTest popup_window;
 
   popup_window.set_use_async_mode(false);
@@ -420,7 +423,6 @@ TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupResizeTest) {
 // This test validates that when a top level owned popup Aura window is
 // repositioned, the widget is repositioned as well.
 TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupRepositionTest) {
-  ViewsDelegate::views_delegate = NULL;
   DesktopAuraTopLevelWindowTest popup_window;
 
   popup_window.set_use_async_mode(false);
@@ -506,6 +508,129 @@ TEST_F(DesktopAuraWidgetTest, CloseWidgetDuringMousePress) {
 TEST_F(DesktopAuraWidgetTest, CloseWidgetDuringMouseReleased) {
   RunCloseWidgetDuringDispatchTest(this, ui::ET_MOUSE_RELEASED);
 }
+
+// Provides functionality to create a window modal dialog.
+class ModalDialogDelegate : public DialogDelegateView {
+ public:
+  ModalDialogDelegate() {}
+  ~ModalDialogDelegate() override {}
+
+  // WidgetDelegate overrides.
+  ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_WINDOW; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ModalDialogDelegate);
+};
+
+// This test verifies that whether mouse events when a modal dialog is
+// displayed are eaten or recieved by the dialog.
+TEST_F(WidgetTest, WindowMouseModalityTest) {
+  // Create a top level widget.
+  Widget top_level_widget;
+  Widget::InitParams init_params =
+      CreateParams(Widget::InitParams::TYPE_WINDOW);
+  init_params.show_state = ui::SHOW_STATE_NORMAL;
+  gfx::Rect initial_bounds(0, 0, 500, 500);
+  init_params.bounds = initial_bounds;
+  init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  init_params.native_widget =
+      new PlatformDesktopNativeWidget(&top_level_widget);
+  top_level_widget.Init(init_params);
+  top_level_widget.Show();
+  EXPECT_TRUE(top_level_widget.IsVisible());
+
+  // Create a view and validate that a mouse moves makes it to the view.
+  EventCountView* widget_view = new EventCountView();
+  widget_view->SetBounds(0, 0, 10, 10);
+  top_level_widget.GetRootView()->AddChildView(widget_view);
+
+  gfx::Point cursor_location_main(5, 5);
+  ui::MouseEvent move_main(ui::ET_MOUSE_MOVED, cursor_location_main,
+                           cursor_location_main, ui::EventTimeForNow(),
+                           ui::EF_NONE, ui::EF_NONE);
+  ui::EventDispatchDetails details =
+      GetEventProcessor(&top_level_widget)->OnEventFromSource(&move_main);
+  ASSERT_FALSE(details.dispatcher_destroyed);
+
+  EXPECT_EQ(1, widget_view->GetEventCount(ui::ET_MOUSE_ENTERED));
+  widget_view->ResetCounts();
+
+  // Create a modal dialog and validate that a mouse down message makes it to
+  // the main view within the dialog.
+
+  // This instance will be destroyed when the dialog is destroyed.
+  ModalDialogDelegate* dialog_delegate = new ModalDialogDelegate;
+
+  Widget* modal_dialog_widget = views::DialogDelegate::CreateDialogWidget(
+      dialog_delegate, NULL, top_level_widget.GetNativeView());
+  modal_dialog_widget->SetBounds(gfx::Rect(100, 100, 200, 200));
+  EventCountView* dialog_widget_view = new EventCountView();
+  dialog_widget_view->SetBounds(0, 0, 50, 50);
+  modal_dialog_widget->GetRootView()->AddChildView(dialog_widget_view);
+  modal_dialog_widget->Show();
+  EXPECT_TRUE(modal_dialog_widget->IsVisible());
+
+  gfx::Point cursor_location_dialog(100, 100);
+  ui::MouseEvent mouse_down_dialog(
+      ui::ET_MOUSE_PRESSED, cursor_location_dialog, cursor_location_dialog,
+      ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
+  details = GetEventProcessor(&top_level_widget)->OnEventFromSource(
+      &mouse_down_dialog);
+  ASSERT_FALSE(details.dispatcher_destroyed);
+  EXPECT_EQ(1, dialog_widget_view->GetEventCount(ui::ET_MOUSE_PRESSED));
+
+  // Send a mouse move message to the main window. It should not be received by
+  // the main window as the modal dialog is still active.
+  gfx::Point cursor_location_main2(6, 6);
+  ui::MouseEvent mouse_down_main(ui::ET_MOUSE_MOVED, cursor_location_main2,
+                                 cursor_location_main2, ui::EventTimeForNow(),
+                                 ui::EF_NONE, ui::EF_NONE);
+  details = GetEventProcessor(&top_level_widget)->OnEventFromSource(
+      &mouse_down_main);
+  ASSERT_FALSE(details.dispatcher_destroyed);
+  EXPECT_EQ(0, widget_view->GetEventCount(ui::ET_MOUSE_MOVED));
+
+  modal_dialog_widget->CloseNow();
+  top_level_widget.CloseNow();
+}
+
+#if defined(OS_WIN)
+// Tests whether we can activate the top level widget when a modal dialog is
+// active.
+TEST_F(WidgetTest, WindowModalityActivationTest) {
+  TestDesktopWidgetDelegate widget_delegate;
+  widget_delegate.InitWidget(CreateParams(Widget::InitParams::TYPE_WINDOW));
+
+  Widget* top_level_widget = widget_delegate.GetWidget();
+  top_level_widget->Show();
+  EXPECT_TRUE(top_level_widget->IsVisible());
+
+  HWND win32_window = views::HWNDForWidget(top_level_widget);
+  EXPECT_TRUE(::IsWindow(win32_window));
+
+  // This instance will be destroyed when the dialog is destroyed.
+  ModalDialogDelegate* dialog_delegate = new ModalDialogDelegate;
+
+  // We should be able to activate the window even if the WidgetDelegate
+  // says no, when a modal dialog is active.
+  widget_delegate.set_can_activate(false);
+
+  Widget* modal_dialog_widget = views::DialogDelegate::CreateDialogWidget(
+      dialog_delegate, NULL, top_level_widget->GetNativeView());
+  modal_dialog_widget->SetBounds(gfx::Rect(100, 100, 200, 200));
+  modal_dialog_widget->Show();
+  EXPECT_TRUE(modal_dialog_widget->IsVisible());
+
+  LRESULT activate_result = ::SendMessage(
+      win32_window,
+      WM_MOUSEACTIVATE,
+      reinterpret_cast<WPARAM>(win32_window),
+      MAKELPARAM(WM_LBUTTONDOWN, HTCLIENT));
+  EXPECT_EQ(activate_result, MA_ACTIVATE);
+
+  modal_dialog_widget->CloseNow();
+}
+#endif  // defined(OS_WIN)
 
 }  // namespace test
 }  // namespace views

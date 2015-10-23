@@ -7,25 +7,16 @@
 
 #include <string>
 
+#include "base/containers/small_map.h"
 #include "base/gtest_prod_util.h"
 #include "base/logging.h"
 #include "base/values.h"
-#include "chrome/browser/media/router/media_route_id.h"
 #include "chrome/browser/media/router/media_sink.h"
 #include "chrome/browser/media/router/media_source.h"
+#include "content/public/browser/presentation_session.h"
 #include "url/gurl.h"
 
 namespace media_router {
-
-// For now, a simple transition graph: NEW -> CONNECTED -> CLOSED.
-enum MediaRouteState {
-  // The route is new and not yet connected to a sink.
-  MEDIA_ROUTE_STATE_NEW,
-  // The route is active and connected to a sink.
-  MEDIA_ROUTE_STATE_CONNECTED,
-  // The route has been disconnected.
-  MEDIA_ROUTE_STATE_CLOSED
-};
 
 // MediaRoute objects contain the status and metadata of a routing
 // operation. The fields are immutable and reflect the route status
@@ -33,24 +24,26 @@ enum MediaRouteState {
 // be retrieved as new MediaRoute objects from the Media Router.
 class MediaRoute {
  public:
+  using Id = std::string;
+
   // |media_route_id|: ID of the route. New route IDs should be created
   //                   by the RouteIdManager class.
   // |media_source|: Description of source of the route.
   // |media_sink|: The sink that is receiving the media.
   // |description|: Description of the route to be displayed.
   // |is_local|: true if the route was created from this browser.
-  MediaRoute(const MediaRouteId& media_route_id,
+  // |custom_controller_path|: custom controller path if it is given by route
+  //                      provider. empty otherwise.
+  MediaRoute(const MediaRoute::Id& media_route_id,
              const MediaSource& media_source,
              const MediaSink& media_sink,
              const std::string& description,
-             bool is_local);
+             bool is_local,
+             const std::string& custom_controller_path);
   ~MediaRoute();
 
   // The media route identifier.
-  const MediaRouteId& media_route_id() const { return media_route_id_; }
-
-  // The state of the media route.
-  MediaRouteState state() const { return state_; }
+  const MediaRoute::Id& media_route_id() const { return media_route_id_; }
 
   // The media source being routed.
   const MediaSource& media_source() const { return media_source_; }
@@ -67,15 +60,44 @@ class MediaRoute {
   // by a media route provider.)
   bool is_local() const { return is_local_; }
 
+  // The custom controller path. This allows route provider to have custom route
+  // detail as well as its own route control features route control features in
+  // the media router dialog.
+  const std::string& custom_controller_path() const {
+    return custom_controller_path_;
+  }
+
   bool Equals(const MediaRoute& other) const;
 
  private:
-  MediaRouteId media_route_id_;
+  MediaRoute::Id media_route_id_;
   MediaSource media_source_;
   MediaSink media_sink_;
   std::string description_;
   bool is_local_;
-  MediaRouteState state_;
+  std::string custom_controller_path_;
+};
+
+class MediaRouteIdToPresentationSessionMapping {
+ public:
+  MediaRouteIdToPresentationSessionMapping();
+  ~MediaRouteIdToPresentationSessionMapping();
+
+  void Add(const MediaRoute::Id& route_id,
+           const content::PresentationSessionInfo& session_info);
+  void Remove(const MediaRoute::Id& route_id);
+  void Clear();
+
+  // Gets the PresentationSessionInfo corresponding to |route_id| or nullptr
+  // if it does not exist. Caller should not hold on to the returned pointer.
+  const content::PresentationSessionInfo* Get(
+      const MediaRoute::Id& route_id) const;
+
+ private:
+  base::SmallMap<std::map<MediaRoute::Id, content::PresentationSessionInfo>>
+      route_id_to_presentation_;
+
+  DISALLOW_COPY_AND_ASSIGN(MediaRouteIdToPresentationSessionMapping);
 };
 
 }  // namespace media_router

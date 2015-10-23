@@ -10,6 +10,7 @@
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
+#include "chrome/browser/chromeos/login/users/affiliation.h"
 #include "chrome/browser/chromeos/login/users/avatar/mock_user_image_manager.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "components/user_manager/user.h"
@@ -95,6 +96,10 @@ class MockUserManager : public ChromeUserManager {
   MOCK_METHOD1(KioskAppLoggedIn, void(const std::string&));
   MOCK_METHOD1(PublicAccountUserLoggedIn, void(user_manager::User*));
   MOCK_METHOD1(SupervisedUserLoggedIn, void(const std::string&));
+  MOCK_METHOD1(OnUserRemoved, void(const std::string&));
+  MOCK_METHOD2(SetUserAffiliation,
+               void(const std::string& user_id,
+                    const chromeos::AffiliationIDSet& user_affiliation_ids));
 
   // You can't mock these functions easily because nobody can create
   // User objects but the ChromeUserManager and us.
@@ -117,6 +122,8 @@ class MockUserManager : public ChromeUserManager {
   UserFlow* GetCurrentUserFlow() const override;
   UserFlow* GetUserFlow(const std::string&) const override;
 
+  bool ShouldReportUser(const std::string& user_id) const override;
+
   // Sets a new User instance. Users previously created by this MockUserManager
   // become invalid.
   void SetActiveUser(const std::string& email);
@@ -130,8 +137,13 @@ class MockUserManager : public ChromeUserManager {
   user_manager::User* CreateKioskAppUser(const std::string& user_id);
 
   // Adds a new User instance to the back of the user list. Users previously
-  // created by this MockUserManager remain valid.
+  // created by this MockUserManager remain valid. The added User is not
+  // affiliated with the domain, that owns the device.
   void AddUser(const std::string& email);
+
+  // The same as AddUser, but allows specifying affiliation with the domain,
+  // that owns the device.
+  void AddUserWithAffiliation(const std::string& email, bool is_affiliated);
 
   // Clears the user list and the active user. Users previously created by this
   // MockUserManager become invalid.

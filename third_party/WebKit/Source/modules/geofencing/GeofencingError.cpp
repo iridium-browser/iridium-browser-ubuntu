@@ -7,26 +7,19 @@
 
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
-DOMException* GeofencingError::take(ScriptPromiseResolver*, WebType* webErrorRaw)
+DOMException* GeofencingError::take(ScriptPromiseResolver*, const WebGeofencingError& webError)
 {
-    OwnPtr<WebType> webError = adoptPtr(webErrorRaw);
-    switch (webError->errorType) {
-    case WebType::ErrorTypeAbort:
-        return DOMException::create(AbortError, webError->message);
-    case WebType::ErrorTypeUnknown:
-        return DOMException::create(UnknownError, webError->message);
+    switch (webError.errorType) {
+    case WebGeofencingError::ErrorTypeAbort:
+        return DOMException::create(AbortError, webError.message);
+    case WebGeofencingError::ErrorTypeUnknown:
+        return DOMException::create(UnknownError, webError.message);
     }
     ASSERT_NOT_REACHED();
     return DOMException::create(UnknownError);
-}
-
-void GeofencingError::dispose(WebType* webErrorRaw)
-{
-    delete webErrorRaw;
 }
 
 } // namespace blink

@@ -14,6 +14,7 @@
 #include <string>
 
 #include "net/tools/flip_server/constants.h"
+#include "net/tools/flip_server/create_listener.h"
 #include "net/tools/flip_server/flip_config.h"
 #include "net/tools/flip_server/http_interface.h"
 #include "net/tools/flip_server/spdy_interface.h"
@@ -332,7 +333,7 @@ bool SMConnection::WasSpdyNegotiated(SpdyMajorVersion* version_negotiated) {
       if (!strncmp(reinterpret_cast<const char*>(npn_proto),
                    "spdy/4a2",
                    npn_proto_len)) {
-        *version_negotiated = SPDY4;
+        *version_negotiated = HTTP2;
         return true;
       }
     }

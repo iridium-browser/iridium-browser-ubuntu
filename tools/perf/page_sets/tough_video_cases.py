@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry import story
 
 
 class ToughVideoCasesPage(page_module.Page):
@@ -498,48 +498,100 @@ class Page36(ToughVideoCasesPage):
   def RunPageInteractions(self, action_runner):
     self.SeekBeforeAndAfterPlayhead(action_runner)
 
-class ToughVideoCasesPageSet(page_set_module.PageSet):
+class Page37(ToughVideoCasesPage):
 
+  def __init__(self, page_set):
+    super(Page37, self).__init__(
+      url='file://tough_video_cases/video.html?src=crowd1080_vp9.webm&canvas=true',
+      page_set=page_set)
+
+    self.add_browser_metrics = True
+
+  def RunPageInteractions(self, action_runner):
+    self.PlayAction(action_runner)
+
+class Page38(ToughVideoCasesPage):
+
+  def __init__(self, page_set):
+    super(Page38, self).__init__(
+      url='file://tough_video_cases/video.html?src=tulip2.mp4&canvas=true',
+      page_set=page_set)
+
+    self.add_browser_metrics = True
+
+  def RunPageInteractions(self, action_runner):
+    self.SeekBeforeAndAfterPlayhead(action_runner)
+
+class Page39(ToughVideoCasesPage):
+
+  def __init__(self, page_set):
+    super(Page39, self).__init__(
+      url='file://tough_video_cases/video.html?src=garden2_10s.webm&canvas=true',
+      page_set=page_set, labels=['is_4k'])
+
+    self.add_browser_metrics = True
+
+  def RunPageInteractions(self, action_runner):
+    self.PlayAction(action_runner)
+
+class Page40(ToughVideoCasesPage):
+
+  def __init__(self, page_set):
+    super(Page40, self).__init__(
+      url='file://tough_video_cases/video.html?src=crowd1080.ogv&canvas=true',
+      page_set=page_set)
+
+    self.add_browser_metrics = True
+    self.is_50fps = True
+
+  def RunPageInteractions(self, action_runner):
+    self.PlayAction(action_runner)
+
+class ToughVideoCasesPageSet(story.StorySet):
   """
   Description: Video Stack Perf benchmark
   """
   def __init__(self):
     super(ToughVideoCasesPageSet, self).__init__(
-            bucket=page_set_module.PARTNER_BUCKET)
+            cloud_storage_bucket=story.PARTNER_BUCKET)
 
-    self.AddUserStory(Page1(self))
-    self.AddUserStory(Page2(self))
-    self.AddUserStory(Page3(self))
-    self.AddUserStory(Page4(self))
-    self.AddUserStory(Page5(self))
-    self.AddUserStory(Page6(self))
-    self.AddUserStory(Page7(self))
-    self.AddUserStory(Page8(self))
-    self.AddUserStory(Page9(self))
-    self.AddUserStory(Page10(self))
-    self.AddUserStory(Page11(self))
-    self.AddUserStory(Page12(self))
-    self.AddUserStory(Page13(self))
-    self.AddUserStory(Page14(self))
-    self.AddUserStory(Page15(self))
-    self.AddUserStory(Page16(self))
-    self.AddUserStory(Page17(self))
-    self.AddUserStory(Page18(self))
-    self.AddUserStory(Page19(self))
-    self.AddUserStory(Page20(self))
-    self.AddUserStory(Page21(self))
-    self.AddUserStory(Page22(self))
-    self.AddUserStory(Page23(self))
-    self.AddUserStory(Page24(self))
-    self.AddUserStory(Page25(self))
-    self.AddUserStory(Page26(self))
-    self.AddUserStory(Page27(self))
-    self.AddUserStory(Page28(self))
-    self.AddUserStory(Page29(self))
-    self.AddUserStory(Page30(self))
-    self.AddUserStory(Page31(self))
-    self.AddUserStory(Page32(self))
-    self.AddUserStory(Page33(self))
-    self.AddUserStory(Page34(self))
-    self.AddUserStory(Page35(self))
-    self.AddUserStory(Page36(self))
+    self.AddStory(Page1(self))
+    self.AddStory(Page2(self))
+    self.AddStory(Page3(self))
+    self.AddStory(Page4(self))
+    self.AddStory(Page5(self))
+    self.AddStory(Page6(self))
+    self.AddStory(Page7(self))
+    self.AddStory(Page8(self))
+    self.AddStory(Page9(self))
+    self.AddStory(Page10(self))
+    self.AddStory(Page11(self))
+    self.AddStory(Page12(self))
+    self.AddStory(Page13(self))
+    self.AddStory(Page14(self))
+    self.AddStory(Page15(self))
+    self.AddStory(Page16(self))
+    self.AddStory(Page17(self))
+    self.AddStory(Page18(self))
+    self.AddStory(Page19(self))
+    self.AddStory(Page20(self))
+    self.AddStory(Page21(self))
+    self.AddStory(Page22(self))
+    self.AddStory(Page23(self))
+    self.AddStory(Page24(self))
+    self.AddStory(Page25(self))
+    self.AddStory(Page26(self))
+    self.AddStory(Page27(self))
+    self.AddStory(Page28(self))
+    self.AddStory(Page29(self))
+    self.AddStory(Page30(self))
+    self.AddStory(Page31(self))
+    self.AddStory(Page32(self))
+    self.AddStory(Page33(self))
+    self.AddStory(Page34(self))
+    self.AddStory(Page35(self))
+    self.AddStory(Page36(self))
+    self.AddStory(Page37(self))
+    self.AddStory(Page38(self))
+    self.AddStory(Page39(self))
+    self.AddStory(Page40(self))

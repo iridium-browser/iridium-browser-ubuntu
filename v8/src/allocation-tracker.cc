@@ -6,7 +6,7 @@
 
 #include "src/allocation-tracker.h"
 #include "src/frames-inl.h"
-#include "src/heap-snapshot-generator.h"
+#include "src/heap-snapshot-generator-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -337,4 +337,5 @@ void AllocationTracker::UnresolvedLocation::HandleWeakScript(
 }
 
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

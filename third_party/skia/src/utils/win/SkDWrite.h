@@ -8,8 +8,8 @@
 #ifndef SkDWrite_DEFINED
 #define SkDWrite_DEFINED
 
-#include "SkTemplates.h"
 #include "SkFontStyle.h"
+#include "SkTemplates.h"
 
 #include <dwrite.h>
 #include <winsdkver.h>
@@ -57,7 +57,7 @@ HRESULT SkGetGetUserDefaultLocaleNameProc(SkGetUserDefaultLocaleNameProc* proc);
 
 class AutoDWriteTable {
 public:
-    AutoDWriteTable(IDWriteFontFace* fontFace, UINT32 beTag) : fFontFace(fontFace), fExists(FALSE) {
+    AutoDWriteTable(IDWriteFontFace* fontFace, UINT32 beTag) : fExists(FALSE), fFontFace(fontFace) {
         // Any errors are ignored, user must check fExists anyway.
         fontFace->TryGetFontTable(beTag,
             reinterpret_cast<const void **>(&fData), &fSize, &fLock, &fExists);

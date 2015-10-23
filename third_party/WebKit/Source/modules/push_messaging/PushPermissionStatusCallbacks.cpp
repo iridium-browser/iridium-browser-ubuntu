@@ -11,7 +11,7 @@
 
 namespace blink {
 
-PushPermissionStatusCallbacks::PushPermissionStatusCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
+PushPermissionStatusCallbacks::PushPermissionStatusCallbacks(ScriptPromiseResolver* resolver)
     : m_resolver(resolver)
 {
 }
@@ -20,18 +20,15 @@ PushPermissionStatusCallbacks::~PushPermissionStatusCallbacks()
 {
 }
 
-void PushPermissionStatusCallbacks::onSuccess(WebPushPermissionStatus* status)
+void PushPermissionStatusCallbacks::onSuccess(WebPushPermissionStatus status)
 {
-    m_resolver->resolve(permissionString(*status));
+    m_resolver->resolve(permissionString(status));
 }
 
-void PushPermissionStatusCallbacks::onError(WebPushError* error)
+void PushPermissionStatusCallbacks::onError(const WebPushError& error)
 {
-    if (!m_resolver->executionContext() || m_resolver->executionContext()->activeDOMObjectsAreStopped()) {
-        PushError::dispose(error);
+    if (!m_resolver->executionContext() || m_resolver->executionContext()->activeDOMObjectsAreStopped())
         return;
-    }
-
     m_resolver->reject(PushError::take(m_resolver.get(), error));
 }
 

@@ -12,7 +12,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
-#include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -415,10 +414,11 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
       parent_web_contents &&
       !parent_web_contents->GetDelegate()->IsNeverVisible(parent_web_contents);
   if (modal_dialog) {
-    widget = constrained_window::CreateWebModalDialogViews(this,
-                                                           parent_web_contents);
+    widget = constrained_window::ShowWebModalDialogViews(this,
+                                                         parent_web_contents);
   } else {
     widget = DialogDelegate::CreateDialogWidget(this, context, NULL);
+    widget->Show();
   }
 
   // If the picker is not modal to the calling web contents then it is displayed
@@ -430,7 +430,8 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
 #if defined(USE_ASH)
     if (chrome::IsNativeWindowInAsh(widget->GetNativeWindow())) {
       dialog_window_id =
-          DesktopMediaID::RegisterAuraWindow(widget->GetNativeWindow()).id;
+          DesktopMediaID::RegisterAuraWindow(
+              DesktopMediaID::TYPE_WINDOW, widget->GetNativeWindow()).aura_id;
       DCHECK_NE(dialog_window_id, 0);
     }
 #endif
@@ -442,15 +443,6 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
   }
 
   list_view_->StartUpdating(dialog_window_id);
-
-  if (modal_dialog) {
-    web_modal::PopupManager* popup_manager =
-        web_modal::PopupManager::FromWebContents(parent_web_contents);
-    popup_manager->ShowModalDialog(GetWidget()->GetNativeView(),
-                                   parent_web_contents);
-  } else {
-    widget->Show();
-  }
 }
 
 DesktopMediaPickerDialogView::~DesktopMediaPickerDialogView() {}

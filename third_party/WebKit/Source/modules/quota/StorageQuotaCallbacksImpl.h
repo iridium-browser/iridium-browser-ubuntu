@@ -43,23 +43,23 @@ namespace blink {
 class MODULES_EXPORT StorageQuotaCallbacksImpl final : public StorageQuotaCallbacks {
     WTF_MAKE_NONCOPYABLE(StorageQuotaCallbacksImpl);
 public:
-    static StorageQuotaCallbacksImpl* create(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
+    static StorageQuotaCallbacksImpl* create(ScriptPromiseResolver* resolver)
     {
         return new StorageQuotaCallbacksImpl(resolver);
     }
 
-    virtual ~StorageQuotaCallbacksImpl();
+    ~StorageQuotaCallbacksImpl() override;
 
-    virtual void didQueryStorageUsageAndQuota(unsigned long long usageInBytes, unsigned long long quotaInBytes) override;
-    virtual void didGrantStorageQuota(unsigned long long usageInBytes, unsigned long long grantedQuotaInBytes) override;
-    virtual void didFail(WebStorageQuotaError) override;
+    void didQueryStorageUsageAndQuota(unsigned long long usageInBytes, unsigned long long quotaInBytes) override;
+    void didGrantStorageQuota(unsigned long long usageInBytes, unsigned long long grantedQuotaInBytes) override;
+    void didFail(WebStorageQuotaError) override;
 
     DECLARE_VIRTUAL_TRACE();
 
 private:
-    explicit StorageQuotaCallbacksImpl(PassRefPtrWillBeRawPtr<ScriptPromiseResolver>);
+    explicit StorageQuotaCallbacksImpl(ScriptPromiseResolver*);
 
-    RefPtrWillBeMember<ScriptPromiseResolver> m_resolver;
+    Member<ScriptPromiseResolver> m_resolver;
 };
 
 } // namespace blink

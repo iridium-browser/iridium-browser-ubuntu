@@ -168,7 +168,7 @@ std::vector<uint8_t> MakeJsonVector(const std::string& json_string) {
 
 std::vector<uint8_t> MakeJsonVector(const base::DictionaryValue& dict) {
   std::string json;
-  base::JSONWriter::Write(&dict, &json);
+  base::JSONWriter::Write(dict, &json);
   return MakeJsonVector(json);
 }
 
@@ -195,7 +195,7 @@ std::vector<uint8_t> MakeJsonVector(const base::DictionaryValue& dict) {
   re2::RE2::GlobalReplace(&file_contents, re2::RE2("\\s*//.*"), "");
 
   // Parse the JSON to a dictionary.
-  value->reset(base::JSONReader::Read(file_contents));
+  value->reset(base::JSONReader::DeprecatedRead(file_contents));
   if (!value->get()) {
     return ::testing::AssertionFailure()
            << "Couldn't parse test file JSON: " << file_path.value();
@@ -422,7 +422,7 @@ scoped_ptr<base::DictionaryValue> GetJwkDictionary(
     const std::vector<uint8_t>& json) {
   base::StringPiece json_string(
       reinterpret_cast<const char*>(vector_as_array(&json)), json.size());
-  base::Value* value = base::JSONReader::Read(json_string);
+  base::Value* value = base::JSONReader::DeprecatedRead(json_string);
   EXPECT_TRUE(value);
   base::DictionaryValue* dict_value = NULL;
   value->GetAsDictionary(&dict_value);
@@ -495,8 +495,9 @@ scoped_ptr<base::DictionaryValue> GetJwkDictionary(
   std::string k_value;
   if (!Base64DecodeUrlSafe(value_string, &k_value))
     return ::testing::AssertionFailure() << "Base64DecodeUrlSafe(k) failed";
-  if (!LowerCaseEqualsASCII(base::HexEncode(k_value.data(), k_value.size()),
-                            k_expected_hex.c_str())) {
+  if (!base::LowerCaseEqualsASCII(
+          base::HexEncode(k_value.data(), k_value.size()),
+          k_expected_hex.c_str())) {
     return ::testing::AssertionFailure() << "Expected 'k' to be "
                                          << k_expected_hex
                                          << " but found something different";
@@ -534,8 +535,9 @@ scoped_ptr<base::DictionaryValue> GetJwkDictionary(
   std::string e_value;
   if (!Base64DecodeUrlSafe(value_string, &e_value))
     return ::testing::AssertionFailure() << "Base64DecodeUrlSafe(e) failed";
-  if (!LowerCaseEqualsASCII(base::HexEncode(e_value.data(), e_value.size()),
-                            e_expected_hex.c_str())) {
+  if (!base::LowerCaseEqualsASCII(
+          base::HexEncode(e_value.data(), e_value.size()),
+          e_expected_hex.c_str())) {
     return ::testing::AssertionFailure() << "Expected 'e' to be "
                                          << e_expected_hex
                                          << " but found something different";

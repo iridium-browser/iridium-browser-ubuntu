@@ -36,16 +36,13 @@ class VirtualKeyboardDelegate {
   // For example, settings should be blocked when the session is locked.
   virtual bool IsLanguageSettingsEnabled() = 0;
 
+  // Sets the state of the hotrod virtual keyboad.
+  virtual void SetHotrodKeyboard(bool enable) = 0;
+
   // Activate and lock the virtual keyboad on screen or dismiss the keyboard
   // regardless of the state of text focus. Used in a11y mode to allow typing
   // hotkeys without the need for text focus. Returns true if successful.
   virtual bool LockKeyboard(bool state) = 0;
-
-  // Moves the text caret. |swipe_direction| indicates the direction to move the
-  // caret. Swipes can be in one or 4 directions denoted by an enumerated value.
-  // |modifier_flags| indicates which keyboard modifier keys (e.g. shift or alt)
-  // are being held during the swipe. Returns true if successful.
-  virtual bool MoveCursor(int swipe_direction, int modifier_flags) = 0;
 
   // Dispatches a virtual key event. |type| indicates if the event is a keydown
   // or keyup event. |char_value| is the unicode value for the key. |key_code|
@@ -64,6 +61,9 @@ class VirtualKeyboardDelegate {
 
   // Sets virtual keyboard window mode.
   virtual bool SetVirtualKeyboardMode(int mode_enum) = 0;
+
+  // Sets requested virtual keyboard state.
+  virtual bool SetRequestedKeyboardState(int state_enum) = 0;
 };
 
 }  // namespace extensions

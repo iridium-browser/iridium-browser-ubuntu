@@ -18,14 +18,13 @@ def main_run(args):
 
   test_args = ['--retry-limit', '3']
   if 'android' == args.properties.get('target_platform'):
-    test_args += ['--browser', 'android-chrome-shell', '--device', 'android']
+    test_args += ['--browser', 'android-chromium', '--device', 'android']
   else:
     test_args += ['--browser', args.build_config_fs.lower()]
 
   with common.temporary_file() as tempfile_path:
     test_args += ['--write-full-results-to', tempfile_path]
     rc = common.run_runtest(args, [
-        '--annotate', 'gtest',
         '--test-type', 'telemetry_perf_unittests',
         '--run-python-script',
         os.path.join(common.SRC_DIR, 'tools', 'perf', 'run_tests')
@@ -48,7 +47,7 @@ def main_run(args):
 
 def main_compile_targets(args):
   if 'android' == args.properties.get('target_platform'):
-    json.dump(['chrome_shell_apk'], args.output)
+    json.dump(['chrome_public_apk'], args.output)
   else:
     json.dump(['chrome'], args.output)
 

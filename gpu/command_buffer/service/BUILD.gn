@@ -18,7 +18,10 @@ group("service") {
 }
 
 source_set("service_sources") {
-  visibility = [ "//gpu/*" ]
+  visibility = [
+    "//gpu/*",
+    "//mojo/gles2:gles2",
+  ]
 
   sources = [
     "async_pixel_transfer_delegate.cc",
@@ -56,6 +59,8 @@ source_set("service_sources") {
     "error_state.h",
     "feature_info.cc",
     "feature_info.h",
+    "framebuffer_completeness_cache.cc",
+    "framebuffer_completeness_cache.h",
     "framebuffer_manager.cc",
     "framebuffer_manager.h",
     "gl_context_virtual.cc",
@@ -92,6 +97,7 @@ source_set("service_sources") {
     "in_process_command_buffer.h",
     "logger.cc",
     "logger.h",
+    "mailbox_manager.cc",
     "mailbox_manager.h",
     "mailbox_manager_impl.cc",
     "mailbox_manager_impl.h",
@@ -99,6 +105,8 @@ source_set("service_sources") {
     "mailbox_manager_sync.h",
     "memory_program_cache.cc",
     "memory_program_cache.h",
+    "path_manager.cc",
+    "path_manager.h",
     "program_cache.cc",
     "program_cache.h",
     "program_manager.cc",
@@ -132,6 +140,7 @@ source_set("service_sources") {
   ]
 
   configs += [
+    "//build/config:precompiled_headers",
     "//gpu:gpu_implementation",
     "//third_party/khronos:khronos_headers",
   ]
@@ -148,6 +157,7 @@ source_set("service_sources") {
     "//base/third_party/dynamic_annotations",
     "//crypto",
     "//gpu/config:config_sources",
+    "//third_party/angle:commit_id",
     "//third_party/angle:translator",
     "//third_party/protobuf:protobuf_lite",
     "//third_party/re2",

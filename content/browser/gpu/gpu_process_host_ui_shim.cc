@@ -60,6 +60,12 @@ void SendOnIOThreadTask(int host_id, IPC::Message* msg) {
     delete msg;
 }
 
+void StopGpuProcessOnIO(int host_id) {
+  GpuProcessHost* host = GpuProcessHost::FromID(host_id);
+  if (host)
+    host->StopGpuProcess();
+}
+
 class ScopedSendOnIOThread {
  public:
   ScopedSendOnIOThread(int host_id, IPC::Message* msg)
@@ -192,11 +198,11 @@ bool GpuProcessHostUIShim::OnMessageReceived(const IPC::Message& message) {
   return OnControlMessageReceived(message);
 }
 
-void GpuProcessHostUIShim::RelinquishGpuResources(
-    const base::Closure& callback) {
-  DCHECK(relinquish_callback_.is_null());
-  relinquish_callback_ = callback;
-  Send(new GpuMsg_RelinquishResources());
+void GpuProcessHostUIShim::StopGpuProcess(const base::Closure& callback) {
+  close_callback_ = callback;
+
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE, base::Bind(&StopGpuProcessOnIO, host_id_));
 }
 
 void GpuProcessHostUIShim::SimulateRemoveAllContext() {
@@ -213,6 +219,8 @@ void GpuProcessHostUIShim::SimulateHang() {
 
 GpuProcessHostUIShim::~GpuProcessHostUIShim() {
   DCHECK(CalledOnValidThread());
+  if (!close_callback_.is_null())
+    base::ResetAndReturn(&close_callback_).Run();
   g_hosts_by_id.Pointer()->Remove(host_id_);
 }
 
@@ -225,14 +233,14 @@ bool GpuProcessHostUIShim::OnControlMessageReceived(
                         OnLogMessage)
     IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfaceInitialized,
                         OnAcceleratedSurfaceInitialized)
+#if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfaceBuffersSwapped,
                         OnAcceleratedSurfaceBuffersSwapped)
+#endif
     IPC_MESSAGE_HANDLER(GpuHostMsg_GraphicsInfoCollected,
                         OnGraphicsInfoCollected)
     IPC_MESSAGE_HANDLER(GpuHostMsg_VideoMemoryUsageStats,
                         OnVideoMemoryUsageStatsReceived);
-    IPC_MESSAGE_HANDLER(GpuHostMsg_ResourcesRelinquished,
-                        OnResourcesRelinquished)
     IPC_MESSAGE_HANDLER(GpuHostMsg_AddSubscription, OnAddSubscription);
     IPC_MESSAGE_HANDLER(GpuHostMsg_RemoveSubscription, OnRemoveSubscription);
 
@@ -268,9 +276,9 @@ void GpuProcessHostUIShim::OnAcceleratedSurfaceInitialized(int32 surface_id,
   view->AcceleratedSurfaceInitialized(route_id);
 }
 
+#if defined(OS_MACOSX)
 void GpuProcessHostUIShim::OnAcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params) {
-#if defined(OS_MACOSX)
   TRACE_EVENT0("renderer",
       "GpuProcessHostUIShim::OnAcceleratedSurfaceBuffersSwapped");
   if (!ui::LatencyInfo::Verify(params.latency_info,
@@ -298,25 +306,19 @@ void GpuProcessHostUIShim::OnAcceleratedSurfaceBuffersSwapped(
     ui::AcceleratedWidgetMacGotAcceleratedFrame(
         native_widget, params.surface_handle, params.latency_info, params.size,
         params.scale_factor,
+        params.damage_rect,
         base::Bind(&OnSurfaceDisplayedCallback, params.surface_id),
-        &ack_params.disable_throttling, &ack_params.renderer_id);
+        &ack_params.disable_throttling, &ack_params.renderer_id,
+        &ack_params.vsync_timebase, &ack_params.vsync_interval);
   }
   Send(new AcceleratedSurfaceMsg_BufferPresented(params.route_id, ack_params));
-#else
-  NOTREACHED();
-#endif
 }
+#endif
 
 void GpuProcessHostUIShim::OnVideoMemoryUsageStatsReceived(
     const GPUVideoMemoryUsageStats& video_memory_usage_stats) {
   GpuDataManagerImpl::GetInstance()->UpdateVideoMemoryUsageStats(
       video_memory_usage_stats);
-}
-
-void GpuProcessHostUIShim::OnResourcesRelinquished() {
-  if (!relinquish_callback_.is_null()) {
-    base::ResetAndReturn(&relinquish_callback_).Run();
-  }
 }
 
 void GpuProcessHostUIShim::OnAddSubscription(

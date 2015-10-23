@@ -7,16 +7,19 @@
 
 #include <stdint.h>
 #include <set>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/gcm_driver/common/gcm_messages.h"
 #include "components/gcm_driver/gcm_app_handler.h"
 #include "components/gcm_driver/gcm_client.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/push_messaging_service.h"
+#include "content/public/common/permission_status.mojom.h"
 #include "content/public/common/push_messaging_status.h"
 #include "third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h"
 
@@ -53,7 +56,7 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
   // gcm::GCMAppHandler implementation.
   void ShutdownHandler() override;
   void OnMessage(const std::string& app_id,
-                 const gcm::GCMClient::IncomingMessage& message) override;
+                 const gcm::IncomingMessage& message) override;
   void OnMessagesDeleted(const std::string& app_id) override;
   void OnSendError(
       const std::string& app_id,
@@ -64,23 +67,28 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
 
   // content::PushMessagingService implementation:
   GURL GetPushEndpoint() override;
-  void RegisterFromDocument(
+  void SubscribeFromDocument(
       const GURL& requesting_origin,
-      int64 service_worker_registration_id,
+      int64_t service_worker_registration_id,
       const std::string& sender_id,
       int renderer_id,
       int render_frame_id,
       bool user_visible,
       const content::PushMessagingService::RegisterCallback& callback) override;
-  void RegisterFromWorker(
+  void SubscribeFromWorker(
       const GURL& requesting_origin,
-      int64 service_worker_registration_id,
+      int64_t service_worker_registration_id,
       const std::string& sender_id,
       bool user_visible,
       const content::PushMessagingService::RegisterCallback& callback) override;
-  void Unregister(
+  void GetPublicEncryptionKey(
+      const GURL& origin,
+      int64_t service_worker_registration_id,
+      const content::PushMessagingService::PublicKeyCallback&
+          callback) override;
+  void Unsubscribe(
       const GURL& requesting_origin,
-      int64 service_worker_registration_id,
+      int64_t service_worker_registration_id,
       const std::string& sender_id,
       const content::PushMessagingService::UnregisterCallback&) override;
   blink::WebPushPermissionStatus GetPermissionStatus(
@@ -104,51 +112,69 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
       const base::Closure& callback);
 
  private:
-  // A registration is pending until it has succeeded or failed.
-  void IncreasePushRegistrationCount(int add, bool is_pending);
-  void DecreasePushRegistrationCount(int subtract, bool was_pending);
+  // A subscription is pending until it has succeeded or failed.
+  void IncreasePushSubscriptionCount(int add, bool is_pending);
+  void DecreasePushSubscriptionCount(int subtract, bool was_pending);
 
   // OnMessage methods ---------------------------------------------------------
 
   void DeliverMessageCallback(const std::string& app_id,
                               const GURL& requesting_origin,
                               int64 service_worker_registration_id,
-                              const gcm::GCMClient::IncomingMessage& message,
+                              const gcm::IncomingMessage& message,
                               const base::Closure& message_handled_closure,
                               content::PushDeliveryStatus status);
 
-  // Register methods ----------------------------------------------------------
+  // Subscribe methods ---------------------------------------------------------
 
-  void RegisterEnd(
+  void SubscribeEnd(
       const content::PushMessagingService::RegisterCallback& callback,
-      const std::string& registration_id,
+      const std::string& subscription_id,
+      const std::vector<uint8_t>& curve25519dh,
       content::PushRegistrationStatus status);
 
-  void DidRegister(
+  void SubscribeEndWithError(
+      const content::PushMessagingService::RegisterCallback& callback,
+      content::PushRegistrationStatus status);
+
+  void DidSubscribe(
       const PushMessagingAppIdentifier& app_identifier,
       const content::PushMessagingService::RegisterCallback& callback,
-      const std::string& registration_id,
+      const std::string& subscription_id,
       gcm::GCMClient::Result result);
+
+  void DidSubscribeWithPublicKey(
+      const PushMessagingAppIdentifier& app_identifier,
+      const content::PushMessagingService::RegisterCallback& callback,
+      const std::string& subscription_id,
+      const std::string& public_key);
 
   void DidRequestPermission(
       const PushMessagingAppIdentifier& app_identifier,
       const std::string& sender_id,
       const content::PushMessagingService::RegisterCallback& callback,
-      ContentSetting content_setting);
+      content::PermissionStatus permission_status);
 
-  // Unregister methods --------------------------------------------------------
+  // GetPublicEncryptionKey method ---------------------------------------------
 
-  void Unregister(const std::string& app_id,
-                  const std::string& sender_id,
-                  const content::PushMessagingService::UnregisterCallback&);
+  void DidGetPublicKey(
+      const PushMessagingService::PublicKeyCallback& callback,
+      const std::string& public_key) const;
 
-  void DidUnregister(bool was_registered,
-                     const content::PushMessagingService::UnregisterCallback&,
-                     gcm::GCMClient::Result result);
+
+  // Unsubscribe methods -------------------------------------------------------
+
+  void Unsubscribe(const std::string& app_id,
+                   const std::string& sender_id,
+                   const content::PushMessagingService::UnregisterCallback&);
+
+  void DidUnsubscribe(bool was_subscribed,
+                      const content::PushMessagingService::UnregisterCallback&,
+                      gcm::GCMClient::Result result);
 
   // OnContentSettingChanged methods -------------------------------------------
 
-  void UnregisterBecausePermissionRevoked(
+  void UnsubscribeBecausePermissionRevoked(
       const PushMessagingAppIdentifier& app_identifier,
       const base::Closure& closure,
       const std::string& sender_id,
@@ -158,14 +184,17 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
   // Helper methods ------------------------------------------------------------
 
   // Checks if a given origin is allowed to use Push.
-  bool HasPermission(const GURL& origin);
+  bool IsPermissionSet(const GURL& origin);
+
+  // Returns whether incoming messages should support payloads.
+  bool AreMessagePayloadsEnabled() const;
 
   gcm::GCMDriver* GetGCMDriver() const;
 
   Profile* profile_;
 
-  int push_registration_count_;
-  int pending_push_registration_count_;
+  int push_subscription_count_;
+  int pending_push_subscription_count_;
 
   base::Closure message_callback_for_testing_;
   base::Closure content_setting_changed_callback_for_testing_;

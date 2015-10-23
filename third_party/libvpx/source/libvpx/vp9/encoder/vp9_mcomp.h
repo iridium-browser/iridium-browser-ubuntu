@@ -13,7 +13,7 @@
 #define VP9_ENCODER_VP9_MCOMP_H_
 
 #include "vp9/encoder/vp9_block.h"
-#include "vp9/encoder/vp9_variance.h"
+#include "vpx_dsp/variance.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,7 +83,8 @@ int vp9_full_pixel_diamond(const struct VP9_COMP *cpi, MACROBLOCK *x,
 // Perform integral projection based motion estimation.
 unsigned int vp9_int_pro_motion_estimation(const struct VP9_COMP *cpi,
                                            MACROBLOCK *x,
-                                           BLOCK_SIZE bsize);
+                                           BLOCK_SIZE bsize,
+                                           int mi_row, int mi_col);
 
 typedef int (integer_mv_pattern_search_fn) (
     const MACROBLOCK *x,

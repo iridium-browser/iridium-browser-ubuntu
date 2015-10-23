@@ -12,6 +12,21 @@
 #include "ui/gl/gl_image_shared_memory.h"
 
 namespace content {
+namespace {
+
+const GpuMemoryBufferFactory::Configuration kSupportedConfigurations[] = {
+    {gfx::BufferFormat::R_8, gfx::BufferUsage::MAP},
+    {gfx::BufferFormat::R_8, gfx::BufferUsage::PERSISTENT_MAP},
+    {gfx::BufferFormat::RGBA_4444, gfx::BufferUsage::MAP},
+    {gfx::BufferFormat::RGBA_4444, gfx::BufferUsage::PERSISTENT_MAP},
+    {gfx::BufferFormat::RGBA_8888, gfx::BufferUsage::MAP},
+    {gfx::BufferFormat::RGBA_8888, gfx::BufferUsage::PERSISTENT_MAP},
+    {gfx::BufferFormat::BGRA_8888, gfx::BufferUsage::MAP},
+    {gfx::BufferFormat::BGRA_8888, gfx::BufferUsage::PERSISTENT_MAP},
+    {gfx::BufferFormat::YUV_420, gfx::BufferUsage::MAP},
+    {gfx::BufferFormat::YUV_420, gfx::BufferUsage::PERSISTENT_MAP}};
+
+}  // namespace
 
 GpuMemoryBufferFactorySharedMemory::GpuMemoryBufferFactorySharedMemory() {
 }
@@ -19,25 +34,32 @@ GpuMemoryBufferFactorySharedMemory::GpuMemoryBufferFactorySharedMemory() {
 GpuMemoryBufferFactorySharedMemory::~GpuMemoryBufferFactorySharedMemory() {
 }
 
+// static
+bool GpuMemoryBufferFactorySharedMemory::
+    IsGpuMemoryBufferConfigurationSupported(gfx::BufferFormat format,
+                                            gfx::BufferUsage usage) {
+  for (auto& configuration : kSupportedConfigurations) {
+    if (configuration.format == format && configuration.usage == usage)
+      return true;
+  }
+
+  return false;
+}
+
 void GpuMemoryBufferFactorySharedMemory::
     GetSupportedGpuMemoryBufferConfigurations(
         std::vector<Configuration>* configurations) {
-  const Configuration supported_configurations[] = {
-      {gfx::GpuMemoryBuffer::R_8, gfx::GpuMemoryBuffer::MAP},
-      {gfx::GpuMemoryBuffer::RGBA_8888, gfx::GpuMemoryBuffer::MAP},
-      {gfx::GpuMemoryBuffer::BGRA_8888, gfx::GpuMemoryBuffer::MAP},
-      {gfx::GpuMemoryBuffer::YUV_420, gfx::GpuMemoryBuffer::MAP}};
   configurations->assign(
-      supported_configurations,
-      supported_configurations + arraysize(supported_configurations));
+      kSupportedConfigurations,
+      kSupportedConfigurations + arraysize(kSupportedConfigurations));
 }
 
 gfx::GpuMemoryBufferHandle
 GpuMemoryBufferFactorySharedMemory::CreateGpuMemoryBuffer(
     gfx::GpuMemoryBufferId id,
     const gfx::Size& size,
-    gfx::GpuMemoryBuffer::Format format,
-    gfx::GpuMemoryBuffer::Usage usage,
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage,
     int client_id,
     gfx::PluginWindowHandle surface_handle) {
   size_t buffer_size = 0u;
@@ -49,6 +71,9 @@ GpuMemoryBufferFactorySharedMemory::CreateGpuMemoryBuffer(
   if (!shared_memory.CreateAnonymous(buffer_size))
     return gfx::GpuMemoryBufferHandle();
 
+#if DCHECK_IS_ON()
+  DCHECK(buffers_.insert(id).second);
+#endif
   gfx::GpuMemoryBufferHandle handle;
   handle.type = gfx::SHARED_MEMORY_BUFFER;
   handle.id = id;
@@ -59,6 +84,9 @@ GpuMemoryBufferFactorySharedMemory::CreateGpuMemoryBuffer(
 void GpuMemoryBufferFactorySharedMemory::DestroyGpuMemoryBuffer(
     gfx::GpuMemoryBufferId id,
     int client_id) {
+#if DCHECK_IS_ON()
+  DCHECK_EQ(buffers_.erase(id), 1u);
+#endif
 }
 
 gpu::ImageFactory* GpuMemoryBufferFactorySharedMemory::AsImageFactory() {
@@ -69,9 +97,12 @@ scoped_refptr<gfx::GLImage>
 GpuMemoryBufferFactorySharedMemory::CreateImageForGpuMemoryBuffer(
     const gfx::GpuMemoryBufferHandle& handle,
     const gfx::Size& size,
-    gfx::GpuMemoryBuffer::Format format,
+    gfx::BufferFormat format,
     unsigned internalformat,
     int client_id) {
+#if DCHECK_IS_ON()
+  DCHECK_EQ(buffers_.count(handle.id), 1u);
+#endif
   scoped_refptr<gfx::GLImageSharedMemory> image(
       new gfx::GLImageSharedMemory(size, internalformat));
   if (!image->Initialize(handle, format))

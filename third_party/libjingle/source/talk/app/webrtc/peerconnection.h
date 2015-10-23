@@ -30,6 +30,7 @@
 
 #include <string>
 
+#include "talk/app/webrtc/dtlsidentitystore.h"
 #include "talk/app/webrtc/mediastreamsignaling.h"
 #include "talk/app/webrtc/peerconnectionfactory.h"
 #include "talk/app/webrtc/peerconnectioninterface.h"
@@ -61,7 +62,7 @@ class PeerConnection : public PeerConnectionInterface,
       const PeerConnectionInterface::RTCConfiguration& configuration,
       const MediaConstraintsInterface* constraints,
       PortAllocatorFactoryInterface* allocator_factory,
-      DTLSIdentityServiceInterface* dtls_identity_service,
+      rtc::scoped_ptr<DtlsIdentityStoreInterface> dtls_identity_store,
       PeerConnectionObserver* observer);
   virtual rtc::scoped_refptr<StreamCollectionInterface> local_streams();
   virtual rtc::scoped_refptr<StreamCollectionInterface> remote_streams();
@@ -99,6 +100,7 @@ class PeerConnection : public PeerConnectionInterface,
                                    SessionDescriptionInterface* desc);
   virtual void SetRemoteDescription(SetSessionDescriptionObserver* observer,
                                     SessionDescriptionInterface* desc);
+  virtual void SetIceConnectionReceivingTimeout(int timeout_ms);
   // TODO(mallinath) : Deprecated version, remove after all clients are updated.
   virtual bool UpdateIce(const IceServers& configuration,
                          const MediaConstraintsInterface* constraints);
@@ -142,26 +144,19 @@ class PeerConnection : public PeerConnectionInterface,
                                uint32 ssrc) override;
   void OnRemoveLocalVideoTrack(MediaStreamInterface* stream,
                                VideoTrackInterface* video_track) override;
-  virtual void OnRemoveLocalStream(MediaStreamInterface* stream);
+  void OnRemoveLocalStream(MediaStreamInterface* stream) override;
 
   // Implements IceObserver
-  virtual void OnIceConnectionChange(IceConnectionState new_state);
-  virtual void OnIceGatheringChange(IceGatheringState new_state);
-  virtual void OnIceCandidate(const IceCandidateInterface* candidate);
-  virtual void OnIceComplete();
+  void OnIceConnectionChange(IceConnectionState new_state) override;
+  void OnIceGatheringChange(IceGatheringState new_state) override;
+  void OnIceCandidate(const IceCandidateInterface* candidate) override;
+  void OnIceComplete() override;
+  void OnIceConnectionReceivingChange(bool receiving) override;
 
   // Signals from WebRtcSession.
   void OnSessionStateChange(cricket::BaseSession* session,
                             cricket::BaseSession::State state);
   void ChangeSignalingState(SignalingState signaling_state);
-
-  bool DoInitialize(IceTransportsType type,
-                    const StunConfigurations& stun_config,
-                    const TurnConfigurations& turn_config,
-                    const MediaConstraintsInterface* constraints,
-                    PortAllocatorFactoryInterface* allocator_factory,
-                    DTLSIdentityServiceInterface* dtls_identity_service,
-                    PeerConnectionObserver* observer);
 
   rtc::Thread* signaling_thread() const {
     return factory_->signaling_thread();

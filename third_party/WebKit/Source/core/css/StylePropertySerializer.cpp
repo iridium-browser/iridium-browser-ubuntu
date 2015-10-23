@@ -40,16 +40,16 @@ static bool isInitialOrInherit(const String& value)
 }
 
 StylePropertySerializer::StylePropertySetForSerializer::StylePropertySetForSerializer(const StylePropertySet& properties)
-    : m_propertySet(properties)
-    , m_allIndex(m_propertySet.findPropertyIndex(CSSPropertyAll))
+    : m_propertySet(&properties)
+    , m_allIndex(m_propertySet->findPropertyIndex(CSSPropertyAll))
     , m_needToExpandAll(false)
 {
     if (!hasAllProperty())
         return;
 
-    StylePropertySet::PropertyReference allProperty = m_propertySet.propertyAt(m_allIndex);
-    for (unsigned i = 0; i < m_propertySet.propertyCount(); ++i) {
-        StylePropertySet::PropertyReference property = m_propertySet.propertyAt(i);
+    StylePropertySet::PropertyReference allProperty = m_propertySet->propertyAt(m_allIndex);
+    for (unsigned i = 0; i < m_propertySet->propertyCount(); ++i) {
+        StylePropertySet::PropertyReference property = m_propertySet->propertyAt(i);
         if (CSSProperty::isAffectedByAllProperty(property.id())) {
             if (allProperty.isImportant() && !property.isImportant())
                 continue;
@@ -64,27 +64,32 @@ StylePropertySerializer::StylePropertySetForSerializer::StylePropertySetForSeria
     }
 }
 
+DEFINE_TRACE(StylePropertySerializer::StylePropertySetForSerializer)
+{
+    visitor->trace(m_propertySet);
+}
+
 unsigned StylePropertySerializer::StylePropertySetForSerializer::propertyCount() const
 {
     if (!hasExpandedAllProperty())
-        return m_propertySet.propertyCount();
+        return m_propertySet->propertyCount();
     return lastCSSProperty - firstCSSProperty + 1;
 }
 
 StylePropertySerializer::PropertyValueForSerializer StylePropertySerializer::StylePropertySetForSerializer::propertyAt(unsigned index) const
 {
     if (!hasExpandedAllProperty())
-        return StylePropertySerializer::PropertyValueForSerializer(m_propertySet.propertyAt(index));
+        return StylePropertySerializer::PropertyValueForSerializer(m_propertySet->propertyAt(index));
 
     CSSPropertyID propertyID = static_cast<CSSPropertyID>(index + firstCSSProperty);
     ASSERT(firstCSSProperty <= propertyID && propertyID <= lastCSSProperty);
     if (m_longhandPropertyUsed.get(index)) {
-        int index = m_propertySet.findPropertyIndex(propertyID);
+        int index = m_propertySet->findPropertyIndex(propertyID);
         ASSERT(index != -1);
-        return StylePropertySerializer::PropertyValueForSerializer(m_propertySet.propertyAt(index));
+        return StylePropertySerializer::PropertyValueForSerializer(m_propertySet->propertyAt(index));
     }
 
-    StylePropertySet::PropertyReference property = m_propertySet.propertyAt(m_allIndex);
+    StylePropertySet::PropertyReference property = m_propertySet->propertyAt(m_allIndex);
     return StylePropertySerializer::PropertyValueForSerializer(propertyID, property.value(), property.isImportant());
 }
 
@@ -97,7 +102,7 @@ bool StylePropertySerializer::StylePropertySetForSerializer::shouldProcessProper
     // If all is not expanded, we need to process "all" and properties which
     // are not overwritten by "all".
     if (!m_needToExpandAll) {
-        StylePropertySet::PropertyReference property = m_propertySet.propertyAt(index);
+        StylePropertySet::PropertyReference property = m_propertySet->propertyAt(index);
         if (property.id() == CSSPropertyAll || !CSSProperty::isAffectedByAllProperty(property.id()))
             return true;
         return m_longhandPropertyUsed.get(property.id() - firstCSSProperty);
@@ -124,7 +129,7 @@ bool StylePropertySerializer::StylePropertySetForSerializer::shouldProcessProper
 int StylePropertySerializer::StylePropertySetForSerializer::findPropertyIndex(CSSPropertyID propertyID) const
 {
     if (!hasExpandedAllProperty())
-        return m_propertySet.findPropertyIndex(propertyID);
+        return m_propertySet->findPropertyIndex(propertyID);
     return propertyID - firstCSSProperty;
 }
 
@@ -140,7 +145,7 @@ const CSSValue* StylePropertySerializer::StylePropertySetForSerializer::getPrope
 String StylePropertySerializer::StylePropertySetForSerializer::getPropertyValue(CSSPropertyID propertyID) const
 {
     if (!hasExpandedAllProperty())
-        return m_propertySet.getPropertyValue(propertyID);
+        return m_propertySet->getPropertyValue(propertyID);
 
     const CSSValue* value = getPropertyCSSValue(propertyID);
     if (!value)
@@ -246,8 +251,9 @@ String StylePropertySerializer::asText() const
                     shorthandPropertyAppeared.set(CSSPropertyBorder - firstCSSProperty);
                 else
                     shorthandPropertyID = CSSPropertyBorder;
-            } else if (shorthandPropertyUsed.get(CSSPropertyBorder - firstCSSProperty))
+            } else if (shorthandPropertyUsed.get(CSSPropertyBorder - firstCSSProperty)) {
                 shorthandPropertyID = CSSPropertyBorder;
+            }
             if (!shorthandPropertyID)
                 shorthandPropertyID = borderFallbackShorthandProperty;
             break;
@@ -381,7 +387,7 @@ String StylePropertySerializer::getPropertyValue(CSSPropertyID propertyID) const
     // Shorthand and 4-values properties
     switch (propertyID) {
     case CSSPropertyAnimation:
-        return getLayeredShorthandValue(animationShorthand(), true);
+        return getLayeredShorthandValue(animationShorthand());
     case CSSPropertyBorderSpacing:
         return borderSpacingValue(borderSpacingShorthand());
     case CSSPropertyBackgroundPosition:
@@ -389,7 +395,7 @@ String StylePropertySerializer::getPropertyValue(CSSPropertyID propertyID) const
     case CSSPropertyBackgroundRepeat:
         return backgroundRepeatPropertyValue();
     case CSSPropertyBackground:
-        return getLayeredShorthandValue(backgroundShorthand(), true);
+        return getLayeredShorthandValue(backgroundShorthand());
     case CSSPropertyBorder:
         return borderPropertyValue(OmitUncommonValues);
     case CSSPropertyBorderTop:
@@ -435,7 +441,7 @@ String StylePropertySerializer::getPropertyValue(CSSPropertyID propertyID) const
     case CSSPropertyPadding:
         return get4Values(paddingShorthand());
     case CSSPropertyTransition:
-        return getLayeredShorthandValue(transitionShorthand(), true);
+        return getLayeredShorthandValue(transitionShorthand());
     case CSSPropertyListStyle:
         return getShorthandValue(listStyleShorthand());
     case CSSPropertyWebkitMaskPosition:
@@ -478,13 +484,14 @@ String StylePropertySerializer::borderSpacingValue(const StylePropertyShorthand&
     return horizontalValueCSSText + ' ' + verticalValueCSSText;
 }
 
-void StylePropertySerializer::appendFontLonghandValueIfExplicit(CSSPropertyID propertyID, StringBuilder& result, String& commonValue) const
+void StylePropertySerializer::appendFontLonghandValueIfNotNormal(CSSPropertyID propertyID, StringBuilder& result, String& commonValue) const
 {
     int foundPropertyIndex = m_propertySet.findPropertyIndex(propertyID);
     if (foundPropertyIndex == -1)
-        return; // All longhands must have at least implicit values if "font" is specified.
+        return;
 
-    if (m_propertySet.propertyAt(foundPropertyIndex).isImplicit()) {
+    const CSSValue* val = m_propertySet.propertyAt(foundPropertyIndex).value();
+    if (val->isPrimitiveValue() && toCSSPrimitiveValue(val)->getValueID() == CSSValueNormal) {
         commonValue = String();
         return;
     }
@@ -523,19 +530,17 @@ String StylePropertySerializer::fontValue() const
 
     PropertyValueForSerializer fontSizeProperty = m_propertySet.propertyAt(fontSizePropertyIndex);
     PropertyValueForSerializer fontFamilyProperty = m_propertySet.propertyAt(fontFamilyPropertyIndex);
-    if (fontSizeProperty.isImplicit() || fontFamilyProperty.isImplicit())
-        return emptyString();
 
     String commonValue = fontSizeProperty.value()->cssText();
     StringBuilder result;
-    appendFontLonghandValueIfExplicit(CSSPropertyFontStyle, result, commonValue);
-    appendFontLonghandValueIfExplicit(CSSPropertyFontVariant, result, commonValue);
-    appendFontLonghandValueIfExplicit(CSSPropertyFontWeight, result, commonValue);
-    appendFontLonghandValueIfExplicit(CSSPropertyFontStretch, result, commonValue);
+    appendFontLonghandValueIfNotNormal(CSSPropertyFontStyle, result, commonValue);
+    appendFontLonghandValueIfNotNormal(CSSPropertyFontVariant, result, commonValue);
+    appendFontLonghandValueIfNotNormal(CSSPropertyFontWeight, result, commonValue);
+    appendFontLonghandValueIfNotNormal(CSSPropertyFontStretch, result, commonValue);
     if (!result.isEmpty())
         result.append(' ');
     result.append(fontSizeProperty.value()->cssText());
-    appendFontLonghandValueIfExplicit(CSSPropertyLineHeight, result, commonValue);
+    appendFontLonghandValueIfNotNormal(CSSPropertyLineHeight, result, commonValue);
     if (!result.isEmpty())
         result.append(' ');
     result.append(fontFamilyProperty.value()->cssText());
@@ -597,113 +602,97 @@ String StylePropertySerializer::get4Values(const StylePropertyShorthand& shortha
     return result.toString();
 }
 
-String StylePropertySerializer::getLayeredShorthandValue(const StylePropertyShorthand& shorthand, bool checkShorthandAvailable) const
+String StylePropertySerializer::getLayeredShorthandValue(const StylePropertyShorthand& shorthand) const
 {
-    StringBuilder result;
-
     const unsigned size = shorthand.length();
-    // Begin by collecting the properties into an array.
-    WillBeHeapVector<const CSSValue*> values(size);
-    size_t numLayers = 0;
 
-    for (unsigned i = 0; i < size; ++i) {
+    // Begin by collecting the properties into a vector.
+    WillBeHeapVector<const CSSValue*> values(size);
+    // If the below loop succeeds, there should always be at minimum 1 layer.
+    size_t numLayers = 1U;
+
+    for (size_t i = 0; i < size; i++) {
         values[i] = m_propertySet.getPropertyCSSValue(shorthand.properties()[i]);
-        if (values[i]) {
-            if (values[i]->isBaseValueList()) {
-                const CSSValueList* valueList = toCSSValueList(values[i]);
-                numLayers = std::max(valueList->length(), numLayers);
-            } else {
-                numLayers = std::max<size_t>(1U, numLayers);
-            }
-        } else if (checkShorthandAvailable) {
+        // A shorthand is not available if getPropertyCSSValue didn't resolve to anything.
+        if (!values[i])
             return String();
+        if (values[i]->isBaseValueList()) {
+            const CSSValueList* valueList = toCSSValueList(values[i]);
+            numLayers = std::max(numLayers, valueList->length());
         }
     }
 
-
-    String commonValue;
-    bool commonValueInitialized = false;
+    StringBuilder result;
+    // Tracks whether or not all the values are initial or all the values are inherit.
+    // Start out assuming there is a common value. It will get set to false below if there isn't one.
+    bool hasCommonValue = true;
+    const CSSValue* commonValue = nullptr;
 
     // Now stitch the properties together. Implicit initial values are flagged as such and
     // can safely be omitted.
-    for (size_t i = 0; i < numLayers; i++) {
+    for (size_t layer = 0; layer < numLayers; layer++) {
         StringBuilder layerResult;
         bool useRepeatXShorthand = false;
         bool useRepeatYShorthand = false;
         bool useSingleWordShorthand = false;
         bool foundPositionYCSSProperty = false;
-        for (unsigned j = 0; j < size; j++) {
-            const CSSValue* value = 0;
-            if (values[j]) {
-                if (values[j]->isBaseValueList()) {
-                    value = toCSSValueList(values[j])->itemWithBoundsCheck(i);
-                } else {
-                    value = values[j];
 
-                    // Color only belongs in the last layer.
-                    if (shorthand.properties()[j] == CSSPropertyBackgroundColor) {
-                        if (i != numLayers - 1)
-                            value = 0;
-                    } else if (i) {
-                        // Other singletons only belong in the first layer.
-                        value = 0;
-                    }
-                }
+        for (unsigned propertyIndex = 0; propertyIndex < size; propertyIndex++) {
+            const CSSValue* value = nullptr;
+            CSSPropertyID property = shorthand.properties()[propertyIndex];
+
+            // Get a CSSValue for this property and layer.
+            if (values[propertyIndex]->isBaseValueList()) {
+                // Might return 0 if there is not an item for this layer for this property.
+                value = toCSSValueList(values[propertyIndex])->itemWithBoundsCheck(layer);
+            } else if (layer == 0 || (layer != numLayers - 1 && property == CSSPropertyBackgroundColor)) {
+                // Singletons except background color belong in the 0th layer.
+                // Background color belongs in the last layer.
+                value = values[propertyIndex];
             }
+            // No point proceeding if there's not a value to look at.
+            if (!value)
+                continue;
 
-            // We need to report background-repeat as it was written in the CSS. If the property is implicit,
-            // then it was written with only one value. Here we figure out which value that was so we can
-            // report back correctly.
-            if ((shorthand.properties()[j] == CSSPropertyBackgroundRepeatX && m_propertySet.isPropertyImplicit(shorthand.properties()[j]))
-                || (shorthand.properties()[j] == CSSPropertyWebkitMaskRepeatX && m_propertySet.isPropertyImplicit(shorthand.properties()[j]))) {
+            // Special case for background-repeat.
+            if ((propertyIndex < size - 1 && m_propertySet.isPropertyImplicit(property))
+                && (property == CSSPropertyBackgroundRepeatX || property == CSSPropertyWebkitMaskRepeatX)) {
+                ASSERT(shorthand.properties()[propertyIndex + 1] == CSSPropertyBackgroundRepeatY
+                    || shorthand.properties()[propertyIndex + 1] == CSSPropertyWebkitMaskRepeatY);
+                const CSSValue* yValue = values[propertyIndex + 1]->isValueList() ?
+                    toCSSValueList(values[propertyIndex + 1])->item(layer) : values[propertyIndex + 1];
 
-                // BUG 49055: make sure the value was not reset in the layer check just above.
-                if ((j < size - 1 && shorthand.properties()[j + 1] == CSSPropertyBackgroundRepeatY && value)
-                    || (j < size - 1 && shorthand.properties()[j + 1] == CSSPropertyWebkitMaskRepeatY && value)) {
-                    const CSSValue* yValue = 0;
-                    const CSSValue* nextValue = values[j + 1];
-                    if (nextValue->isValueList())
-                        yValue = toCSSValueList(nextValue)->item(i);
-                    else
-                        yValue = nextValue;
 
-                    // background-repeat-x(y) or mask-repeat-x(y) may be like this : "initial, repeat". We can omit the implicit initial values
-                    // before starting to compare their values.
-                    if (value->isImplicitInitialValue() || yValue->isImplicitInitialValue())
-                        continue;
-
-                    // FIXME: At some point we need to fix this code to avoid returning an invalid shorthand,
-                    // since some longhand combinations are not serializable into a single shorthand.
-                    if (!value->isPrimitiveValue() || !yValue->isPrimitiveValue())
-                        continue;
-
-                    CSSValueID xId = toCSSPrimitiveValue(value)->getValueID();
-                    CSSValueID yId = toCSSPrimitiveValue(yValue)->getValueID();
-                    if (xId != yId) {
-                        if (xId == CSSValueRepeat && yId == CSSValueNoRepeat) {
-                            useRepeatXShorthand = true;
-                            ++j;
-                        } else if (xId == CSSValueNoRepeat && yId == CSSValueRepeat) {
-                            useRepeatYShorthand = true;
-                            continue;
-                        }
-                    } else {
-                        useSingleWordShorthand = true;
-                        ++j;
-                    }
-                }
-            }
-
-            String valueText;
-            if (value && !value->isImplicitInitialValue()) {
-                if (!layerResult.isEmpty())
-                    layerResult.append(' ');
-                if (foundPositionYCSSProperty
-                    && (shorthand.properties()[j] == CSSPropertyBackgroundSize || shorthand.properties()[j] == CSSPropertyWebkitMaskSize))
-                    layerResult.appendLiteral("/ ");
-                if (!foundPositionYCSSProperty
-                    && (shorthand.properties()[j] == CSSPropertyBackgroundSize || shorthand.properties()[j] == CSSPropertyWebkitMaskSize))
+                // FIXME: At some point we need to fix this code to avoid returning an invalid shorthand,
+                // since some longhand combinations are not serializable into a single shorthand.
+                if (!value->isPrimitiveValue() || !yValue->isPrimitiveValue())
                     continue;
+
+                CSSValueID xId = toCSSPrimitiveValue(value)->getValueID();
+                CSSValueID yId = toCSSPrimitiveValue(yValue)->getValueID();
+                // Maybe advance propertyIndex to look at the next CSSValue in the list for the checks below.
+                if (xId == yId) {
+                    useSingleWordShorthand = true;
+                    property = shorthand.properties()[++propertyIndex];
+                } else if (xId == CSSValueRepeat && yId == CSSValueNoRepeat) {
+                    useRepeatXShorthand = true;
+                    property = shorthand.properties()[++propertyIndex];
+                } else if (xId == CSSValueNoRepeat && yId == CSSValueRepeat) {
+                    useRepeatYShorthand = true;
+                    property = shorthand.properties()[++propertyIndex];
+                }
+            }
+
+            if (!(value->isInitialValue() && toCSSInitialValue(value)->isImplicit())) {
+                if (property == CSSPropertyBackgroundSize || property == CSSPropertyWebkitMaskSize) {
+                    if (foundPositionYCSSProperty)
+                        layerResult.appendLiteral(" / ");
+                    else
+                        continue;
+                } else if (!layerResult.isEmpty()) {
+                    // Do this second to avoid ending up with an extra space in the output if we hit the continue above.
+                    layerResult.append(' ');
+                }
 
                 if (useRepeatXShorthand) {
                     useRepeatXShorthand = false;
@@ -714,28 +703,22 @@ String StylePropertySerializer::getLayeredShorthandValue(const StylePropertyShor
                 } else {
                     if (useSingleWordShorthand)
                         useSingleWordShorthand = false;
-                    valueText = value->cssText();
-                    layerResult.append(valueText);
+                    layerResult.append(value->cssText());
                 }
-
-                if (shorthand.properties()[j] == CSSPropertyBackgroundPositionY
-                    || shorthand.properties()[j] == CSSPropertyWebkitMaskPositionY) {
+                if (property == CSSPropertyBackgroundPositionY || property == CSSPropertyWebkitMaskPositionY) {
                     foundPositionYCSSProperty = true;
-
-                    // background-position is a special case: if only the first offset is specified,
+                    // background-position is a special case. If only the first offset is specified,
                     // the second one defaults to "center", not the same value.
-                    if (commonValueInitialized && commonValue != "initial" && commonValue != "inherit")
-                        commonValue = String();
+                    if (hasCommonValue && !value->isInitialValue() && !value->isInheritedValue())
+                        hasCommonValue = false;
                 }
             }
 
-            if (!commonValueInitialized) {
-                commonValue = valueText;
-                commonValueInitialized = true;
-            } else if (!commonValue.isNull() && commonValue != valueText)
-                commonValue = String();
+            if (hasCommonValue && !commonValue)
+                commonValue = value;
+            else if (!value->equals(*commonValue))
+                hasCommonValue = false;
         }
-
         if (!layerResult.isEmpty()) {
             if (!result.isEmpty())
                 result.appendLiteral(", ");
@@ -743,11 +726,9 @@ String StylePropertySerializer::getLayeredShorthandValue(const StylePropertyShor
         }
     }
 
-    if (isInitialOrInherit(commonValue))
-        return commonValue;
+    if (hasCommonValue && (commonValue->isInitialValue() || commonValue->isInheritedValue()))
+        return commonValue->cssText();
 
-    if (result.isEmpty())
-        return String();
     return result.toString();
 }
 
@@ -756,27 +737,22 @@ String StylePropertySerializer::getShorthandValue(const StylePropertyShorthand& 
     String commonValue;
     StringBuilder result;
     for (unsigned i = 0; i < shorthand.length(); ++i) {
-        if (!m_propertySet.isPropertyImplicit(shorthand.properties()[i])) {
-            const CSSValue* value = m_propertySet.getPropertyCSSValue(shorthand.properties()[i]);
-            if (!value)
-                return String();
-            String valueText = value->cssText();
-            if (!i)
-                commonValue = valueText;
-            else if (!commonValue.isNull() && commonValue != valueText)
-                commonValue = String();
-            if (value->isInitialValue())
-                continue;
-            if (!result.isEmpty())
-                result.append(separator);
-            result.append(valueText);
-        } else
+        const CSSValue* value = m_propertySet.getPropertyCSSValue(shorthand.properties()[i]);
+        if (!value)
+            return String();
+        String valueText = value->cssText();
+        if (!i)
+            commonValue = valueText;
+        else if (!commonValue.isNull() && commonValue != valueText)
             commonValue = String();
+        if (value->isInitialValue())
+            continue;
+        if (!result.isEmpty())
+            result.append(separator);
+        result.append(valueText);
     }
     if (isInitialOrInherit(commonValue))
         return commonValue;
-    if (result.isEmpty())
-        return String();
     return result.toString();
 }
 
@@ -933,7 +909,7 @@ void StylePropertySerializer::appendBackgroundPropertyAsText(StringBuilder& resu
     // FIXME: This is a not-so-nice way to turn x/y positions into single background-position in output.
     // It is required because background-position-x/y are non-standard properties and WebKit generated output
     // would not work in Firefox (<rdar://problem/5143183>)
-    // It would be a better solution if background-position was CSS_PAIR.
+    // It would be a better solution if background-position was UnitType::Pair.
     if (shorthandHasOnlyInitialOrInheritedValue(backgroundPositionShorthand())) {
         const CSSValue* value = m_propertySet.getPropertyCSSValue(CSSPropertyBackgroundPositionX);
         bool isImportant = m_propertySet.propertyIsImportant(CSSPropertyBackgroundPositionX);

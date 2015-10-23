@@ -61,13 +61,17 @@ class GLManager : private GpuControl {
     bool lose_context_when_out_of_memory;
     // Whether or not it's ok to lose the context.
     bool context_lost_allowed;
+    // 0 indicates not WebGL context - default.
+    // 1 indicates WebGL 1 context.
+    // 2 indicates WebGL 2 context.
+    unsigned webgl_version;
   };
   GLManager();
   ~GLManager() override;
 
   static scoped_ptr<gfx::GpuMemoryBuffer> CreateGpuMemoryBuffer(
       const gfx::Size& size,
-      gfx::GpuMemoryBuffer::Format format);
+      gfx::BufferFormat format);
 
   void Initialize(const Options& options);
   void InitializeWithCommandLine(const Options& options,
@@ -120,6 +124,7 @@ class GLManager : private GpuControl {
   void SetSurfaceVisible(bool visible) override;
   uint32 CreateStreamTexture(uint32 texture_id) override;
   void SetLock(base::Lock*) override;
+  bool IsGpuChannelLost() override;
 
  private:
   void PumpCommands();

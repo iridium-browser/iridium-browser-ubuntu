@@ -8,6 +8,7 @@
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 
+class Browser;
 class Profile;
 class ToolbarActionViewController;
 
@@ -16,33 +17,32 @@ class ToolbarActionViewController;
 // components of chrome, such as ChromeCast.
 class ComponentToolbarActionsFactory {
  public:
+  // Component action IDs.
+  static const char kMediaRouterActionId[];
+  static const char kActionIdForTesting[];  // Only used for testing.
+
   ComponentToolbarActionsFactory();
-  ~ComponentToolbarActionsFactory();
+  virtual ~ComponentToolbarActionsFactory();
 
   static ComponentToolbarActionsFactory* GetInstance();
 
-  // Returns a collection of controllers for Chrome Actions. Declared virtual
-  // for testing.
-  virtual ScopedVector<ToolbarActionViewController>
-      GetComponentToolbarActions();
+  // Returns a vector of IDs of the component actions.
+  static std::vector<std::string> GetComponentIds();
 
-  // Returns the number of component actions.
-  int GetNumComponentActions();
+  // Returns true if the component action with |action_id| should be added
+  // in incognito mode.
+  static bool EnabledIncognito(const std::string& action_id);
+
+  // Returns a collection of controllers for component actions. Declared
+  // virtual for testing.
+  virtual ScopedVector<ToolbarActionViewController>
+      GetComponentToolbarActions(Browser* browser);
 
   // Sets the factory to use for testing purposes.
   // Ownership remains with the caller.
   static void SetTestingFactory(ComponentToolbarActionsFactory* factory);
 
  private:
-  // The number of component actions. Initially set to -1 to denote that the
-  // count has not been checked yet.
-  int num_component_actions_;
-
-  // Whether or not Media Router UI is currently enabled.
-  // TODO(apacible): Replace this with a switch once there is more Media Router
-  //                 functionality.
-  bool media_router_ui_enabled_;
-
   DISALLOW_COPY_AND_ASSIGN(ComponentToolbarActionsFactory);
 };
 

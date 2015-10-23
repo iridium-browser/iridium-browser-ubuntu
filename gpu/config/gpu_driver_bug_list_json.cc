@@ -19,7 +19,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
 {
   "name": "gpu driver bug list",
   // Please update the version number whenever you change this file.
-  "version": "8.19",
+  "version": "8.23",
   "entries": [
     {
       "id": 1,
@@ -235,8 +235,9 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
         "type": "linux"
       },
       "vendor_id": "0x8086",
-      "features": [
-        "disable_ext_occlusion_query"
+      "disabled_extensions": [
+        "GL_ARB_occlusion_query2",
+        "GL_ARB_occlusion_query"
       ]
     },
     {
@@ -309,19 +310,19 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       },
       "vendor_id": "0x8086",
       "device_id": ["0xa011", "0xa012"],
-      "features": [
-        "disable_oes_standard_derivatives"
+      "disabled_extensions": [
+        "GL_OES_standard_derivatives"
       ]
     },
     {
       "id": 24,
       "cr_bugs": [231082],
-      "description": "Mali-400 drivers throw an error when a buffer object's size is set to 0",
+      "description": "Mali-4xx drivers throw an error when a buffer object's size is set to 0",
       "os": {
         "type": "android"
       },
       "gl_vendor": "ARM.*",
-      "gl_renderer": ".*Mali-400.*",
+      "gl_renderer": ".*Mali-4.*",
       "features": [
         "use_non_zero_size_for_client_side_stream_buffers"
       ]
@@ -593,13 +594,13 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
     },
     {
       "id": 51,
-      "description": "TexSubImage2D() is faster for full uploads on ANGLE",
+      "description": "TexSubImage is faster for full uploads on ANGLE",
       "os": {
         "type": "win"
       },
       "gl_renderer": "ANGLE.*",
       "features": [
-        "texsubimage2d_faster_than_teximage2d"
+        "texsubimage_faster_than_teximage"
       ]
     },
     {
@@ -814,8 +815,8 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
         "type": "android"
       },
       "gl_extensions": ".*GL_VIV_shader_binary.*",
-      "features": [
-        "disable_oes_standard_derivatives"
+      "disabled_extensions": [
+        "GL_OES_standard_derivatives"
       ]
     },
     {
@@ -850,13 +851,13 @@ LONG_STRING_CONST(
         }
       },
       "gl_vendor": "Qualcomm.*",
-      "features": [
-        "disable_egl_khr_fence_sync"
+      "disabled_extensions": [
+        "EGL_KHR_fence_sync"
       ]
     },
     {
       "id": 75,
-      "description": "Mali-400 support of EXT_multisampled_render_to_texture is buggy on Android < 4.3",
+      "description": "Mali-4xx support of EXT_multisampled_render_to_texture is buggy on Android < 4.3",
       "cr_bugs": [362435],
       "os": {
         "type": "android",
@@ -866,7 +867,7 @@ LONG_STRING_CONST(
         }
       },
       "gl_vendor": "ARM.*",
-      "gl_renderer": ".*Mali-400.*",
+      "gl_renderer": ".*Mali-4.*",
       "features": [
         "disable_multisampled_render_to_texture"
       ]
@@ -883,8 +884,8 @@ LONG_STRING_CONST(
         }
       },
       "gl_vendor": "Imagination Technologies.*",
-      "features": [
-        "disable_egl_khr_fence_sync"
+      "disabled_extensions": [
+        "EGL_KHR_fence_sync"
       ]
     },
     {
@@ -905,8 +906,8 @@ LONG_STRING_CONST(
         "op": "<",
         "value": "3.0"
       },
-      "features": [
-        "disable_egl_khr_fence_sync"
+      "disabled_extensions": [
+        "EGL_KHR_fence_sync"
       ]
     },
     {
@@ -921,8 +922,8 @@ LONG_STRING_CONST(
         }
       },
       "gl_vendor": "Broadcom.*",
-      "features": [
-        "disable_egl_khr_fence_sync"
+      "disabled_extensions": [
+        "EGL_KHR_fence_sync"
       ]
     },
     {
@@ -1064,8 +1065,8 @@ LONG_STRING_CONST(
         "op": "=",
         "value": "3.1"
       },
-      "features": [
-        "disable_egl_khr_wait_sync"
+      "disabled_extensions": [
+        "EGL_KHR_wait_sync"
       ]
     },
     {
@@ -1174,8 +1175,7 @@ LONG_STRING_CONST(
           "value": "5.0.2"
         }
       },
-      "gl_vendor": "Qualcomm.*",
-      "gl_renderer": ".*420",
+      "gl_renderer": "Adreno \\(TM\\) 4.*",
       "features": [
         "unbind_attachments_on_bound_render_fbo_delete"
       ]
@@ -1187,15 +1187,14 @@ LONG_STRING_CONST(
       "os": {
         "type": "android"
       },
-      "gl_vendor": "Qualcomm.*",
-      "gl_renderer": ".*420",
+      "gl_renderer": "Adreno \\(TM\\) 4.*",
       "features": [
         "disable_discard_framebuffer"
       ]
     },
     {
       "id": 104,
-      "description": "EXT_occlusion_query hangs on MediaTek MT8135 pre-Lollipop",
+      "description": "EXT_occlusion_query_boolean hangs on MediaTek MT8135 pre-Lollipop",
       "os": {
         "type": "android",
         "version": {
@@ -1205,8 +1204,8 @@ LONG_STRING_CONST(
       },
       "gl_vendor": "Imagination.*",
       "gl_renderer": "PowerVR Rogue Han",
-      "features": [
-        "disable_ext_occlusion_query"
+      "disabled_extensions": [
+        "GL_EXT_occlusion_query_boolean"
       ]
     },
     {
@@ -1223,17 +1222,14 @@ LONG_STRING_CONST(
     },
     {
       "id": 106,
-      "description": "EXT_occlusion_query hangs on PowerVR SGX 544 (IMG) drivers",
+      "description": "EXT_occlusion_query_boolean hangs on PowerVR SGX 544 (IMG) drivers",
       "os": {
         "type": "android"
       },
       "gl_vendor": "Imagination.*",
       "gl_renderer": "PowerVR SGX 544",
-      "features": [
-        "disable_ext_occlusion_query"
-      ],
       "disabled_extensions": [
-        "EXT_occlusion_query_boolean"
+        "GL_EXT_occlusion_query_boolean"
       ]
     },
     {
@@ -1256,16 +1252,18 @@ LONG_STRING_CONST(
         "value2": "1.4"
       },
       "features": [
-        "avoid_egl_image_target_texture_reuse",
-        "disable_egl_khr_wait_sync"
+        "avoid_egl_image_target_texture_reuse"
+      ],
+      "disabled_extensions": [
+        "EGL_KHR_wait_sync"
       ]
     },
     {
       "id": 108,
       "cr_bugs": [449150],
-      "description": "Mali-400 does not support GL_RGB format",
+      "description": "Mali-4xx does not support GL_RGB format",
       "gl_vendor": "ARM.*",
-      "gl_renderer": ".*Mali-400.*",
+      "gl_renderer": ".*Mali-4.*",
       "features": [
         "disable_gl_rgb_format"
       ]
@@ -1282,32 +1280,78 @@ LONG_STRING_CONST(
     },
     {
       "id": 110,
-      "description": "EGL Sync server causes crashes on Adreno 3xx drivers",
+      "description": "EGL Sync server causes crashes on Adreno 2xx and 3xx drivers",
       "cr_bugs": [482298],
       "os": {
         "type": "android"
       },
       "gl_vendor": "Qualcomm.*",
-      "gl_renderer": "Adreno \\(TM\\) 3.*",
+      "gl_renderer": "Adreno \\(TM\\) [23].*",
       "driver_version": {
         "op": "<",
         "value": "95"
       },
-      "features": [
-        "disable_egl_khr_wait_sync"
+      "disabled_extensions": [
+        "EGL_KHR_wait_sync"
       ]
     },
     {
       "id": 111,
-      "description": "Discard Framebuffer breaks WebGL on Mali-400 Linux",
+      "description": "Discard Framebuffer breaks WebGL on Mali-4xx Linux",
       "cr_bugs": [485814],
       "os": {
         "type": "linux"
       },
       "gl_vendor": "ARM.*",
-      "gl_renderer": ".*Mali-400.*",
+      "gl_renderer": ".*Mali-4.*",
       "features": [
         "disable_discard_framebuffer"
+      ]
+    },
+    {
+      "id": 112,
+      "cr_bugs": [477514],
+      "description": "EXT_disjoint_timer_query fails after 2 queries on adreno 3xx in lollypop",
+      "os": {
+        "type": "android",
+        "version": {
+          "op": ">=",
+          "value": "5.0.0"
+        }
+      },
+      "gl_vendor": "Qualcomm.*",
+      "gl_renderer": "Adreno \\(TM\\) 3.*",
+      "features": [
+        "disable_timestamp_queries"
+      ]
+    },
+    {
+      "id": 113,
+      "cr_bugs": [477514],
+      "description": "EXT_disjoint_timer_query fails after 256 queries on adreno 4xx",
+      "os": {
+        "type": "android"
+      },
+      "gl_renderer": "Adreno \\(TM\\) 4.*",
+      "disabled_extensions": [
+        "GL_EXT_disjoint_timer_query"
+      ]
+    },
+    {
+      "id": 115,
+      "cr_bugs": [462553],
+      "description": "glGetIntegerv with GL_GPU_DISJOINT_EXT causes GL_INVALID_ENUM error",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "NVIDIA.*",
+      "gl_type": "gles",
+      "gl_version": {
+        "op": ">=",
+        "value": "3.0"
+      },
+      "disabled_extensions": [
+        "GL_EXT_disjoint_timer_query"
       ]
     },
     {
@@ -1321,8 +1365,7 @@ LONG_STRING_CONST(
           "value": "5.1"
         }
       },
-      "gl_vendor": "Qualcomm.*",
-      "gl_renderer": ".*420",
+      "gl_renderer": "Adreno \\(TM\\) 4.*",
       "features": [
         "disable_multisampled_render_to_texture"
       ]
@@ -1341,6 +1384,22 @@ LONG_STRING_CONST(
       ]
     },
     {
+      "id": 118,
+      "cr_bugs": [477306],
+      "description": "NVIDIA 331 series drivers shader compiler may crash when attempting to optimize pow()",
+      "os": {
+        "type": "linux"
+      },
+      "driver_version": {
+        "op": "<=",
+        "value": "331"
+      },
+      "vendor_id": "0x10de",
+      "features": [
+        "remove_pow_with_constant_exponent"
+      ]
+    },
+    {
       "id": 119,
       "description": "Context lost recovery often fails on Mali-400/450 on Android.",
       "cr_bugs": [496438],
@@ -1351,6 +1410,36 @@ LONG_STRING_CONST(
       "gl_renderer": ".*Mali-4.*",
       "features": [
         "exit_on_context_lost"
+      ]
+    },
+    {
+      "id": 120,
+      "description": "CHROMIUM_copy_texture is slow on Mali pre-Lollipop",
+      "cr_bugs": [498443],
+      "os": {
+        "type": "android",
+        "version": {
+          "op": "<",
+          "value": "5.0.0"
+        }
+      },
+      "gl_vendor": "ARM.*",
+      "gl_renderer": "Mali.*",
+      "features": [
+        "max_copy_texture_chromium_size_262144"
+      ]
+    },
+    {
+      "id": 123,
+      "cr_bugs": [344330],
+      "description": "NVIDIA drivers before 337 lack features in NV_path_rendering and related extensions to implement driver level path rendering.",
+      "driver_version": {
+        "op": "<",
+        "value": "337"
+      },
+      "vendor_id": "0x10de",
+      "features": [
+        "disable_gl_path_rendering"
       ]
     },
     {
@@ -1365,6 +1454,30 @@ LONG_STRING_CONST(
         "value": "103.0"
       },
       "gl_renderer": "Adreno \\(TM\\) 4.*",
+      "features": [
+        "disable_program_cache"
+      ]
+    },
+    {
+      "id": 125,
+      "description": "glFinish doesn't clear caches on Android",
+      "cr_bugs": [509727],
+      "os": {
+        "type": "android"
+      },
+      "gl_renderer": "Adreno.*",
+      "features": [
+        "unbind_egl_context_to_flush_driver_caches"
+      ]
+    },
+    {
+      "id": 126,
+      "description": "Program binaries contain incorrect bound attribute locations on Adreno 3xx GPUs",
+      "cr_bugs": [510637],
+      "os": {
+        "type": "android"
+      },
+      "gl_renderer": "Adreno \\(TM\\) 3.*",
       "features": [
         "disable_program_cache"
       ]

@@ -56,6 +56,7 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
   // Constructor used by the accelerated implementation.
   BrowserCompositorOutputSurface(
       const scoped_refptr<cc::ContextProvider>& context,
+      const scoped_refptr<cc::ContextProvider>& worker_context,
       const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
       scoped_ptr<BrowserCompositorOverlayCandidateValidator>
           overlay_candidate_validator);
@@ -67,6 +68,9 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
 
   scoped_refptr<ui::CompositorVSyncManager> vsync_manager_;
   ReflectorImpl* reflector_;
+
+  // True when BeginFrame scheduling is enabled.
+  bool use_begin_frame_scheduling_;
 
  private:
   void Initialize();

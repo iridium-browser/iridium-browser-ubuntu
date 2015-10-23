@@ -32,7 +32,8 @@ namespace {
 // Makes sure that .jpg also shows .JPG.
 gboolean FileFilterCaseInsensitive(const GtkFileFilterInfo* file_info,
                                    std::string* file_extension) {
-  return EndsWith(file_info->filename, *file_extension, false);
+  return base::EndsWith(file_info->filename, *file_extension,
+                        base::CompareCase::INSENSITIVE_ASCII);
 }
 
 // Deletes |data| when gtk_file_filter_add_custom() is done with it.
@@ -319,7 +320,8 @@ void SelectFileDialogImplGTK::AddFilters(GtkFileChooser* chooser) {
       // the extensions themselves if the description is blank.
       std::vector<std::string> fallback_labels_vector(fallback_labels.begin(),
                                                       fallback_labels.end());
-      std::string fallback_label = JoinString(fallback_labels_vector, ',');
+      std::string fallback_label =
+          base::JoinString(fallback_labels_vector, ",");
       gtk_file_filter_set_name(filter, fallback_label.c_str());
     }
 

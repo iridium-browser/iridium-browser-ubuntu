@@ -9,10 +9,10 @@
 function ImageLoader() {
   /**
    * Persistent cache object.
-   * @type {Cache}
+   * @type {ImageCache}
    * @private
    */
-  this.cache_ = new Cache();
+  this.cache_ = new ImageCache();
 
   /**
    * Manages pending requests and runs them in order of priorities.
@@ -68,6 +68,12 @@ function ImageLoader() {
               // Ignore the error.
             }
           };
+          if (typeof request.orientation === 'number') {
+            request.orientation =
+                ImageOrientation.fromDriveOrientation(request.orientation);
+          } else {
+            request.orientation = new ImageOrientation(1, 0, 0, 1);
+          }
           return this.onMessage_(sender.id,
                                  /** @type {LoadImageRequest} */ (request),
                                  failSafeSendResponse);
@@ -79,7 +85,7 @@ function ImageLoader() {
  * List of extensions allowed to perform image requests.
  *
  * @const
- * @type {Array.<string>}
+ * @type {Array<string>}
  */
 ImageLoader.ALLOWED_CLIENTS = [
   'hhaomjibdihmijegdhdafkllkbggdgoj',  // File Manager's extension id.
@@ -91,7 +97,7 @@ ImageLoader.ALLOWED_CLIENTS = [
  * an image task.
  *
  * @param {string} senderId Sender's extension id.
- * @param {LoadImageRequest} request Request message as a hash array.
+ * @param {!LoadImageRequest} request Request message as a hash array.
  * @param {function(Object)} callback Callback to be called to return response.
  * @return {boolean} True if the message channel should stay alive until the
  *     callback is called.
@@ -105,7 +111,7 @@ ImageLoader.prototype.onMessage_ = function(senderId, request, callback) {
     return false;  // No callback calls.
   } else {
     // Create a request task and add it to the scheduler (queue).
-    var requestTask = new Request(
+    var requestTask = new ImageRequest(
         requestId, this.cache_, this.piexLoader_, request, callback);
     this.scheduler_.add(requestTask);
     return true;  // Request will call the callback.
@@ -138,7 +144,7 @@ ImageLoader.shouldProcess = function(width, height, options) {
     return true;
 
   // Orientation has to be adjusted.
-  if (options.orientation)
+  if (!options.orientation.isIdentity())
     return true;
 
   // Non-standard color space has to be converted.
@@ -162,22 +168,11 @@ ImageLoader.shouldProcess = function(width, height, options) {
  * @return {Object} Dimensions, eg. {width: 100, height: 50}.
  */
 ImageLoader.resizeDimensions = function(width, height, options) {
-  var sourceWidth = width;
-  var sourceHeight = height;
-
-  // Flip dimensions for odd orientation values: 1 (90deg) and 3 (270deg).
-  if (options.orientation && options.orientation % 2) {
-    sourceWidth = height;
-    sourceHeight = width;
-  }
-
-  var targetWidth = sourceWidth;
-  var targetHeight = sourceHeight;
-
-  if ('scale' in options) {
-    targetWidth = sourceWidth * options.scale;
-    targetHeight = sourceHeight * options.scale;
-  }
+  var scale = options.scale || 1;
+  var targetDimensions = options.orientation.getSizeAfterCancelling(
+      width * scale, height * scale);
+  var targetWidth = targetDimensions.width;
+  var targetHeight = targetDimensions.height;
 
   if (options.maxWidth && targetWidth > options.maxWidth) {
     var scale = options.maxWidth / targetWidth;
@@ -211,10 +206,6 @@ ImageLoader.resizeDimensions = function(width, height, options) {
  * @param {Object} options Resizing options as a hash array.
  */
 ImageLoader.resizeAndCrop = function(source, target, options) {
-  // Default orientation is 0deg.
-  var orientation =
-      ImageOrientation.fromDriveOrientation(options.orientation || 0);
-
   // Calculates copy parameters.
   var copyParameters = ImageLoader.calculateCopyParameters(source, options);
   target.width = copyParameters.canvas.width;
@@ -224,7 +215,7 @@ ImageLoader.resizeAndCrop = function(source, target, options) {
   var targetContext =
       /** @type {CanvasRenderingContext2D} */ (target.getContext('2d'));
   targetContext.save();
-  orientation.cancelImageOrientation(
+  options.orientation.cancelImageOrientation(
       targetContext, copyParameters.target.width, copyParameters.target.height);
   targetContext.drawImage(
       source,
@@ -290,13 +281,8 @@ ImageLoader.calculateCopyParameters = function(source, options) {
   var targetCanvasDimensions = ImageLoader.resizeDimensions(
       source.width, source.height, options);
 
-  var targetDimensions = targetCanvasDimensions;
-  if (options.orientation && options.orientation % 2) {
-    targetDimensions = {
-      width: targetCanvasDimensions.height,
-      height: targetCanvasDimensions.width
-    };
-  }
+  var targetDimensions = options.orientation.getSizeAfterCancelling(
+      targetCanvasDimensions.width, targetCanvasDimensions.height);
 
   return {
     source: {

@@ -16,11 +16,14 @@ from util import build_utils
 BUILD_ANDROID_DIR = os.path.join(os.path.dirname(__file__), '..', '..')
 sys.path.append(BUILD_ANDROID_DIR)
 
-from pylib import android_commands
+from pylib.device import adb_wrapper
 from pylib.device import device_errors
 from pylib.device import device_utils
 
-GetAttachedDevices = android_commands.GetAttachedDevices
+
+def GetAttachedDevices():
+  return [a.GetDeviceSerial()
+          for a in adb_wrapper.AdbWrapper.Devices()]
 
 
 class BuildDevice(object):
@@ -41,6 +44,9 @@ class BuildDevice(object):
 
   def Install(self, *args, **kwargs):
     return self.device.Install(*args, **kwargs)
+
+  def InstallSplitApk(self, *args, **kwargs):
+    return self.device.InstallSplitApk(*args, **kwargs)
 
   def GetInstallMetadata(self, apk_package):
     """Gets the metadata on the device for the apk_package apk."""

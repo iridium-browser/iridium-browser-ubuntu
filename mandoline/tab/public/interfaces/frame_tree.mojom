@@ -1,0 +1,139 @@
+// Copyright 2015 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+module mandoline;
+
+import "network/public/interfaces/url_loader.mojom";
+
+// This files defines the interfaces and structures used for frames.
+//
+// When a client in the frame tree is connected to by way of the ViewManager a
+// FrameTreeClient is obtained (from the ServiceProvider interface request
+// passed in ViewManager::OnEmbed()). The FrameTreeClient is told the frame
+// tree (by way of OnConnection()), which allows the client to use other
+// frames in the tree (assuming the client has the appropriate permissions).
+//
+// frame_ids are the same as views ids. This means that when a client creates
+// a new view to be part of the frame tree it immediately knows the id to use
+// for FrameTreeServer calls.
+//
+// The server provides an id that may be used to identify the state of the
+// tree. The change id is an integer that is incremented every time the
+// structure of the tree changes. The change id is not used by the server; the
+// server only updates the change id and notifies clients of the new id (by
+// way of structure change functions such as OnFrameAdded()).
+
+// Expresses a preference for where a navigation should occur.
+enum NavigationTargetType {
+  // No preference.
+  NO_PREFERENCE,
+
+  // In the specified frame.
+  EXISTING_FRAME,
+
+  // In a new frame.
+  NEW_FRAME,
+};
+
+// Provides information about a frame.
+struct FrameData {
+  // 0 if the frame has no parent (its the root).
+  uint32 parent_id;
+  uint32 frame_id;
+
+  // A map of the properties supplied by the client. The server does not
+  // intepret these values in anyway, the meaning and usage is left up to
+  // clients.
+  map<string, array<uint8>>? client_properties;
+};
+
+// TODO(sky): decide which bits of this make sense for all frames, and move the
+// html specific parts into properties.
+struct HTMLMessageEvent {
+  // The serialized script value.
+  array<uint8>? data;
+
+  // The origin of the source frame.
+  string source_origin;
+
+  // The origin for the message's target.
+  string? target_origin;
+
+  // TODO(sky): these two are not implemented. Figure out what they should be.
+  // Information about the MessagePorts this message contains.
+  // IPC_STRUCT_MEMBER(std::vector<content::TransferredMessagePort>, message_ports)
+  // IPC_STRUCT_MEMBER(std::vector<int>, new_routing_ids)
+};
+
+interface FrameTreeServer {
+  // Requests the server to message the specified frame with |event|. If the
+  // operation is allowed OnPostMessageEvent() is called on the appropriate
+  // FrameTreeClient.
+  PostMessageEventToFrame(uint32 source_frame_id,
+                          uint32 target_frame_id,
+                          HTMLMessageEvent event);
+
+  // Notifies the server that a load has started or stopped in this frame.
+  // When loading is started, progress is reset to 0, but when loading is
+  // stopped progress may not have reached 1.0.
+  LoadingStarted(uint32 frame_id);
+  LoadingStopped(uint32 frame_id);
+
+  // Called when the progress for this frame changes. Will only be called while
+  // a load is in progress.
+  ProgressChanged(uint32 frame_id, double progress);
+
+  // Sets the value of the specified client property, notifying clients if the
+  // value changed. If |value| is null the property is removed.
+  SetClientProperty(uint32 frame_id,
+                    string name,
+                    array<uint8>? value);
+
+  // Called when the client creates a new frame. |frame_id| corresponds to
+  // the id of the view hosting the frame, and |parent_id| the id of the
+  // parent. See FrameData::client_properties for details of
+  // |client_properties|.
+  OnCreatedFrame(uint32 parent_id,
+                 uint32 frame_id,
+                 map<string, array<uint8>> client_properties);
+
+  // Requests a navigation. If |target_TYPE| is |EXISTING_FRAME|, then
+  // |target_frame_id| identifies the frame to navigate in. Otherwise
+  // |target_frame_id| is unused.
+  RequestNavigate(NavigationTargetType target_type,
+                  uint32 target_frame_id,
+                  mojo.URLRequest request);
+
+  // The frame navigated locally, for example, pushState() navigations in an
+  // HTML application.
+  DidNavigateLocally(uint32 frame_id, string url);
+};
+
+interface FrameTreeClient {
+  // Called once per client. |frame_data| gives the contents of the tree.
+  OnConnect(FrameTreeServer server,
+            uint32 change_id,
+            array<FrameData> frame_data);
+
+  // Called when a new frame is added to the tree.
+  OnFrameAdded(uint32 change_id, FrameData frame_data);
+
+  // Called when a frame is removed from the tree.
+  OnFrameRemoved(uint32 change_id, uint32 frame_id);
+
+  // Called when a client property changes.
+  OnFrameClientPropertyChanged(uint32 frame_id,
+                               string name,
+                               array<uint8>? new_value);
+
+  // See description in PostMessageEventToFrame().
+  OnPostMessageEvent(uint32 source_frame_id,
+                     uint32 target_frame_id,
+                     HTMLMessageEvent event);
+
+  // Called prior to starting a new navigation in |target_frame_id|. This is
+  // only called on the FrameTreeClient that is rendering to |target_frame_id|.
+  // The navigation does not start until the callback is received.
+  OnWillNavigate(uint32 target_frame_id) => ();
+};

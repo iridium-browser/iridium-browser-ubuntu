@@ -30,7 +30,7 @@ public:
     int count() const { return fHistogram[T::kType]; }
 
     void apply(const SkRecord& record) {
-        for (unsigned i = 0; i < record.count(); i++) {
+        for (int i = 0; i < record.count(); i++) {
             record.visit<void>(i, *this);
         }
     }
@@ -48,25 +48,6 @@ DEF_TEST(Recorder, r) {
     Tally tally;
     tally.apply(record);
     REPORTER_ASSERT(r, 1 == tally.count<SkRecords::DrawRect>());
-}
-
-// All of Skia will work fine without support for comment groups, but
-// Chrome's inspector can break.  This serves as a simple regression test.
-DEF_TEST(Recorder_CommentGroups, r) {
-    SkRecord record;
-    SkRecorder recorder(&record, 1920, 1080);
-
-    recorder.beginCommentGroup("test");
-        recorder.addComment("foo", "bar");
-        recorder.addComment("baz", "quux");
-    recorder.endCommentGroup();
-
-    Tally tally;
-    tally.apply(record);
-
-    REPORTER_ASSERT(r, 1 == tally.count<SkRecords::BeginCommentGroup>());
-    REPORTER_ASSERT(r, 2 == tally.count<SkRecords::AddComment>());
-    REPORTER_ASSERT(r, 1 == tally.count<SkRecords::EndCommentGroup>());
 }
 
 // Regression test for leaking refs held by optional arguments.
@@ -117,7 +98,7 @@ DEF_TEST(Recorder_drawImage_takeReference, reporter) {
         SkRecorder recorder(&record, 100, 100);
 
         // DrawImageRect is supposed to take a reference
-        recorder.drawImageRect(image.get(), 0, SkRect::MakeWH(100, 100));
+        recorder.drawImageRect(image.get(), SkRect::MakeWH(100, 100), nullptr);
         REPORTER_ASSERT(reporter, !image->unique());
 
         Tally tally;

@@ -39,11 +39,11 @@ class StunBindingRequest : public StunRequest {
 
   const rtc::SocketAddress& server_addr() const { return server_addr_; }
 
-  virtual void Prepare(StunMessage* request) {
+  virtual void Prepare(StunMessage* request) override {
     request->SetType(STUN_BINDING_REQUEST);
   }
 
-  virtual void OnResponse(StunMessage* response) {
+  virtual void OnResponse(StunMessage* response) override {
     const StunAddressAttribute* addr_attr =
         response->GetAddress(STUN_ATTR_MAPPED_ADDRESS);
     if (!addr_attr) {
@@ -65,7 +65,7 @@ class StunBindingRequest : public StunRequest {
     }
   }
 
-  virtual void OnErrorResponse(StunMessage* response) {
+  virtual void OnErrorResponse(StunMessage* response) override {
     const StunErrorCodeAttribute* attr = response->GetErrorCode();
     if (!attr) {
       LOG(LS_ERROR) << "Bad allocate response error code";
@@ -86,7 +86,7 @@ class StunBindingRequest : public StunRequest {
     }
   }
 
-  virtual void OnTimeout() {
+  virtual void OnTimeout() override {
     LOG(LS_ERROR) << "Binding request timed out from "
       << port_->GetLocalAddress().ToSensitiveString()
       << " (" << port_->Network()->name() << ")";
@@ -280,9 +280,8 @@ int UDPPort::GetError() {
 
 void UDPPort::OnLocalAddressReady(rtc::AsyncPacketSocket* socket,
                                   const rtc::SocketAddress& address) {
-  AddAddress(address, address, rtc::SocketAddress(),
-             UDP_PROTOCOL_NAME, "", LOCAL_PORT_TYPE,
-             ICE_TYPE_PREFERENCE_HOST, 0, false);
+  AddAddress(address, address, rtc::SocketAddress(), UDP_PROTOCOL_NAME, "", "",
+             LOCAL_PORT_TYPE, ICE_TYPE_PREFERENCE_HOST, 0, false);
   MaybePrepareStunCandidate();
 }
 
@@ -396,9 +395,9 @@ void UDPPort::OnStunBindingRequestSucceeded(
           related_address.family());
     }
 
-    AddAddress(stun_reflected_addr, socket_->GetLocalAddress(),
-               related_address, UDP_PROTOCOL_NAME, "",
-               STUN_PORT_TYPE, ICE_TYPE_PREFERENCE_SRFLX, 0, false);
+    AddAddress(stun_reflected_addr, socket_->GetLocalAddress(), related_address,
+               UDP_PROTOCOL_NAME, "", "", STUN_PORT_TYPE,
+               ICE_TYPE_PREFERENCE_SRFLX, 0, false);
   }
   MaybeSetPortCompleteOrError();
 }

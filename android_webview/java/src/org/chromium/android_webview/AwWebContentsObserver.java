@@ -41,13 +41,13 @@ public class AwWebContentsObserver extends WebContentsObserver {
         boolean isErrorUrl =
                 unreachableWebDataUrl != null && unreachableWebDataUrl.equals(validatedUrl);
         if (isMainFrame && !isErrorUrl) {
-            client.onPageFinished(validatedUrl);
+            client.getCallbackHelper().postOnPageFinished(validatedUrl);
         }
     }
 
     @Override
-    public void didFailLoad(boolean isProvisionalLoad,
-            boolean isMainFrame, int errorCode, String description, String failingUrl) {
+    public void didFailLoad(boolean isProvisionalLoad, boolean isMainFrame, int errorCode,
+            String description, String failingUrl, boolean wasIgnoredByHandler) {
         AwContentsClient client = mAwContentsClient.get();
         if (client == null) return;
         String unreachableWebDataUrl = AwContentsStatics.getUnreachableWebDataUrl();
@@ -56,7 +56,7 @@ public class AwWebContentsObserver extends WebContentsObserver {
         if (isMainFrame && !isErrorUrl && errorCode == NetError.ERR_ABORTED) {
             // Need to call onPageFinished for backwards compatibility with the classic webview.
             // See also AwContents.IoThreadClientImpl.onReceivedError.
-            client.onPageFinished(failingUrl);
+            client.getCallbackHelper().postOnPageFinished(failingUrl);
         }
     }
 
@@ -90,7 +90,7 @@ public class AwWebContentsObserver extends WebContentsObserver {
         if (isFragmentNavigation) {
             AwContentsClient client = mAwContentsClient.get();
             if (client == null) return;
-            client.onPageFinished(url);
+            client.getCallbackHelper().postOnPageFinished(url);
         }
     }
 
@@ -99,7 +99,7 @@ public class AwWebContentsObserver extends WebContentsObserver {
         mCommittedNavigation = true;
         final AwContentsClient client = mAwContentsClient.get();
         if (client == null) return;
-        client.doUpdateVisitedHistory(url, isReload);
+        client.getCallbackHelper().postDoUpdateVisitedHistory(url, isReload);
     }
 
     public boolean didEverCommitNavigation() {

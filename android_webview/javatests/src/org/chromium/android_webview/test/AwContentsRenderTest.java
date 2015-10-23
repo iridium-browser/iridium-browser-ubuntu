@@ -42,10 +42,9 @@ public class AwContentsRenderTest extends AwTestBase {
         });
     }
 
-    /*
+
     @SmallTest
     @Feature({"AndroidWebView"})
-    */
     public void testSetGetBackgroundColor() throws Throwable {
         setBackgroundColorOnUiThread(Color.MAGENTA);
         GraphicsTestUtils.pollForBackgroundColor(mAwContents, Color.MAGENTA);

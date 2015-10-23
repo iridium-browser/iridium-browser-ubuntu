@@ -17,24 +17,25 @@ namespace blink {
 
 class RenderingTest : public testing::Test {
 protected:
-    virtual void SetUp() override;
+    void SetUp() override;
 
     Document& document() const { return m_pageHolder->document(); }
 
+    // Both sets the inner html and runs the document lifecycle.
     void setBodyInnerHTML(const String& htmlContent)
     {
         document().body()->setInnerHTML(htmlContent, ASSERT_NO_EXCEPTION);
-        document().view()->updateLayoutAndStyleForPainting();
+        document().view()->updateAllLifecyclePhases();
     }
 
+    // Both enables compositing and runs the document lifecycle.
     void enableCompositing()
     {
         m_pageHolder->page().settings().setAcceleratedCompositingEnabled(true);
-        document().view()->updateLayoutAndStyleForPainting();
+        document().view()->updateAllLifecyclePhases();
     }
 
 private:
-    Page::PageClients m_pageClients;
     OwnPtr<DummyPageHolder> m_pageHolder;
 };
 

@@ -9,6 +9,7 @@ namespace tabs_constants {
 
 const char kActiveKey[] = "active";
 const char kAllFramesKey[] = "allFrames";
+const char kAllWindowTypesKey[] = "allWindowTypes";
 const char kAlwaysOnTopKey[] = "alwaysOnTop";
 const char kBypassCache[] = "bypassCache";
 const char kCodeKey[] = "code";
@@ -30,6 +31,9 @@ const char kOldPositionKey[] = "oldPosition";
 const char kOldWindowIdKey[] = "oldWindowId";
 const char kOpenerTabIdKey[] = "openerTabId";
 const char kPinnedKey[] = "pinned";
+const char kAudibleKey[] = "audible";
+const char kMutedKey[] = "muted";
+const char kMutedInfoKey[] = "mutedInfo";
 const char kQualityKey[] = "quality";
 const char kHighlightedKey[] = "highlighted";
 const char kRunAtKey[] = "runAt";
@@ -58,13 +62,12 @@ const char kShowStateValueFullscreen[] = "fullscreen";
 const char kStatusValueComplete[] = "complete";
 const char kStatusValueLoading[] = "loading";
 
-// TODO(mpcomplete): should we expose more specific detail, like devtools, app
-// panel, etc?
 const char kWindowTypeValueNormal[] = "normal";
 const char kWindowTypeValuePopup[] = "popup";
 const char kWindowTypeValuePanel[] = "panel";
 const char kWindowTypeValueDetachedPanel[] = "detached_panel";
 const char kWindowTypeValueApp[] = "app";
+const char kWindowTypeValueDevTools[] = "devtools";
 
 const char kCannotZoomDisabledTabError[] = "Cannot zoom a tab in disabled "
     "mode.";
@@ -96,7 +99,11 @@ const char kSupportedInWindowsOnlyError[] = "Supported in Windows only";
 const char kInvalidWindowTypeError[] = "Invalid value for type";
 const char kInvalidWindowStateError[] = "Invalid value for state";
 const char kScreenshotsDisabled[] = "Taking screenshots has been disabled";
-
+const char kCannotUpdateMuteDisabled[] =
+    "Failed to update mute state for tab *, --* must be enabled";
+const char kCannotUpdateMuteCaptured[] =
+    "Cannot update mute state for tab *, tab has audio or video currently "
+    "being captured";
 const char kCannotDetermineLanguageOfUnloadedTab[] =
     "Cannot determine language: tab not loaded";
 

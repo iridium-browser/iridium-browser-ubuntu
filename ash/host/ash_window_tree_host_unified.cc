@@ -4,6 +4,7 @@
 
 #include "ash/host/ash_window_tree_host_unified.h"
 #include "ash/host/root_window_transformer.h"
+#include "ash/ime/input_method_event_handler.h"
 #include "base/logging.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -27,8 +28,6 @@ class UnifiedEventTargeter : public aura::WindowTargeter {
         ui::LocatedEvent* located_event = static_cast<ui::LocatedEvent*>(event);
         located_event->ConvertLocationToTarget(
             static_cast<aura::Window*>(nullptr), dst_root_);
-        located_event->UpdateForRootTransform(
-            dst_root_->GetHost()->GetRootTransform());
       }
       ignore_result(
           dst_root_->GetHost()->event_processor()->OnEventFromSource(event));
@@ -110,10 +109,10 @@ gfx::AcceleratedWidget AshWindowTreeHostUnified::GetAcceleratedWidget() {
   return gfx::kNullAcceleratedWidget;
 }
 
-void AshWindowTreeHostUnified::Show() {
+void AshWindowTreeHostUnified::ShowImpl() {
 }
 
-void AshWindowTreeHostUnified::Hide() {
+void AshWindowTreeHostUnified::HideImpl() {
 }
 
 gfx::Rect AshWindowTreeHostUnified::GetBounds() const {
@@ -121,8 +120,6 @@ gfx::Rect AshWindowTreeHostUnified::GetBounds() const {
 }
 
 void AshWindowTreeHostUnified::SetBounds(const gfx::Rect& bounds) {
-  if (bounds_.size() == bounds.size())
-    return;
   bounds_.set_size(bounds.size());
   OnHostResized(bounds_.size());
 }
@@ -161,8 +158,7 @@ void AshWindowTreeHostUnified::SetCursorNative(gfx::NativeCursor cursor) {
 }
 
 void AshWindowTreeHostUnified::MoveCursorToNative(const gfx::Point& location) {
-  // TODO(oshima): Find out if this is neceessary.
-  NOTIMPLEMENTED();
+  // No native cursor in offscreen surface.
 }
 
 void AshWindowTreeHostUnified::OnCursorVisibilityChangedNative(bool show) {
@@ -181,8 +177,14 @@ void AshWindowTreeHostUnified::OnWindowDestroying(aura::Window* window) {
   mirroring_hosts_.erase(iter);
 }
 
-ui::EventProcessor* AshWindowTreeHostUnified::GetEventProcessor() {
-  return dispatcher();
+ui::EventDispatchDetails AshWindowTreeHostUnified::DispatchKeyEventPostIME(
+    ui::KeyEvent* event) {
+  input_method_handler()->SetPostIME(true);
+  ui::EventDispatchDetails details =
+      event_processor()->OnEventFromSource(event);
+  if (!details.dispatcher_destroyed)
+    input_method_handler()->SetPostIME(false);
+  return details;
 }
 
 }  // namespace ash

@@ -4,7 +4,7 @@
 
 #include "ash/shell/window_watcher.h"
 
-#include "ash/display/display_controller.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_item_delegate_manager.h"
 #include "ash/shelf/shelf_model.h"
@@ -13,6 +13,7 @@
 #include "ash/shell.h"
 #include "ash/shell/window_watcher_shelf_item_delegate.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/window_util.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/gfx/display.h"
@@ -90,8 +91,7 @@ aura::Window* WindowWatcher::GetWindowByID(ash::ShelfID id) {
 
 // aura::WindowObserver overrides:
 void WindowWatcher::OnWindowAdded(aura::Window* new_window) {
-  if (new_window->type() != ui::wm::WINDOW_TYPE_NORMAL &&
-      new_window->type() != ui::wm::WINDOW_TYPE_PANEL)
+  if (!wm::IsWindowUserPositionable(new_window))
     return;
 
   static int image_count = 0;
@@ -137,8 +137,9 @@ void WindowWatcher::OnWillRemoveWindow(aura::Window* window) {
 }
 
 void WindowWatcher::OnDisplayAdded(const gfx::Display& new_display) {
-  aura::Window* root = Shell::GetInstance()->display_controller()->
-      GetRootWindowForDisplayId(new_display.id());
+  aura::Window* root = Shell::GetInstance()
+                           ->window_tree_host_manager()
+                           ->GetRootWindowForDisplayId(new_display.id());
   workspace_window_watcher_->RootWindowAdded(root);
 }
 

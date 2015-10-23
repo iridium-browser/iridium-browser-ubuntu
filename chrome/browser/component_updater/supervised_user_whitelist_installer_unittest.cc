@@ -51,7 +51,7 @@ std::string CrxIdToHashToCrxId(const std::string& kCrxId) {
   return GetCrxComponentID(component);
 }
 
-std::string JsonToString(const base::DictionaryValue* dict) {
+std::string JsonToString(const base::DictionaryValue& dict) {
   std::string json;
   base::JSONWriter::Write(dict, &json);
   return json;
@@ -78,44 +78,34 @@ class MockComponentUpdateService : public ComponentUpdateService,
   void AddObserver(Observer* observer) override { ADD_FAILURE(); }
   void RemoveObserver(Observer* observer) override { ADD_FAILURE(); }
 
-  Status Start() override {
-    ADD_FAILURE();
-    return Status::kError;
-  }
-
-  Status Stop() override {
-    ADD_FAILURE();
-    return Status::kError;
-  }
-
   std::vector<std::string> GetComponentIDs() const override {
     ADD_FAILURE();
     return std::vector<std::string>();
   }
 
-  Status RegisterComponent(const CrxComponent& component) override {
+  bool RegisterComponent(const CrxComponent& component) override {
     EXPECT_EQ(nullptr, component_.get());
     component_.reset(new CrxComponent(component));
     if (!registration_callback_.is_null())
       registration_callback_.Run();
 
-    return Status::kOk;
+    return true;
   }
 
-  Status UnregisterComponent(const std::string& crx_id) override {
+  bool UnregisterComponent(const std::string& crx_id) override {
     if (!component_) {
       ADD_FAILURE();
-      return Status::kError;
+      return false;
     }
 
     EXPECT_EQ(GetCrxComponentID(*component_), crx_id);
     if (!component_->installer->Uninstall()) {
       ADD_FAILURE();
-      return Status::kError;
+      return false;
     }
 
     component_.reset();
-    return Status::kOk;
+    return true;
   }
 
   OnDemandUpdater& GetOnDemandUpdater() override { return *this; }
@@ -136,16 +126,16 @@ class MockComponentUpdateService : public ComponentUpdateService,
   }
 
   // OnDemandUpdater implementation:
-  Status OnDemandUpdate(const std::string& crx_id) override {
+  bool OnDemandUpdate(const std::string& crx_id) override {
     on_demand_update_called_ = true;
 
     if (!component_) {
       ADD_FAILURE() << "Trying to update unregistered component " << crx_id;
-      return Status::kError;
+      return false;
     }
 
     EXPECT_EQ(GetCrxComponentID(*component_), crx_id);
-    return Status::kOk;
+    return true;
   }
 
  private:
@@ -204,19 +194,19 @@ class SupervisedUserWhitelistInstallerTest : public testing::Test {
     whitelist_version_directory_ = whitelist_directory_.AppendASCII(kVersion);
     whitelist_path_ = whitelist_version_directory_.AppendASCII(kWhitelistFile);
 
-    scoped_ptr<base::DictionaryValue> contentPackDict(
+    scoped_ptr<base::DictionaryValue> whitelist_dict(
         new base::DictionaryValue);
-    contentPackDict->SetString("sites", kWhitelistFile);
-    manifest_.Set("content_pack", contentPackDict.release());
+    whitelist_dict->SetString("file", kWhitelistFile);
+    manifest_.Set("whitelist", whitelist_dict.release());
     manifest_.SetString("version", kVersion);
 
-    scoped_ptr<base::DictionaryValue> whitelist_dict(new base::DictionaryValue);
-    whitelist_dict->SetString("name", kName);
+    scoped_ptr<base::DictionaryValue> crx_dict(new base::DictionaryValue);
+    crx_dict->SetString("name", kName);
     scoped_ptr<base::ListValue> clients(new base::ListValue);
     clients->AppendString(kClientId);
     clients->AppendString(kOtherClientId);
-    whitelist_dict->Set("clients", clients.release());
-    pref_.Set(kCrxId, whitelist_dict.release());
+    crx_dict->Set("clients", clients.release());
+    pref_.Set(kCrxId, crx_dict.release());
   }
 
  protected:
@@ -269,7 +259,7 @@ TEST_F(SupervisedUserWhitelistInstallerTest, GetHashFromCrxId) {
 
   {
     std::string extension_id = "aBcDeFgHiJkLmNoPpOnMlKjIhGfEdCbA";
-    ASSERT_EQ(base::StringToLowerASCII(extension_id),
+    ASSERT_EQ(base::ToLowerASCII(extension_id),
               CrxIdToHashToCrxId(extension_id));
   }
 
@@ -310,8 +300,8 @@ TEST_F(SupervisedUserWhitelistInstallerTest, InstallNewWhitelist) {
   ASSERT_TRUE(base::ReadFileToString(whitelist_path_, &whitelist_contents));
   EXPECT_EQ(kWhitelistContents, whitelist_contents);
 
-  EXPECT_EQ(JsonToString(&pref_),
-            JsonToString(local_state_.GetDictionary(
+  EXPECT_EQ(JsonToString(pref_),
+            JsonToString(*local_state_.GetDictionary(
                 prefs::kRegisteredSupervisedUserWhitelists)));
 }
 

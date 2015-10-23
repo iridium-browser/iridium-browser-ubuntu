@@ -12,20 +12,13 @@ namespace extensions {
 
 class NtpOverriddenBubbleController : public ExtensionMessageBubbleController {
  public:
-  explicit NtpOverriddenBubbleController(Profile* profile);
+  explicit NtpOverriddenBubbleController(Browser* browser);
   ~NtpOverriddenBubbleController() override;
-
-  // Whether the controller knows that we should show the bubble for extension
-  // with |extension_id|. Returns true if so.
-  bool ShouldShow(const std::string& extension_id);
 
   // ExtensionMessageBubbleController:
   bool CloseOnDeactivate() override;
 
  private:
-  // A weak pointer to the profile we are associated with. Not owned by us.
-  Profile* profile_;
-
   DISALLOW_COPY_AND_ASSIGN(NtpOverriddenBubbleController);
 };
 

@@ -65,6 +65,8 @@
         '-Wno-conversion',
         # libvpx does `if ((a == b))` in some places.
         '-Wno-parentheses-equality',
+        # libvpx has many static functions in header, which trigger this warning
+        '-Wno-unused-function',
       ],
       'clang_warning_flags_unset': [
         # libvpx does assert(!"foo"); in some places.

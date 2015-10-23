@@ -19,8 +19,6 @@
 namespace cc {
 
 class Layer;
-template <typename LayerType>
-class LayerIterator;
 
 class CC_EXPORT RenderSurface {
  public:
@@ -38,11 +36,6 @@ class CC_EXPORT RenderSurface {
 
   void SetDrawOpacity(float opacity) { draw_opacity_ = opacity; }
   float draw_opacity() const { return draw_opacity_; }
-
-  void SetDrawOpacityIsAnimating(bool draw_opacity_is_animating) {
-    draw_opacity_is_animating_ = draw_opacity_is_animating;
-  }
-  bool draw_opacity_is_animating() const { return draw_opacity_is_animating_; }
 
   void SetDrawTransform(const gfx::Transform& draw_transform) {
     draw_transform_ = draw_transform;
@@ -69,19 +62,6 @@ class CC_EXPORT RenderSurface {
   }
   const gfx::Transform& replica_screen_space_transform() const {
     return replica_screen_space_transform_;
-  }
-
-  void SetTargetSurfaceTransformsAreAnimating(bool animating) {
-    target_surface_transforms_are_animating_ = animating;
-  }
-  bool target_surface_transforms_are_animating() const {
-    return target_surface_transforms_are_animating_;
-  }
-  void SetScreenSpaceTransformsAreAnimating(bool animating) {
-    screen_space_transforms_are_animating_ = animating;
-  }
-  bool screen_space_transforms_are_animating() const {
-    return screen_space_transforms_are_animating_;
   }
 
   bool is_clipped() const { return is_clipped_; }
@@ -116,21 +96,16 @@ class CC_EXPORT RenderSurface {
   void ClearLayerLists();
 
  private:
-  friend class LayerIterator<Layer>;
-
   Layer* owning_layer_;
 
   // Uses this surface's space.
   gfx::Rect content_rect_;
 
   float draw_opacity_;
-  bool draw_opacity_is_animating_;
   gfx::Transform draw_transform_;
   gfx::Transform screen_space_transform_;
   gfx::Transform replica_draw_transform_;
   gfx::Transform replica_screen_space_transform_;
-  bool target_surface_transforms_are_animating_;
-  bool screen_space_transforms_are_animating_;
 
   bool is_clipped_;
   bool contributes_to_drawn_surface_;
@@ -143,10 +118,6 @@ class CC_EXPORT RenderSurface {
   // The nearest ancestor target surface that will contain the contents of this
   // surface, and that ignores outside occlusion. This can point to itself.
   RenderSurface* nearest_occlusion_immune_ancestor_;
-
-  // For LayerIteratorActions
-  int target_render_surface_layer_index_history_;
-  int current_layer_index_history_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderSurface);
 };

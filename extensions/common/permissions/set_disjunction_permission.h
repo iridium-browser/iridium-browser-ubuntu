@@ -34,8 +34,6 @@ class SetDisjunctionPermission : public APIPermission {
   ~SetDisjunctionPermission() override {}
 
   // APIPermission overrides
-  bool HasMessages() const override { return !data_set_.empty(); }
-
   bool Check(const APIPermission::CheckParam* param) const override {
     for (typename std::set<PermissionDataType>::const_iterator i =
              data_set_.begin();
@@ -122,7 +120,7 @@ class SetDisjunctionPermission : public APIPermission {
         data_set_.insert(data);
       } else {
         std::string unknown_permission;
-        base::JSONWriter::Write(item_value, &unknown_permission);
+        base::JSONWriter::Write(*item_value, &unknown_permission);
         if (unhandled_permissions) {
           unhandled_permissions->push_back(unknown_permission);
         } else {
@@ -151,7 +149,7 @@ class SetDisjunctionPermission : public APIPermission {
     IPC::WriteParam(m, data_set_);
   }
 
-  bool Read(const IPC::Message* m, PickleIterator* iter) override {
+  bool Read(const IPC::Message* m, base::PickleIterator* iter) override {
     return IPC::ReadParam(m, iter, &data_set_);
   }
 

@@ -34,6 +34,7 @@
         'command_gen.cc',
         'command_help.cc',
         'command_ls.cc',
+        'command_path.cc',
         'command_refs.cc',
         'commands.cc',
         'commands.h',
@@ -59,6 +60,7 @@
         'filesystem_utils.h',
         'function_exec_script.cc',
         'function_foreach.cc',
+        'function_forward_variables_from.cc',
         'function_get_label_info.cc',
         'function_get_path_info.cc',
         'function_get_target_outputs.cc',
@@ -212,6 +214,7 @@
         'exec_process_unittest.cc',
         'filesystem_utils_unittest.cc',
         'function_foreach_unittest.cc',
+        'function_forward_variables_from_unittest.cc',
         'function_get_label_info_unittest.cc',
         'function_get_path_info_unittest.cc',
         'function_get_target_outputs_unittest.cc',
@@ -241,6 +244,7 @@
         'scope_per_file_provider_unittest.cc',
         'scope_unittest.cc',
         'source_dir_unittest.cc',
+        'source_file_unittest.cc',
         'string_utils_unittest.cc',
         'substitution_pattern_unittest.cc',
         'substitution_writer_unittest.cc',
@@ -271,5 +275,20 @@
         '../../base/base.gyp:base',
       ],
     }
+  ],
+  'conditions': [
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'gn_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'gn_unittests',
+          ],
+          'includes': [ '../../build/isolate.gypi' ],
+          'sources': [ 'gn_unittests.isolate' ],
+        },
+      ],
+    }],
   ],
 }

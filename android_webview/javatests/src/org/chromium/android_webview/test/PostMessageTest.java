@@ -45,7 +45,7 @@ public class PostMessageTest extends AwTestBase {
         private String mData;
         private String mOrigin;
         private int[] mPorts;
-        private Object mLock = new Object();
+        private final Object mLock = new Object();
 
         @JavascriptInterface
         public void setMessageParams(String data, String origin, int[] ports) {
@@ -60,7 +60,10 @@ public class PostMessageTest extends AwTestBase {
 
         public void waitForMessage() throws InterruptedException {
             synchronized (mLock) {
-                if (!mReady) mLock.wait(TIMEOUT);
+                long deadline = System.currentTimeMillis() + TIMEOUT;
+                while (!mReady && System.currentTimeMillis() < deadline) {
+                    mLock.wait(deadline - System.currentTimeMillis());
+                }
             }
         }
 
@@ -523,7 +526,7 @@ public class PostMessageTest extends AwTestBase {
     private static class ChannelContainer {
         private boolean mReady;
         private AwMessagePort[] mChannel;
-        private Object mLock = new Object();
+        private final Object mLock = new Object();
         private String mMessage = "";
         private int mCount;
         private int mWaitCount;
@@ -562,7 +565,10 @@ public class PostMessageTest extends AwTestBase {
 
         public void waitForMessage() throws InterruptedException {
             synchronized (mLock) {
-                if (!mReady) mLock.wait(TIMEOUT);
+                long deadline = System.currentTimeMillis() + TIMEOUT;
+                while (!mReady && System.currentTimeMillis() < deadline) {
+                    mLock.wait(deadline - System.currentTimeMillis());
+                }
             }
         }
     }
@@ -813,7 +819,7 @@ public class PostMessageTest extends AwTestBase {
 
         private boolean mReady;
         private AwMessagePort mPort;
-        private Object mLock = new Object();
+        private final Object mLock = new Object();
 
         public TestMessagePort(AwMessagePortService service) {
             super(service);
@@ -1032,7 +1038,6 @@ public class PostMessageTest extends AwTestBase {
     private static final String TEST_PAGE_FOR_UNSUPPORTED_MESSAGES = "<!DOCTYPE html><html><body>"
             + "    <script>"
             + "        onmessage = function (e) {"
-            + "            e.source.postMessage('" + HELLO + "', '*');"
             + "            e.ports[0].postMessage(null);"
             + "            e.ports[0].postMessage(undefined);"
             + "            e.ports[0].postMessage(NaN);"

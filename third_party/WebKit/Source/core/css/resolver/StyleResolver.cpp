@@ -82,7 +82,6 @@
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/layout/GeneratedChildren.h"
 #include "core/layout/LayoutView.h"
-#include "core/style/KeyframeList.h"
 #include "core/svg/SVGDocumentExtensions.h"
 #include "core/svg/SVGElement.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -96,8 +95,8 @@ void setAnimationUpdateIfNeeded(StyleResolverState& state, Element& element)
 {
     // If any changes to CSS Animations were detected, stash the update away for application after the
     // layout object is updated if we're in the appropriate scope.
-    if (state.animationUpdate())
-        element.ensureElementAnimations().cssAnimations().setPendingUpdate(state.takeAnimationUpdate());
+    if (!state.animationUpdate().isEmpty())
+        element.ensureElementAnimations().cssAnimations().setPendingUpdate(state.animationUpdate());
 }
 
 } // namespace
@@ -146,7 +145,6 @@ StyleResolver::StyleResolver(Document& document)
     , m_printMediaType(false)
     , m_styleResourceLoader(&document)
     , m_styleSharingDepth(0)
-    , m_styleResolverStatsSequence(0)
     , m_accessCount(0)
 {
     FrameView* view = document.view();
@@ -157,11 +155,15 @@ StyleResolver::StyleResolver(Document& document)
         m_medium = adoptPtr(new MediaQueryEvaluator("all"));
     }
 
-    initWatchedSelectorRules(CSSSelectorWatch::from(document).watchedCallbackSelectors());
+    initWatchedSelectorRules();
 }
 
-void StyleResolver::initWatchedSelectorRules(const WillBeHeapVector<RefPtrWillBeMember<StyleRule>>& watchedSelectors)
+void StyleResolver::initWatchedSelectorRules()
 {
+    CSSSelectorWatch* watch = CSSSelectorWatch::fromIfExists(*m_document);
+    if (!watch)
+        return;
+    const WillBeHeapVector<RefPtrWillBeMember<StyleRule>>& watchedSelectors = watch->watchedCallbackSelectors();
     if (!watchedSelectors.size())
         return;
     m_watchedSelectorsRules = RuleSet::create();
@@ -185,13 +187,18 @@ void StyleResolver::removePendingAuthorStyleSheets(const WillBeHeapVector<RefPtr
 void StyleResolver::appendCSSStyleSheet(CSSStyleSheet& cssSheet)
 {
     ASSERT(!cssSheet.disabled());
+    ASSERT(cssSheet.ownerDocument());
+    ASSERT(cssSheet.ownerNode());
+    ASSERT(isHTMLStyleElement(cssSheet.ownerNode()) || isSVGStyleElement(cssSheet.ownerNode()) || cssSheet.ownerNode()->treeScope() == cssSheet.ownerDocument());
+
     if (cssSheet.mediaQueries() && !m_medium->eval(cssSheet.mediaQueries(), &m_viewportDependentMediaQueryResults))
         return;
 
-    TreeScope* treeScope = ScopedStyleResolver::treeScopeFor(document(), &cssSheet);
-    if (!treeScope)
-        return;
-
+    TreeScope* treeScope = &cssSheet.ownerNode()->treeScope();
+    // Sheets in the document scope of HTML imports apply to the main document
+    // (m_document), so we override it for all document scoped sheets.
+    if (treeScope->rootNode().isDocumentNode())
+        treeScope = m_document;
     treeScope->ensureScopedStyleResolver().appendCSSStyleSheet(cssSheet, *m_medium);
 }
 
@@ -281,9 +288,6 @@ void StyleResolver::collectFeatures()
     if (document().isViewSource())
         m_features.add(defaultStyleSheets.defaultViewSourceStyle()->features());
 
-    if (document().isTransitionDocument())
-        m_features.add(defaultStyleSheets.defaultTransitionStyle()->features());
-
     if (m_watchedSelectorsRules)
         m_features.add(m_watchedSelectorsRules->features());
 
@@ -305,7 +309,7 @@ void StyleResolver::addToStyleSharingList(Element& element)
     // otherwise we could leave stale pointers in there.
     if (!document().inStyleRecalc())
         return;
-    INCREMENT_STYLE_STATS_COUNTER(*this, sharedStyleCandidates);
+    INCREMENT_STYLE_STATS_COUNTER(*this, sharedStyleCandidates, 1);
     StyleSharingList& list = styleSharingList();
     if (list.size() >= styleSharingListSize)
         list.removeLast();
@@ -332,24 +336,12 @@ void StyleResolver::clearStyleSharingList()
 
 void StyleResolver::pushParentElement(Element& parent)
 {
-    const ContainerNode* parentsParent = parent.parentOrShadowHostElement();
-
-    // We are not always invoked consistently. For example, script execution can cause us to enter
-    // style recalc in the middle of tree building. We may also be invoked from somewhere within the tree.
-    // Reset the stack in this case, or if we see a new root element.
-    // Otherwise just push the new parent.
-    if (!parentsParent || m_selectorFilter.parentStackIsEmpty())
-        m_selectorFilter.setupParentStack(parent);
-    else
-        m_selectorFilter.pushParent(parent);
+    m_selectorFilter.pushParent(parent);
 }
 
 void StyleResolver::popParentElement(Element& parent)
 {
-    // Note that we may get invoked for some random elements in some wacky cases during style resolve.
-    // Pause maintaining the stack in this case.
-    if (m_selectorFilter.parentStackIsConsistent(&parent))
-        m_selectorFilter.popParent();
+    m_selectorFilter.popParent(parent);
 }
 
 StyleResolver::~StyleResolver()
@@ -387,7 +379,6 @@ static inline ScopedStyleResolver* scopedResolverFor(const Element* element)
 void StyleResolver::matchAuthorRules(Element* element, ElementRuleCollector& collector, bool includeEmptyRules)
 {
     collector.clearMatchedRules();
-    collector.matchedResult().ranges.lastAuthorRule = collector.matchedResult().matchedProperties.size() - 1;
 
     CascadeOrder cascadeOrder = 0;
     WillBeHeapVector<RawPtrWillBeMember<ScopedStyleResolver>, 8> resolversInShadowTree;
@@ -422,20 +413,14 @@ void StyleResolver::matchUARules(ElementRuleCollector& collector)
     if (document().isViewSource())
         matchRuleSet(collector, defaultStyleSheets.defaultViewSourceStyle());
 
-    if (document().isTransitionDocument())
-        matchRuleSet(collector, defaultStyleSheets.defaultTransitionStyle());
-
+    collector.finishAddingUARules();
     collector.setMatchingUARules(false);
 }
 
 void StyleResolver::matchRuleSet(ElementRuleCollector& collector, RuleSet* rules)
 {
     collector.clearMatchedRules();
-    collector.matchedResult().ranges.lastUARule = collector.matchedResult().matchedProperties.size() - 1;
-
-    RuleRange ruleRange = collector.matchedResult().ranges.UARuleRange();
-    collector.collectMatchingRules(MatchRequest(rules), ruleRange);
-
+    collector.collectMatchingRules(MatchRequest(rules));
     collector.sortAndTransferMatchedRules();
 }
 
@@ -457,7 +442,7 @@ void StyleResolver::matchAllRules(StyleResolverState& state, ElementRuleCollecto
             TextDirection textDirection = toHTMLElement(state.element())->directionalityIfhasDirAutoAttribute(isAuto);
             if (isAuto) {
                 state.setHasDirAutoAttribute(true);
-                collector.matchedResult().addMatchedProperties(textDirection == LTR ? leftToRightDeclaration() : rightToLeftDeclaration());
+                collector.addElementStyleProperties(textDirection == LTR ? leftToRightDeclaration() : rightToLeftDeclaration());
             }
         }
     }
@@ -475,6 +460,8 @@ void StyleResolver::matchAllRules(StyleResolverState& state, ElementRuleCollecto
         if (includeSMILProperties && state.element()->isSVGElement())
             collector.addElementStyleProperties(toSVGElement(state.element())->animatedSMILStyleProperties(), false /* isCacheable */);
     }
+
+    collector.finishAddingAuthorRulesForTreeScope();
 }
 
 PassRefPtr<ComputedStyle> StyleResolver::styleForDocument(Document& document)
@@ -491,7 +478,7 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForDocument(Document& document)
     // so that the common case doesn't need to create a new ComputedStyle in
     // Document::inheritHtmlAndBodyElementStyles.
     documentStyle->setDisplay(BLOCK);
-    documentStyle->setScrollBlocksOn(WebScrollBlocksOnStartTouch | WebScrollBlocksOnWheelEvent);
+    documentStyle->setPosition(AbsolutePosition);
 
     document.setupFontBuilder(*documentStyle);
 
@@ -555,6 +542,7 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForElement(Element* element, const
     }
 
     didAccess();
+    INCREMENT_STYLE_STATS_COUNTER(*this, elementsStyled, 1);
 
     StyleResolverParentScope::ensureParentStackIsPushed();
 
@@ -609,7 +597,7 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForElement(Element* element, const
     if (!baseComputedStyle) {
 
         bool needsCollection = false;
-        CSSDefaultStyleSheets::instance().ensureDefaultStyleSheetsForElement(element, needsCollection);
+        CSSDefaultStyleSheets::instance().ensureDefaultStyleSheetsForElement(*element, needsCollection);
         if (needsCollection)
             collectFeatures();
 
@@ -637,13 +625,17 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForElement(Element* element, const
 
         if (elementAnimations)
             elementAnimations->updateBaseComputedStyle(state.style());
+    } else {
+        INCREMENT_STYLE_STATS_COUNTER(*this, baseStylesUsed, 1);
     }
 
     // FIXME: The CSSWG wants to specify that the effects of animations are applied before
     // important rules, but this currently happens here as we require adjustment to have happened
     // before deciding which properties to transition.
-    if (applyAnimatedProperties(state, element))
+    if (applyAnimatedProperties(state, element)) {
+        INCREMENT_STYLE_STATS_COUNTER(*this, stylesAnimated, 1);
         adjustComputedStyle(state, element);
+    }
 
     if (isHTMLBodyElement(*element))
         document().textLinkColors().setTextColor(state.style()->color());
@@ -653,44 +645,10 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForElement(Element* element, const
     if (state.style()->hasViewportUnits())
         document().setHasViewportUnits();
 
+    if (state.style()->hasRemUnits())
+        document().styleEngine().setUsesRemUnit(true);
+
     // Now return the style.
-    return state.takeStyle();
-}
-
-PassRefPtr<ComputedStyle> StyleResolver::styleForKeyframe(Element& element, const ComputedStyle& elementStyle, const ComputedStyle* parentStyle, const StyleRuleKeyframe* keyframe, const AtomicString& animationName)
-{
-    ASSERT(document().frame());
-    ASSERT(document().settings());
-    ASSERT(!hasPendingAuthorStyleSheets());
-
-    StyleResolverState state(document(), &element, parentStyle);
-
-    MatchResult result;
-    result.addMatchedProperties(&keyframe->properties());
-
-    ASSERT(!state.style());
-
-    // Create the style
-    state.setStyle(ComputedStyle::clone(elementStyle));
-
-    // We don't need to bother with !important. Since there is only ever one
-    // decl, there's nothing to override. So just add the first properties.
-    // We also don't need to bother with animation properties since the only
-    // relevant one is animation-timing-function and we special-case that in
-    // CSSAnimations.cpp
-    bool inheritedOnly = false;
-    applyMatchedProperties<HighPropertyPriority>(state, result, false, 0, result.matchedProperties.size() - 1, inheritedOnly);
-
-    // If our font got dirtied, go ahead and update it now.
-    updateFont(state);
-
-    // Now do rest of the properties.
-    applyMatchedProperties<LowPropertyPriority>(state, result, false, 0, result.matchedProperties.size() - 1, inheritedOnly);
-
-    loadPendingResources(state);
-
-    didAccess();
-
     return state.takeStyle();
 }
 
@@ -801,8 +759,9 @@ bool StyleResolver::pseudoStyleForElementInternal(Element& element, const Pseudo
 
         matchUARules(collector);
         matchAuthorRules(state.element(), collector, false);
+        collector.finishAddingAuthorRulesForTreeScope();
 
-        if (collector.matchedResult().matchedProperties.isEmpty())
+        if (!collector.matchedResult().hasMatchedProperties())
             return false;
 
         applyMatchedProperties(state, collector.matchedResult());
@@ -826,6 +785,7 @@ bool StyleResolver::pseudoStyleForElementInternal(Element& element, const Pseudo
         adjustComputedStyle(state, 0);
 
     didAccess();
+    INCREMENT_STYLE_STATS_COUNTER(*this, pseudoElementsStyled, 1);
 
     if (state.style()->hasViewportUnits())
         document().setHasViewportUnits();
@@ -873,13 +833,13 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForPage(int pageIndex)
 
     bool inheritedOnly = false;
 
-    MatchResult& result = collector.matchedResult();
-    applyMatchedProperties<HighPropertyPriority>(state, result, false, 0, result.matchedProperties.size() - 1, inheritedOnly);
+    const MatchResult& result = collector.matchedResult();
+    applyMatchedProperties<HighPropertyPriority>(state, result.allRules(), false, inheritedOnly);
 
     // If our font got dirtied, go ahead and update it now.
     updateFont(state);
 
-    applyMatchedProperties<LowPropertyPriority>(state, result, false, 0, result.matchedProperties.size() - 1, inheritedOnly);
+    applyMatchedProperties<LowPropertyPriority>(state, result.allRules(), false, inheritedOnly);
 
     loadPendingResources(state);
 
@@ -970,12 +930,12 @@ bool StyleResolver::applyAnimatedProperties(StyleResolverState& state, const Ele
         && !state.style()->transitions() && !state.style()->animations())
         return false;
 
-    state.setAnimationUpdate(CSSAnimations::calculateUpdate(animatingElement, *element, *state.style(), state.parentStyle(), this));
-    if (!state.animationUpdate())
+    CSSAnimations::calculateUpdate(animatingElement, *element, *state.style(), state.parentStyle(), state.animationUpdate(), this);
+    if (state.animationUpdate().isEmpty())
         return false;
 
-    const ActiveInterpolationMap& activeInterpolationsForAnimations = state.animationUpdate()->activeInterpolationsForAnimations();
-    const ActiveInterpolationMap& activeInterpolationsForTransitions = state.animationUpdate()->activeInterpolationsForTransitions();
+    const ActiveInterpolationMap& activeInterpolationsForAnimations = state.animationUpdate().activeInterpolationsForAnimations();
+    const ActiveInterpolationMap& activeInterpolationsForTransitions = state.animationUpdate().activeInterpolationsForTransitions();
     applyAnimatedProperties<HighPropertyPriority>(state, activeInterpolationsForAnimations);
     applyAnimatedProperties<HighPropertyPriority>(state, activeInterpolationsForTransitions);
 
@@ -1190,7 +1150,7 @@ static inline bool isValidFirstLetterStyleProperty(CSSPropertyID id)
     }
 }
 
-static bool shouldIgnoreTextTrackAuthorStyle(Document& document)
+static bool shouldIgnoreTextTrackAuthorStyle(const Document& document)
 {
     Settings* settings = document.settings();
     if (!settings)
@@ -1207,10 +1167,25 @@ static bool shouldIgnoreTextTrackAuthorStyle(Document& document)
     return false;
 }
 
+static inline bool isPropertyInWhitelist(PropertyWhitelistType propertyWhitelistType, CSSPropertyID property, const Document& document)
+{
+    if (propertyWhitelistType == PropertyWhitelistNone)
+        return true; // Early bail for the by far most common case.
+
+    if (propertyWhitelistType == PropertyWhitelistFirstLetter)
+        return isValidFirstLetterStyleProperty(property);
+
+    if (propertyWhitelistType == PropertyWhitelistCue)
+        return isValidCueStyleProperty(property) && !shouldIgnoreTextTrackAuthorStyle(document);
+
+    ASSERT_NOT_REACHED();
+    return true;
+}
+
 // This method expands the 'all' shorthand property to longhand properties
 // and applies the expanded longhand properties.
 template <CSSPropertyPriority priority>
-void StyleResolver::applyAllProperty(StyleResolverState& state, CSSValue* allValue, bool inheritedOnly)
+void StyleResolver::applyAllProperty(StyleResolverState& state, CSSValue* allValue, bool inheritedOnly, PropertyWhitelistType propertyWhitelistType)
 {
     unsigned startCSSProperty = CSSPropertyPriorityData<priority>::first();
     unsigned endCSSProperty = CSSPropertyPriorityData<priority>::last();
@@ -1229,6 +1204,9 @@ void StyleResolver::applyAllProperty(StyleResolverState& state, CSSValue* allVal
         // We skip applyProperty when a given property is unicode-bidi or
         // direction.
         if (!CSSProperty::isAffectedByAllProperty(propertyId))
+            continue;
+
+        if (!isPropertyInWhitelist(propertyWhitelistType, propertyId, document()))
             continue;
 
         // When hitting matched properties' cache, only inherited properties will be
@@ -1251,14 +1229,11 @@ void StyleResolver::applyProperties(StyleResolverState& state, const StyleProper
 
         CSSPropertyID property = current.id();
         if (property == CSSPropertyAll) {
-            applyAllProperty<priority>(state, current.value(), inheritedOnly);
+            applyAllProperty<priority>(state, current.value(), inheritedOnly, propertyWhitelistType);
             continue;
         }
 
-        if (propertyWhitelistType == PropertyWhitelistCue && (!isValidCueStyleProperty(property) || shouldIgnoreTextTrackAuthorStyle(document())))
-            continue;
-
-        if (propertyWhitelistType == PropertyWhitelistFirstLetter && !isValidFirstLetterStyleProperty(property))
+        if (!isPropertyInWhitelist(propertyWhitelistType, property, document()))
             continue;
 
         if (inheritedOnly && !current.isInherited()) {
@@ -1277,14 +1252,13 @@ void StyleResolver::applyProperties(StyleResolverState& state, const StyleProper
 }
 
 template <CSSPropertyPriority priority>
-void StyleResolver::applyMatchedProperties(StyleResolverState& state, const MatchResult& matchResult, bool isImportant, int startIndex, int endIndex, bool inheritedOnly)
+void StyleResolver::applyMatchedProperties(StyleResolverState& state, const MatchedPropertiesRange& range, bool isImportant, bool inheritedOnly)
 {
-    if (startIndex == -1)
+    if (range.isEmpty())
         return;
 
     if (state.style()->insideLink() != NotInsideLink) {
-        for (int i = startIndex; i <= endIndex; ++i) {
-            const MatchedProperties& matchedProperties = matchResult.matchedProperties[i];
+        for (const auto& matchedProperties : range) {
             unsigned linkMatchType = matchedProperties.m_types.linkMatchType;
             // FIXME: It would be nicer to pass these as arguments but that requires changes in many places.
             state.setApplyPropertyToRegularStyle(linkMatchType & CSSSelector::MatchLink);
@@ -1296,10 +1270,8 @@ void StyleResolver::applyMatchedProperties(StyleResolverState& state, const Matc
         state.setApplyPropertyToVisitedLinkStyle(false);
         return;
     }
-    for (int i = startIndex; i <= endIndex; ++i) {
-        const MatchedProperties& matchedProperties = matchResult.matchedProperties[i];
+    for (const auto& matchedProperties : range)
         applyProperties<priority>(state, matchedProperties.properties.get(), isImportant, inheritedOnly, static_cast<PropertyWhitelistType>(matchedProperties.m_types.whitelistType));
-    }
 }
 
 static unsigned computeMatchedPropertiesHash(const MatchedProperties* properties, unsigned size)
@@ -1323,21 +1295,21 @@ void StyleResolver::applyMatchedProperties(StyleResolverState& state, const Matc
     const Element* element = state.element();
     ASSERT(element);
 
-    INCREMENT_STYLE_STATS_COUNTER(*this, matchedPropertyApply);
+    INCREMENT_STYLE_STATS_COUNTER(*this, matchedPropertyApply, 1);
 
-    unsigned cacheHash = matchResult.isCacheable ? computeMatchedPropertiesHash(matchResult.matchedProperties.data(), matchResult.matchedProperties.size()) : 0;
+    unsigned cacheHash = matchResult.isCacheable() ? computeMatchedPropertiesHash(matchResult.matchedProperties().data(), matchResult.matchedProperties().size()) : 0;
     bool applyInheritedOnly = false;
-    const CachedMatchedProperties* cachedMatchedProperties = cacheHash ? m_matchedPropertiesCache.find(cacheHash, state, matchResult) : 0;
+    const CachedMatchedProperties* cachedMatchedProperties = cacheHash ? m_matchedPropertiesCache.find(cacheHash, state, matchResult.matchedProperties()) : 0;
 
     if (cachedMatchedProperties && MatchedPropertiesCache::isCacheable(element, *state.style(), *state.parentStyle())) {
-        INCREMENT_STYLE_STATS_COUNTER(*this, matchedPropertyCacheHit);
+        INCREMENT_STYLE_STATS_COUNTER(*this, matchedPropertyCacheHit, 1);
         // We can build up the style by copying non-inherited properties from an earlier style object built using the same exact
         // style declarations. We then only need to apply the inherited properties, if any, as their values can depend on the
         // element context. This is fast and saves memory by reusing the style data structures.
         state.style()->copyNonInheritedFromCached(*cachedMatchedProperties->computedStyle);
         if (state.parentStyle()->inheritedDataShared(*cachedMatchedProperties->parentComputedStyle) && !isAtShadowBoundary(element)
             && (!state.distributedToInsertionPoint() || state.style()->userModify() == READ_ONLY)) {
-            INCREMENT_STYLE_STATS_COUNTER(*this, matchedPropertyCacheInheritedHit);
+            INCREMENT_STYLE_STATS_COUNTER(*this, matchedPropertyCacheInheritedHit, 1);
 
             EInsideLink linkStatus = state.style()->insideLink();
             // If the cache item parent style has identical inherited properties to the current parent style then the
@@ -1358,9 +1330,10 @@ void StyleResolver::applyMatchedProperties(StyleResolverState& state, const Matc
     // high-priority properties first, i.e., those properties that other properties depend on.
     // The order is (1) high-priority not important, (2) high-priority important, (3) normal not important
     // and (4) normal important.
-    applyMatchedProperties<HighPropertyPriority>(state, matchResult, false, 0, matchResult.matchedProperties.size() - 1, applyInheritedOnly);
-    applyMatchedProperties<HighPropertyPriority>(state, matchResult, true, matchResult.ranges.firstAuthorRule, matchResult.ranges.lastAuthorRule, applyInheritedOnly);
-    applyMatchedProperties<HighPropertyPriority>(state, matchResult, true, matchResult.ranges.firstUARule, matchResult.ranges.lastUARule, applyInheritedOnly);
+    applyMatchedProperties<HighPropertyPriority>(state, matchResult.allRules(), false, applyInheritedOnly);
+    for (auto range : ImportantAuthorRanges(matchResult))
+        applyMatchedProperties<HighPropertyPriority>(state, range, true, applyInheritedOnly);
+    applyMatchedProperties<HighPropertyPriority>(state, matchResult.uaRules(), true, applyInheritedOnly);
 
     if (UNLIKELY(isSVGForeignObjectElement(element))) {
         // LayoutSVGRoot handles zooming for the whole SVG subtree, so foreignObject content should not be scaled again.
@@ -1386,21 +1359,22 @@ void StyleResolver::applyMatchedProperties(StyleResolverState& state, const Matc
         applyInheritedOnly = false;
 
     // Now do the normal priority UA properties.
-    applyMatchedProperties<LowPropertyPriority>(state, matchResult, false, matchResult.ranges.firstUARule, matchResult.ranges.lastUARule, applyInheritedOnly);
+    applyMatchedProperties<LowPropertyPriority>(state, matchResult.uaRules(), false, applyInheritedOnly);
 
     // Cache the UA properties to pass them to LayoutTheme in adjustComputedStyle.
     state.cacheUserAgentBorderAndBackground();
 
     // Now do the author and user normal priority properties and all the !important properties.
-    applyMatchedProperties<LowPropertyPriority>(state, matchResult, false, matchResult.ranges.lastUARule + 1, matchResult.matchedProperties.size() - 1, applyInheritedOnly);
-    applyMatchedProperties<LowPropertyPriority>(state, matchResult, true, matchResult.ranges.firstAuthorRule, matchResult.ranges.lastAuthorRule, applyInheritedOnly);
-    applyMatchedProperties<LowPropertyPriority>(state, matchResult, true, matchResult.ranges.firstUARule, matchResult.ranges.lastUARule, applyInheritedOnly);
+    applyMatchedProperties<LowPropertyPriority>(state, matchResult.authorRules(), false, applyInheritedOnly);
+    for (auto range : ImportantAuthorRanges(matchResult))
+        applyMatchedProperties<LowPropertyPriority>(state, range, true, applyInheritedOnly);
+    applyMatchedProperties<LowPropertyPriority>(state, matchResult.uaRules(), true, applyInheritedOnly);
 
     loadPendingResources(state);
 
     if (!cachedMatchedProperties && cacheHash && MatchedPropertiesCache::isCacheable(element, *state.style(), *state.parentStyle())) {
-        INCREMENT_STYLE_STATS_COUNTER(*this, matchedPropertyCacheAdded);
-        m_matchedPropertiesCache.add(*state.style(), *state.parentStyle(), cacheHash, matchResult);
+        INCREMENT_STYLE_STATS_COUNTER(*this, matchedPropertyCacheAdded, 1);
+        m_matchedPropertiesCache.add(*state.style(), *state.parentStyle(), cacheHash, matchResult.matchedProperties());
     }
 
     ASSERT(!state.fontBuilder().fontDirty());
@@ -1415,44 +1389,27 @@ void StyleResolver::applyCallbackSelectors(StyleResolverState& state)
     collector.setMode(SelectorChecker::CollectingStyleRules);
 
     MatchRequest matchRequest(m_watchedSelectorsRules.get(), true);
-    RuleRange ruleRange = collector.matchedResult().ranges.authorRuleRange();
-    collector.collectMatchingRules(matchRequest, ruleRange);
+    collector.collectMatchingRules(matchRequest);
     collector.sortAndTransferMatchedRules();
 
     RefPtrWillBeRawPtr<StyleRuleList> rules = collector.matchedStyleRuleList();
     if (!rules)
         return;
-    for (size_t i = 0; i < rules->m_list.size(); i++)
-        state.style()->addCallbackSelector(rules->m_list[i]->selectorList().selectorsText());
+    for (size_t i = 0; i < rules->size(); i++)
+        state.style()->addCallbackSelector(rules->at(i)->selectorList().selectorsText());
 }
 
-void StyleResolver::enableStats(StatsReportType reportType)
+void StyleResolver::setStatsEnabled(bool enabled)
 {
-    if (m_styleResolverStats)
-        return;
-    m_styleResolverStats = StyleResolverStats::create();
-    m_styleResolverStatsTotals = StyleResolverStats::create();
-    if (reportType == ReportSlowStats) {
-        m_styleResolverStats->printMissedCandidateCount = true;
-        m_styleResolverStatsTotals->printMissedCandidateCount = true;
+    if (enabled) {
+        if (!m_styleResolverStats) {
+            m_styleResolverStats = StyleResolverStats::create();
+        } else {
+            m_styleResolverStats->reset();
+        }
+    } else {
+        m_styleResolverStats = nullptr;
     }
-}
-
-void StyleResolver::disableStats()
-{
-    m_styleResolverStatsSequence = 0;
-    m_styleResolverStats.clear();
-    m_styleResolverStatsTotals.clear();
-}
-
-void StyleResolver::printStats()
-{
-    if (!m_styleResolverStats)
-        return;
-    fprintf(stderr, "=== Style Resolver Stats (resolve #%u) (%s) ===\n", ++m_styleResolverStatsSequence, document().url().string().utf8().data());
-    fprintf(stderr, "%s\n", m_styleResolverStats->report().utf8().data());
-    fprintf(stderr, "== Totals ==\n");
-    fprintf(stderr, "%s\n", m_styleResolverStatsTotals->report().utf8().data());
 }
 
 void StyleResolver::computeFont(ComputedStyle* style, const StylePropertySet& propertySet)

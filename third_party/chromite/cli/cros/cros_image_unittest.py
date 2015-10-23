@@ -6,7 +6,6 @@
 
 from __future__ import print_function
 
-import multiprocessing
 import os
 
 from chromite.cbuildbot import constants
@@ -17,6 +16,7 @@ from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
+from chromite.lib import image_lib
 
 
 class MockImageCommand(command_unittest.MockCommand):
@@ -32,7 +32,8 @@ class MockImageCommand(command_unittest.MockCommand):
     return super(MockImageCommand, self).Run(inst)
 
 
-class ImageCommandTest(cros_test_lib.WorkspaceTestCase):
+class ImageCommandTest(cros_test_lib.WorkspaceTestCase,
+                       cros_test_lib.OutputTestCase):
   """Test class for our ImageCommand class."""
 
   def SetupCommandMock(self, cmd_args):
@@ -64,10 +65,45 @@ class ImageCommandTest(cros_test_lib.WorkspaceTestCase):
     self.cmd_mock.inst.Run()
 
     expected_args = [os.path.join(constants.CROSUTILS_DIR, 'build_image'),
+                     '--board=foo.json',
                      '--extra_packages=brick/foo brick/bar bsp/baz',
-                     '--board=foo.json', '--noenable_bootcache',
-                     '--enable_rootfs_verification', '--loglevel=7']
+                     '--noenable_bootcache', '--enable_rootfs_verification',
+                     '--loglevel=7']
     self.rc_mock.assertCommandContains(expected_args)
+
+  def testBlueprintWithBuildTargetId(self):
+    """Tests running the full image command with a  valid BuildTargetId."""
+    self.CreateBrick(name='brick1', main_package='brick/foo')
+    self.CreateBrick(name='brick2', main_package='brick/bar')
+    self.CreateBrick(name='bsp1', main_package='bsp/baz')
+    self.CreateBlueprint(name='foo.json', bricks=['//brick1', '//brick2'],
+                         bsp='//bsp1',
+                         buildTargetId='{01234567-89AB-CDEF-0123-456789ABCDEF}')
+
+    args = ['--blueprint=//foo.json']
+    self.SetupCommandMock(args)
+    self.cmd_mock.inst.Run()
+
+    expected_args = [os.path.join(constants.CROSUTILS_DIR, 'build_image'),
+                     '--app_id={01234567-89AB-CDEF-0123-456789ABCDEF}',
+                     '--board=foo.json',
+                     '--extra_packages=brick/foo brick/bar bsp/baz',
+                     '--noenable_bootcache', '--enable_rootfs_verification',
+                     '--loglevel=7']
+    self.rc_mock.assertCommandContains(expected_args)
+
+  def testBlueprintWithInvalidBuildTargetId(self):
+    """Tests running the full image command with invalid BuildTargetId."""
+    self.CreateBrick(name='brick1', main_package='brick/foo')
+    self.CreateBrick(name='brick2', main_package='brick/bar')
+    self.CreateBrick(name='bsp1', main_package='bsp/baz')
+    self.CreateBlueprint(name='foo.json', bricks=['//brick1', '//brick2'],
+                         bsp='//bsp1',
+                         buildTargetId='{01234567-89AB-CDEF-0123-45678}')
+
+    args = ['--blueprint=//foo.json']
+    self.SetupCommandMock(args)
+    self.AssertFuncSystemExitNonZero(self.cmd_mock.inst.Run)
 
   def testOutputRootInWorkspace(self):
     """Tests running the image command with an output root in the workspace."""
@@ -81,9 +117,9 @@ class ImageCommandTest(cros_test_lib.WorkspaceTestCase):
     self.cmd_mock.inst.Run()
 
     expected_args = [os.path.join(constants.CROSUTILS_DIR, 'build_image'),
+                     '--board=bar.json',
                      '--extra_packages=brick/foo bsp/baz',
-                     '--board=bar.json', '--noenable_bootcache',
-                     '--enable_rootfs_verification',
+                     '--noenable_bootcache', '--enable_rootfs_verification',
                      '--output_root=%s' % os.path.join(self.workspace_path,
                                                        'images'),
                      '--loglevel=7']
@@ -92,13 +128,23 @@ class ImageCommandTest(cros_test_lib.WorkspaceTestCase):
   def testProgressBar(self):
     """Test that RunCommand is called with --progress_bar."""
     self.PatchObject(command, 'UseProgressBar', return_value=True)
-    op = self.PatchObject(cros_image.BrilloImageOperation, 'Run')
+    op = self.PatchObject(image_lib.BrilloImageOperation, 'Run')
     self.SetupCommandMock([])
     self.cmd_mock.inst.Run()
 
     # Test that BrilloImageOperation.Run is called with the correct arguments.
     self.assertEqual(1, op.call_count)
     self.assertTrue('--progress_bar' in op.call_args[0][1])
+
+  def testToolsetBrillo(self):
+    """Test RunCommand called with --toolset=brillo when using brillo."""
+    self.PatchObject(command, 'GetToolset', return_value='brillo')
+    self.SetupCommandMock([])
+    self.cmd_mock.inst.Run()
+
+    # Test that build_image is called with the correct arguments.
+    cmds = '\n'.join(repr(x) for x in self.rc_mock.call_args_list)
+    self.assertIn('--toolset=brillo', cmds)
 
 
 class ImageCommandParserTest(cros_test_lib.TestCase):
@@ -122,7 +168,7 @@ class ImageCommandParserTest(cros_test_lib.TestCase):
     self.assertEqual(instance.options.disk_layout, None)
     self.assertEqual(instance.options.enable_serial, None)
     self.assertEqual(instance.options.kernel_log_level, 7)
-    self.assertEqual(instance.options.image_types, ['test'])
+    self.assertEqual(instance.options.image_types, 'test')
 
   def testParserSetValues(self):
     """Tests that the parser reads in values correctly."""
@@ -235,112 +281,3 @@ class ImageCommandParserTest(cros_test_lib.TestCase):
     self.assertFalse(instance.options.enable_bootcache)
     self.assertTrue(instance.options.enable_rootfs_verification)
     self.assertEqual(instance.options.image_types, ['dev', 'test'])
-
-
-class BrilloImageOperationFake(cros_image.BrilloImageOperation):
-  """Fake of BrilloImageOperation,"""
-
-  def __init__(self, queue):
-    super(BrilloImageOperationFake, self).__init__()
-    self._queue = queue
-
-  def ParseOutput(self, output=None):
-    super(BrilloImageOperationFake, self).ParseOutput(output)
-    self._queue.put('advance')
-
-
-# TODO(ralphnathan): Inherit from cros_test_lib.ProgressBarTestCase.
-# Implemented in CL:267026
-class BrilloImageOperationTest(cros_test_lib.ProgressBarTestCase,
-                               cros_test_lib.LoggingTestCase):
-  """Test class for cros_image.BrilloImageOperation."""
-
-  def BrilloImageFake(self, events, queue):
-    """Test function to emulate brillo image."""
-    for event in events:
-      queue.get()
-      print(event)
-
-  def testParseOutputBaseImageStage(self):
-    """Test Base Image Creation Stage."""
-    events = ['operation: creating base image',
-              'Total: 1 packages',
-              'Fetched ',
-              'Completed ',
-              'operation: done creating base image',
-              'operation: creating developer image',
-              'operation: done creating developer image',
-              'operation: creating test image',
-              'operation: done creating test image']
-
-    queue = multiprocessing.Queue()
-    op = BrilloImageOperationFake(queue)
-    with cros_test_lib.LoggingCapturer() as logs:
-      with self.OutputCapturer():
-        op.Run(self.BrilloImageFake, events, queue)
-
-    # Check that output display progress bars for 1 package being built.
-    self.AssertProgressBarAllEvents(2)
-
-    # Check the logs to make sure only the base image creation is logged.
-    self.AssertLogsContain(logs, 'Creating disk layout')
-    self.AssertLogsContain(logs, 'Building base image')
-    self.AssertLogsContain(logs, 'Building developer image', inverted=True)
-    self.AssertLogsContain(logs, 'Building test image', inverted=True)
-
-  def testParseOutputTestImageStage(self):
-    """Test Test Image Creation Stage."""
-    events = ['operation: creating base image',
-              'operation: done creating base image',
-              'operation: creating developer image',
-              'operation: done creating developer image',
-              'operation: creating test image',
-              'Total: 2 packages',
-              'Fetched ',
-              'Fetched ',
-              'Completed ',
-              'operation: done creating test image']
-
-    queue = multiprocessing.Queue()
-    op = BrilloImageOperationFake(queue)
-    with cros_test_lib.LoggingCapturer() as logs:
-      with self.OutputCapturer():
-        op.Run(self.BrilloImageFake, events, queue)
-
-    # Check that output display progress bars for 2 packages.
-    self.AssertProgressBarAllEvents(4)
-
-    # Check the logs to make sure only the base image creation is logged.
-    self.AssertLogsContain(logs, 'Creating disk layout')
-    self.AssertLogsContain(logs, 'Building base image', inverted=True)
-    self.AssertLogsContain(logs, 'Building developer image', inverted=True)
-    self.AssertLogsContain(logs, 'Building test image')
-
-  def testParseOutputDeveloperImageStage(self):
-    """Test Developer Image Creation Stage."""
-    events = ['operation: creating base image',
-              'operation: done creating base image',
-              'operation: creating developer image',
-              'Total: 2 packages',
-              'Fetched ',
-              'Fetched ',
-              'Completed ',
-              'Completed ',
-              'operation: done creating developer image',
-              'operation: creating test image',
-              'operation: done creating test image']
-
-    queue = multiprocessing.Queue()
-    op = BrilloImageOperationFake(queue)
-    with cros_test_lib.LoggingCapturer() as logs:
-      with self.OutputCapturer():
-        op.Run(self.BrilloImageFake, events, queue)
-
-    # Check that output display progress bars for 2 packages.
-    self.AssertProgressBarAllEvents(4)
-
-    # Check the logs to make sure only the base image creation is logged.
-    self.AssertLogsContain(logs, 'Creating disk layout')
-    self.AssertLogsContain(logs, 'Building base image', inverted=True)
-    self.AssertLogsContain(logs, 'Building developer image')
-    self.AssertLogsContain(logs, 'Building test image', inverted=True)

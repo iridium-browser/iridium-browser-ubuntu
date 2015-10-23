@@ -127,6 +127,8 @@ class GLES2_UTILS_EXPORT GLES2Util {
 
   static size_t GetGLTypeSizeForTexturesAndBuffers(uint32_t type);
 
+  static size_t GetGLTypeSizeForPathCoordType(uint32_t type);
+
   static uint32_t GLErrorToErrorBit(uint32_t gl_error);
 
   static uint32_t GLErrorBitToGLError(uint32_t error_bit);
@@ -216,7 +218,8 @@ struct GLES2_UTILS_EXPORT ContextCreationAttribHelper {
   bool bind_generates_resource;
   bool fail_if_major_perf_caveat;
   bool lose_context_when_out_of_memory;
-  bool es3_context_required;
+  // 0 if not a WebGL context.
+  unsigned webgl_version;
 };
 
 }  // namespace gles2

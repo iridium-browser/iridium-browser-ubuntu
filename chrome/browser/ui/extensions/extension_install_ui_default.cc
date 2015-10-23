@@ -125,7 +125,7 @@ base::string16 ErrorInfoBarDelegate::GetLinkText() const {
 bool ErrorInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
   InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
       content::OpenURLParams(
-          GURL("http://support.google.com/chrome_webstore/?p=crx_warning"),
+          GURL("https://support.google.com/chrome_webstore/?p=crx_warning"),
           content::Referrer(),
           (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
           ui::PAGE_TRANSITION_LINK, false));
@@ -229,7 +229,7 @@ void ExtensionInstallUIDefault::OpenAppInstalledUI(const std::string& app_id) {
   Profile* current_profile = profile_->GetOriginalProfile();
   Browser* browser = FindOrCreateVisibleBrowser(current_profile);
   if (browser) {
-    GURL url(chrome::IsInstantExtendedAPIEnabled()
+    GURL url(search::IsInstantExtendedAPIEnabled()
                  ? chrome::kChromeUIAppsURL
                  : chrome::kChromeUINewTabURL);
     chrome::NavigateParams params(

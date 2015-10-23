@@ -10,16 +10,17 @@
 #include "sync/syncable/syncable_util.h"
 #include "sync/util/time.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
-EntityTracker* EntityTracker::FromServerUpdate(
+scoped_ptr<EntityTracker> EntityTracker::FromServerUpdate(
     const std::string& id_string,
     const std::string& client_tag_hash,
     int64 received_version) {
-  return new EntityTracker(id_string, client_tag_hash, 0, received_version);
+  return make_scoped_ptr(
+      new EntityTracker(id_string, client_tag_hash, 0, received_version));
 }
 
-EntityTracker* EntityTracker::FromCommitRequest(
+scoped_ptr<EntityTracker> EntityTracker::FromCommitRequest(
     const std::string& id_string,
     const std::string& client_tag_hash,
     int64 sequence_number,
@@ -29,18 +30,9 @@ EntityTracker* EntityTracker::FromCommitRequest(
     const std::string& non_unique_name,
     bool deleted,
     const sync_pb::EntitySpecifics& specifics) {
-  return new EntityTracker(id_string,
-                           client_tag_hash,
-                           0,
-                           0,
-                           true,
-                           sequence_number,
-                           base_version,
-                           ctime,
-                           mtime,
-                           non_unique_name,
-                           deleted,
-                           specifics);
+  return make_scoped_ptr(new EntityTracker(
+      id_string, client_tag_hash, 0, 0, true, sequence_number, base_version,
+      ctime, mtime, non_unique_name, deleted, specifics));
 }
 
 // Constructor that does not set any pending commit fields.
@@ -105,8 +97,8 @@ void EntityTracker::PrepareCommitProto(sync_pb::SyncEntity* commit_entity,
   commit_entity->set_folder(false);
   commit_entity->set_name(non_unique_name_);
   if (!deleted_) {
-    commit_entity->set_ctime(TimeToProtoTime(ctime_));
-    commit_entity->set_mtime(TimeToProtoTime(mtime_));
+    commit_entity->set_ctime(syncer::TimeToProtoTime(ctime_));
+    commit_entity->set_mtime(syncer::TimeToProtoTime(mtime_));
     commit_entity->mutable_specifics()->CopyFrom(specifics_);
   }
 

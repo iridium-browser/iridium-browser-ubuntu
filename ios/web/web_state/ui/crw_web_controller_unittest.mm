@@ -7,6 +7,7 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 
+#include "base/ios/ios_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/test/histogram_tester.h"
@@ -18,8 +19,11 @@
 #include "ios/web/navigation/navigation_item_impl.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
 #include "ios/web/public/referrer.h"
+#include "ios/web/public/test/test_web_view_content_view.h"
 #include "ios/web/public/test/web_test_util.h"
 #import "ios/web/public/web_state/crw_web_controller_observer.h"
+#import "ios/web/public/web_state/ui/crw_content_view.h"
+#import "ios/web/public/web_state/ui/crw_web_view_content_view.h"
 #include "ios/web/public/web_state/url_verification_constants.h"
 #include "ios/web/test/web_test.h"
 #import "ios/web/test/wk_web_view_crash_utils.h"
@@ -27,6 +31,7 @@
 #import "ios/web/web_state/js/crw_js_invoke_parameter_queue.h"
 #import "ios/web/web_state/ui/crw_ui_web_view_web_controller.h"
 #import "ios/web/web_state/ui/crw_web_controller+protected.h"
+#import "ios/web/web_state/ui/crw_web_controller_container_view.h"
 #import "ios/web/web_state/web_state_impl.h"
 #import "net/base/mac/url_conversions.h"
 #include "net/ssl/ssl_info.h"
@@ -45,11 +50,12 @@ using web::NavigationManagerImpl;
 @end
 
 @interface CRWWebController (PrivateAPI)
-- (void)setPageScrollState:(const web::PageScrollState&)scrollState;
+@property(nonatomic, readwrite) web::PageDisplayState pageDisplayState;
+@property(nonatomic, readonly) CRWWebControllerContainerView* containerView;
 - (void)setJsMessageQueueThrottled:(BOOL)throttle;
 - (void)removeDocumentLoadCommandsFromQueue;
-- (GURL)updateURLForHistoryNavigationFromURL:(const GURL&)startURL
-                                       toURL:(const GURL&)endURL;
+- (GURL)URLForHistoryNavigationFromItem:(web::NavigationItem*)fromItem
+                                 toItem:(web::NavigationItem*)toItem;
 - (BOOL)checkForUnexpectedURLChange;
 - (void)injectEarlyInjectionScripts;
 - (void)stopExpectingURLChangeIfNecessary;
@@ -247,6 +253,36 @@ bool IsIPhone6Or6Plus() {
           CGRectGetHeight([[UIScreen mainScreen] nativeBounds]) >= 1334.0);
 }
 
+// Returns HTML for an optionally zoomable test page with |zoom_state|.
+enum PageScalabilityType {
+  PAGE_SCALABILITY_DISABLED = 0,
+  PAGE_SCALABILITY_ENABLED,
+};
+NSString* GetHTMLForZoomState(const web::PageZoomState& zoom_state,
+                              PageScalabilityType scalability_type) {
+  NSString* const kHTMLFormat =
+      @"<html><head><meta name='viewport' content="
+       "'width=%f,minimum-scale=%f,maximum-scale=%f,initial-scale=%f,"
+       "user-scalable=%@'/></head><body>Test</body></html>";
+  CGFloat width = CGRectGetWidth([UIScreen mainScreen].bounds) /
+      zoom_state.minimum_zoom_scale();
+  BOOL scalability_enabled = scalability_type == PAGE_SCALABILITY_ENABLED;
+  return [NSString
+      stringWithFormat:kHTMLFormat, width, zoom_state.minimum_zoom_scale(),
+                       zoom_state.maximum_zoom_scale(), zoom_state.zoom_scale(),
+                       scalability_enabled ? @"yes" : @"no"];
+}
+
+// Forces |webController|'s view to render and waits until |webController|'s
+// PageZoomState matches |zoom_state|.
+void WaitForZoomRendering(CRWWebController* webController,
+                          const web::PageZoomState& zoom_state) {
+  ui::test::uiview_utils::ForceViewRendering(webController.view);
+  base::test::ios::WaitUntilCondition(^bool() {
+    return webController.pageDisplayState.zoom_state() == zoom_state;
+  });
+}
+
 // A mixin class for testing CRWWKWebViewWebController or
 // CRWUIWebViewWebController. Stubs out WebView and child CRWWebController.
 template <typename WebTestT>
@@ -263,7 +299,10 @@ class WebControllerTest : public WebTestT {
     mockDelegate_.reset([[MockInteractionLoader alloc]
         initWithRepresentedObject:originalMockDelegate]);
     [WebTestT::webController_ setDelegate:mockDelegate_];
-    [WebTestT::webController_ injectWebView:(UIView*)mockWebView_];
+    base::scoped_nsobject<TestWebViewContentView> webViewContentView(
+        [[TestWebViewContentView alloc] initWithMockWebView:mockWebView_
+                                                 scrollView:mockScrollView_]);
+    [WebTestT::webController_ injectWebViewContentView:webViewContentView];
 
     NavigationManagerImpl& navigationManager =
         [WebTestT::webController_ webStateImpl]->GetNavigationManagerImpl();
@@ -285,7 +324,7 @@ class WebControllerTest : public WebTestT {
     EXPECT_OCMOCK_VERIFY(mockDelegate_);
     EXPECT_OCMOCK_VERIFY(mockChildWebController_.get());
     EXPECT_OCMOCK_VERIFY(mockWebView_);
-    [WebTestT::webController_ resetInjectedWebView];
+    [WebTestT::webController_ resetInjectedWebViewContentView];
     [WebTestT::webController_ setDelegate:nil];
     WebTestT::TearDown();
   }
@@ -303,7 +342,7 @@ class WebControllerTest : public WebTestT {
 };
 
 class CRWUIWebViewWebControllerTest
-    : public WebControllerTest<web::UIWebViewWebTest> {
+    : public WebControllerTest<web::WebTestWithUIWebViewWebController> {
  protected:
   UIView* CreateMockWebView() const override {
     id result = [[OCMockObject mockForClass:[UIWebView class]] retain];
@@ -329,17 +368,18 @@ class CRWUIWebViewWebControllerTest
 };
 
 class CRWWKWebViewWebControllerTest
-    : public WebControllerTest<web::WKWebViewWebTest> {
+    : public WebControllerTest<web::WebTestWithWKWebViewWebController> {
  protected:
   void SetUp() override {
     CR_TEST_REQUIRES_WK_WEB_VIEW();
-    WebControllerTest<web::WKWebViewWebTest>::SetUp();
+    WebControllerTest<web::WebTestWithWKWebViewWebController>::SetUp();
   }
   UIView* CreateMockWebView() const override {
     id result = [[OCMockObject mockForClass:[WKWebView class]] retain];
 
     // Called by resetInjectedWebView
     [[result stub] configuration];
+    [[result stub] backForwardList];
     [[result stub] setNavigationDelegate:OCMOCK_ANY];
     [[result stub] setUIDelegate:OCMOCK_ANY];
     [[result stub] addObserver:webController_
@@ -785,23 +825,27 @@ WEB_TEST_F(CRWUIWebViewWebControllerTest,
       [urlsWithFragments addObject:[url stringByAppendingString:fragment]];
     }
   }
+  web::NavigationItemImpl fromItem;
+  web::NavigationItemImpl toItem;
 
   // No start fragment: the end url is never changed.
   for (NSString* start in urlsNoFragments) {
     for (NSString* end in urlsWithFragments) {
+      fromItem.SetURL(MAKE_URL(start));
+      toItem.SetURL(MAKE_URL(end));
       EXPECT_EQ(MAKE_URL(end),
-                [this->webController_
-                    updateURLForHistoryNavigationFromURL:MAKE_URL(start)
-                                                   toURL:MAKE_URL(end)]);
+                [this->webController_ URLForHistoryNavigationFromItem:&fromItem
+                                                               toItem:&toItem]);
     }
   }
   // Both contain fragments: the end url is never changed.
   for (NSString* start in urlsWithFragments) {
     for (NSString* end in urlsWithFragments) {
+      fromItem.SetURL(MAKE_URL(start));
+      toItem.SetURL(MAKE_URL(end));
       EXPECT_EQ(MAKE_URL(end),
-                [this->webController_
-                    updateURLForHistoryNavigationFromURL:MAKE_URL(start)
-                                                   toURL:MAKE_URL(end)]);
+                [this->webController_ URLForHistoryNavigationFromItem:&fromItem
+                                                               toItem:&toItem]);
     }
   }
   for (unsigned start_index = 0; start_index < [urlsWithFragments count];
@@ -812,17 +856,20 @@ WEB_TEST_F(CRWUIWebViewWebControllerTest,
       NSString* end = urlsNoFragments[end_index];
       if (start_index / 2 != end_index) {
         // The URLs have nothing in common, they are left untouched.
-        EXPECT_EQ(MAKE_URL(end),
-                  [this->webController_
-                      updateURLForHistoryNavigationFromURL:MAKE_URL(start)
-                                                     toURL:MAKE_URL(end)]);
+        fromItem.SetURL(MAKE_URL(start));
+        toItem.SetURL(MAKE_URL(end));
+        EXPECT_EQ(MAKE_URL(end), [this->webController_
+                                     URLForHistoryNavigationFromItem:&fromItem
+                                                              toItem:&toItem]);
       } else {
         // Start contains a fragment and matches end: An empty fragment is
         // added.
-        EXPECT_EQ(MAKE_URL([end stringByAppendingString:@"#"]),
-                  [this->webController_
-                      updateURLForHistoryNavigationFromURL:MAKE_URL(start)
-                                                     toURL:MAKE_URL(end)]);
+        fromItem.SetURL(MAKE_URL(start));
+        toItem.SetURL(MAKE_URL(end));
+        EXPECT_EQ(
+            MAKE_URL([end stringByAppendingString:@"#"]),
+            [this->webController_ URLForHistoryNavigationFromItem:&fromItem
+                                                           toItem:&toItem]);
       }
     }
   }
@@ -841,7 +888,8 @@ TEST_F(CRWWKWebViewWebControllerTest, SSLError) {
       [NSError errorWithDomain:NSURLErrorDomain
                           code:NSURLErrorServerCertificateHasUnknownRoot
                       userInfo:nil];
-  [static_cast<id<WKNavigationDelegate>>(webController_.get()) webView:nil
+  WKWebView* webView = static_cast<WKWebView*>([webController_ webView]);
+  [static_cast<id<WKNavigationDelegate>>(webController_.get()) webView:webView
                                           didFailProvisionalNavigation:nil
                                                              withError:error];
 
@@ -857,10 +905,12 @@ TEST_F(CRWWKWebViewWebControllerTest, SSLError) {
 #endif  // !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
 
 // None of the |CRWUIWebViewWebControllerTest| setup is needed;
-typedef web::UIWebViewWebTest CRWUIWebControllerPageDialogsOpenPolicyTest;
+typedef web::WebTestWithUIWebViewWebController
+    CRWUIWebControllerPageDialogsOpenPolicyTest;
 
 // None of the |CRWWKWebViewWebControllerTest| setup is needed;
-typedef web::WKWebViewWebTest CRWWKWebControllerPageDialogsOpenPolicyTest;
+typedef web::WebTestWithWKWebViewWebController
+    CRWWKWebControllerPageDialogsOpenPolicyTest;
 
 WEB_TEST_F(CRWUIWebControllerPageDialogsOpenPolicyTest,
            CRWWKWebControllerPageDialogsOpenPolicyTest,
@@ -880,17 +930,18 @@ WEB_TEST_F(CRWUIWebControllerPageDialogsOpenPolicyTest,
 
 // A separate test class, as none of the |CRWUIWebViewWebControllerTest| setup
 // is needed;
-class CRWUIWebControllerPageScrollStateTest : public web::UIWebViewWebTest {
+class CRWUIWebControllerPageScrollStateTest
+    : public web::WebTestWithUIWebViewWebController {
  protected:
-  // Returns a web::PageScrollState that will scroll a UIWebView to
+  // Returns a web::PageDisplayState that will scroll a UIWebView to
   // |scrollOffset| and zoom the content by |relativeZoomScale|.
-  inline web::PageScrollState CreateTestScrollState(
+  inline web::PageDisplayState CreateTestPageDisplayState(
       CGPoint scroll_offset,
       CGFloat relative_zoom_scale,
       CGFloat original_minimum_zoom_scale,
       CGFloat original_maximum_zoom_scale,
       CGFloat original_zoom_scale) const {
-    return web::PageScrollState(
+    return web::PageDisplayState(
         scroll_offset.x, scroll_offset.y,
         original_minimum_zoom_scale / relative_zoom_scale,
         original_maximum_zoom_scale / relative_zoom_scale, 1.0);
@@ -899,119 +950,121 @@ class CRWUIWebControllerPageScrollStateTest : public web::UIWebViewWebTest {
 
 // A separate test class, as none of the |CRWUIWebViewWebControllerTest| setup
 // is needed;
-class CRWWKWebControllerPageScrollStateTest : public web::WKWebViewWebTest {
+class CRWWKWebControllerPageScrollStateTest
+    : public web::WebTestWithWKWebViewWebController {
  protected:
-  // Returns a web::PageScrollState that will scroll a WKWebView to
+  // Returns a web::PageDisplayState that will scroll a WKWebView to
   // |scrollOffset| and zoom the content by |relativeZoomScale|.
-  inline web::PageScrollState CreateTestScrollState(
+  inline web::PageDisplayState CreateTestPageDisplayState(
       CGPoint scroll_offset,
       CGFloat relative_zoom_scale,
       CGFloat original_minimum_zoom_scale,
       CGFloat original_maximum_zoom_scale,
       CGFloat original_zoom_scale) const {
-    return web::PageScrollState(
+    return web::PageDisplayState(
         scroll_offset.x, scroll_offset.y, original_minimum_zoom_scale,
         original_maximum_zoom_scale,
         relative_zoom_scale * original_minimum_zoom_scale);
   }
 };
 
+// TODO(iOS): Flaky on the bots. crbug/493427
 WEB_TEST_F(CRWUIWebControllerPageScrollStateTest,
            CRWWKWebControllerPageScrollStateTest,
-           SetPageStateWithUserScalableDisabled) {
+           FLAKY_SetPageDisplayStateWithUserScalableDisabled) {
 #if !TARGET_IPHONE_SIMULATOR
   // This test fails flakily on device with WKWebView, so skip it there.
   // crbug.com/453530
   if ([this->webController_ webViewType] == web::WK_WEB_VIEW_TYPE)
     return;
 #endif
-  this->LoadHtml(@"<html><head>"
-                  "<meta name='viewport' content="
-                  "'width=device-width,maximum-scale=5,initial-scale=1.0,"
-                  "user-scalable=no'"
-                  " /></head><body></body></html>");
-  UIScrollView* scrollView =
-      [[[this->webController_ view] subviews][0] scrollView];
-  float originZoomScale = scrollView.zoomScale;
-  float originMinimumZoomScale = scrollView.minimumZoomScale;
-  float originMaximumZoomScale = scrollView.maximumZoomScale;
+  web::PageZoomState zoom_state(1.0, 5.0, 1.0);
+  this->LoadHtml(GetHTMLForZoomState(zoom_state, PAGE_SCALABILITY_DISABLED));
+  CRWWebController* web_controller = this->webController_.get();
+  WaitForZoomRendering(web_controller, zoom_state);
+  web::PageZoomState original_zoom_state =
+      web_controller.pageDisplayState.zoom_state();
 
-  web::PageScrollState scrollState =
-      this->CreateTestScrollState(CGPointMake(1.0, 1.0),  // scroll offset
-                                  3.0,                    // relative zoom scale
-                                  1.0,   // original minimum zoom scale
-                                  5.0,   // original maximum zoom scale
-                                  1.0);  // original zoom scale
-  [this->webController_ setPageScrollState:scrollState];
+  web::NavigationManager* nagivation_manager =
+      web_controller.webState->GetNavigationManager();
+  nagivation_manager->GetLastCommittedItem()->SetPageDisplayState(
+      this->CreateTestPageDisplayState(CGPointMake(1.0, 1.0),  // scroll offset
+                                       3.0,    // relative zoom scale
+                                       1.0,    // original minimum zoom scale
+                                       5.0,    // original maximum zoom scale
+                                       1.0));  // original zoom scale
+  [web_controller restoreStateFromHistory];
 
-  // setPageState: is async; wait for its completion.
-  scrollView = [[[this->webController_ view] subviews][0] scrollView];
+  // |-restoreStateFromHistory| is async; wait for its completion.
   base::test::ios::WaitUntilCondition(^bool() {
-    return [scrollView contentOffset].x == 1.0f;
+    return web_controller.pageDisplayState.scroll_state().offset_x() == 1.0;
   });
 
-  ASSERT_EQ(originZoomScale, scrollView.zoomScale);
-  ASSERT_EQ(originMinimumZoomScale, scrollView.minimumZoomScale);
-  ASSERT_EQ(originMaximumZoomScale, scrollView.maximumZoomScale);
+  ASSERT_EQ(original_zoom_state, web_controller.pageDisplayState.zoom_state());
 };
 
+// TODO(iOS): Flaky on the bots. crbug/493427
 WEB_TEST_F(CRWUIWebControllerPageScrollStateTest,
            CRWWKWebControllerPageScrollStateTest,
-           SetPageStateWithUserScalableEnabled) {
-  this->LoadHtml(@"<html><head>"
-                  "<meta name='viewport' content="
-                  "'width=device-width,maximum-scale=10,initial-scale=1.0'"
-                  " /></head><body>Test</body></html>");
+           FLAKY_SetPageDisplayStateWithUserScalableEnabled) {
+  web::PageZoomState zoom_state(1.0, 10.0, 1.0);
+  this->LoadHtml(GetHTMLForZoomState(zoom_state, PAGE_SCALABILITY_ENABLED));
+  CRWWebController* web_controller = this->webController_.get();
+  WaitForZoomRendering(web_controller, zoom_state);
 
-  ui::test::uiview_utils::ForceViewRendering([this->webController_ view]);
-  web::PageScrollState scrollState =
-      this->CreateTestScrollState(CGPointMake(1.0, 1.0),  // scroll offset
-                                  3.0,                    // relative zoom scale
-                                  1.0,   // original minimum zoom scale
-                                  10.0,  // original maximum zoom scale
-                                  1.0);  // original zoom scale
-  [this->webController_ setPageScrollState:scrollState];
+  web::NavigationManager* nagivation_manager =
+      web_controller.webState->GetNavigationManager();
+  nagivation_manager->GetLastCommittedItem()->SetPageDisplayState(
+      this->CreateTestPageDisplayState(CGPointMake(1.0, 1.0),  // scroll offset
+                                       3.0,    // relative zoom scale
+                                       1.0,    // original minimum zoom scale
+                                       10.0,   // original maximum zoom scale
+                                       1.0));  // original zoom scale
+  [web_controller restoreStateFromHistory];
 
-  // setPageState: is async; wait for its completion.
-  id webView = [[this->webController_ view] subviews][0];
-  UIScrollView* scrollView = [webView scrollView];
+  // |-restoreStateFromHistory| is async; wait for its completion.
   base::test::ios::WaitUntilCondition(^bool() {
-    return [scrollView contentOffset].x == 1.0f;
+    return web_controller.pageDisplayState.scroll_state().offset_x() == 1.0;
   });
 
-  EXPECT_FLOAT_EQ(3, scrollView.zoomScale / scrollView.minimumZoomScale);
+  web::PageZoomState final_zoom_state =
+      web_controller.pageDisplayState.zoom_state();
+  EXPECT_FLOAT_EQ(3, final_zoom_state.zoom_scale() /
+                        final_zoom_state.minimum_zoom_scale());
 };
 
+// TODO(iOS): Flaky on the bots. crbug/493427
 WEB_TEST_F(CRWUIWebControllerPageScrollStateTest,
            CRWWKWebControllerPageScrollStateTest,
-           AtTop) {
+           FLAKY_AtTop) {
   // This test fails on iPhone 6/6+ with WKWebView; skip until it's fixed.
   // crbug.com/453105
   if ([this->webController_ webViewType] == web::WK_WEB_VIEW_TYPE &&
       IsIPhone6Or6Plus())
     return;
 
-  this->LoadHtml(@"<html><head>"
-                  "<meta name='viewport' content="
-                  "'width=device-width,maximum-scale=5.0,initial-scale=1.0'"
-                  " /></head><body>Test</body></html>");
-  ASSERT_TRUE(this->webController_.get().atTop);
+  web::PageZoomState zoom_state = web::PageZoomState(1.0, 5.0, 1.0);
+  this->LoadHtml(GetHTMLForZoomState(zoom_state, PAGE_SCALABILITY_ENABLED));
+  CRWWebController* web_controller = this->webController_.get();
+  WaitForZoomRendering(web_controller, zoom_state);
+  ASSERT_TRUE(web_controller.atTop);
 
-  web::PageScrollState scrollState =
-      this->CreateTestScrollState(CGPointMake(0.0, 30.0),  // scroll offset
-                                  5.0,   // relative zoom scale
-                                  1.0,   // original minimum zoom scale
-                                  5.0,   // original maximum zoom scale
-                                  1.0);  // original zoom scale
-  [this->webController_ setPageScrollState:scrollState];
+  web::NavigationManager* nagivation_manager =
+      web_controller.webState->GetNavigationManager();
+  nagivation_manager->GetLastCommittedItem()->SetPageDisplayState(
+      this->CreateTestPageDisplayState(CGPointMake(0.0, 30.0),  // scroll offset
+                                       5.0,    // relative zoom scale
+                                       1.0,    // original minimum zoom scale
+                                       5.0,    // original maximum zoom scale
+                                       1.0));  // original zoom scale
+  [web_controller restoreStateFromHistory];
 
-  // setPageState: is async; wait for its completion.
-  id webView = [[this->webController_ view] subviews][0];
+  // |-restoreStateFromHistory| is async; wait for its completion.
   base::test::ios::WaitUntilCondition(^bool() {
-    return [[webView scrollView] contentOffset].y == 30.0f;
+    return web_controller.pageDisplayState.scroll_state().offset_y() == 30.0;
   });
 
-  ASSERT_FALSE([this->webController_ atTop]);
+  ASSERT_FALSE(web_controller.atTop);
 };
 
 // Tests that evaluateJavaScript:completionHandler: properly forwards the
@@ -1139,10 +1192,12 @@ TEST_F(WebControllerJSEvaluationTest, JavaScriptEvaluationNilHandler) {
 }
 
 // Real UIWebView is required for JSEvaluationTest.
-typedef web::UIWebViewWebTest CRWUIWebControllerJSEvaluationTest;
+typedef web::WebTestWithUIWebViewWebController
+    CRWUIWebControllerJSEvaluationTest;
 
 // Real WKWebView is required for JSEvaluationTest.
-typedef web::WKWebViewWebTest CRWWKWebControllerJSEvaluationTest;
+typedef web::WebTestWithWKWebViewWebController
+    CRWWKWebControllerJSEvaluationTest;
 
 // Tests that a script correctly evaluates to string.
 WEB_TEST_F(CRWUIWebControllerJSEvaluationTest,
@@ -1173,10 +1228,11 @@ WEB_TEST_F(CRWUIWebControllerJSEvaluationTest,
 // A separate test class is used for testing the keyboard dismissal, as none of
 // the setup in |CRWUIWebViewWebControllerTest| is needed; keyboard appearance
 // is tracked by the KeyboardAppearanceListener.
-class WebControllerKeyboardTest : public web::UIWebViewWebTest {
+class WebControllerKeyboardTest
+    : public web::WebTestWithUIWebViewWebController {
  protected:
   void SetUp() override {
-    UIWebViewWebTest::SetUp();
+    web::WebTestWithUIWebViewWebController::SetUp();
     // Close any outstanding alert boxes.
     ui::test::uiview_utils::CancelAlerts();
 
@@ -1192,8 +1248,8 @@ TEST_F(WebControllerKeyboardTest, DismissKeyboard) {
            @"</body></html>");
 
   // Get the webview.
-  UIWebView* webView =
-      (UIWebView*)[[[webController_ view] subviews] objectAtIndex:0];
+  UIWebView* webView = static_cast<UIWebView*>(
+      [webController_ containerView].webViewContentView.webView);
   EXPECT_TRUE(webView);
 
   // Create the window and add the webview.
@@ -1253,8 +1309,8 @@ TEST_F(CRWWKWebViewWebControllerTest, WebURLWithTrustLevel) {
 
 // A separate test class, as none of the |CRWUIWebViewWebControllerTest| setup
 // is needed;
-typedef web::UIWebViewWebTest CRWUIWebControllerObserversTest;
-typedef web::WKWebViewWebTest CRWWKWebControllerObserversTest;
+typedef web::WebTestWithUIWebViewWebController CRWUIWebControllerObserversTest;
+typedef web::WebTestWithWKWebViewWebController CRWWKWebControllerObserversTest;
 
 // Tests that CRWWebControllerObservers are called.
 WEB_TEST_F(CRWUIWebControllerObserversTest,
@@ -1289,11 +1345,12 @@ WEB_TEST_F(CRWUIWebControllerObserversTest,
 };
 
 // Test fixture for window.open tests.
-class CRWWKWebControllerWindowOpenTest : public web::WKWebViewWebTest {
+class CRWWKWebControllerWindowOpenTest
+    : public web::WebTestWithWKWebViewWebController {
  protected:
   void SetUp() override {
     CR_TEST_REQUIRES_WK_WEB_VIEW();
-    WKWebViewWebTest::SetUp();
+    web::WebTestWithWKWebViewWebController::SetUp();
 
     // Configure web delegate.
     delegate_.reset([[MockInteractionLoader alloc]
@@ -1322,7 +1379,7 @@ class CRWWKWebControllerWindowOpenTest : public web::WKWebViewWebTest {
     [webController_ setDelegate:nil];
     [child_ close];
 
-    WKWebViewWebTest::TearDown();
+    web::WebTestWithWKWebViewWebController::TearDown();
   }
   // Executes JavaScript that opens a new window and returns evaluation result
   // as a string.
@@ -1435,13 +1492,18 @@ TEST_F(CRWWKWebControllerWindowOpenTest, BlockPopup) {
 };
 
 // Fixture class to test WKWebView crashes.
-class CRWWKWebControllerWebProcessTest : public web::WKWebViewWebTest {
+class CRWWKWebControllerWebProcessTest
+    : public web::WebTestWithWKWebViewWebController {
  protected:
   void SetUp() override {
     CR_TEST_REQUIRES_WK_WEB_VIEW();
-    WKWebViewWebTest::SetUp();
+    web::WebTestWithWKWebViewWebController::SetUp();
     webView_.reset(web::CreateTerminatedWKWebView());
-    [webController_ injectWebView:webView_];
+    base::scoped_nsobject<TestWebViewContentView> webViewContentView(
+        [[TestWebViewContentView alloc]
+            initWithMockWebView:webView_
+                     scrollView:[webView_ scrollView]]);
+    [webController_ injectWebViewContentView:webViewContentView];
   }
   base::scoped_nsobject<WKWebView> webView_;
 };
@@ -1463,7 +1525,7 @@ TEST_F(CRWWKWebControllerWebProcessTest, Crash) {
 
 // Tests that WKWebView does not crash if deallocation happens during JavaScript
 // evaluation.
-typedef web::WKWebViewWebTest DeallocationDuringJSEvaluation;
+typedef web::WebTestWithWKWebViewWebController DeallocationDuringJSEvaluation;
 TEST_F(DeallocationDuringJSEvaluation, NoCrash) {
   CR_TEST_REQUIRES_WK_WEB_VIEW();
 

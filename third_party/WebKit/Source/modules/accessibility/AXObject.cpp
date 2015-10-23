@@ -29,8 +29,8 @@
 #include "config.h"
 #include "modules/accessibility/AXObject.h"
 
+#include "core/editing/EditingUtilities.h"
 #include "core/editing/VisibleUnits.h"
-#include "core/editing/htmlediting.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLDialogElement.h"
@@ -180,6 +180,7 @@ const InternalRoleEntry internalRoles[] = {
     { ImageMapRole, "ImageMap" },
     { ImageRole, "Image" },
     { InlineTextBoxRole, "InlineTextBox" },
+    { InputTimeRole, "InputTime" },
     { LabelRole, "Label" },
     { LegendRole, "Legend" },
     { LinkRole, "Link" },
@@ -190,6 +191,7 @@ const InternalRoleEntry internalRoles[] = {
     { ListRole, "List" },
     { LogRole, "Log" },
     { MainRole, "Main" },
+    { MarkRole, "Mark" },
     { MarqueeRole, "Marquee" },
     { MathRole, "Math" },
     { MenuBarRole, "MenuBar" },
@@ -368,13 +370,14 @@ HTMLDialogElement* getActiveDialogElement(Node* node)
 
 } // namespace
 
-AXObject::AXObject(AXObjectCacheImpl* axObjectCache)
+unsigned AXObject::s_numberOfLiveAXObjects = 0;
+
+AXObject::AXObject(AXObjectCacheImpl& axObjectCache)
     : m_id(0)
     , m_haveChildren(false)
     , m_role(UnknownRole)
     , m_lastKnownIsIgnoredValue(DefaultBehavior)
-    , m_detached(false)
-    , m_parent(0)
+    , m_parent(nullptr)
     , m_lastModificationCount(-1)
     , m_cachedIsIgnored(false)
     , m_cachedIsInertOrAriaHidden(false)
@@ -382,14 +385,16 @@ AXObject::AXObject(AXObjectCacheImpl* axObjectCache)
     , m_cachedIsDescendantOfDisabledNode(false)
     , m_cachedHasInheritedPresentationalRole(false)
     , m_cachedIsPresentationalChild(false)
-    , m_cachedLiveRegionRoot(0)
-    , m_axObjectCache(axObjectCache)
+    , m_cachedLiveRegionRoot(nullptr)
+    , m_axObjectCache(&axObjectCache)
 {
+    ++s_numberOfLiveAXObjects;
 }
 
 AXObject::~AXObject()
 {
     ASSERT(isDetached());
+    --s_numberOfLiveAXObjects;
 }
 
 void AXObject::detach()
@@ -398,12 +403,12 @@ void AXObject::detach()
     // no children are left with dangling pointers to their parent.
     clearChildren();
 
-    m_detached = true;
+    m_axObjectCache = nullptr;
 }
 
 bool AXObject::isDetached() const
 {
-    return m_detached;
+    return !m_axObjectCache;
 }
 
 bool AXObject::isARIATextControl() const
@@ -493,14 +498,15 @@ bool AXObject::accessibilityIsIgnored() const
 
 void AXObject::updateCachedAttributeValuesIfNeeded() const
 {
-    AXObjectCacheImpl* cache = axObjectCache();
-    if (!cache)
+    if (isDetached())
         return;
 
-    if (cache->modificationCount() == m_lastModificationCount)
+    AXObjectCacheImpl& cache = axObjectCache();
+
+    if (cache.modificationCount() == m_lastModificationCount)
         return;
 
-    m_lastModificationCount = cache->modificationCount();
+    m_lastModificationCount = cache.modificationCount();
     m_cachedIsInertOrAriaHidden = computeIsInertOrAriaHidden();
     m_cachedIsDescendantOfLeafNode = (leafNodeAncestor() != 0);
     m_cachedIsDescendantOfDisabledNode = (disabledAncestor() != 0);
@@ -557,7 +563,7 @@ bool AXObject::computeIsInertOrAriaHidden(IgnoredReasons* ignoredReasons) const
             if (ignoredReasons) {
                 HTMLDialogElement* dialog = getActiveDialogElement(node());
                 if (dialog) {
-                    AXObject* dialogObject = axObjectCache()->getOrCreate(dialog);
+                    AXObject* dialogObject = axObjectCache().getOrCreate(dialog);
                     if (dialogObject)
                         ignoredReasons->append(IgnoredReason(AXActiveModalDialog, dialogObject));
                     else
@@ -665,10 +671,25 @@ bool AXObject::isPresentationalChild() const
     return m_cachedIsPresentationalChild;
 }
 
-String AXObject::name(AXNameFrom& nameFrom, Vector<AXObject*>& nameObjects)
+String AXObject::name(AXNameFrom& nameFrom, AXObjectVector& nameObjects) const
 {
-    HashSet<AXObject*> visited;
-    return textAlternative(false, false, visited, &nameFrom, &nameObjects);
+    WillBeHeapHashSet<RawPtrWillBeMember<const AXObject>> visited;
+    return textAlternative(false, false, visited, nameFrom, nameObjects, nullptr);
+}
+
+String AXObject::name(NameSources* nameSources) const
+{
+    AXObjectSet visited;
+    AXNameFrom tmpNameFrom;
+    AXObjectVector tmpNameObjects;
+    return textAlternative(false, false, visited, tmpNameFrom, tmpNameObjects, nameSources);
+}
+
+String AXObject::recursiveTextAlternative(const AXObject& axObj, bool inAriaLabelledByTraversal, AXObjectSet& visited)
+{
+    AXNameFrom unusedRecursiveNameFrom;
+    AXObjectVector unusedRecursiveNameObjects;
+    return axObj.textAlternative(true, inAriaLabelledByTraversal, visited, unusedRecursiveNameFrom, unusedRecursiveNameObjects, nullptr);
 }
 
 // In ARIA 1.1, the default value for aria-orientation changed from horizontal to undefined.
@@ -880,8 +901,9 @@ IntRect AXObject::boundingBoxForQuads(LayoutObject* obj, const Vector<FloatQuad>
     for (size_t i = 0; i < count; ++i) {
         IntRect r = quads[i].enclosingBoundingBox();
         if (!r.isEmpty()) {
+            // TODO(pdr): Should this be using visualOverflowRect?
             if (obj->style()->hasAppearance())
-                LayoutTheme::theme().adjustPaintInvalidationRect(obj, r);
+                LayoutTheme::theme().addVisualOverflow(*obj, r);
             result.unite(r);
         }
     }
@@ -895,7 +917,7 @@ AXObject* AXObject::elementAccessibilityHitTest(const IntPoint& point) const
         Widget* widget = widgetForAttachmentView();
         // Normalize the point for the widget's bounds.
         if (widget && widget->isFrameView())
-            return axObjectCache()->getOrCreate(widget)->accessibilityHitTest(IntPoint(point - widget->frameRect().location()));
+            return axObjectCache().getOrCreate(widget)->accessibilityHitTest(IntPoint(point - widget->frameRect().location()));
     }
 
     // Check if there are any mock elements that need to be handled.
@@ -916,18 +938,21 @@ const AXObject::AccessibilityChildrenVector& AXObject::children()
 
 AXObject* AXObject::parentObject() const
 {
-    if (m_detached)
+    if (isDetached())
         return 0;
 
     if (m_parent)
         return m_parent;
+
+    if (axObjectCache().isAriaOwned(this))
+        return axObjectCache().getAriaOwnedParent(this);
 
     return computeParent();
 }
 
 AXObject* AXObject::parentObjectIfExists() const
 {
-    if (m_detached)
+    if (isDetached())
         return 0;
 
     if (m_parent)
@@ -971,7 +996,7 @@ AXObject* AXObject::focusedUIElement() const
     if (!page)
         return 0;
 
-    return axObjectCache()->focusedUIElementForPage(page);
+    return axObjectCache().focusedUIElementForPage(page);
 }
 
 Document* AXObject::document() const
@@ -1082,7 +1107,8 @@ void AXObject::setScrollOffset(const IntPoint& offset) const
     if (!area)
         return;
 
-    area->setScrollPosition(DoublePoint(offset.x(), offset.y()));
+    // TODO(bokan): This should potentially be a UserScroll.
+    area->setScrollPosition(DoublePoint(offset.x(), offset.y()), ProgrammaticScroll);
 }
 
 //
@@ -1309,7 +1335,7 @@ void AXObject::notifyIfIgnoredValueChanged()
 {
     bool isIgnored = accessibilityIsIgnored();
     if (lastKnownIsIgnoredValue() != isIgnored) {
-        axObjectCache()->childrenChanged(parentObject());
+        axObjectCache().childrenChanged(parentObject());
         setLastKnownIsIgnoredValue(isIgnored);
     }
 }
@@ -1326,7 +1352,7 @@ int AXObject::lineForPosition(const VisiblePosition& visiblePos) const
         return -1;
 
     // If the position is not in the same editable region as this AX object, return -1.
-    Node* containerNode = visiblePos.deepEquivalent().containerNode();
+    Node* containerNode = visiblePos.deepEquivalent().computeContainerNode();
     if (!containerNode->containsIncludingShadowDOM(node()) && !node()->containsIncludingShadowDOM(containerNode))
         return -1;
 
@@ -1427,6 +1453,7 @@ bool AXObject::nameFromContents() const
     case CellRole:
     case ColumnHeaderRole:
     case DirectoryRole:
+    case DisclosureTriangleRole:
     case LinkRole:
     case ListItemRole:
     case MenuItemRole:
@@ -1471,6 +1498,14 @@ const AtomicString& AXObject::internalRoleName(AccessibilityRole role)
     static const Vector<AtomicString>* internalRoleNameVector = createInternalRoleNameVector();
 
     return internalRoleNameVector->at(role);
+}
+
+DEFINE_TRACE(AXObject)
+{
+    visitor->trace(m_children);
+    visitor->trace(m_parent);
+    visitor->trace(m_cachedLiveRegionRoot);
+    visitor->trace(m_axObjectCache);
 }
 
 } // namespace blink

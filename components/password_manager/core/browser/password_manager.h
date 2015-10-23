@@ -61,15 +61,17 @@ class PasswordManager : public LoginModel {
 
   // Called by a PasswordFormManager when it decides a form can be autofilled
   // on the page.
-  virtual void Autofill(password_manager::PasswordManagerDriver* driver,
-                        const autofill::PasswordForm& form_for_autofill,
-                        const autofill::PasswordFormMap& best_matches,
-                        const autofill::PasswordForm& preferred_match,
-                        bool wait_for_username) const;
+  void Autofill(password_manager::PasswordManagerDriver* driver,
+                const autofill::PasswordForm& form_for_autofill,
+                const autofill::PasswordFormMap& best_matches,
+                const autofill::PasswordForm& preferred_match,
+                bool wait_for_username) const;
 
   // LoginModel implementation.
   void AddObserver(LoginModelObserver* observer) override;
   void RemoveObserver(LoginModelObserver* observer) override;
+
+  void GenerationAvailableForForm(const autofill::PasswordForm& form);
 
   // Update the state of generation for this form.
   void SetHasGeneratedPasswordForForm(
@@ -103,6 +105,11 @@ class PasswordManager : public LoginModel {
       password_manager::PasswordManagerDriver* driver,
       const autofill::PasswordForm& password_form);
 
+  // Handles a manual request to save password.
+  void OnPasswordFormForceSaveRequested(
+      password_manager::PasswordManagerDriver* driver,
+      const autofill::PasswordForm& password_form);
+
   // Called if |password_form| was filled upon in-page navigation. This often
   // means history.pushState being called from JavaScript. If this causes false
   // positive in password saving, update http://crbug.com/357696.
@@ -112,6 +119,10 @@ class PasswordManager : public LoginModel {
   void ProcessAutofillPredictions(
       password_manager::PasswordManagerDriver* driver,
       const std::vector<autofill::FormStructure*>& forms);
+
+  // Causes all |pending_login_managers_| to query the password store again.
+  // Results in updating the fill information on the page.
+  void UpdateFormManagers();
 
   PasswordManagerClient* client() { return client_; }
 
@@ -149,15 +160,22 @@ class PasswordManager : public LoginModel {
   // |provisional_save_manager_|.
   bool ShouldPromptUserToSavePassword() const;
 
-  // Called when we already decided that login was correct and we want to save
-  // password.
-  void AskUserOrSavePassword();
+  // Called when the login was deemed successful. It handles the special case
+  // when the provisionally saved password is a sync credential, and otherwise
+  // asks the user about saving the password or saves it directly, as
+  // appropriate.
+  void OnLoginSuccessful();
 
   // Checks for every from in |forms| whether |pending_login_managers_| already
   // contain a manager for that form. If not, adds a manager for each such form.
   void CreatePendingLoginManagers(
       password_manager::PasswordManagerDriver* driver,
       const std::vector<autofill::PasswordForm>& forms);
+
+  // Returns the best match in |pending_login_managers_| for |form|. May return
+  // nullptr if no match exists.
+  PasswordFormManager* GetMatchingPendingManager(
+      const autofill::PasswordForm& form);
 
   // Note about how a PasswordFormManager can transition from
   // pending_login_managers_ to provisional_save_manager_ and the infobar.
@@ -188,7 +206,7 @@ class PasswordManager : public LoginModel {
 
   // Observers to be notified of LoginModel events.  This is mutable to allow
   // notification in const member functions.
-  mutable ObserverList<LoginModelObserver> observers_;
+  mutable base::ObserverList<LoginModelObserver> observers_;
 
   // Callbacks to be notified when a password form has been submitted.
   std::vector<PasswordSubmittedCallback> submission_callbacks_;

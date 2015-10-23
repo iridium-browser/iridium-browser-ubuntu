@@ -42,11 +42,11 @@ TEST_F(SyncPrefsTest, Basic) {
   sync_prefs.SetSyncSetupCompleted();
   EXPECT_TRUE(sync_prefs.HasSyncSetupCompleted());
 
-  EXPECT_FALSE(sync_prefs.IsStartSuppressed());
-  sync_prefs.SetStartSuppressed(true);
-  EXPECT_TRUE(sync_prefs.IsStartSuppressed());
-  sync_prefs.SetStartSuppressed(false);
-  EXPECT_FALSE(sync_prefs.IsStartSuppressed());
+  EXPECT_TRUE(sync_prefs.IsSyncRequested());
+  sync_prefs.SetSyncRequested(false);
+  EXPECT_FALSE(sync_prefs.IsSyncRequested());
+  sync_prefs.SetSyncRequested(true);
+  EXPECT_TRUE(sync_prefs.IsSyncRequested());
 
   EXPECT_EQ(base::Time(), sync_prefs.GetLastSyncedTime());
   const base::Time& now = base::Time::Now();
@@ -141,6 +141,7 @@ TEST_F(SyncPrefsTest, PreferredTypesNotKeepEverythingSynced) {
     if (it.Get() == syncer::AUTOFILL) {
       expected_preferred_types.Put(syncer::AUTOFILL_PROFILE);
       expected_preferred_types.Put(syncer::AUTOFILL_WALLET_DATA);
+      expected_preferred_types.Put(syncer::AUTOFILL_WALLET_METADATA);
     }
     if (it.Get() == syncer::PREFERENCES) {
       expected_preferred_types.Put(syncer::DICTIONARY);
@@ -234,6 +235,25 @@ TEST_F(SyncPrefsTest, DeviceInfo) {
   sync_prefs.SetKeepEverythingSynced(false);
   EXPECT_TRUE(sync_prefs.GetPreferredDataTypes(syncer::UserTypes())
                   .Has(syncer::DEVICE_INFO));
+}
+
+// Verify that invalidation versions are persisted and loaded correctly.
+TEST_F(SyncPrefsTest, InvalidationVersions) {
+  std::map<syncer::ModelType, int64> versions;
+  versions[syncer::BOOKMARKS] = 10;
+  versions[syncer::SESSIONS] = 20;
+  versions[syncer::PREFERENCES] = 30;
+
+  SyncPrefs sync_prefs(&pref_service_);
+  sync_prefs.UpdateInvalidationVersions(versions);
+
+  std::map<syncer::ModelType, int64> versions2;
+  sync_prefs.GetInvalidationVersions(&versions2);
+
+  EXPECT_EQ(versions.size(), versions2.size());
+  for (auto map_iter : versions2) {
+    EXPECT_EQ(versions[map_iter.first], map_iter.second);
+  }
 }
 
 }  // namespace

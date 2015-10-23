@@ -8,10 +8,10 @@
 
 #include <algorithm>  // for max()
 
-//------------------------------------------------------------------------------
+#include "base/bits.h"
+#include "base/macros.h"
 
-using base::char16;
-using base::string16;
+namespace base {
 
 // static
 const int Pickle::kPayloadUnit = 64;
@@ -37,7 +37,7 @@ inline bool PickleIterator::ReadBuiltinType(Type* result) {
 }
 
 inline void PickleIterator::Advance(size_t size) {
-  size_t aligned_size = AlignInt(size, sizeof(uint32_t));
+  size_t aligned_size = bits::Align(size, sizeof(uint32_t));
   if (end_index_ - read_index_ < aligned_size) {
     read_index_ = end_index_;
   } else {
@@ -152,7 +152,7 @@ bool PickleIterator::ReadString(std::string* result) {
   return true;
 }
 
-bool PickleIterator::ReadStringPiece(base::StringPiece* result) {
+bool PickleIterator::ReadStringPiece(StringPiece* result) {
   int len;
   if (!ReadInt(&len))
     return false;
@@ -160,7 +160,7 @@ bool PickleIterator::ReadStringPiece(base::StringPiece* result) {
   if (!read_from)
     return false;
 
-  *result = base::StringPiece(read_from, len);
+  *result = StringPiece(read_from, len);
   return true;
 }
 
@@ -176,7 +176,7 @@ bool PickleIterator::ReadString16(string16* result) {
   return true;
 }
 
-bool PickleIterator::ReadStringPiece16(base::StringPiece16* result) {
+bool PickleIterator::ReadStringPiece16(StringPiece16* result) {
   int len;
   if (!ReadInt(&len))
     return false;
@@ -184,8 +184,7 @@ bool PickleIterator::ReadStringPiece16(base::StringPiece16* result) {
   if (!read_from)
     return false;
 
-  *result = base::StringPiece16(reinterpret_cast<const char16*>(read_from),
-                                len);
+  *result = StringPiece16(reinterpret_cast<const char16*>(read_from), len);
   return true;
 }
 
@@ -214,13 +213,15 @@ Pickle::Pickle()
       header_size_(sizeof(Header)),
       capacity_after_header_(0),
       write_offset_(0) {
+  static_assert((Pickle::kPayloadUnit & (Pickle::kPayloadUnit - 1)) == 0,
+                "Pickle::kPayloadUnit must be a power of two");
   Resize(kPayloadUnit);
   header_->payload_size = 0;
 }
 
 Pickle::Pickle(int header_size)
     : header_(NULL),
-      header_size_(AlignInt(header_size, sizeof(uint32))),
+      header_size_(bits::Align(header_size, sizeof(uint32))),
       capacity_after_header_(0),
       write_offset_(0) {
   DCHECK_GE(static_cast<size_t>(header_size), sizeof(Header));
@@ -240,7 +241,7 @@ Pickle::Pickle(const char* data, int data_len)
   if (header_size_ > static_cast<unsigned int>(data_len))
     header_size_ = 0;
 
-  if (header_size_ != AlignInt(header_size_, sizeof(uint32)))
+  if (header_size_ != bits::Align(header_size_, sizeof(uint32)))
     header_size_ = 0;
 
   // If there is anything wrong with the data, we're not going to use it.
@@ -284,14 +285,14 @@ Pickle& Pickle::operator=(const Pickle& other) {
   return *this;
 }
 
-bool Pickle::WriteString(const base::StringPiece& value) {
+bool Pickle::WriteString(const StringPiece& value) {
   if (!WriteInt(static_cast<int>(value.size())))
     return false;
 
   return WriteBytes(value.data(), static_cast<int>(value.size()));
 }
 
-bool Pickle::WriteString16(const base::StringPiece16& value) {
+bool Pickle::WriteString16(const StringPiece16& value) {
   if (!WriteInt(static_cast<int>(value.size())))
     return false;
 
@@ -309,7 +310,7 @@ bool Pickle::WriteBytes(const void* data, int length) {
 }
 
 void Pickle::Reserve(size_t length) {
-  size_t data_len = AlignInt(length, sizeof(uint32));
+  size_t data_len = bits::Align(length, sizeof(uint32));
   DCHECK_GE(data_len, length);
 #ifdef ARCH_CPU_64_BITS
   DCHECK_LE(data_len, kuint32max);
@@ -321,20 +322,24 @@ void Pickle::Reserve(size_t length) {
 }
 
 void Pickle::Resize(size_t new_capacity) {
-  new_capacity = AlignInt(new_capacity, kPayloadUnit);
-
   CHECK_NE(capacity_after_header_, kCapacityReadOnly);
-  void* p = realloc(header_, header_size_ + new_capacity);
+  capacity_after_header_ = bits::Align(new_capacity, kPayloadUnit);
+  void* p = realloc(header_, GetTotalAllocatedSize());
   CHECK(p);
   header_ = reinterpret_cast<Header*>(p);
-  capacity_after_header_ = new_capacity;
+}
+
+size_t Pickle::GetTotalAllocatedSize() const {
+  if (capacity_after_header_ == kCapacityReadOnly)
+    return 0;
+  return header_size_ + capacity_after_header_;
 }
 
 // static
 const char* Pickle::FindNext(size_t header_size,
                              const char* start,
                              const char* end) {
-  DCHECK_EQ(header_size, AlignInt(header_size, sizeof(uint32)));
+  DCHECK_EQ(header_size, bits::Align(header_size, sizeof(uint32)));
   DCHECK_LE(header_size, static_cast<size_t>(kPayloadUnit));
 
   size_t length = static_cast<size_t>(end - start);
@@ -359,7 +364,7 @@ inline void Pickle::WriteBytesCommon(const void* data, size_t length) {
   DCHECK_NE(kCapacityReadOnly, capacity_after_header_)
       << "oops: pickle is readonly";
   MSAN_CHECK_MEM_IS_INITIALIZED(data, length);
-  size_t data_len = AlignInt(length, sizeof(uint32));
+  size_t data_len = bits::Align(length, sizeof(uint32));
   DCHECK_GE(data_len, length);
 #ifdef ARCH_CPU_64_BITS
   DCHECK_LE(data_len, kuint32max);
@@ -367,7 +372,11 @@ inline void Pickle::WriteBytesCommon(const void* data, size_t length) {
   DCHECK_LE(write_offset_, kuint32max - data_len);
   size_t new_size = write_offset_ + data_len;
   if (new_size > capacity_after_header_) {
-    Resize(std::max(capacity_after_header_ * 2, new_size));
+    size_t new_capacity = capacity_after_header_ * 2;
+    const size_t kPickleHeapAlign = 4096;
+    if (new_capacity > kPickleHeapAlign)
+      new_capacity = bits::Align(new_capacity, kPickleHeapAlign) - kPayloadUnit;
+    Resize(std::max(new_capacity, new_size));
   }
 
   char* write = mutable_payload() + write_offset_;
@@ -376,3 +385,5 @@ inline void Pickle::WriteBytesCommon(const void* data, size_t length) {
   header_->payload_size = static_cast<uint32>(new_size);
   write_offset_ = new_size;
 }
+
+}  // namespace base

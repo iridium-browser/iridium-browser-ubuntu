@@ -111,11 +111,6 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
                                 false);
 #endif
   registry->RegisterStringPref(prefs::kSelectFileLastDirectory, std::string());
-  // TODO(wjmaclean): remove the following two prefs once migration to per-
-  // partition zoom is complete.
-  registry->RegisterDoublePref(prefs::kDefaultZoomLevelDeprecated, 0.0);
-  registry->RegisterDictionaryPref(prefs::kPerHostZoomLevelsDeprecated);
-
   registry->RegisterDictionaryPref(prefs::kPartitionDefaultZoomLevel);
   registry->RegisterDictionaryPref(prefs::kPartitionPerHostZoomLevels);
   registry->RegisterStringPref(prefs::kDefaultApps, "install");
@@ -182,14 +177,15 @@ bool Profile::IsNewProfile() {
       PrefService::INITIALIZATION_STATUS_CREATED_NEW_PREF_STORE;
 }
 
-bool Profile::IsSyncAccessible() {
-  if (ProfileSyncServiceFactory::HasProfileSyncService(this))
-    return !ProfileSyncServiceFactory::GetForProfile(this)->IsManaged();
+bool Profile::IsSyncAllowed() {
+  if (ProfileSyncServiceFactory::HasProfileSyncService(this)) {
+    return ProfileSyncServiceFactory::GetForProfile(this)->IsSyncAllowed();
+  }
 
   // No ProfileSyncService created yet - we don't want to create one, so just
   // infer the accessible state by looking at prefs/command line flags.
   sync_driver::SyncPrefs prefs(GetPrefs());
-  return ProfileSyncService::IsSyncEnabled() && !prefs.IsManaged();
+  return ProfileSyncService::IsSyncAllowedByFlag() && !prefs.IsManaged();
 }
 
 void Profile::MaybeSendDestroyedNotification() {

@@ -9,17 +9,12 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl_impl.h"
+#include "sandbox/linux/bpf_dsl/errorcode.h"
 #include "sandbox/linux/bpf_dsl/policy_compiler.h"
-#include "sandbox/linux/seccomp-bpf/die.h"
-#include "sandbox/linux/seccomp-bpf/errorcode.h"
 
 namespace sandbox {
 namespace bpf_dsl {
 namespace {
-
-intptr_t BPFFailure(const struct arch_seccomp_data&, void* aux) {
-  SANDBOX_DIE(static_cast<char*>(aux));
-}
 
 class AllowResultExprImpl : public internal::ResultExprImpl {
  public:
@@ -55,6 +50,22 @@ class ErrorResultExprImpl : public internal::ResultExprImpl {
   int err_;
 
   DISALLOW_COPY_AND_ASSIGN(ErrorResultExprImpl);
+};
+
+class KillResultExprImpl : public internal::ResultExprImpl {
+ public:
+  KillResultExprImpl() {}
+
+  ErrorCode Compile(PolicyCompiler* pc) const override {
+    return ErrorCode(ErrorCode::ERR_KILL);
+  }
+
+  bool IsDeny() const override { return true; }
+
+ private:
+  ~KillResultExprImpl() override {}
+
+  DISALLOW_COPY_AND_ASSIGN(KillResultExprImpl);
 };
 
 class TraceResultExprImpl : public internal::ResultExprImpl {
@@ -255,6 +266,8 @@ uint64_t DefaultMask(size_t size) {
 }
 
 BoolExpr ArgEq(int num, size_t size, uint64_t mask, uint64_t val) {
+  // If this is changed, update Arg<T>::EqualTo's static_cast rules
+  // accordingly.
   CHECK(size == 4 || size == 8);
 
   // TODO(mdempsky): Should we just always use TP_64BIT?
@@ -274,8 +287,8 @@ ResultExpr Error(int err) {
   return ResultExpr(new const ErrorResultExprImpl(err));
 }
 
-ResultExpr Kill(const char* msg) {
-  return Trap(BPFFailure, msg);
+ResultExpr Kill() {
+  return ResultExpr(new const KillResultExprImpl());
 }
 
 ResultExpr Trace(uint16_t aux) {

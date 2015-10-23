@@ -65,7 +65,9 @@ remoting.ClientPlugin.prototype.injectKeyCombination = function(keys) {};
 /**
  * Sets and stores the key remapping setting for the current host.
  *
- * @param {string} remappings Comma separated list of key remappings.
+ * @param {!Object} remappings Key mappings, specified as {from: to}, where
+ *     |from| and |to| are both USB keycodes, |from| is a decimal representation
+ *     (because object keys must be strings) and |to| is a number.
  */
 remoting.ClientPlugin.prototype.setRemapKeys = function(remappings) {};
 
@@ -86,18 +88,6 @@ remoting.ClientPlugin.prototype.releaseAllKeys = function() {};
 remoting.ClientPlugin.prototype.onIncomingIq = function(iq) {};
 
 /**
- * @return {boolean} True if the web-app and plugin are compatible.
- */
-remoting.ClientPlugin.prototype.isSupportedVersion = function() {};
-
-/**
- * @param {remoting.ClientPlugin.Feature} feature
- * @return {boolean} True if the plugin supports the specified feature.
- */
-remoting.ClientPlugin.prototype.hasFeature = function(feature) {};
-
-
-/**
  * @param {remoting.ClientSession.Capability} capability
  * @return {boolean} True if the capability has been negotiated between
  *     the client and host.
@@ -112,6 +102,13 @@ remoting.ClientPlugin.prototype.hasCapability = function(capability) {};
  */
 remoting.ClientPlugin.prototype.sendClipboardItem =
     function(mimeType, item) {};
+
+/**
+ * Notifies the plugin whether to send touch events to the host.
+ *
+ * @param {boolean} enable True if touch events should be sent.
+ */
+remoting.ClientPlugin.prototype.enableTouchEvents = function(enable) {};
 
 /**
  * Request that this client be paired with the current host.
@@ -171,29 +168,6 @@ remoting.ClientPlugin.prototype.setClipboardHandler = function(handler) {};
  */
 remoting.ClientPlugin.prototype.setDebugDirtyRegionHandler =
     function(handler) {};
-
-
-/**
- * Set of features for which hasFeature() can be used to test.
- *
- * @enum {string}
- */
-remoting.ClientPlugin.Feature = {
-  INJECT_KEY_EVENT: 'injectKeyEvent',
-  NOTIFY_CLIENT_RESOLUTION: 'notifyClientResolution',
-  ASYNC_PIN: 'asyncPin',
-  PAUSE_VIDEO: 'pauseVideo',
-  PAUSE_AUDIO: 'pauseAudio',
-  REMAP_KEY: 'remapKey',
-  SEND_CLIPBOARD_ITEM: 'sendClipboardItem',
-  THIRD_PARTY_AUTH: 'thirdPartyAuth',
-  TRAP_KEY: 'trapKey',
-  PINLESS_AUTH: 'pinlessAuth',
-  ALLOW_MOUSE_LOCK: 'allowMouseLock',
-  EXTENSION_MESSAGE: 'extensionMessage',
-  VIDEO_CONTROL: 'videoControl'
-};
-
 
 /**
  * @interface

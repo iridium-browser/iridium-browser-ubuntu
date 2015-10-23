@@ -29,7 +29,7 @@
 #include "platform/animation/AnimationUtilities.h"
 #include "wtf/FastAllocBase.h"
 #include "wtf/Forward.h"
-#include "wtf/unicode/Unicode.h"
+#include "wtf/text/Unicode.h"
 
 namespace blink {
 
@@ -56,7 +56,7 @@ struct NamedColor {
     unsigned ARGBValue;
 };
 
-const NamedColor* findColor(register const char* str, register unsigned len);
+PLATFORM_EXPORT const NamedColor* findColor(register const char* str, register unsigned len);
 
 class PLATFORM_EXPORT Color {
     WTF_MAKE_FAST_ALLOCATED(Color);

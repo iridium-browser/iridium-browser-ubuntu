@@ -2,7 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry.page import shared_page_state
+from telemetry import story
 
 from page_sets import key_mobile_sites_pages
 
@@ -26,8 +27,8 @@ class KeyMobileSitesSmoothPage(page_module.Page):
                action_on_load_complete=False):
     super(KeyMobileSitesSmoothPage, self).__init__(
         url=url, page_set=page_set, name=name,
-        credentials_path='data/credentials.json', labels=labels)
-    self.user_agent_type = 'mobile'
+        credentials_path='data/credentials.json', labels=labels,
+        shared_page_state_class=shared_page_state.SharedMobilePageState)
     self.archive_data_file = 'data/key_mobile_sites.json'
     self.action_on_load_complete = action_on_load_complete
 
@@ -48,7 +49,6 @@ class LinkedInSmoothPage(key_mobile_sites_pages.LinkedInPage):
   def RunNavigateSteps(self, action_runner):
     super(LinkedInSmoothPage, self).RunNavigateSteps(action_runner)
     action_runner.ScrollPage()
-    action_runner.ReloadPage()
     super(LinkedInSmoothPage, self).RunNavigateSteps(action_runner)
 
 
@@ -64,7 +64,6 @@ class WowwikiSmoothPage(KeyMobileSitesSmoothPage):
   def RunNavigateSteps(self, action_runner):
     super(WowwikiSmoothPage, self).RunNavigateSteps(action_runner)
     action_runner.ScrollPage()
-    action_runner.ReloadPage()
     super(WowwikiSmoothPage, self).RunNavigateSteps(action_runner)
 
 
@@ -127,15 +126,14 @@ class AmazonNicolasCageSmoothPage(
           distance_expr='document.body.scrollHeight - window.innerHeight')
 
 
-class KeyMobileSitesSmoothPageSet(page_set_module.PageSet):
+class KeyMobileSitesSmoothPageSet(story.StorySet):
 
   """ Key mobile sites with smooth interactions. """
 
   def __init__(self):
     super(KeyMobileSitesSmoothPageSet, self).__init__(
-      user_agent_type='mobile',
       archive_data_file='data/key_mobile_sites_smooth.json',
-      bucket=page_set_module.PARTNER_BUCKET)
+      cloud_storage_bucket=story.PARTNER_BUCKET)
 
 
     # Add pages with predefined classes that contain custom navigation logic.
@@ -149,55 +147,55 @@ class KeyMobileSitesSmoothPageSet(page_set_module.PageSet):
       key_mobile_sites_pages.GoogleNewsMobilePage,
     ]
     for page_class in predefined_page_classes:
-      self.AddUserStory(
+      self.AddStory(
         _CreatePageClassWithSmoothInteractions(page_class)(self))
 
-    self.AddUserStory(
+    self.AddStory(
       _CreatePageClassWithSmoothInteractions(LinkedInSmoothPage)(self))
-    self.AddUserStory(WowwikiSmoothPage(self))
+    self.AddStory(WowwikiSmoothPage(self))
 
     # Add pages with custom page interaction logic.
 
     # Page behaves non-deterministically, replaced with test version for now.
-    # self.AddUserStory(GroupClonedSmoothPage(self))
+    # self.AddStory(GroupClonedSmoothPage(self))
     # mean_input_event_latency cannot be tracked correctly for
     # GroupClonedListImagesPage.
     # See crbug.com/409086.
-    # self.AddUserStory(GroupClonedListImagesSmoothPage(self))
-    self.AddUserStory(GoogleNewsMobile2SmoothPage(self))
-    self.AddUserStory(AmazonNicolasCageSmoothPage(self))
+    # self.AddStory(GroupClonedListImagesSmoothPage(self))
+    self.AddStory(GoogleNewsMobile2SmoothPage(self))
+    self.AddStory(AmazonNicolasCageSmoothPage(self))
 
     # Add pages with custom labels.
 
     # Why: Top news site.
-    self.AddUserStory(KeyMobileSitesSmoothPage(
+    self.AddStory(KeyMobileSitesSmoothPage(
       url='http://nytimes.com/', page_set=self, labels=['fastpath']))
 
     # Why: Image-heavy site.
-    self.AddUserStory(KeyMobileSitesSmoothPage(
+    self.AddStory(KeyMobileSitesSmoothPage(
       url='http://cuteoverload.com', page_set=self, labels=['fastpath']))
 
     # Why: #11 (Alexa global), google property; some blogger layouts
     # have infinite scroll but more interesting.
-    self.AddUserStory(KeyMobileSitesSmoothPage(
+    self.AddStory(KeyMobileSitesSmoothPage(
       url='http://googlewebmastercentral.blogspot.com/',
       page_set=self, name='Blogger'))
 
     # Why: #18 (Alexa global), Picked an interesting post """
-    self.AddUserStory(KeyMobileSitesSmoothPage(
+    self.AddStory(KeyMobileSitesSmoothPage(
       # pylint: disable=line-too-long
       url='http://en.blog.wordpress.com/2012/09/04/freshly-pressed-editors-picks-for-august-2012/',
       page_set=self,
       name='Wordpress'))
 
     # Why: #6 (Alexa) most visited worldwide, picked an interesting page
-    self.AddUserStory(KeyMobileSitesSmoothPage(
+    self.AddStory(KeyMobileSitesSmoothPage(
       url='http://en.wikipedia.org/wiki/Wikipedia',
       page_set=self,
       name='Wikipedia (1 tab)'))
 
     # Why: Wikipedia page with a delayed scroll start
-    self.AddUserStory(KeyMobileSitesSmoothPage(
+    self.AddStory(KeyMobileSitesSmoothPage(
       url='http://en.wikipedia.org/wiki/Wikipedia',
       page_set=self,
       name='Wikipedia (1 tab) - delayed scroll start',
@@ -205,35 +203,35 @@ class KeyMobileSitesSmoothPageSet(page_set_module.PageSet):
 
     # Why: #8 (Alexa global), picked an interesting page
     # Forbidden (Rate Limit Exceeded)
-    # self.AddUserStory(KeyMobileSitesSmoothPage(
+    # self.AddStory(KeyMobileSitesSmoothPage(
     #  url='http://twitter.com/katyperry', page_set=self, name='Twitter'))
 
     # Why: #37 (Alexa global) """
-    self.AddUserStory(KeyMobileSitesSmoothPage(
+    self.AddStory(KeyMobileSitesSmoothPage(
         url='http://pinterest.com',
         page_set=self,
         name='Pinterest'))
 
     # Why: #1 sports.
     # Fails often; crbug.com/249722'
-    # self.AddUserStory(KeyMobileSitesSmoothPage(
+    # self.AddStory(KeyMobileSitesSmoothPage(
     # url='http://espn.go.com', page_set=self, name='ESPN'))
     # Why: crbug.com/231413
     # Doesn't scroll; crbug.com/249736
-    # self.AddUserStory(KeyMobileSitesSmoothPage(
+    # self.AddStory(KeyMobileSitesSmoothPage(
     #                 url='http://forecast.io', page_set=self))
     # Why: crbug.com/169827
-    self.AddUserStory(KeyMobileSitesSmoothPage(
+    self.AddStory(KeyMobileSitesSmoothPage(
       url='http://slashdot.org/', page_set=self, labels=['fastpath']))
 
     # Why: #5 Alexa news """
 
-    self.AddUserStory(KeyMobileSitesSmoothPage(
+    self.AddStory(KeyMobileSitesSmoothPage(
       url='http://www.reddit.com/r/programming/comments/1g96ve',
       page_set=self, labels=['fastpath']))
 
     # Why: Problematic use of fixed position elements """
-    self.AddUserStory(KeyMobileSitesSmoothPage(
+    self.AddStory(KeyMobileSitesSmoothPage(
       url='http://www.boingboing.net', page_set=self, labels=['fastpath']))
 
     # Add simple pages with no custom navigation logic or labels.
@@ -284,4 +282,4 @@ class KeyMobileSitesSmoothPageSet(page_set_module.PageSet):
     ]
 
     for url in urls_list:
-      self.AddUserStory(KeyMobileSitesSmoothPage(url, self))
+      self.AddStory(KeyMobileSitesSmoothPage(url, self))

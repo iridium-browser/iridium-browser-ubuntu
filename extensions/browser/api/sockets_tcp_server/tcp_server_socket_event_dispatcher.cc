@@ -11,7 +11,7 @@
 #include "net/base/net_errors.h"
 
 namespace extensions {
-namespace core_api {
+namespace api {
 
 using content::BrowserThread;
 
@@ -134,8 +134,9 @@ void TCPServerSocketEventDispatcher::AcceptCallback(
     accept_info.client_socket_id = client_socket_id;
     scoped_ptr<base::ListValue> args =
         sockets_tcp_server::OnAccept::Create(accept_info);
-    scoped_ptr<Event> event(
-        new Event(sockets_tcp_server::OnAccept::kEventName, args.Pass()));
+    scoped_ptr<Event> event(new Event(events::SOCKETS_TCP_SERVER_ON_ACCEPT,
+                                      sockets_tcp_server::OnAccept::kEventName,
+                                      args.Pass()));
     PostEvent(params, event.Pass());
 
     // Post a task to delay the "accept" until the socket is available, as
@@ -153,7 +154,8 @@ void TCPServerSocketEventDispatcher::AcceptCallback(
     scoped_ptr<base::ListValue> args =
         sockets_tcp_server::OnAcceptError::Create(accept_error_info);
     scoped_ptr<Event> event(
-        new Event(sockets_tcp_server::OnAcceptError::kEventName, args.Pass()));
+        new Event(events::SOCKETS_TCP_SERVER_ON_ACCEPT_ERROR,
+                  sockets_tcp_server::OnAcceptError::kEventName, args.Pass()));
     PostEvent(params, event.Pass());
 
     // Since we got an error, the socket is now "paused" until the application
@@ -195,5 +197,5 @@ void TCPServerSocketEventDispatcher::DispatchEvent(
     router->DispatchEventToExtension(extension_id, event.Pass());
 }
 
-}  // namespace core_api
+}  // namespace api
 }  // namespace extensions

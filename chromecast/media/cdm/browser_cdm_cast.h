@@ -19,7 +19,7 @@
 #include "media/cdm/json_web_key.h"
 
 namespace base {
-class MessageLoopProxy;
+class SingleThreadTaskRunner;
 }
 
 namespace media {
@@ -28,7 +28,7 @@ class PlayerTrackerImpl;
 
 namespace chromecast {
 namespace media {
-class DecryptContext;
+class DecryptContextImpl;
 
 // BrowserCdmCast is an extension of BrowserCdm that provides common
 // functionality across CDM implementations.
@@ -55,21 +55,19 @@ class BrowserCdmCast : public ::media::BrowserCdm {
   void UnregisterPlayer(int registration_id) override;
 
   // ::media::BrowserCdm implementation:
-  void LoadSession(::media::MediaKeys::SessionType session_type,
-                   const std::string& session_id,
-                   scoped_ptr<::media::NewSessionCdmPromise> promise) override;
   ::media::CdmContext* GetCdmContext() override;
 
   // Returns the decryption context needed to decrypt frames encrypted with
   // |key_id|.
   // Returns null if |key_id| is not available.
-  virtual scoped_refptr<DecryptContext> GetDecryptContext(
+  virtual scoped_ptr<DecryptContextImpl> GetDecryptContext(
       const std::string& key_id) const = 0;
 
  protected:
   void OnSessionMessage(const std::string& session_id,
                         const std::vector<uint8_t>& message,
-                        const GURL& destination_url);
+                        const GURL& destination_url,
+                        ::media::MediaKeys::MessageType message_type);
   void OnSessionClosed(const std::string& session_id);
   void OnSessionKeysChange(const std::string& session_id,
                            const ::media::KeyIdAndKeyPairs& keys);
@@ -101,7 +99,7 @@ class BrowserCdmCastUi : public ::media::BrowserCdm {
  public:
   BrowserCdmCastUi(
       scoped_ptr<BrowserCdmCast> browser_cdm_cast,
-      const scoped_refptr<base::MessageLoopProxy>& cdm_loop);
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
   ~BrowserCdmCastUi() override;
 
   // PlayerTracker implementation:
@@ -134,7 +132,7 @@ class BrowserCdmCastUi : public ::media::BrowserCdm {
   ::media::CdmContext* GetCdmContext() override;
 
   scoped_ptr<BrowserCdmCast> browser_cdm_cast_;
-  scoped_refptr<base::MessageLoopProxy> cdm_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   base::ThreadChecker thread_checker_;
 

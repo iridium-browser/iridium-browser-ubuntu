@@ -3,9 +3,10 @@
 # found in the LICENSE file.
 import json
 
-from telemetry import perf_tests_helper
+from telemetry.util import perf_tests_helper
 from telemetry import value as value_module
 from telemetry.value import histogram_util
+
 
 class HistogramValueBucket(object):
   def __init__(self, low, high, count=0):
@@ -48,9 +49,9 @@ class HistogramValue(value_module.Value):
 
   def __repr__(self):
     if self.page:
-      page_name = self.page.url
+      page_name = self.page.display_name
     else:
-      page_name = None
+      page_name = 'None'
     return ('HistogramValue(%s, %s, %s, raw_json_string="%s", '
             'important=%s, description=%s, tir_label=%s') % (
                 page_name,
@@ -120,8 +121,7 @@ class HistogramValue(value_module.Value):
         important=v0.important, tir_label=v0.tir_label)
 
   @classmethod
-  def MergeLikeValuesFromDifferentPages(cls, values,
-                                        group_by_name_suffix=False):
+  def MergeLikeValuesFromDifferentPages(cls, values):
     # Histograms cannot be merged across pages, at least for now. It should be
     # theoretically possible, just requires more work. Instead, return None.
     # This signals to the merging code that the data is unmergable and it will

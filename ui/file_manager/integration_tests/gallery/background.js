@@ -19,9 +19,9 @@ var gallery = new RemoteCallGallery(GALLERY_APP_ID);
  * @param {string} testVolumeName Test volume name passed to the addEntries
  *     function. Either 'drive' or 'local'.
  * @param {VolumeManagerCommon.VolumeType} volumeType Volume type.
- * @param {Array.<TestEntryInfo>} entries Entries to be parepared and passed to
+ * @param {Array<TestEntryInfo>} entries Entries to be parepared and passed to
  *     the application.
- * @param {Array.<TestEntryInfo>=} opt_selected Entries to be selected. Should
+ * @param {Array<TestEntryInfo>=} opt_selected Entries to be selected. Should
  *     be a sub-set of the entries argument.
  * @return {Promise} Promise to be fulfilled with the data of the main element
  *     in the allery.
@@ -52,33 +52,6 @@ function launch(testVolumeName, volumeType, entries, opt_selected) {
     };
   });
 }
-
-/**
- * Verifies if there are no Javascript errors in any of the app windows.
- * @param {function()} Completion callback.
- */
-function checkIfNoErrorsOccured(callback) {
-  var countPromise = gallery.callRemoteTestUtil('getErrorCount', null, []);
-  countPromise.then(function(count) {
-    chrome.test.assertEq(0, count, 'The error count is not 0.');
-    callback();
-  });
-}
-
-/**
- * Adds check of chrome.test to the end of the given promise.
- * @param {Promise} promise Promise.
- */
-function testPromise(promise) {
-  promise.then(function() {
-    return new Promise(checkIfNoErrorsOccured);
-  }).then(chrome.test.callbackPass(function() {
-    // The callbacPass is necessary to avoid prematurely finishing tests.
-    // Don't put chrome.test.succeed() here to avoid doubled success log.
-  }), function(error) {
-    chrome.test.fail(error.stack || error);
-  });
-};
 
 /**
  * Namespace for test cases.
@@ -118,7 +91,7 @@ window.addEventListener('load', function() {
       // Specify the name of test to the test system.
       targetTest.generatedName = testCaseName;
       chrome.test.runTests([function() {
-        return testPromise(targetTest());
+        return testPromiseAndApps(targetTest(), [gallery]);
       }]);
     }
   ];

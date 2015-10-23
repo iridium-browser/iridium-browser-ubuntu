@@ -49,6 +49,12 @@
       <include name="IDR_FILE_MANAGER_TEST_UTIL_BASE_JS" file="file_manager/background/js/test_util_base.js" flattenhtml="false" type="BINDATA" />
       <include name="IDR_FILE_MANAGER_VOLUME_MANAGER_JS" file="file_manager/background/js/volume_manager.js" flattenhtml="false" type="BINDATA" />
 
+      <!-- Polymer elements -->
+      <include name="IDR_FILE_MANAGER_ELEMENTS_FILES_TOAST_HTML" file="file_manager/foreground/elements/files_toast.html" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_ELEMENTS_FILES_TOAST_JS" file="file_manager/foreground/elements/files_toast.js" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_ELEMENTS_FILES_TOGGLE_RIPPLE_HTML" file="file_manager/foreground/elements/files_toggle_ripple.html" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_ELEMENTS_FILES_TOGGLE_RIPPLE_JS" file="file_manager/foreground/elements/files_toggle_ripple.js" type="BINDATA" />
+
       <!-- Scripts referred by the gallery app. -->
       <include name="IDR_FILE_MANAGER_FILE_TYPE_JS" file="file_manager/common/js/file_type.js" flattenhtml="false" type="BINDATA" />
 
@@ -83,32 +89,52 @@
       <include name="IDR_FILE_MANAGER_GALLERY_ICON_256" file="gallery/images/icon256.png" type="BINDATA" />
 
       <!-- Resources used for file type icon in launcher search result. -->
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_ARCHIVE" file="file_manager/foreground/images/filetype/2x/filetype_archive.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_AUDIO" file="file_manager/foreground/images/filetype/2x/filetype_audio.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_CHART" file="file_manager/foreground/images/filetype/2x/filetype_chart.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_EXCEL" file="file_manager/foreground/images/filetype/2x/filetype_excel.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_FOLDER" file="file_manager/foreground/images/filetype/2x/filetype_folder.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_FORM" file="file_manager/foreground/images/filetype/2x/filetype_form.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_GDOC" file="file_manager/foreground/images/filetype/2x/filetype_gdoc.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_GDRAW" file="file_manager/foreground/images/filetype/2x/filetype_gdraw.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_GENERIC" file="file_manager/foreground/images/filetype/2x/filetype_generic.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_GSHEET" file="file_manager/foreground/images/filetype/2x/filetype_gsheet.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_GSLIDES" file="file_manager/foreground/images/filetype/2x/filetype_gslides.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_GTABLE" file="file_manager/foreground/images/filetype/2x/filetype_gtable.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_IMAGE" file="file_manager/foreground/images/filetype/2x/filetype_image.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_MAP" file="file_manager/foreground/images/filetype/2x/filetype_map.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_PDF" file="file_manager/foreground/images/filetype/2x/filetype_pdf.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_PPT" file="file_manager/foreground/images/filetype/2x/filetype_ppt.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_SCRIPT" file="file_manager/foreground/images/filetype/2x/filetype_script.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_SITES" file="file_manager/foreground/images/filetype/2x/filetype_sites.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_VIDEO" file="file_manager/foreground/images/filetype/2x/filetype_video.png" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_FILETYPE_2X_WORD" file="file_manager/foreground/images/filetype/2x/filetype_word.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_AUDIO" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_audio.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_CHART" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_chart.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_EXCEL" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_excel.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_FOLDER" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_folder.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_FORM" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_form.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_GDOC" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_gdoc.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_GDRAW" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_gdraw.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_GENERIC" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_generic.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_GSHEET" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_gsheet.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_GSLIDES" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_gslides.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_GTABLE" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_gtable.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_IMAGE" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_image.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_MAP" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_map.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_PDF" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_pdf.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_PPT" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_ppt.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_SCRIPT" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_script.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_SITES" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_sites.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_VIDEO" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_video.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_WORD" file="file_manager/foreground/images/launcher_filetypes/launcher_filetype_word.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_AUDIO" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_audio.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_CHART" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_chart.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_EXCEL" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_excel.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_FOLDER" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_folder.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_FORM" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_form.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_GDOC" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_gdoc.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_GDRAW" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_gdraw.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_GENERIC" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_generic.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_GSHEET" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_gsheet.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_GSLIDES" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_gslides.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_GTABLE" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_gtable.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_IMAGE" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_image.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_MAP" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_map.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_PDF" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_pdf.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_PPT" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_ppt.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_SCRIPT" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_script.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_SITES" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_sites.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_VIDEO" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_video.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_LAUNCHER_FILETYPE_2X_WORD" file="file_manager/foreground/images/launcher_filetypes/2x/launcher_filetype_word.png" type="BINDATA" />
 
       <!-- Resources used for non-flattened HTML files. -->
       <include name="IDR_FILE_MANAGER_DRIVE_WELCOME_STYLE" file="file_manager/foreground/css/drive_welcome.css" type="BINDATA" />
-      <include name="IDR_FILE_MANAGER_IMG_UI_DRIVE_WELCOME_BACKGROUND" file="../webui/resources/images/clouds.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_UI_CLOUDS" file="file_manager/foreground/images/files/ui/clouds.png" type="BINDATA" />
       <include name="IDR_FILE_MANAGER_IMG_UI_DRIVE_WELCOME_LOGO" file="file_manager/foreground/images/files/ui/drive_logo.png" type="BINDATA" />
       <include name="IDR_FILE_MANAGER_IMG_UI_2X_DRIVE_WELCOME_LOGO" file="file_manager/foreground/images/files/ui/2x/drive_logo.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_UI_DRIVE_WELCOME_PEOPLE" file="file_manager/foreground/images/files/ui/drive_banner_people.png" type="BINDATA" />
+      <include name="IDR_FILE_MANAGER_IMG_UI_2X_DRIVE_WELCOME_PEOPLE" file="file_manager/foreground/images/files/ui/2x/drive_banner_people.png" type="BINDATA" />
 
       <!-- VideoPlayer.app pages and scripts. -->
       <include name="IDR_VIDEO_PLAYER_MANIFEST" file="video_player/manifest.json" type="BINDATA" />
@@ -129,7 +155,21 @@
       <!-- AudioPlayer.app pages and scripts. -->
       <include name="IDR_AUDIO_PLAYER_MANIFEST" file="audio_player/manifest.json" type="BINDATA" />
       <include name="IDR_AUDIO_PLAYER_BKGND_JS" file="audio_player/js/background.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_AUDIO_PLAYER_CSS" file="audio_player/elements/audio_player.css" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_AUDIO_PLAYER_HTML" file="audio_player/elements/audio_player.html" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_AUDIO_PLAYER_JS" file="audio_player/elements/audio_player.js" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_CONTROL_PANEL_CSS" file="audio_player/elements/control_panel.css" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_CONTROL_PANEL_HTML" file="audio_player/elements/control_panel.html" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_CONTROL_PANEL_JS" file="audio_player/elements/control_panel.js" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_TRACK_LIST_CSS" file="audio_player/elements/track_list.css" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_TRACK_LIST_HTML" file="audio_player/elements/track_list.html" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_TRACK_LIST_JS" file="audio_player/elements/track_list.js" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_VOLUME_CONTROLLER_CSS" file="audio_player/elements/volume_controller.css" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_VOLUME_CONTROLLER_HTML" file="audio_player/elements/volume_controller.html" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ELEMENTS_VOLUME_CONTROLLER_JS" file="audio_player/elements/volume_controller.js" type="BINDATA" />
       <include name="IDR_AUDIO_PLAYER_METADATA_WORKER_JS" file="audio_player/js/metadata_worker.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_ERROR_UTIL_JS" file="audio_player/js/error_util.js" flattenhtml="false" type="BINDATA" />
+      <include name="IDR_AUDIO_PLAYER_TEST_UTIL_JS" file="audio_player/js/test_util.js" flattenhtml="false" type="BINDATA" />
       <include name="IDR_AUDIO_PLAYER" file="audio_player/audio_player.html" allowexternalscript="true" flattenhtml="true" type="BINDATA" />
       <include name="IDR_AUDIO_PLAYER_JS" file="audio_player/js/audio_player_scripts.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_AUDIO_PLAYER_ICON_FAVICON_16" file="audio_player/icons/audio-player-favicon-16.png" type="BINDATA" />

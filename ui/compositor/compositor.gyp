@@ -25,6 +25,8 @@
         'COMPOSITOR_IMPLEMENTATION',
       ],
       'sources': [
+        'canvas_painter.cc',
+        'canvas_painter.h',
         'clip_transform_recorder.cc',
         'clip_transform_recorder.h',
         'closure_animation_observer.cc',
@@ -192,5 +194,27 @@
         }],
       ],
     },
+  ],
+  'conditions': [
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'compositor_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'compositor_unittests',
+          ],
+          'includes': [ '../../build/isolate.gypi' ],
+          'sources': [ 'compositor_unittests.isolate' ],
+          'conditions': [
+            ['use_x11 == 1', {
+              'dependencies': [
+                '../../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+              ],
+            }],
+          ],
+        },
+      ],
+    }],
   ],
 }

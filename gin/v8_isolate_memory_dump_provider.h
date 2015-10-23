@@ -5,6 +5,8 @@
 #ifndef GIN_V8_ISOLATE_MEMORY_DUMP_PROVIDER_H_
 #define GIN_V8_ISOLATE_MEMORY_DUMP_PROVIDER_H_
 
+#include <string>
+
 #include "base/trace_event/memory_dump_provider.h"
 #include "gin/gin_export.h"
 
@@ -21,12 +23,16 @@ class V8IsolateMemoryDumpProvider
   ~V8IsolateMemoryDumpProvider() override;
 
   // MemoryDumpProvider implementation.
-  bool OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd) override;
+  bool OnMemoryDump(
+      const base::trace_event::MemoryDumpArgs& args,
+      base::trace_event::ProcessMemoryDump* process_memory_dump) override;
 
  private:
-  IsolateHolder* isolate_holder_;  // Not owned.
+  void DumpHeapStatistics(
+      const base::trace_event::MemoryDumpArgs& args,
+      base::trace_event::ProcessMemoryDump* process_memory_dump);
 
-  void DumpMemoryStatistics(base::trace_event::ProcessMemoryDump* pmd);
+  IsolateHolder* isolate_holder_;  // Not owned.
 
   DISALLOW_COPY_AND_ASSIGN(V8IsolateMemoryDumpProvider);
 };

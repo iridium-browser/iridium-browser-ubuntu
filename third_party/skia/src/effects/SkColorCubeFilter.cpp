@@ -8,6 +8,7 @@
 #include "SkColorCubeFilter.h"
 #include "SkColorPriv.h"
 #include "SkOnce.h"
+#include "SkOpts.h"
 #include "SkReadBuffer.h"
 #include "SkUnPreMultiply.h"
 #include "SkWriteBuffer.h"
@@ -17,7 +18,7 @@
 #include "GrInvariantOutput.h"
 #include "GrTexturePriv.h"
 #include "SkGr.h"
-#include "gl/GrGLProcessor.h"
+#include "gl/GrGLFragmentProcessor.h"
 #include "gl/builders/GrGLProgramBuilder.h"
 #endif
 
@@ -128,36 +129,9 @@ void SkColorCubeFilter::filterSpan(const SkPMColor src[], int count, SkPMColor d
     const SkScalar* colorToScalar;
     fCache.getProcessingLuts(&colorToIndex, &colorToFactors, &colorToScalar);
 
-    const int dim = fCache.cubeDimension();
-    SkColor* colorCube = (SkColor*)fCubeData->data();
-    for (int i = 0; i < count; ++i) {
-        SkColor inputColor = SkUnPreMultiply::PMColorToColor(src[i]);
-        uint8_t r = SkColorGetR(inputColor);
-        uint8_t g = SkColorGetG(inputColor);
-        uint8_t b = SkColorGetB(inputColor);
-        uint8_t a = SkColorGetA(inputColor);
-        SkScalar rOut(0), gOut(0), bOut(0);
-        for (int x = 0; x < 2; ++x) {
-            for (int y = 0; y < 2; ++y) {
-                for (int z = 0; z < 2; ++z) {
-                    SkColor lutColor = colorCube[colorToIndex[x][r] +
-                                                (colorToIndex[y][g] +
-                                                 colorToIndex[z][b] * dim) * dim];
-                    SkScalar factor = colorToFactors[x][r] *
-                                      colorToFactors[y][g] *
-                                      colorToFactors[z][b];
-                    rOut += colorToScalar[SkColorGetR(lutColor)] * factor;
-                    gOut += colorToScalar[SkColorGetG(lutColor)] * factor;
-                    bOut += colorToScalar[SkColorGetB(lutColor)] * factor;
-                }
-            }
-        }
-        const SkScalar aOut = SkIntToScalar(a);
-        dst[i] = SkPackARGB32(a,
-            SkScalarRoundToInt(rOut * aOut),
-            SkScalarRoundToInt(gOut * aOut),
-            SkScalarRoundToInt(bOut * aOut));
-    }
+    SkOpts::color_cube_filter_span(src, count, dst, colorToIndex,
+                                   colorToFactors, fCache.cubeDimension(),
+                                   (const SkColor*)fCubeData->data());
 }
 
 SkFlattenable* SkColorCubeFilter::CreateProc(SkReadBuffer& buffer) {
@@ -194,10 +168,6 @@ public:
 
     const char* name() const override { return "ColorCube"; }
 
-    virtual void getGLProcessorKey(const GrGLSLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const override;
-
-    GrGLFragmentProcessor* createGLInstance() const override;
     int colorCubeSize() const { return fColorCubeAccess.getTexture()->width(); }
 
 
@@ -208,16 +178,12 @@ public:
         GLProcessor(const GrProcessor&);
         virtual ~GLProcessor();
 
-        virtual void emitCode(GrGLFPBuilder*,
-                              const GrFragmentProcessor&,
-                              const char* outputColor,
-                              const char* inputColor,
-                              const TransformedCoordsArray&,
-                              const TextureSamplerArray&) override;
+        virtual void emitCode(EmitArgs&) override;
 
         static inline void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder*);
 
-        void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
+    protected:
+        void onSetData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
     private:
         GrGLProgramDataManager::UniformHandle fColorCubeSizeUni;
@@ -227,6 +193,11 @@ public:
     };
 
 private:
+    virtual void onGetGLProcessorKey(const GrGLSLCaps& caps,
+                                     GrProcessorKeyBuilder* b) const override;
+
+    GrGLFragmentProcessor* onCreateGLInstance() const override;
+
     bool onIsEqual(const GrFragmentProcessor&) const override { return true; }
 
     GrColorCubeEffect(GrTexture* colorCube);
@@ -247,11 +218,11 @@ GrColorCubeEffect::GrColorCubeEffect(GrTexture* colorCube)
 GrColorCubeEffect::~GrColorCubeEffect() {
 }
 
-void GrColorCubeEffect::getGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const {
+void GrColorCubeEffect::onGetGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const {
     GLProcessor::GenKey(*this, caps, b);
 }
 
-GrGLFragmentProcessor* GrColorCubeEffect::createGLInstance() const {
+GrGLFragmentProcessor* GrColorCubeEffect::onCreateGLInstance() const {
     return SkNEW_ARGS(GLProcessor, (*this));
 }
 
@@ -267,24 +238,19 @@ GrColorCubeEffect::GLProcessor::GLProcessor(const GrProcessor&) {
 GrColorCubeEffect::GLProcessor::~GLProcessor() {
 }
 
-void GrColorCubeEffect::GLProcessor::emitCode(GrGLFPBuilder* builder,
-                                              const GrFragmentProcessor&,
-                                              const char* outputColor,
-                                              const char* inputColor,
-                                              const TransformedCoordsArray& coords,
-                                              const TextureSamplerArray& samplers) {
-    if (NULL == inputColor) {
-        inputColor = "vec4(1)";
+void GrColorCubeEffect::GLProcessor::emitCode(EmitArgs& args) {
+    if (NULL == args.fInputColor) {
+        args.fInputColor = "vec4(1)";
     }
 
-    fColorCubeSizeUni = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
+    fColorCubeSizeUni = args.fBuilder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
                                             kFloat_GrSLType, kDefault_GrSLPrecision,
                                             "Size");
-    const char* colorCubeSizeUni = builder->getUniformCStr(fColorCubeSizeUni);
-    fColorCubeInvSizeUni = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
+    const char* colorCubeSizeUni = args.fBuilder->getUniformCStr(fColorCubeSizeUni);
+    fColorCubeInvSizeUni = args.fBuilder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
                                                kFloat_GrSLType, kDefault_GrSLPrecision,
                                                "InvSize");
-    const char* colorCubeInvSizeUni = builder->getUniformCStr(fColorCubeInvSizeUni);
+    const char* colorCubeInvSizeUni = args.fBuilder->getUniformCStr(fColorCubeInvSizeUni);
 
     const char* nonZeroAlpha = "nonZeroAlpha";
     const char* unPMColor = "unPMColor";
@@ -295,12 +261,12 @@ void GrColorCubeEffect::GLProcessor::emitCode(GrGLFPBuilder* builder,
     // Note: if implemented using texture3D in OpenGL ES older than OpenGL ES 3.0,
     //       the shader might need "#extension GL_OES_texture_3D : enable".
 
-    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = args.fBuilder->getFragmentShaderBuilder();
 
     // Unpremultiply color
-    fsBuilder->codeAppendf("\tfloat %s = max(%s.a, 0.00001);\n", nonZeroAlpha, inputColor);
+    fsBuilder->codeAppendf("\tfloat %s = max(%s.a, 0.00001);\n", nonZeroAlpha, args.fInputColor);
     fsBuilder->codeAppendf("\tvec4 %s = vec4(%s.rgb / %s, %s);\n",
-                           unPMColor, inputColor, nonZeroAlpha, nonZeroAlpha);
+                           unPMColor, args.fInputColor, nonZeroAlpha, nonZeroAlpha);
 
     // Fit input color into the cube.
     fsBuilder->codeAppendf(
@@ -315,17 +281,17 @@ void GrColorCubeEffect::GLProcessor::emitCode(GrGLFPBuilder* builder,
                            cCoords2, cubeIdx, cubeIdx, cubeIdx, colorCubeInvSizeUni);
 
     // Apply the cube.
-    fsBuilder->codeAppendf("%s = vec4(mix(", outputColor);
-    fsBuilder->appendTextureLookup(samplers[0], cCoords1);
+    fsBuilder->codeAppendf("%s = vec4(mix(", args.fOutputColor);
+    fsBuilder->appendTextureLookup(args.fSamplers[0], cCoords1);
     fsBuilder->codeAppend(".rgb, ");
-    fsBuilder->appendTextureLookup(samplers[0], cCoords2);
+    fsBuilder->appendTextureLookup(args.fSamplers[0], cCoords2);
 
     // Premultiply color by alpha. Note that the input alpha is not modified by this shader.
     fsBuilder->codeAppendf(".rgb, fract(%s.b)) * vec3(%s), %s.a);\n",
-                           cubeIdx, nonZeroAlpha, inputColor);
+                           cubeIdx, nonZeroAlpha, args.fInputColor);
 }
 
-void GrColorCubeEffect::GLProcessor::setData(const GrGLProgramDataManager& pdman,
+void GrColorCubeEffect::GLProcessor::onSetData(const GrGLProgramDataManager& pdman,
                                              const GrProcessor& proc) {
     const GrColorCubeEffect& colorCube = proc.cast<GrColorCubeEffect>();
     SkScalar size = SkIntToScalar(colorCube.colorCubeSize());
@@ -337,7 +303,7 @@ void GrColorCubeEffect::GLProcessor::GenKey(const GrProcessor& proc,
                                             const GrGLSLCaps&, GrProcessorKeyBuilder* b) {
 }
 
-bool SkColorCubeFilter::asFragmentProcessors(GrContext* context,
+bool SkColorCubeFilter::asFragmentProcessors(GrContext* context, GrProcessorDataManager*,
                                              SkTDArray<GrFragmentProcessor*>* array) const {
     static const GrUniqueKey::Domain kDomain = GrUniqueKey::GenerateDomain();
     GrUniqueKey key;
@@ -365,6 +331,9 @@ bool SkColorCubeFilter::asFragmentProcessors(GrContext* context,
     if (frag) {
         if (array) {
             *array->append() = frag;
+        } else {
+            frag->unref();
+            SkDEBUGCODE(frag = NULL;)
         }
         return true;
     }

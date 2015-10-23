@@ -33,7 +33,7 @@ namespace updatepolicy {
 // Base class for all update policies for sending a location.
 class UpdatePolicy : public base::RefCounted<UpdatePolicy> {
  public:
-  explicit UpdatePolicy() {}
+  UpdatePolicy() {}
 
   // True if the caller should send an update based off of this policy.
   virtual bool ShouldSendUpdate(const content::Geoposition&) const = 0;
@@ -313,6 +313,7 @@ void LocationManager::SendLocationUpdate(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   scoped_ptr<base::ListValue> args(new base::ListValue());
+  events::HistogramValue histogram_value = events::UNKNOWN;
   std::string event_name;
 
   if (position.Validate() &&
@@ -324,15 +325,17 @@ void LocationManager::SendLocationUpdate(
     location.timestamp = position.timestamp.ToJsTime();
 
     args->Append(location.ToValue().release());
+    histogram_value = events::LOCATION_ON_LOCATION_UPDATE;
     event_name = location::OnLocationUpdate::kEventName;
   } else {
     // Set data for onLocationError event.
     // TODO(vadimt): Set name.
     args->AppendString(position.error_message);
+    histogram_value = events::LOCATION_ON_LOCATION_ERROR;
     event_name = location::OnLocationError::kEventName;
   }
 
-  scoped_ptr<Event> event(new Event(event_name, args.Pass()));
+  scoped_ptr<Event> event(new Event(histogram_value, event_name, args.Pass()));
 
   EventRouter::Get(browser_context_)
       ->DispatchEventToExtension(extension_id, event.Pass());

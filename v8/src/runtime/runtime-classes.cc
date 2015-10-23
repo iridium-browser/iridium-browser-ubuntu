@@ -2,17 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/runtime/runtime-utils.h"
+
 #include <stdlib.h>
 #include <limits>
 
-#include "src/v8.h"
-
 #include "src/arguments.h"
-#include "src/debug.h"
+#include "src/debug/debug.h"
+#include "src/frames-inl.h"
 #include "src/messages.h"
 #include "src/runtime/runtime.h"
-#include "src/runtime/runtime-utils.h"
-
 
 namespace v8 {
 namespace internal {
@@ -52,7 +51,7 @@ RUNTIME_FUNCTION(Runtime_ThrowArrayNotSubclassableError) {
 
 static Object* ThrowStaticPrototypeError(Isolate* isolate) {
   THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError("static_prototype", HandleVector<Object>(NULL, 0)));
+      isolate, NewTypeError(MessageTemplate::kStaticPrototype));
 }
 
 
@@ -93,16 +92,10 @@ RUNTIME_FUNCTION(Runtime_HomeObjectSymbol) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_DefineClass) {
-  HandleScope scope(isolate);
-  DCHECK(args.length() == 6);
-  CONVERT_ARG_HANDLE_CHECKED(Object, name, 0);
-  CONVERT_ARG_HANDLE_CHECKED(Object, super_class, 1);
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, constructor, 2);
-  CONVERT_ARG_HANDLE_CHECKED(Script, script, 3);
-  CONVERT_SMI_ARG_CHECKED(start_position, 4);
-  CONVERT_SMI_ARG_CHECKED(end_position, 5);
-
+static MaybeHandle<Object> DefineClass(Isolate* isolate, Handle<Object> name,
+                                       Handle<Object> super_class,
+                                       Handle<JSFunction> constructor,
+                                       int start_position, int end_position) {
   Handle<Object> prototype_parent;
   Handle<Object> constructor_parent;
 
@@ -113,33 +106,38 @@ RUNTIME_FUNCTION(Runtime_DefineClass) {
       prototype_parent = isolate->factory()->null_value();
     } else if (super_class->IsSpecFunction()) {
       if (Handle<JSFunction>::cast(super_class)->shared()->is_generator()) {
-        Handle<Object> args[1] = {super_class};
-        THROW_NEW_ERROR_RETURN_FAILURE(
+        THROW_NEW_ERROR(
             isolate,
-            NewTypeError("extends_value_generator", HandleVector(args, 1)));
+            NewTypeError(MessageTemplate::kExtendsValueGenerator, super_class),
+            Object);
       }
-      ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      ASSIGN_RETURN_ON_EXCEPTION(
           isolate, prototype_parent,
           Runtime::GetObjectProperty(isolate, super_class,
-                                     isolate->factory()->prototype_string()));
+                                     isolate->factory()->prototype_string(),
+                                     SLOPPY),
+          Object);
       if (!prototype_parent->IsNull() && !prototype_parent->IsSpecObject()) {
-        Handle<Object> args[1] = {prototype_parent};
-        THROW_NEW_ERROR_RETURN_FAILURE(
-            isolate, NewTypeError("prototype_parent_not_an_object",
-                                  HandleVector(args, 1)));
+        THROW_NEW_ERROR(
+            isolate, NewTypeError(MessageTemplate::kPrototypeParentNotAnObject,
+                                  prototype_parent),
+            Object);
       }
       constructor_parent = super_class;
     } else {
       // TODO(arv): Should be IsConstructor.
-      Handle<Object> args[1] = {super_class};
-      THROW_NEW_ERROR_RETURN_FAILURE(
+      THROW_NEW_ERROR(
           isolate,
-          NewTypeError("extends_value_not_a_function", HandleVector(args, 1)));
+          NewTypeError(MessageTemplate::kExtendsValueNotFunction, super_class),
+          Object);
     }
   }
 
   Handle<Map> map =
       isolate->factory()->NewMap(JS_OBJECT_TYPE, JSObject::kHeaderSize);
+  if (constructor->map()->is_strong()) {
+    map->set_is_strong();
+  }
   Map::SetPrototype(map, prototype_parent);
   map->SetConstructor(*constructor);
   Handle<JSObject> prototype = isolate->factory()->NewJSObjectFromMap(map);
@@ -157,42 +155,81 @@ RUNTIME_FUNCTION(Runtime_DefineClass) {
   JSFunction::SetPrototype(constructor, prototype);
   PropertyAttributes attribs =
       static_cast<PropertyAttributes>(DONT_ENUM | DONT_DELETE | READ_ONLY);
-  RETURN_FAILURE_ON_EXCEPTION(
-      isolate, JSObject::SetOwnPropertyIgnoreAttributes(
-                   constructor, isolate->factory()->prototype_string(),
-                   prototype, attribs));
+  RETURN_ON_EXCEPTION(isolate,
+                      JSObject::SetOwnPropertyIgnoreAttributes(
+                          constructor, isolate->factory()->prototype_string(),
+                          prototype, attribs),
+                      Object);
 
   // TODO(arv): Only do this conditionally.
   Handle<Symbol> home_object_symbol(isolate->heap()->home_object_symbol());
-  RETURN_FAILURE_ON_EXCEPTION(
+  RETURN_ON_EXCEPTION(
       isolate, JSObject::SetOwnPropertyIgnoreAttributes(
-                   constructor, home_object_symbol, prototype, DONT_ENUM));
+                   constructor, home_object_symbol, prototype, DONT_ENUM),
+      Object);
 
   if (!constructor_parent.is_null()) {
-    RETURN_FAILURE_ON_EXCEPTION(
-        isolate,
-        JSObject::SetPrototype(constructor, constructor_parent, false));
+    RETURN_ON_EXCEPTION(
+        isolate, JSObject::SetPrototype(constructor, constructor_parent, false),
+        Object);
   }
 
   JSObject::AddProperty(prototype, isolate->factory()->constructor_string(),
                         constructor, DONT_ENUM);
 
   // Install private properties that are used to construct the FunctionToString.
-  RETURN_FAILURE_ON_EXCEPTION(
-      isolate, Object::SetProperty(constructor,
-                                   isolate->factory()->class_script_symbol(),
-                                   script, STRICT));
-  RETURN_FAILURE_ON_EXCEPTION(
+  RETURN_ON_EXCEPTION(
       isolate,
       Object::SetProperty(
           constructor, isolate->factory()->class_start_position_symbol(),
-          handle(Smi::FromInt(start_position), isolate), STRICT));
-  RETURN_FAILURE_ON_EXCEPTION(
+          handle(Smi::FromInt(start_position), isolate), STRICT),
+      Object);
+  RETURN_ON_EXCEPTION(
       isolate, Object::SetProperty(
                    constructor, isolate->factory()->class_end_position_symbol(),
-                   handle(Smi::FromInt(end_position), isolate), STRICT));
+                   handle(Smi::FromInt(end_position), isolate), STRICT),
+      Object);
 
-  return *constructor;
+  return constructor;
+}
+
+
+RUNTIME_FUNCTION(Runtime_DefineClass) {
+  HandleScope scope(isolate);
+  DCHECK(args.length() == 5);
+  CONVERT_ARG_HANDLE_CHECKED(Object, name, 0);
+  CONVERT_ARG_HANDLE_CHECKED(Object, super_class, 1);
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, constructor, 2);
+  CONVERT_SMI_ARG_CHECKED(start_position, 3);
+  CONVERT_SMI_ARG_CHECKED(end_position, 4);
+
+  Handle<Object> result;
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      isolate, result, DefineClass(isolate, name, super_class, constructor,
+                                   start_position, end_position));
+  return *result;
+}
+
+
+RUNTIME_FUNCTION(Runtime_DefineClassStrong) {
+  HandleScope scope(isolate);
+  DCHECK(args.length() == 5);
+  CONVERT_ARG_HANDLE_CHECKED(Object, name, 0);
+  CONVERT_ARG_HANDLE_CHECKED(Object, super_class, 1);
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, constructor, 2);
+  CONVERT_SMI_ARG_CHECKED(start_position, 3);
+  CONVERT_SMI_ARG_CHECKED(end_position, 4);
+
+  if (super_class->IsNull()) {
+    THROW_NEW_ERROR_RETURN_FAILURE(
+        isolate, NewTypeError(MessageTemplate::kStrongExtendNull));
+  }
+
+  Handle<Object> result;
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      isolate, result, DefineClass(isolate, name, super_class, constructor,
+                                   start_position, end_position));
+  return *result;
 }
 
 
@@ -203,17 +240,31 @@ RUNTIME_FUNCTION(Runtime_DefineClassMethod) {
   CONVERT_ARG_HANDLE_CHECKED(Name, name, 1);
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 2);
 
-  uint32_t index;
-  if (name->AsArrayIndex(&index)) {
-    RETURN_FAILURE_ON_EXCEPTION(
-        isolate,
-        JSObject::SetOwnElement(object, index, function, DONT_ENUM, STRICT));
-  } else {
-    RETURN_FAILURE_ON_EXCEPTION(
-        isolate, JSObject::SetOwnPropertyIgnoreAttributes(object, name,
-                                                          function, DONT_ENUM));
-  }
+  RETURN_FAILURE_ON_EXCEPTION(isolate,
+                              JSObject::DefinePropertyOrElementIgnoreAttributes(
+                                  object, name, function, DONT_ENUM));
   return isolate->heap()->undefined_value();
+}
+
+
+RUNTIME_FUNCTION(Runtime_FinalizeClassDefinition) {
+  HandleScope scope(isolate);
+  DCHECK(args.length() == 2);
+  CONVERT_ARG_HANDLE_CHECKED(JSObject, constructor, 0);
+  CONVERT_ARG_HANDLE_CHECKED(JSObject, prototype, 1);
+
+  JSObject::MigrateSlowToFast(prototype, 0, "RuntimeToFastProperties");
+  JSObject::MigrateSlowToFast(constructor, 0, "RuntimeToFastProperties");
+
+  if (constructor->map()->is_strong()) {
+    DCHECK(prototype->map()->is_strong());
+    RETURN_FAILURE_ON_EXCEPTION(isolate, JSObject::Freeze(prototype));
+    Handle<Object> result;
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
+                                       JSObject::Freeze(constructor));
+    return *result;
+  }
+  return *constructor;
 }
 
 
@@ -222,106 +273,125 @@ RUNTIME_FUNCTION(Runtime_ClassGetSourceCode) {
   DCHECK(args.length() == 1);
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, fun, 0);
 
-  Handle<Object> script;
-  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-      isolate, script,
-      Object::GetProperty(fun, isolate->factory()->class_script_symbol()));
-  if (!script->IsScript()) {
-    return isolate->heap()->undefined_value();
-  }
-
   Handle<Symbol> start_position_symbol(
       isolate->heap()->class_start_position_symbol());
-  Handle<Object> start_position;
-  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-      isolate, start_position, Object::GetProperty(fun, start_position_symbol));
+  Handle<Object> start_position =
+      JSReceiver::GetDataProperty(fun, start_position_symbol);
+  if (!start_position->IsSmi()) return isolate->heap()->undefined_value();
 
   Handle<Symbol> end_position_symbol(
       isolate->heap()->class_end_position_symbol());
-  Handle<Object> end_position;
-  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-      isolate, end_position, Object::GetProperty(fun, end_position_symbol));
+  Handle<Object> end_position =
+      JSReceiver::GetDataProperty(fun, end_position_symbol);
+  CHECK(end_position->IsSmi());
 
-  if (!start_position->IsSmi() || !end_position->IsSmi() ||
-      !Handle<Script>::cast(script)->HasValidSource()) {
-    return isolate->ThrowIllegalOperation();
-  }
-
-  Handle<String> source(String::cast(Handle<Script>::cast(script)->source()));
+  Handle<String> source(
+      String::cast(Script::cast(fun->shared()->script())->source()));
   return *isolate->factory()->NewSubString(
       source, Handle<Smi>::cast(start_position)->value(),
       Handle<Smi>::cast(end_position)->value());
 }
 
 
-static Object* LoadFromSuper(Isolate* isolate, Handle<Object> receiver,
-                             Handle<JSObject> home_object, Handle<Name> name) {
+static MaybeHandle<Object> LoadFromSuper(Isolate* isolate,
+                                         Handle<Object> receiver,
+                                         Handle<JSObject> home_object,
+                                         Handle<Name> name,
+                                         LanguageMode language_mode) {
   if (home_object->IsAccessCheckNeeded() && !isolate->MayAccess(home_object)) {
     isolate->ReportFailedAccessCheck(home_object);
-    RETURN_FAILURE_IF_SCHEDULED_EXCEPTION(isolate);
+    RETURN_EXCEPTION_IF_SCHEDULED_EXCEPTION(isolate, Object);
   }
 
   PrototypeIterator iter(isolate, home_object);
   Handle<Object> proto = PrototypeIterator::GetCurrent(iter);
-  if (!proto->IsJSReceiver()) return isolate->heap()->undefined_value();
+  if (!proto->IsJSReceiver()) {
+    return Object::ReadAbsentProperty(isolate, proto, name, language_mode);
+  }
 
   LookupIterator it(receiver, name, Handle<JSReceiver>::cast(proto));
   Handle<Object> result;
-  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result, Object::GetProperty(&it));
-  return *result;
+  ASSIGN_RETURN_ON_EXCEPTION(isolate, result,
+                             Object::GetProperty(&it, language_mode), Object);
+  return result;
 }
 
 
-static Object* LoadElementFromSuper(Isolate* isolate, Handle<Object> receiver,
-                                    Handle<JSObject> home_object,
-                                    uint32_t index) {
+static MaybeHandle<Object> LoadElementFromSuper(Isolate* isolate,
+                                                Handle<Object> receiver,
+                                                Handle<JSObject> home_object,
+                                                uint32_t index,
+                                                LanguageMode language_mode) {
   if (home_object->IsAccessCheckNeeded() && !isolate->MayAccess(home_object)) {
     isolate->ReportFailedAccessCheck(home_object);
-    RETURN_FAILURE_IF_SCHEDULED_EXCEPTION(isolate);
+    RETURN_EXCEPTION_IF_SCHEDULED_EXCEPTION(isolate, Object);
   }
 
   PrototypeIterator iter(isolate, home_object);
   Handle<Object> proto = PrototypeIterator::GetCurrent(iter);
-  if (!proto->IsJSReceiver()) return isolate->heap()->undefined_value();
+  if (!proto->IsJSReceiver()) {
+    Handle<Object> name = isolate->factory()->NewNumberFromUint(index);
+    return Object::ReadAbsentProperty(isolate, proto, name, language_mode);
+  }
+
+  LookupIterator it(isolate, receiver, index, Handle<JSReceiver>::cast(proto));
+  Handle<Object> result;
+  ASSIGN_RETURN_ON_EXCEPTION(isolate, result,
+                             Object::GetProperty(&it, language_mode), Object);
+  return result;
+}
+
+
+// TODO(conradw): It would be more efficient to have a separate runtime function
+// for strong mode.
+RUNTIME_FUNCTION(Runtime_LoadFromSuper) {
+  HandleScope scope(isolate);
+  DCHECK(args.length() == 4);
+  CONVERT_ARG_HANDLE_CHECKED(Object, receiver, 0);
+  CONVERT_ARG_HANDLE_CHECKED(JSObject, home_object, 1);
+  CONVERT_ARG_HANDLE_CHECKED(Name, name, 2);
+  CONVERT_LANGUAGE_MODE_ARG_CHECKED(language_mode, 3);
 
   Handle<Object> result;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, result,
-      Object::GetElementWithReceiver(isolate, proto, receiver, index));
+      LoadFromSuper(isolate, receiver, home_object, name, language_mode));
   return *result;
-}
-
-
-RUNTIME_FUNCTION(Runtime_LoadFromSuper) {
-  HandleScope scope(isolate);
-  DCHECK(args.length() == 3);
-  CONVERT_ARG_HANDLE_CHECKED(Object, receiver, 0);
-  CONVERT_ARG_HANDLE_CHECKED(JSObject, home_object, 1);
-  CONVERT_ARG_HANDLE_CHECKED(Name, name, 2);
-
-  return LoadFromSuper(isolate, receiver, home_object, name);
 }
 
 
 RUNTIME_FUNCTION(Runtime_LoadKeyedFromSuper) {
   HandleScope scope(isolate);
-  DCHECK(args.length() == 3);
+  DCHECK(args.length() == 4);
   CONVERT_ARG_HANDLE_CHECKED(Object, receiver, 0);
   CONVERT_ARG_HANDLE_CHECKED(JSObject, home_object, 1);
   CONVERT_ARG_HANDLE_CHECKED(Object, key, 2);
+  CONVERT_LANGUAGE_MODE_ARG_CHECKED(language_mode, 3);
 
-  uint32_t index;
+  uint32_t index = 0;
+  Handle<Object> result;
+
   if (key->ToArrayIndex(&index)) {
-    return LoadElementFromSuper(isolate, receiver, home_object, index);
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+        isolate, result, LoadElementFromSuper(isolate, receiver, home_object,
+                                              index, language_mode));
+    return *result;
   }
 
   Handle<Name> name;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, name,
                                      Runtime::ToName(isolate, key));
+  // TODO(verwaest): Unify using LookupIterator.
   if (name->AsArrayIndex(&index)) {
-    return LoadElementFromSuper(isolate, receiver, home_object, index);
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+        isolate, result, LoadElementFromSuper(isolate, receiver, home_object,
+                                              index, language_mode));
+    return *result;
   }
-  return LoadFromSuper(isolate, receiver, home_object, name);
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      isolate, result,
+      LoadFromSuper(isolate, receiver, home_object, name, language_mode));
+  return *result;
 }
 
 
@@ -361,11 +431,12 @@ static Object* StoreElementToSuper(Isolate* isolate,
   Handle<Object> proto = PrototypeIterator::GetCurrent(iter);
   if (!proto->IsJSReceiver()) return isolate->heap()->undefined_value();
 
+  LookupIterator it(isolate, receiver, index, Handle<JSReceiver>::cast(proto));
   Handle<Object> result;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, result,
-      Object::SetElementWithReceiver(isolate, proto, receiver, index, value,
-                                     language_mode));
+      Object::SetSuperProperty(&it, value, language_mode,
+                               Object::MAY_BE_STORE_FROM_KEYED));
   return *result;
 }
 
@@ -398,7 +469,7 @@ static Object* StoreKeyedToSuper(Isolate* isolate, Handle<JSObject> home_object,
                                  Handle<Object> receiver, Handle<Object> key,
                                  Handle<Object> value,
                                  LanguageMode language_mode) {
-  uint32_t index;
+  uint32_t index = 0;
 
   if (key->ToArrayIndex(&index)) {
     return StoreElementToSuper(isolate, home_object, receiver, index, value,
@@ -407,6 +478,7 @@ static Object* StoreKeyedToSuper(Isolate* isolate, Handle<JSObject> home_object,
   Handle<Name> name;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, name,
                                      Runtime::ToName(isolate, key));
+  // TODO(verwaest): Unify using LookupIterator.
   if (name->AsArrayIndex(&index)) {
     return StoreElementToSuper(isolate, home_object, receiver, index, value,
                                language_mode);
@@ -446,22 +518,55 @@ RUNTIME_FUNCTION(Runtime_HandleStepInForDerivedConstructors) {
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
   Debug* debug = isolate->debug();
   // Handle stepping into constructors if step into is active.
-  if (debug->StepInActive()) {
-    debug->HandleStepIn(function, Handle<Object>::null(), 0, true);
-  }
+  if (debug->StepInActive()) debug->HandleStepIn(function, true);
   return *isolate->factory()->undefined_value();
 }
 
 
 RUNTIME_FUNCTION(Runtime_DefaultConstructorCallSuper) {
-  UNIMPLEMENTED();
-  return nullptr;
-}
+  HandleScope scope(isolate);
+  DCHECK(args.length() == 2);
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, original_constructor, 0);
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, actual_constructor, 1);
+  JavaScriptFrameIterator it(isolate);
 
+  // Prepare the callee to the super call. The super constructor is stored as
+  // the prototype of the constructor we are currently executing.
+  Handle<Object> super_constructor;
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      isolate, super_constructor,
+      Runtime::GetPrototype(isolate, actual_constructor));
 
-RUNTIME_FUNCTION(Runtime_CallSuperWithSpread) {
-  UNIMPLEMENTED();
-  return nullptr;
+  // Find the frame that holds the actual arguments passed to the function.
+  it.AdvanceToArgumentsFrame();
+  JavaScriptFrame* frame = it.frame();
+
+  // Prepare the array containing all passed arguments.
+  int argument_count = frame->GetArgumentsLength();
+  Handle<FixedArray> elements =
+      isolate->factory()->NewUninitializedFixedArray(argument_count);
+  for (int i = 0; i < argument_count; ++i) {
+    elements->set(i, frame->GetParameter(i));
+  }
+  Handle<JSArray> arguments = isolate->factory()->NewJSArrayWithElements(
+      elements, FAST_ELEMENTS, argument_count);
+
+  // Call $reflectConstruct(<super>, <args>, <new.target>) now.
+  Handle<Object> reflect;
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      isolate, reflect,
+      Object::GetProperty(isolate,
+                          handle(isolate->native_context()->builtins()),
+                          "$reflectConstruct"));
+  RUNTIME_ASSERT(reflect->IsJSFunction());  // Depends on --harmony-reflect.
+  Handle<Object> argv[] = {super_constructor, arguments, original_constructor};
+  Handle<Object> result;
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      isolate, result,
+      Execution::Call(isolate, reflect, isolate->factory()->undefined_value(),
+                      arraysize(argv), argv));
+
+  return *result;
 }
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

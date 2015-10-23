@@ -16,24 +16,20 @@ namespace media {
 // background rendering to keep the Render() callbacks moving.
 const int kBackgroundRenderingTimeoutMs = 250;
 
+// Returns true if the format has no Alpha channel (hence is always opaque).
 static bool IsOpaque(const scoped_refptr<VideoFrame>& frame) {
   switch (frame->format()) {
-    case VideoFrame::UNKNOWN:
-    case VideoFrame::YV12:
-    case VideoFrame::YV12J:
-    case VideoFrame::YV12HD:
-    case VideoFrame::YV16:
-    case VideoFrame::I420:
-    case VideoFrame::YV24:
-    case VideoFrame::NV12:
+    case PIXEL_FORMAT_UNKNOWN:
+    case PIXEL_FORMAT_YV12:
+    case PIXEL_FORMAT_I420:
+    case PIXEL_FORMAT_YV16:
+    case PIXEL_FORMAT_YV24:
+    case PIXEL_FORMAT_NV12:
+    case PIXEL_FORMAT_XRGB:
+    case PIXEL_FORMAT_UYVY:
       return true;
-
-    case VideoFrame::YV12A:
-#if defined(VIDEO_HOLE)
-    case VideoFrame::HOLE:
-#endif  // defined(VIDEO_HOLE)
-    case VideoFrame::NATIVE_TEXTURE:
-    case VideoFrame::ARGB:
+    case PIXEL_FORMAT_YV12A:
+    case PIXEL_FORMAT_ARGB:
       break;
   }
   return false;
@@ -222,7 +218,9 @@ void VideoFrameCompositor::BackgroundRender() {
   DCHECK(compositor_task_runner_->BelongsToCurrentThread());
   const base::TimeTicks now = tick_clock_->NowTicks();
   last_background_render_ = now;
-  CallRender(now, now + last_interval_, true);
+  bool new_frame = CallRender(now, now + last_interval_, true);
+  if (new_frame && client_)
+    client_->DidReceiveFrame();
 }
 
 bool VideoFrameCompositor::CallRender(base::TimeTicks deadline_min,

@@ -8,9 +8,9 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "base/version.h"
 // TODO(ddorwin): Find a better place for ReadManifest.
@@ -37,7 +37,7 @@ ComponentInstallerTraits::~ComponentInstallerTraits() {
 DefaultComponentInstaller::DefaultComponentInstaller(
     scoped_ptr<ComponentInstallerTraits> installer_traits)
     : current_version_(kNullVersion),
-      main_task_runner_(base::MessageLoopProxy::current()) {
+      main_task_runner_(base::ThreadTaskRunnerHandle::Get()) {
   installer_traits_ = installer_traits.Pass();
 }
 
@@ -82,11 +82,9 @@ bool DefaultComponentInstaller::InstallHelper(
 
 bool DefaultComponentInstaller::Install(const base::DictionaryValue& manifest,
                                         const base::FilePath& unpack_path) {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
-
   std::string manifest_version;
   manifest.GetStringASCII("version", &manifest_version);
-  base::Version version(manifest_version.c_str());
+  base::Version version(manifest_version);
   if (!version.IsValid())
     return false;
   if (current_version_.CompareTo(version) > 0)
@@ -127,6 +125,7 @@ bool DefaultComponentInstaller::GetInstalledFile(
 }
 
 bool DefaultComponentInstaller::Uninstall() {
+  DCHECK(thread_checker_.CalledOnValidThread());
   task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&DefaultComponentInstaller::UninstallOnTaskRunner, this));
@@ -248,9 +247,7 @@ void DefaultComponentInstaller::FinishRegistration(
     crx.version = current_version_;
     crx.fingerprint = current_fingerprint_;
     installer_traits_->GetHash(&crx.pk_hash);
-    ComponentUpdateService::Status status = cus->RegisterComponent(crx);
-    if (status != ComponentUpdateService::Status::kOk &&
-        status != ComponentUpdateService::Status::kReplaced) {
+    if (!cus->RegisterComponent(crx)) {
       NOTREACHED() << "Component registration failed for "
                    << installer_traits_->GetName();
       return;

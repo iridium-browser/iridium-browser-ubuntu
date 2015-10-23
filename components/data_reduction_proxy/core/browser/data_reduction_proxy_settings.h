@@ -44,6 +44,17 @@ enum ProxyStartupState {
   PROXY_STARTUP_STATE_COUNT,
 };
 
+// Values of the UMA DataReductionProxy.LoFi.ImplicitOptOutAction histogram.
+// This enum must remain synchronized with
+// DataReductionProxyLoFiImplicitOptOutAction in
+// metrics/histograms/histograms.xml.
+enum LoFiImplicitOptOutAction {
+  LO_FI_OPT_OUT_ACTION_DISABLED_FOR_SESSION = 0,
+  LO_FI_OPT_OUT_ACTION_DISABLED_UNTIL_NEXT_EPOCH,
+  LO_FI_OPT_OUT_ACTION_NEXT_EPOCH,
+  LO_FI_OPT_OUT_ACTION_INDEX_BOUNDARY,
+};
+
 // Central point for configuring the data reduction proxy.
 // This object lives on the UI thread and all of its methods are expected to
 // be called from there.
@@ -87,17 +98,39 @@ class DataReductionProxySettings : public DataReductionProxyServiceObserver {
   // used.
   bool CanUseDataReductionProxy(const GURL& url) const;
 
-  // Returns true if the alternative proxy is enabled.
-  bool IsDataReductionProxyAlternativeEnabled() const;
-
   // Returns true if the proxy is managed by an adminstrator's policy.
   bool IsDataReductionProxyManaged();
 
   // Enables or disables the data reduction proxy.
   void SetDataReductionProxyEnabled(bool enabled);
 
-  // Enables or disables the alternative data reduction proxy configuration.
-  void SetDataReductionProxyAlternativeEnabled(bool enabled);
+  // Sets |lo_fi_mode_active_| to true if Lo-Fi is currently active, meaning
+  // requests are being sent with "q=low" headers. Set from the IO thread only
+  // on main frame requests.
+  void SetLoFiModeActiveOnMainFrame(bool lo_fi_mode_active);
+
+  // Returns true if Lo-Fi was active on the main frame request.
+  bool WasLoFiModeActiveOnMainFrame() const;
+
+  // Returns true if a "Load image" context menu request has not been made since
+  // the last main frame request.
+  bool WasLoFiLoadImageRequestedBefore();
+
+  // Increments the number of times the Lo-Fi snackbar has been shown.
+  void IncrementLoFiSnackbarShown();
+
+  // Sets |lo_fi_load_image_requested_| to true, which means a "Load image"
+  // context menu request has been made since the last main frame request.
+  void SetLoFiLoadImageRequested();
+
+  // Counts the number of requests to reload the page with images from the Lo-Fi
+  // snackbar. If the user requests the page with images a certain number of
+  // times, then Lo-Fi is disabled for the remainder of the session.
+  void IncrementLoFiUserRequestsForImages();
+
+  // Records UMA for Lo-Fi implicit opt out actions.
+  void RecordLoFiImplicitOptOutAction(
+      data_reduction_proxy::LoFiImplicitOptOutAction action) const;
 
   // Returns the time in microseconds that the last update was made to the
   // daily original and received content lengths.
@@ -133,14 +166,8 @@ class DataReductionProxySettings : public DataReductionProxyServiceObserver {
     return allowed_;
   }
 
-  // Returns true if the alternative data reduction proxy configuration may be
-  // used.
-  bool AlternativeAllowed() const {
-    return alternative_allowed_;
-  }
-
   // Returns true if the data reduction proxy promo may be shown.
-  // This is idependent of whether the data reduction proxy is allowed.
+  // This is independent of whether the data reduction proxy is allowed.
   bool PromoAllowed() const {
     return promo_allowed_;
   }
@@ -201,27 +228,30 @@ class DataReductionProxySettings : public DataReductionProxyServiceObserver {
                            TestInitDataReductionProxyOff);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxySettingsTest,
                            CheckInitMetricsWhenNotAllowed);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxySettingsTest,
+                           TestLoFiImplicitOptOutClicksPerSession);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxySettingsTest,
+                           TestLoFiImplicitOptOutConsecutiveSessions);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxySettingsTest,
+                           TestLoFiImplicitOptOutHistograms);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxySettingsTest,
+                           TestLoFiSessionStateHistograms);
 
   // Override of DataReductionProxyService::Observer.
   void OnServiceInitialized() override;
-
-  // Returns true if both LoFi and the proxy are enabled.
-  bool IsLoFiEnabled() const;
 
   // Registers the trial "SyntheticDataReductionProxySetting" with the group
   // "Enabled" or "Disabled". Indicates whether the proxy is turned on or not.
   void RegisterDataReductionProxyFieldTrial();
 
   // Registers the trial "SyntheticDataReductionProxyLoFiSetting" with the group
-  // "Enabled" or "Disabled". Indicates whether LoFi is turned on or not.
-  // The group won't be reported if it changes while compiling the report. LoFi
-  // has its own field trial because it is expected that the user will be
-  // switching states often. It can be assumed that when no LoFi group is
-  // reported, the user was in a mixed LoFi state.
+  // "Enabled" or "Disabled". Indicates whether Lo-Fi is turned on or not.
+  // The group won't be reported if it changes while compiling the report. It
+  // can be assumed that when no Lo-Fi group is reported, the user was in a
+  // mixed Lo-Fi state.
   void RegisterLoFiFieldTrial();
 
   void OnProxyEnabledPrefChange();
-  void OnProxyAlternativeEnabledPrefChange();
 
   void ResetDataReductionStatistics();
 
@@ -241,11 +271,26 @@ class DataReductionProxySettings : public DataReductionProxyServiceObserver {
   // The following values are cached in order to access the values on the
   // correct thread.
   bool allowed_;
-  bool alternative_allowed_;
   bool promo_allowed_;
 
+  // True if Lo-Fi is active.
+  bool lo_fi_mode_active_;
+
+  // True if a "Load image" context menu request has not been made since the
+  // last main frame request.
+  bool lo_fi_load_image_requested_;
+
+  // The number of requests to reload the page with images from the Lo-Fi
+  // snackbar until Lo-Fi is disabled for the remainder of the
+  // session.
+  int lo_fi_user_requests_for_images_per_session_;
+
+  // The number of consecutive sessions where Lo-Fi was disabled for
+  // Lo-Fi to be disabled until the next implicit opt out epoch, which may be in
+  // a later session, or never.
+  int lo_fi_consecutive_session_disables_;
+
   BooleanPrefMember spdy_proxy_auth_enabled_;
-  BooleanPrefMember data_reduction_proxy_alternative_enabled_;
 
   scoped_ptr<DataReductionProxyService> data_reduction_proxy_service_;
 

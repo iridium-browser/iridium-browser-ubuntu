@@ -366,6 +366,16 @@ void PluginMetricsProvider::BrowserChildProcessInstanceCreated(
   RecordCurrentStateWithDelay(kRecordStateDelayMs);
 }
 
+void PluginMetricsProvider::BrowserChildProcessKilled(
+    const content::ChildProcessData& data,
+    int exit_code) {
+  // Treat a kill as a crash, since Flash returns STATUS_DEBUGGER_INACTIVE for
+  // actual crashes, which is treated as a kill rather than a crash by
+  // base::GetTerminationStatus
+  GetChildProcessStats(data).process_crashes++;
+  RecordCurrentStateWithDelay(kRecordStateDelayMs);
+}
+
 bool PluginMetricsProvider::RecordCurrentStateWithDelay(int delay_sec) {
   if (weak_ptr_factory_.HasWeakPtrs())
     return false;

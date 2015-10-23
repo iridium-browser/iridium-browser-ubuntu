@@ -71,10 +71,30 @@ WebTouchPoint::State ToWebTouchPointState(const MotionEvent& event,
   return WebTouchPoint::StateUndefined;
 }
 
+WebTouchPoint::PointerType ToWebTouchPointPointerType(const MotionEvent& event,
+                                                      size_t pointer_index) {
+  switch (event.GetToolType(pointer_index)) {
+    case MotionEvent::TOOL_TYPE_UNKNOWN:
+      return WebTouchPoint::PointerTypeUnknown;
+    case MotionEvent::TOOL_TYPE_FINGER:
+      return WebTouchPoint::PointerTypeTouch;
+    case MotionEvent::TOOL_TYPE_STYLUS:
+      return WebTouchPoint::PointerTypePen;
+    case MotionEvent::TOOL_TYPE_MOUSE:
+      return WebTouchPoint::PointerTypeMouse;
+    case MotionEvent::TOOL_TYPE_ERASER:
+      return WebTouchPoint::PointerTypeUnknown;
+  }
+  NOTREACHED() << "Invalid MotionEvent::ToolType = "
+               << event.GetToolType(pointer_index);
+  return WebTouchPoint::PointerTypeUnknown;
+}
+
 WebTouchPoint CreateWebTouchPoint(const MotionEvent& event,
                                   size_t pointer_index) {
   WebTouchPoint touch;
   touch.id = event.GetPointerId(pointer_index);
+  touch.pointerType = ToWebTouchPointPointerType(event, pointer_index);
   touch.state = ToWebTouchPointState(event, pointer_index);
   touch.position.x = event.GetX(pointer_index);
   touch.position.y = event.GetY(pointer_index);
@@ -103,9 +123,25 @@ WebTouchPoint CreateWebTouchPoint(const MotionEvent& event,
   DCHECK_GE(major_radius, 0);
   DCHECK_GE(minor_radius, 0);
   DCHECK_GE(major_radius, minor_radius);
-  // Allow a small bound tolerance to account for floating point conversion.
-  DCHECK_GT(orientation_deg, -90.01f);
-  DCHECK_LT(orientation_deg, 90.01f);
+  if (event.GetToolType(pointer_index) == MotionEvent::TOOL_TYPE_STYLUS) {
+    // Orientation lies in [-180, 180] for a stylus. Normalise to [-90, 90).
+    // Allow a small bound tolerance to account for floating point conversion.
+    // TODO(e_hakkinen): crbug.com/493728: Pass also unaltered orientation
+    //                   to touch in order not to lose quadrant information.
+    DCHECK_GT(orientation_deg, -180.01f);
+    DCHECK_LT(orientation_deg, 180.01f);
+    if (orientation_deg >= 90.f)
+      orientation_deg -= 180.f;
+    else if (orientation_deg < -90.f)
+      orientation_deg += 180.f;
+  } else {
+    // Orientation lies in [-90, 90] for a touch. Normalise to [-90, 90).
+    // Allow a small bound tolerance to account for floating point conversion.
+    DCHECK_GT(orientation_deg, -90.01f);
+    DCHECK_LT(orientation_deg, 90.01f);
+    if (orientation_deg >= 90.f)
+      orientation_deg -= 180.f;
+  }
   if (orientation_deg >= 0) {
     // The case orientation_deg == 0 is handled here on purpose: although the
     // 'else' block is equivalent in this case, we want to pass the 0 value

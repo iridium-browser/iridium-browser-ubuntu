@@ -6,6 +6,7 @@
 
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/ash_switches.h"
+#include "ash/display/display_info.h"
 #include "ash/shell.h"
 #include "ash/shell_init_params.h"
 #include "ash/test/ash_test_views_delegate.h"
@@ -60,6 +61,7 @@ AshTestHelper::~AshTestHelper() {
 }
 
 void AshTestHelper::SetUp(bool start_session) {
+  ResetDisplayIdForTest();
   views_delegate_.reset(new AshTestViewsDelegate);
 
   // Disable animations during tests.
@@ -102,8 +104,7 @@ void AshTestHelper::SetUp(bool start_session) {
     GetTestSessionStateDelegate()->SetHasActiveUser(true);
   }
 
-  test::DisplayManagerTestApi(shell->display_manager()).
-      DisableChangeDisplayUponHostResize();
+  test::DisplayManagerTestApi().DisableChangeDisplayUponHostResize();
   ShellTestApi(shell).DisableDisplayConfiguratorAnimation();
 
   test_screenshot_delegate_ = new TestScreenshotDelegate();
@@ -127,7 +128,6 @@ void AshTestHelper::TearDown() {
   }
 #endif
 
-  aura::Env::DeleteInstance();
   ui::TerminateContextFactoryForTests();
 
   // Need to reset the initial login status.
@@ -143,7 +143,6 @@ void AshTestHelper::TearDown() {
 
 void AshTestHelper::RunAllPendingInMessageLoop() {
   DCHECK(base::MessageLoopForUI::current() == message_loop_);
-  aura::Env::CreateInstance(true);
   base::RunLoop run_loop;
   run_loop.RunUntilIdle();
 }

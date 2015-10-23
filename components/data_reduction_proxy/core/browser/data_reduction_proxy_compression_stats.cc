@@ -4,6 +4,7 @@
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -11,20 +12,36 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
+#include "components/data_reduction_proxy/core/browser/data_usage_store.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
+#include "net/base/mime_util.h"
 
 namespace data_reduction_proxy {
 
 namespace {
+
+#define CONCAT(a, b) a##b
+// CONCAT1 provides extra level of indirection so that __LINE__ macro expands.
+#define CONCAT1(a, b) CONCAT(a, b)
+#define UNIQUE_VARNAME CONCAT1(var_, __LINE__)
+// We need to use a macro instead of a method because UMA_HISTOGRAM_COUNTS
+// requires its first argument to be an inline string and not a variable.
+#define RECORD_INT64PREF_TO_HISTOGRAM(pref, uma)     \
+  int64 UNIQUE_VARNAME = GetInt64(pref);             \
+  if (UNIQUE_VARNAME > 0) {                          \
+    UMA_HISTOGRAM_COUNTS(uma, UNIQUE_VARNAME >> 10); \
+  }
 
 // Returns the value at |index| of |list_value| as an int64.
 int64 GetInt64PrefValue(const base::ListValue& list_value, size_t index) {
@@ -106,6 +123,7 @@ void RecordDailyContentLengthHistograms(
       "Net.DailyOriginalContentLength", original_length >> 10);
   UMA_HISTOGRAM_COUNTS(
       "Net.DailyContentLength", received_length >> 10);
+
   int percent = 0;
   // UMA percentage cannot be negative.
   if (original_length > received_length) {
@@ -170,7 +188,7 @@ void RecordDailyContentLengthHistograms(
 
   DCHECK_GE(unknown_length_with_data_reduction_enabled, 0);
   UMA_HISTOGRAM_COUNTS(
-      "Net.DailyContentLength_DataReductionProxyEnabled_Unknown",
+      "Net.DailyContentLength_DataReductionProxyEnabled_UnknownBypass",
       unknown_length_with_data_reduction_enabled >> 10);
   UMA_HISTOGRAM_PERCENTAGE(
       "Net.DailyContentPercent_DataReductionProxyEnabled_Unknown",
@@ -185,6 +203,7 @@ void RecordDailyContentLengthHistograms(
   UMA_HISTOGRAM_COUNTS(
       "Net.DailyContentLength_ViaDataReductionProxy",
       received_length_via_data_reduction_proxy >> 10);
+
   int percent_via_data_reduction_proxy = 0;
   if (original_length_via_data_reduction_proxy >
       received_length_via_data_reduction_proxy) {
@@ -199,6 +218,32 @@ void RecordDailyContentLengthHistograms(
   UMA_HISTOGRAM_PERCENTAGE(
       "Net.DailyContentPercent_ViaDataReductionProxy",
       (100 * received_length_via_data_reduction_proxy) / received_length);
+}
+
+// Given a |net::NetworkChangeNotifier::ConnectionType|, returns the
+// corresponding |data_reduction_proxy::ConnectionType|.
+ConnectionType StoredConnectionType(
+    net::NetworkChangeNotifier::ConnectionType networkType) {
+  switch (networkType) {
+    case net::NetworkChangeNotifier::CONNECTION_UNKNOWN:
+    case net::NetworkChangeNotifier::CONNECTION_NONE:
+      return ConnectionType::CONNECTION_UNKNOWN;
+    case net::NetworkChangeNotifier::CONNECTION_ETHERNET:
+      return ConnectionType::CONNECTION_ETHERNET;
+    case net::NetworkChangeNotifier::CONNECTION_WIFI:
+      return ConnectionType::CONNECTION_WIFI;
+    case net::NetworkChangeNotifier::CONNECTION_2G:
+      return ConnectionType::CONNECTION_2G;
+    case net::NetworkChangeNotifier::CONNECTION_3G:
+      return ConnectionType::CONNECTION_3G;
+    case net::NetworkChangeNotifier::CONNECTION_4G:
+      return ConnectionType::CONNECTION_4G;
+    case net::NetworkChangeNotifier::CONNECTION_BLUETOOTH:
+      return ConnectionType::CONNECTION_BLUETOOTH;
+    default:
+      NOTREACHED();
+      return ConnectionType::CONNECTION_UNKNOWN;
+  }
 }
 
 class DailyContentLengthUpdate {
@@ -301,15 +346,20 @@ class DailyDataSavingUpdate {
 }  // namespace
 
 DataReductionProxyCompressionStats::DataReductionProxyCompressionStats(
+    DataReductionProxyService* service,
     PrefService* prefs,
-    scoped_refptr<base::SequencedTaskRunner> task_runner,
-    const base::TimeDelta& delay)
-    : pref_service_(prefs),
+    const scoped_refptr<base::SequencedTaskRunner>& task_runner,
+    base::TimeDelta delay)
+    : service_(service),
+      pref_service_(prefs),
       task_runner_(task_runner),
       delay_(delay),
       delayed_task_posted_(false),
       pref_change_registrar_(new PrefChangeRegistrar()),
+      data_usage_map_is_dirty_(false),
+      data_usage_loaded_(false),
       weak_factory_(this) {
+  DCHECK(service);
   DCHECK(prefs);
   DCHECK_GE(delay.InMilliseconds(), 0);
   Init();
@@ -317,13 +367,27 @@ DataReductionProxyCompressionStats::DataReductionProxyCompressionStats(
 
 DataReductionProxyCompressionStats::~DataReductionProxyCompressionStats() {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (data_usage_map_is_dirty_)
+    PersistDataUsage();
+  ClearInMemoryDataUsage();
+  net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
+
   WritePrefs();
   pref_change_registrar_->RemoveAll();
-  weak_factory_.InvalidateWeakPtrs();
 }
 
 void DataReductionProxyCompressionStats::Init() {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  service_->LoadCurrentDataUsageBucket(
+      base::Bind(&DataReductionProxyCompressionStats::OnDataUsageLoaded,
+                 weak_factory_.GetWeakPtr()));
+
+  net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
+  connection_type_ =
+      StoredConnectionType(net::NetworkChangeNotifier::GetConnectionType());
+
   if (delay_ == base::TimeDelta())
     return;
 
@@ -331,6 +395,33 @@ void DataReductionProxyCompressionStats::Init() {
   InitInt64Pref(prefs::kDailyHttpContentLengthLastUpdateDate);
   InitInt64Pref(prefs::kHttpReceivedContentLength);
   InitInt64Pref(prefs::kHttpOriginalContentLength);
+
+  InitInt64Pref(prefs::kDailyHttpOriginalContentLengthApplication);
+  InitInt64Pref(prefs::kDailyHttpOriginalContentLengthVideo);
+  InitInt64Pref(prefs::kDailyHttpOriginalContentLengthUnknown);
+  InitInt64Pref(prefs::kDailyHttpReceivedContentLengthApplication);
+  InitInt64Pref(prefs::kDailyHttpReceivedContentLengthVideo);
+  InitInt64Pref(prefs::kDailyHttpReceivedContentLengthUnknown);
+
+  InitInt64Pref(
+      prefs::kDailyOriginalContentLengthViaDataReductionProxyApplication);
+  InitInt64Pref(prefs::kDailyOriginalContentLengthViaDataReductionProxyVideo);
+  InitInt64Pref(prefs::kDailyOriginalContentLengthViaDataReductionProxyUnknown);
+  InitInt64Pref(prefs::kDailyContentLengthViaDataReductionProxyApplication);
+  InitInt64Pref(prefs::kDailyContentLengthViaDataReductionProxyVideo);
+  InitInt64Pref(prefs::kDailyContentLengthViaDataReductionProxyUnknown);
+
+  InitInt64Pref(
+      prefs::
+          kDailyOriginalContentLengthWithDataReductionProxyEnabledApplication);
+  InitInt64Pref(
+      prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabledVideo);
+  InitInt64Pref(
+      prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabledUnknown);
+  InitInt64Pref(
+      prefs::kDailyContentLengthWithDataReductionProxyEnabledApplication);
+  InitInt64Pref(prefs::kDailyContentLengthWithDataReductionProxyEnabledVideo);
+  InitInt64Pref(prefs::kDailyContentLengthWithDataReductionProxyEnabledUnknown);
 
   // Init all list prefs.
   InitListPref(prefs::kDailyContentLengthHttpsWithDataReductionProxyEnabled);
@@ -367,28 +458,29 @@ void DataReductionProxyCompressionStats::OnUpdateContentLengths() {
 }
 
 void DataReductionProxyCompressionStats::UpdateContentLengths(
-    int64 received_content_length,
-    int64 original_content_length,
+    int64 data_used,
+    int64 original_size,
     bool data_reduction_proxy_enabled,
-    DataReductionProxyRequestType request_type) {
+    DataReductionProxyRequestType request_type,
+    const std::string& data_usage_host,
+    const std::string& mime_type) {
   DCHECK(thread_checker_.CalledOnValidThread());
+  TRACE_EVENT0("loader",
+               "DataReductionProxyCompressionStats::UpdateContentLengths")
   int64 total_received = GetInt64(
       data_reduction_proxy::prefs::kHttpReceivedContentLength);
   int64 total_original = GetInt64(
       data_reduction_proxy::prefs::kHttpOriginalContentLength);
-  total_received += received_content_length;
-  total_original += original_content_length;
+  total_received += data_used;
+  total_original += original_size;
   SetInt64(data_reduction_proxy::prefs::kHttpReceivedContentLength,
            total_received);
   SetInt64(data_reduction_proxy::prefs::kHttpOriginalContentLength,
            total_original);
 
-  RecordContentLengthPrefs(
-      received_content_length,
-      original_content_length,
-      data_reduction_proxy_enabled,
-      request_type,
-      base::Time::Now());
+  RecordDataUsage(data_usage_host, data_used, original_size);
+  RecordRequestSizePrefs(data_used, original_size, data_reduction_proxy_enabled,
+                         request_type, mime_type, base::Time::Now());
 }
 
 void DataReductionProxyCompressionStats::InitInt64Pref(const char* pref) {
@@ -419,6 +511,12 @@ void DataReductionProxyCompressionStats::SetInt64(const char* pref_path,
 
   DelayedWritePrefs();
   pref_map_[pref_path] = pref_value;
+}
+
+void DataReductionProxyCompressionStats::IncrementInt64Pref(
+    const char* pref_path,
+    int64_t pref_increment) {
+  SetInt64(pref_path, GetInt64(pref_path) + pref_increment);
 }
 
 base::ListValue* DataReductionProxyCompressionStats::GetList(
@@ -528,6 +626,33 @@ void DataReductionProxyCompressionStats::GetContentLengths(
   *last_update_time = GetInt64(prefs::kDailyHttpContentLengthLastUpdateDate);
 }
 
+void DataReductionProxyCompressionStats::OnConnectionTypeChanged(
+    net::NetworkChangeNotifier::ConnectionType type) {
+  connection_type_ = StoredConnectionType(type);
+}
+
+void DataReductionProxyCompressionStats::OnDataUsageLoaded(
+    scoped_ptr<DataUsageBucket> data_usage) {
+  DCHECK(!data_usage_loaded_);
+  DCHECK(data_usage_map_last_updated_.is_null());
+  DCHECK(data_usage_map_.empty());
+
+  for (auto connection_usage : data_usage->connection_usage()) {
+    ConnectionType type = connection_usage.connection_type();
+    scoped_ptr<SiteUsageMap> site_usage_map(new SiteUsageMap());
+
+    for (auto site_usage : connection_usage.site_usage()) {
+      site_usage_map->set(site_usage.site_url(),
+                          make_scoped_ptr(new PerSiteDataUsage(site_usage)));
+    }
+    data_usage_map_.set(type, site_usage_map.Pass());
+  }
+
+  data_usage_map_last_updated_ =
+      base::Time::FromInternalValue(data_usage->last_updated_timestamp());
+  data_usage_loaded_ = true;
+}
+
 void DataReductionProxyCompressionStats::ClearDataSavingStatistics() {
   list_pref_map_.get(
       prefs::kDailyContentLengthHttpsWithDataReductionProxyEnabled)->Clear();
@@ -593,11 +718,12 @@ int64 DataReductionProxyCompressionStats::GetListPrefInt64Value(
   return value;
 }
 
-void DataReductionProxyCompressionStats::RecordContentLengthPrefs(
-    int64 received_content_length,
-    int64 original_content_length,
+void DataReductionProxyCompressionStats::RecordRequestSizePrefs(
+    int64 data_used,
+    int64 original_size,
     bool with_data_reduction_proxy_enabled,
     DataReductionProxyRequestType request_type,
+    const std::string& mime_type,
     base::Time now) {
   // TODO(bengr): Remove this check once the underlying cause of
   // http://crbug.com/287821 is fixed. For now, only continue if the current
@@ -623,102 +749,411 @@ void DataReductionProxyCompressionStats::RecordContentLengthPrefs(
   }
   base::Time midnight = now.LocalMidnight();
 
-  int days_since_last_update = (midnight - then_midnight).InDays();
-
-  // Each day, we calculate the total number of bytes received and the total
-  // size of all corresponding resources before any data-reducing recompression
-  // is applied. These values are used to compute the data savings realized
-  // by applying our compression techniques. Totals for the last
-  // |kNumDaysInHistory| days are maintained.
   DailyDataSavingUpdate total(
       GetList(data_reduction_proxy::prefs::kDailyHttpOriginalContentLength),
       GetList(data_reduction_proxy::prefs::kDailyHttpReceivedContentLength));
-  total.UpdateForDataChange(days_since_last_update);
 
   DailyDataSavingUpdate proxy_enabled(
       GetList(data_reduction_proxy::prefs::
           kDailyOriginalContentLengthWithDataReductionProxyEnabled),
       GetList(data_reduction_proxy::prefs::
           kDailyContentLengthWithDataReductionProxyEnabled));
-  proxy_enabled.UpdateForDataChange(days_since_last_update);
 
   DailyDataSavingUpdate via_proxy(
       GetList(data_reduction_proxy::prefs::
-          kDailyOriginalContentLengthViaDataReductionProxy),
+                  kDailyOriginalContentLengthViaDataReductionProxy),
       GetList(data_reduction_proxy::prefs::
-          kDailyContentLengthViaDataReductionProxy));
-  via_proxy.UpdateForDataChange(days_since_last_update);
+                  kDailyContentLengthViaDataReductionProxy));
 
   DailyContentLengthUpdate https(
       GetList(data_reduction_proxy::prefs::
-          kDailyContentLengthHttpsWithDataReductionProxyEnabled));
-  https.UpdateForDataChange(days_since_last_update);
+                  kDailyContentLengthHttpsWithDataReductionProxyEnabled));
 
   DailyContentLengthUpdate short_bypass(
       GetList(data_reduction_proxy::prefs::
-          kDailyContentLengthShortBypassWithDataReductionProxyEnabled));
-  short_bypass.UpdateForDataChange(days_since_last_update);
+                  kDailyContentLengthShortBypassWithDataReductionProxyEnabled));
 
   DailyContentLengthUpdate long_bypass(
       GetList(data_reduction_proxy::prefs::
-          kDailyContentLengthLongBypassWithDataReductionProxyEnabled));
-  long_bypass.UpdateForDataChange(days_since_last_update);
+                  kDailyContentLengthLongBypassWithDataReductionProxyEnabled));
 
   DailyContentLengthUpdate unknown(
       GetList(data_reduction_proxy::prefs::
-          kDailyContentLengthUnknownWithDataReductionProxyEnabled));
-  unknown.UpdateForDataChange(days_since_last_update);
+                  kDailyContentLengthUnknownWithDataReductionProxyEnabled));
 
-  total.Add(original_content_length, received_content_length);
-  if (with_data_reduction_proxy_enabled) {
-    proxy_enabled.Add(original_content_length, received_content_length);
-    // Ignore data source cases, if exist, when
-    // "with_data_reduction_proxy_enabled == false"
-    switch (request_type) {
-      case VIA_DATA_REDUCTION_PROXY:
-        via_proxy.Add(original_content_length, received_content_length);
-        break;
-      case HTTPS:
-        https.Add(received_content_length);
-        break;
-      case SHORT_BYPASS:
-        short_bypass.Add(received_content_length);
-        break;
-      case LONG_BYPASS:
-        long_bypass.Add(received_content_length);
-        break;
-      case UNKNOWN_TYPE:
-        unknown.Add(received_content_length);
-        break;
-    }
-  }
-
+  int days_since_last_update = (midnight - then_midnight).InDays();
   if (days_since_last_update) {
     // Record the last update time in microseconds in UTC.
-    SetInt64(
-        data_reduction_proxy::prefs::kDailyHttpContentLengthLastUpdateDate,
-        midnight.ToInternalValue());
+    SetInt64(data_reduction_proxy::prefs::kDailyHttpContentLengthLastUpdateDate,
+             midnight.ToInternalValue());
 
     // A new day. Report the previous day's data if exists. We'll lose usage
     // data if the last time Chrome was run was more than a day ago.
     // Here, we prefer collecting less data but the collected data is
     // associated with an accurate date.
     if (days_since_last_update == 1) {
-      // The previous day's data point is the second one from the tail.
-      // Therefore (kNumDaysInHistory - 2) below.
       RecordDailyContentLengthHistograms(
-          total.GetOriginalListPrefValue(kNumDaysInHistory - 2),
-          total.GetReceivedListPrefValue(kNumDaysInHistory - 2),
-          proxy_enabled.GetOriginalListPrefValue(kNumDaysInHistory - 2),
-          proxy_enabled.GetReceivedListPrefValue(kNumDaysInHistory - 2),
-          via_proxy.GetOriginalListPrefValue(kNumDaysInHistory - 2),
-          via_proxy.GetReceivedListPrefValue(kNumDaysInHistory - 2),
-          https.GetListPrefValue(kNumDaysInHistory - 2),
-          short_bypass.GetListPrefValue(kNumDaysInHistory - 2),
-          long_bypass.GetListPrefValue(kNumDaysInHistory - 2),
-          unknown.GetListPrefValue(kNumDaysInHistory - 2));
+          total.GetOriginalListPrefValue(kNumDaysInHistory - 1),
+          total.GetReceivedListPrefValue(kNumDaysInHistory - 1),
+          proxy_enabled.GetOriginalListPrefValue(kNumDaysInHistory - 1),
+          proxy_enabled.GetReceivedListPrefValue(kNumDaysInHistory - 1),
+          via_proxy.GetOriginalListPrefValue(kNumDaysInHistory - 1),
+          via_proxy.GetReceivedListPrefValue(kNumDaysInHistory - 1),
+          https.GetListPrefValue(kNumDaysInHistory - 1),
+          short_bypass.GetListPrefValue(kNumDaysInHistory - 1),
+          long_bypass.GetListPrefValue(kNumDaysInHistory - 1),
+          unknown.GetListPrefValue(kNumDaysInHistory - 1));
+
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyHttpOriginalContentLengthApplication,
+          "Net.DailyOriginalContentLength_Application");
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyHttpReceivedContentLengthApplication,
+          "Net.DailyReceivedContentLength_Application");
+
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::kDailyHttpOriginalContentLengthVideo,
+          "Net.DailyOriginalContentLength_Video");
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::kDailyHttpReceivedContentLengthVideo,
+          "Net.DailyContentLength_Video");
+
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::kDailyHttpOriginalContentLengthUnknown,
+          "Net.DailyOriginalContentLength_UnknownMime");
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::kDailyHttpReceivedContentLengthUnknown,
+          "Net.DailyContentLength_UnknownMime");
+
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyOriginalContentLengthWithDataReductionProxyEnabledApplication,
+          "Net.DailyOriginalContentLength_DataReductionProxyEnabled_"
+          "Application");
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyContentLengthWithDataReductionProxyEnabledApplication,
+          "Net.DailyContentLength_DataReductionProxyEnabled_Application");
+
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyOriginalContentLengthWithDataReductionProxyEnabledVideo,
+          "Net.DailyOriginalContentLength_DataReductionProxyEnabled_Video");
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyContentLengthWithDataReductionProxyEnabledVideo,
+          "Net.DailyContentLength_DataReductionProxyEnabled_Video");
+
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyOriginalContentLengthWithDataReductionProxyEnabledUnknown,
+          "Net.DailyOriginalContentLength_DataReductionProxyEnabled_"
+          "UnknownMime");
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyContentLengthWithDataReductionProxyEnabledUnknown,
+          "Net.DailyContentLength_DataReductionProxyEnabled_UnknownMime")
+
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyOriginalContentLengthViaDataReductionProxyApplication,
+          "Net.DailyOriginalContentLength_ViaDataReductionProxy_Application");
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyContentLengthViaDataReductionProxyApplication,
+          "Net.DailyContentLength_ViaDataReductionProxy_Application");
+
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyOriginalContentLengthViaDataReductionProxyVideo,
+          "Net.DailyOriginalContentLength_ViaDataReductionProxy_Video");
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyContentLengthViaDataReductionProxyVideo,
+          "Net.DailyContentLength_ViaDataReductionProxy_Video");
+
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyOriginalContentLengthViaDataReductionProxyUnknown,
+          "Net.DailyOriginalContentLength_ViaDataReductionProxy_UnknownMime");
+      RECORD_INT64PREF_TO_HISTOGRAM(
+          data_reduction_proxy::prefs::
+              kDailyContentLengthViaDataReductionProxyUnknown,
+          "Net.DailyContentLength_ViaDataReductionProxy_UnknownMime");
+    }
+
+    // The system may go backwards in time by up to a day for legitimate
+    // reasons, such as with changes to the time zone. In such cases, we
+    // keep adding to the current day which is why we check for
+    // |days_since_last_update != -1|.
+    // Note: we accept the fact that some reported data is shifted to
+    // the adjacent day if users travel back and forth across time zones.
+    if (days_since_last_update && (days_since_last_update != -1)) {
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyHttpOriginalContentLengthApplication,
+               0);
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyHttpReceivedContentLengthApplication,
+               0);
+
+      SetInt64(
+          data_reduction_proxy::prefs::kDailyHttpOriginalContentLengthVideo, 0);
+      SetInt64(
+          data_reduction_proxy::prefs::kDailyHttpReceivedContentLengthVideo, 0);
+
+      SetInt64(
+          data_reduction_proxy::prefs::kDailyHttpOriginalContentLengthUnknown,
+          0);
+      SetInt64(
+          data_reduction_proxy::prefs::kDailyHttpReceivedContentLengthUnknown,
+          0);
+
+      SetInt64(
+          data_reduction_proxy::prefs::
+              kDailyOriginalContentLengthWithDataReductionProxyEnabledApplication,
+          0);
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyContentLengthWithDataReductionProxyEnabledApplication,
+               0);
+
+      SetInt64(
+          data_reduction_proxy::prefs::
+              kDailyOriginalContentLengthWithDataReductionProxyEnabledVideo,
+          0);
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyContentLengthWithDataReductionProxyEnabledVideo,
+               0);
+
+      SetInt64(
+          data_reduction_proxy::prefs::
+              kDailyOriginalContentLengthWithDataReductionProxyEnabledUnknown,
+          0);
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyContentLengthWithDataReductionProxyEnabledUnknown,
+               0);
+
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyOriginalContentLengthViaDataReductionProxyApplication,
+               0);
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyContentLengthViaDataReductionProxyApplication,
+               0);
+
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyOriginalContentLengthViaDataReductionProxyVideo,
+               0);
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyContentLengthViaDataReductionProxyVideo,
+               0);
+
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyOriginalContentLengthViaDataReductionProxyUnknown,
+               0);
+      SetInt64(data_reduction_proxy::prefs::
+                   kDailyContentLengthViaDataReductionProxyUnknown,
+               0);
     }
   }
+  total.UpdateForDataChange(days_since_last_update);
+  proxy_enabled.UpdateForDataChange(days_since_last_update);
+  via_proxy.UpdateForDataChange(days_since_last_update);
+  https.UpdateForDataChange(days_since_last_update);
+  short_bypass.UpdateForDataChange(days_since_last_update);
+  long_bypass.UpdateForDataChange(days_since_last_update);
+  unknown.UpdateForDataChange(days_since_last_update);
+
+  total.Add(original_size, data_used);
+  if (with_data_reduction_proxy_enabled) {
+    proxy_enabled.Add(original_size, data_used);
+    // Ignore data source cases, if exist, when
+    // "with_data_reduction_proxy_enabled == false"
+    switch (request_type) {
+      case VIA_DATA_REDUCTION_PROXY:
+        via_proxy.Add(original_size, data_used);
+        break;
+      case HTTPS:
+        https.Add(data_used);
+        break;
+      case SHORT_BYPASS:
+        short_bypass.Add(data_used);
+        break;
+      case LONG_BYPASS:
+        long_bypass.Add(data_used);
+        break;
+      case UNKNOWN_TYPE:
+        unknown.Add(data_used);
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+
+  bool via_data_reduction_proxy = request_type == VIA_DATA_REDUCTION_PROXY;
+  bool is_application = net::MatchesMimeType("application/*", mime_type);
+  bool is_video = net::MatchesMimeType("video/*", mime_type);
+  bool is_mime_type_empty = mime_type.empty();
+  if (is_application) {
+    IncrementDailyUmaPrefs(
+        original_size, data_used,
+        data_reduction_proxy::prefs::kDailyHttpOriginalContentLengthApplication,
+        data_reduction_proxy::prefs::kDailyHttpReceivedContentLengthApplication,
+        with_data_reduction_proxy_enabled,
+        data_reduction_proxy::prefs::
+            kDailyOriginalContentLengthWithDataReductionProxyEnabledApplication,
+        data_reduction_proxy::prefs::
+            kDailyContentLengthWithDataReductionProxyEnabledApplication,
+        via_data_reduction_proxy,
+        data_reduction_proxy::prefs::
+            kDailyOriginalContentLengthViaDataReductionProxyApplication,
+        data_reduction_proxy::prefs::
+            kDailyContentLengthViaDataReductionProxyApplication);
+  } else if (is_video) {
+    IncrementDailyUmaPrefs(
+        original_size, data_used,
+        data_reduction_proxy::prefs::kDailyHttpOriginalContentLengthVideo,
+        data_reduction_proxy::prefs::kDailyHttpReceivedContentLengthVideo,
+        with_data_reduction_proxy_enabled,
+        data_reduction_proxy::prefs::
+            kDailyOriginalContentLengthWithDataReductionProxyEnabledVideo,
+        data_reduction_proxy::prefs::
+            kDailyContentLengthWithDataReductionProxyEnabledVideo,
+        via_data_reduction_proxy,
+        data_reduction_proxy::prefs::
+            kDailyOriginalContentLengthViaDataReductionProxyVideo,
+        data_reduction_proxy::prefs::
+            kDailyContentLengthViaDataReductionProxyVideo);
+  } else if (is_mime_type_empty) {
+    IncrementDailyUmaPrefs(
+        original_size, data_used,
+        data_reduction_proxy::prefs::kDailyHttpOriginalContentLengthUnknown,
+        data_reduction_proxy::prefs::kDailyHttpReceivedContentLengthUnknown,
+        with_data_reduction_proxy_enabled,
+        data_reduction_proxy::prefs::
+            kDailyOriginalContentLengthWithDataReductionProxyEnabledUnknown,
+        data_reduction_proxy::prefs::
+            kDailyContentLengthWithDataReductionProxyEnabledUnknown,
+        via_data_reduction_proxy,
+        data_reduction_proxy::prefs::
+            kDailyOriginalContentLengthViaDataReductionProxyUnknown,
+        data_reduction_proxy::prefs::
+            kDailyContentLengthViaDataReductionProxyUnknown);
+  }
+}
+
+void DataReductionProxyCompressionStats::IncrementDailyUmaPrefs(
+    int64_t original_size,
+    int64_t received_size,
+    const char* original_size_pref,
+    const char* received_size_pref,
+    bool data_reduction_proxy_enabled,
+    const char* original_size_with_proxy_enabled_pref,
+    const char* recevied_size_with_proxy_enabled_pref,
+    bool via_data_reduction_proxy,
+    const char* original_size_via_proxy_pref,
+    const char* received_size_via_proxy_pref) {
+  IncrementInt64Pref(original_size_pref, original_size);
+  IncrementInt64Pref(received_size_pref, received_size);
+
+  if (data_reduction_proxy_enabled) {
+    IncrementInt64Pref(original_size_with_proxy_enabled_pref, original_size);
+    IncrementInt64Pref(recevied_size_with_proxy_enabled_pref, received_size);
+  }
+
+  if (via_data_reduction_proxy) {
+    IncrementInt64Pref(original_size_via_proxy_pref, original_size);
+    IncrementInt64Pref(received_size_via_proxy_pref, received_size);
+  }
+}
+
+void DataReductionProxyCompressionStats::RecordUserVisibleDataSavings() {
+  int64 original_content_length;
+  int64 received_content_length;
+  int64 last_update_internal;
+  GetContentLengths(kNumDaysInHistorySummary, &original_content_length,
+                    &received_content_length, &last_update_internal);
+
+  if (original_content_length == 0)
+    return;
+
+  int64 user_visible_savings_bytes =
+      original_content_length - received_content_length;
+  int user_visible_savings_percent =
+      user_visible_savings_bytes * 100 / original_content_length;
+  UMA_HISTOGRAM_PERCENTAGE(
+      "Net.DailyUserVisibleSavingsPercent_DataReductionProxyEnabled",
+      user_visible_savings_percent);
+  UMA_HISTOGRAM_COUNTS(
+      "Net.DailyUserVisibleSavingsSize_DataReductionProxyEnabled",
+      user_visible_savings_bytes >> 10);
+}
+
+void DataReductionProxyCompressionStats::RecordDataUsage(
+    const std::string& data_usage_host,
+    int64 data_used,
+    int64 original_size) {
+  if (!data_usage_loaded_)
+    return;
+
+  if (!DataUsageStore::IsInCurrentInterval(data_usage_map_last_updated_)) {
+    if (data_usage_map_is_dirty_)
+      PersistDataUsage();
+    ClearInMemoryDataUsage();
+    DCHECK(data_usage_map_last_updated_.is_null());
+    DCHECK(data_usage_map_.empty());
+  }
+
+  std::string normalized_host = NormalizeHostname(data_usage_host);
+
+  auto i =
+      data_usage_map_.add(connection_type_, make_scoped_ptr(new SiteUsageMap));
+  SiteUsageMap* site_usage_map = i.first->second;
+
+  auto j = site_usage_map->add(normalized_host,
+                               make_scoped_ptr(new PerSiteDataUsage()));
+  PerSiteDataUsage* per_site_usage = j.first->second;
+
+  per_site_usage->set_site_url(normalized_host);
+  data_usage_map_last_updated_ = base::Time::Now();
+  per_site_usage->set_original_size(per_site_usage->original_size() +
+                                    original_size);
+  per_site_usage->set_data_used(per_site_usage->data_used() + data_used);
+
+  data_usage_map_is_dirty_ = true;
+}
+
+void DataReductionProxyCompressionStats::PersistDataUsage() {
+  scoped_ptr<DataUsageBucket> data_usage_bucket(new DataUsageBucket());
+  for (auto i = data_usage_map_.begin(); i != data_usage_map_.end(); ++i) {
+    SiteUsageMap* site_usage_map = i->second;
+    PerConnectionDataUsage* connection_usage =
+        data_usage_bucket->add_connection_usage();
+    connection_usage->set_connection_type(connection_type_);
+    for (auto j = site_usage_map->begin(); j != site_usage_map->end(); ++j) {
+      PerSiteDataUsage* per_site_usage = connection_usage->add_site_usage();
+      per_site_usage->CopyFrom(*(j->second));
+    }
+  }
+  // TODO(kundaji): Persist |data_usage_bucket|.
+
+  data_usage_map_is_dirty_ = false;
+}
+
+void DataReductionProxyCompressionStats::ClearInMemoryDataUsage() {
+  DCHECK(!data_usage_map_is_dirty_);
+  data_usage_map_.clear();
+  data_usage_map_last_updated_ = base::Time();
+}
+
+// static
+std::string DataReductionProxyCompressionStats::NormalizeHostname(
+    const std::string& host) {
+  size_t pos = host.find("://");
+  if (pos != std::string::npos)
+    return host.substr(pos + 3);
+
+  return host;
 }
 
 }  // namespace data_reduction_proxy

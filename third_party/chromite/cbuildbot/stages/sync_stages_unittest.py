@@ -6,7 +6,6 @@
 
 from __future__ import print_function
 
-import ConfigParser
 import cPickle
 import datetime
 import itertools
@@ -15,11 +14,12 @@ import os
 import time
 import tempfile
 
-from chromite.cbuildbot import cbuildbot_config
+from chromite.cbuildbot import chromeos_config
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import lkgm_manager
 from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import manifest_version_unittest
+from chromite.cbuildbot import metadata_lib
 from chromite.cbuildbot import repository
 from chromite.cbuildbot import tree_status
 from chromite.cbuildbot import triage_lib
@@ -29,12 +29,9 @@ from chromite.cbuildbot.stages import generic_stages_unittest
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cidb
 from chromite.lib import clactions
-from chromite.lib import cros_test_lib
 from chromite.lib import fake_cidb
 from chromite.lib import gerrit
-from chromite.lib import git
 from chromite.lib import git_unittest
-from chromite.lib import gs_unittest
 from chromite.lib import gob_util
 from chromite.lib import osutils
 from chromite.lib import patch as cros_patch
@@ -95,40 +92,6 @@ class ManifestVersionedSyncStageTest(
 
     self.sync_stage.Run()
 
-  @cros_test_lib.NetworkTest()
-  @mock.patch.object(git, 'PushWithRetry')
-  def testCommitProjectSDKManifest(self, _mock_push):
-    """Tests that we can 'push' an SDK manifest."""
-    gs_mock = self.StartPatcher(gs_unittest.GSContextMock())
-    gs_mock.SetDefaultCmdResult()
-
-    # Create test manifest
-    MANIFEST_CONTENTS = 'bogus value'
-    manifest = os.path.join(self.tempdir, 'sdk.xml')
-    osutils.WriteFile(manifest, MANIFEST_CONTENTS)
-
-    self.sync_stage.CommitProjectSDKManifest(manifest, 'test_version', True)
-
-    project_sdk_dir = os.path.join(
-        self.sync_stage._build_root, 'manifest-versions-project-sdk',
-        'project-sdk')
-    manifest_path = os.path.join(project_sdk_dir, 'test_version.xml')
-    latest_path = os.path.join(project_sdk_dir, 'latest.xml')
-
-    # Ensure new manifest was created, correctly.
-    contents = osutils.ReadFile(manifest_path)
-    self.assertEqual(contents, MANIFEST_CONTENTS)
-
-    # Ensure link to latest manifest was updated.
-    self.assertTrue(os.path.exists(latest_path))
-    self.assertEqual(os.path.realpath(latest_path), manifest_path)
-
-    # Verify pushes to GS.
-    gs_mock.assertCommandContains(
-        ('cp', manifest, 'gs://brillo-releases/sdk-releases/test_version.xml'))
-
-    gs_mock.assertCommandContains(
-        ('cp', 'gs://brillo-releases/sdk-releases/latest'))
 
 class MockPatch(mock.MagicMock):
   """MagicMock for a GerritPatch-like object."""
@@ -182,6 +145,10 @@ class MockPatch(mock.MagicMock):
   def IsBeingMerged(self):
     """Return whether this patch is merged or in the middle of being merged."""
     return self.status in ('SUBMITTED', 'MERGED')
+
+  def IsMergeable(self):
+    """Default implementation of IsMergeable, stubbed out by some tests."""
+    return True
 
   def GetDiffStatus(self, _):
     return self.mock_diff_status
@@ -280,10 +247,11 @@ class BaseCQTestCase(generic_stages_unittest.StageTestCase):
       for change in changes:
         change.flags['COMR'] = '2'
     if pre_cq_status is not None:
+      config = constants.PRE_CQ_DEFAULT_CONFIGS[0]
       new_build_id = self.fake_db.InsertBuild('Pre cq group',
                                               constants.WATERFALL_TRYBOT,
                                               1,
-                                              constants.PRE_CQ_GROUP_CONFIG,
+                                              config,
                                               'bot-hostname')
       for change in changes:
         action = clactions.TranslatePreCQStatusToAction(pre_cq_status)
@@ -493,19 +461,12 @@ class PreCQLauncherStageTest(MasterCQSyncTestCase):
 
   def testVerificationsForChangeValidConfig(self):
     change = MockPatch()
-    configs_to_test = cbuildbot_config.GetConfig().keys()[:5]
+    configs_to_test = chromeos_config.GetConfig().keys()[:5]
     return_string = ' '.join(configs_to_test)
     self.PatchObject(triage_lib, 'GetOptionForChange',
                      return_value=return_string)
     self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
                           configs_to_test)
-
-  def testVerificationsForChangeMalformedConfigFile(self):
-    change = MockPatch()
-    self.PatchObject(triage_lib, 'GetOptionForChange',
-                     side_effect=ConfigParser.Error)
-    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
-                          constants.PRE_CQ_DEFAULT_CONFIGS)
 
   def testVerificationsForChangeNoSuchConfig(self):
     change = MockPatch()
@@ -994,3 +955,70 @@ pre-cq-configs: link-pre-cq
     requeued_actions = [a for a in actions_for_patch
                         if a.action == constants.CL_ACTION_REQUEUED]
     self.assertEqual(1, len(requeued_actions))
+
+
+class MasterSlaveLKGMSyncTest(generic_stages_unittest.StageTestCase):
+  """Unit tests for MasterSlaveLKGMSyncStage"""
+
+  BOT_ID = constants.PFQ_MASTER
+
+  def setUp(self):
+    """Setup"""
+    self.source_repo = 'ssh://source/repo'
+    self.manifest_version_url = 'fake manifest url'
+    self.branch = 'master'
+    self.build_name = 'master-chromium-pfq'
+    self.incr_type = 'branch'
+    self.next_version = 'next_version'
+    self.sync_stage = None
+
+    repo = repository.RepoRepository(
+        self.source_repo, self.tempdir, self.branch)
+    self.manager = lkgm_manager.LKGMManager(
+        source_repo=repo, manifest_repo=self.manifest_version_url,
+        build_names=[self.build_name],
+        build_type=constants.CHROME_PFQ_TYPE,
+        incr_type=self.incr_type,
+        force=False, branch=self.branch, dry_run=True)
+
+    # Create and set up a fake cidb instance.
+    self.fake_db = fake_cidb.FakeCIDBConnection()
+    cidb.CIDBConnectionFactory.SetupMockCidb(self.fake_db)
+
+    self._Prepare()
+
+  def _Prepare(self, bot_id=None, **kwargs):
+    super(MasterSlaveLKGMSyncTest, self)._Prepare(bot_id, **kwargs)
+
+    self._run.config['manifest_version'] = self.manifest_version_url
+    self.sync_stage = sync_stages.MasterSlaveLKGMSyncStage(self._run)
+    self.sync_stage.manifest_manager = self.manager
+    self._run.attrs.manifest_manager = self.manager
+
+  def testGetLastChromeOSVersion(self):
+    """Test GetLastChromeOSVersion"""
+    id1 = self.fake_db.InsertBuild(
+        builder_name='test_builder',
+        waterfall=constants.WATERFALL_TRYBOT,
+        build_number=666,
+        build_config='master-chromium-pfq',
+        bot_hostname='test_hostname')
+    id2 = self.fake_db.InsertBuild(
+        builder_name='test_builder',
+        waterfall=constants.WATERFALL_TRYBOT,
+        build_number=667,
+        build_config='master-chromium-pfq',
+        bot_hostname='test_hostname')
+    metadata_1 = metadata_lib.CBuildbotMetadata()
+    metadata_1.UpdateWithDict(
+        {'version': {'full': 'R42-7140.0.0-rc1'}})
+    metadata_2 = metadata_lib.CBuildbotMetadata()
+    metadata_2.UpdateWithDict(
+        {'version': {'full': 'R43-7141.0.0-rc1'}})
+    self._run.attrs.metadata.UpdateWithDict(
+        {'version': {'full': 'R44-7142.0.0-rc1'}})
+    self.fake_db.UpdateMetadata(id1 + 1, metadata_1)
+    self.fake_db.UpdateMetadata(id2 + 1, metadata_2)
+    v = self.sync_stage.GetLastChromeOSVersion()
+    self.assertEqual(v.milestone, '43')
+    self.assertEqual(v.platform, '7141.0.0-rc1')

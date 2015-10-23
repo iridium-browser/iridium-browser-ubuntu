@@ -21,41 +21,23 @@ class GrGpu;
 class GrStencilAndCoverPathRenderer : public GrPathRenderer {
 public:
 
-    static GrPathRenderer* Create(GrContext*);
+    static GrPathRenderer* Create(GrResourceProvider*, const GrCaps&);
 
-    virtual ~GrStencilAndCoverPathRenderer();
-
-    virtual bool canDrawPath(const GrDrawTarget*,
-                             const GrPipelineBuilder*,
-                             const SkMatrix& viewMatrix,
-                             const SkPath&,
-                             const GrStrokeInfo&,
-                             bool antiAlias) const override;
-
-protected:
-    virtual StencilSupport onGetStencilSupport(const GrDrawTarget*,
-                                               const GrPipelineBuilder*,
-                                               const SkPath&,
-                                               const GrStrokeInfo&) const override;
-
-    virtual bool onDrawPath(GrDrawTarget*,
-                            GrPipelineBuilder*,
-                            GrColor,
-                            const SkMatrix& viewMatrix,
-                            const SkPath&,
-                            const GrStrokeInfo&,
-                            bool antiAlias) override;
-
-    virtual void onStencilPath(GrDrawTarget*,
-                               GrPipelineBuilder*,
-                               const SkMatrix& viewMatrix,
-                               const SkPath&,
-                               const GrStrokeInfo&) override;
 
 private:
-    GrStencilAndCoverPathRenderer(GrGpu*);
+    StencilSupport onGetStencilSupport(const SkPath&, const GrStrokeInfo&) const override {
+        return GrPathRenderer::kStencilOnly_StencilSupport;
+    }
 
-    GrGpu* fGpu;
+    bool onCanDrawPath(const CanDrawPathArgs&) const override;
+
+    bool onDrawPath(const DrawPathArgs&) override;
+
+    void onStencilPath(const StencilPathArgs&) override;
+
+    GrStencilAndCoverPathRenderer(GrResourceProvider*);
+
+    GrResourceProvider* fResourceProvider;
 
     typedef GrPathRenderer INHERITED;
 };

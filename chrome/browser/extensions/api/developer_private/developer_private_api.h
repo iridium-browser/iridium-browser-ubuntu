@@ -9,12 +9,15 @@
 
 #include "base/files/file.h"
 #include "base/memory/weak_ptr.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/scoped_observer.h"
+#include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/developer_private/entry_picker.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/api/file_system/file_system_api.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/error_console/error_console.h"
+#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/pack_extension_job.h"
 #include "chrome/common/extensions/api/developer_private.h"
@@ -22,8 +25,10 @@
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_prefs_observer.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/browser/process_manager_observer.h"
+#include "extensions/browser/warning_service.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_operation.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -52,7 +57,11 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
                                     public ErrorConsole::Observer,
                                     public ProcessManagerObserver,
                                     public AppWindowRegistry::Observer,
-                                    public ExtensionActionAPI::Observer {
+                                    public CommandService::Observer,
+                                    public ExtensionActionAPI::Observer,
+                                    public ExtensionPrefsObserver,
+                                    public ExtensionManagement::Observer,
+                                    public WarningService::Observer {
  public:
   explicit DeveloperPrivateEventRouter(Profile* profile);
   ~DeveloperPrivateEventRouter() override;
@@ -91,9 +100,29 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
   void OnAppWindowAdded(AppWindow* window) override;
   void OnAppWindowRemoved(AppWindow* window) override;
 
+  // CommandService::Observer:
+  void OnExtensionCommandAdded(const std::string& extension_id,
+                               const Command& added_command) override;
+  void OnExtensionCommandRemoved(const std::string& extension_id,
+                                 const Command& removed_command) override;
+
   // ExtensionActionAPI::Observer:
   void OnExtensionActionVisibilityChanged(const std::string& extension_id,
                                           bool is_now_visible) override;
+
+  // ExtensionPrefsObserver:
+  void OnExtensionDisableReasonsChanged(const std::string& extension_id,
+                                        int disable_reasons) override;
+
+  // ExtensionManagement::Observer:
+  void OnExtensionManagementSettingsChanged() override;
+
+  // WarningService::Observer:
+  void ExtensionWarningsChanged(
+      const ExtensionIdSet& affected_extensions) override;
+
+  // Handles a profile preferance change.
+  void OnProfilePrefChanged();
 
   // Broadcasts an event to all listeners.
   void BroadcastItemStateChanged(api::developer_private::EventType event_type,
@@ -114,6 +143,14 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
       app_window_registry_observer_;
   ScopedObserver<ExtensionActionAPI, ExtensionActionAPI::Observer>
       extension_action_api_observer_;
+  ScopedObserver<WarningService, WarningService::Observer>
+      warning_service_observer_;
+  ScopedObserver<ExtensionPrefs, ExtensionPrefsObserver>
+      extension_prefs_observer_;
+  ScopedObserver<ExtensionManagement, ExtensionManagement::Observer>
+      extension_management_observer_;
+  ScopedObserver<CommandService, CommandService::Observer>
+      command_service_observer_;
 
   Profile* profile_;
 
@@ -126,6 +163,8 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
   // update. In particular, we want to avoid entering a loop, which could happen
   // when, e.g., the Apps Developer Tool throws an error.
   std::set<std::string> extension_ids_;
+
+  PrefChangeRegistrar pref_change_registrar_;
 
   base::WeakPtrFactory<DeveloperPrivateEventRouter> weak_factory_;
 
@@ -157,6 +196,10 @@ class DeveloperPrivateAPI : public BrowserContextKeyedAPI,
   // EventRouter::Observer implementation.
   void OnListenerAdded(const EventListenerInfo& details) override;
   void OnListenerRemoved(const EventListenerInfo& details) override;
+
+  DeveloperPrivateEventRouter* developer_private_event_router() {
+    return developer_private_event_router_.get();
+  }
 
  private:
   friend class BrowserContextKeyedAPIFactory<DeveloperPrivateAPI>;
@@ -545,6 +588,28 @@ class DeveloperPrivateShowPathFunction : public DeveloperPrivateAPIFunction {
 
  protected:
   ~DeveloperPrivateShowPathFunction() override;
+  ResponseAction Run() override;
+};
+
+class DeveloperPrivateSetShortcutHandlingSuspendedFunction
+    : public DeveloperPrivateAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.setShortcutHandlingSuspended",
+                             DEVELOPERPRIVATE_SETSHORTCUTHANDLINGSUSPENDED);
+
+ protected:
+  ~DeveloperPrivateSetShortcutHandlingSuspendedFunction() override;
+  ResponseAction Run() override;
+};
+
+class DeveloperPrivateUpdateExtensionCommandFunction
+    : public DeveloperPrivateAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.updateExtensionCommand",
+                             DEVELOPERPRIVATE_UPDATEEXTENSIONCOMMAND);
+
+ protected:
+  ~DeveloperPrivateUpdateExtensionCommandFunction() override;
   ResponseAction Run() override;
 };
 

@@ -4,14 +4,18 @@
 
 #include "media/base/fake_audio_renderer_sink.h"
 
+#include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
+#include "base/single_thread_task_runner.h"
+#include "media/base/fake_output_device.h"
 
 namespace media {
 
 FakeAudioRendererSink::FakeAudioRendererSink()
     : state_(kUninitialized),
-      callback_(NULL) {
-}
+      callback_(NULL),
+      output_device_(new FakeOutputDevice) {}
 
 FakeAudioRendererSink::~FakeAudioRendererSink() {
   DCHECK(!callback_);
@@ -50,6 +54,10 @@ void FakeAudioRendererSink::Play() {
 
 bool FakeAudioRendererSink::SetVolume(double volume) {
   return true;
+}
+
+OutputDevice* FakeAudioRendererSink::GetOutputDevice() {
+  return output_device_.get();
 }
 
 bool FakeAudioRendererSink::Render(AudioBus* dest, int audio_delay_milliseconds,

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/extensions/extension_api_unittest.h"
@@ -16,22 +17,17 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
-namespace core_api {
+namespace api {
 
-static KeyedService* ApiResourceManagerTestFactory(
+static scoped_ptr<KeyedService> ApiResourceManagerTestFactory(
     content::BrowserContext* context) {
-  content::BrowserThread::ID id;
-  CHECK(content::BrowserThread::GetCurrentThreadIdentifier(&id));
-  return ApiResourceManager<
-      ResumableTCPSocket>::CreateApiResourceManagerForTest(context, id);
+  return make_scoped_ptr(new ApiResourceManager<ResumableTCPSocket>(context));
 }
 
-static KeyedService* ApiResourceManagerTestServerFactory(
+static scoped_ptr<KeyedService> ApiResourceManagerTestServerFactory(
     content::BrowserContext* context) {
-  content::BrowserThread::ID id;
-  CHECK(content::BrowserThread::GetCurrentThreadIdentifier(&id));
-  return ApiResourceManager<
-      ResumableTCPServerSocket>::CreateApiResourceManagerForTest(context, id);
+  return make_scoped_ptr(
+      new ApiResourceManager<ResumableTCPServerSocket>(context));
 }
 
 class SocketsTcpServerUnitTest : public ExtensionApiUnittest {
@@ -65,5 +61,5 @@ TEST_F(SocketsTcpServerUnitTest, Create) {
   ASSERT_TRUE(result.get());
 }
 
-}  // namespace core_api
+}  // namespace api
 }  // namespace extensions

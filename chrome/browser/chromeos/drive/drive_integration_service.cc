@@ -14,33 +14,34 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/drive/debug_info_collector.h"
 #include "chrome/browser/chromeos/drive/download_handler.h"
-#include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/drive/job_scheduler.h"
-#include "chrome/browser/chromeos/drive/resource_metadata.h"
-#include "chrome/browser/chromeos/drive/resource_metadata_storage.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/chromeos/profiles/profile_util.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
-#include "chrome/browser/drive/drive_api_service.h"
-#include "chrome/browser/drive/drive_api_util.h"
-#include "chrome/browser/drive/drive_app_registry.h"
-#include "chrome/browser/drive/drive_notification_manager.h"
 #include "chrome/browser/drive/drive_notification_manager_factory.h"
-#include "chrome/browser/drive/event_logger.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/drive/drive_api_util.h"
+#include "components/drive/drive_app_registry.h"
+#include "components/drive/drive_notification_manager.h"
+#include "components/drive/drive_pref_names.h"
+#include "components/drive/event_logger.h"
+#include "components/drive/file_cache.h"
+#include "components/drive/job_scheduler.h"
+#include "components/drive/resource_metadata.h"
+#include "components/drive/resource_metadata_storage.h"
+#include "components/drive/service/drive_api_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -76,8 +77,7 @@ const base::FilePath::CharType kTemporaryFileDirectory[] =
 std::string GetDriveUserAgent() {
   const char kDriveClientName[] = "chromedrive";
 
-  chrome::VersionInfo version_info;
-  const std::string version = version_info.Version();
+  const std::string version = version_info::GetVersionNumber();
 
   // This part is <client_name>/<version>.
   const char kLibraryInfo[] = "chrome-cc/none";
@@ -259,15 +259,16 @@ DriveIntegrationService::DriveIntegrationService(
   resource_metadata_.reset(new internal::ResourceMetadata(
       metadata_storage_.get(), cache_.get(), blocking_task_runner_));
 
+  file_task_runner_ =
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE);
   file_system_.reset(
-      test_file_system ? test_file_system : new FileSystem(
-          profile_->GetPrefs(),
-          logger_.get(),
-          cache_.get(),
-          scheduler_.get(),
-          resource_metadata_.get(),
-          blocking_task_runner_.get(),
-          cache_root_directory_.Append(kTemporaryFileDirectory)));
+      test_file_system
+          ? test_file_system
+          : new FileSystem(
+                profile_->GetPrefs(), logger_.get(), cache_.get(),
+                scheduler_.get(), resource_metadata_.get(),
+                blocking_task_runner_.get(), file_task_runner_.get(),
+                cache_root_directory_.Append(kTemporaryFileDirectory)));
   download_handler_.reset(new DownloadHandler(file_system()));
   debug_info_collector_.reset(new DebugInfoCollector(
       resource_metadata_.get(), file_system(), blocking_task_runner_.get()));
@@ -553,9 +554,9 @@ void DriveIntegrationService::InitializeAfterMetadataInitialized(
 void DriveIntegrationService::AvoidDriveAsDownloadDirecotryPreference() {
   PrefService* pref_service = profile_->GetPrefs();
   if (util::IsUnderDriveMountPoint(
-          pref_service->GetFilePath(prefs::kDownloadDefaultDirectory))) {
+          pref_service->GetFilePath(::prefs::kDownloadDefaultDirectory))) {
     pref_service->SetFilePath(
-        prefs::kDownloadDefaultDirectory,
+        ::prefs::kDownloadDefaultDirectory,
         file_manager::util::GetDownloadsFolderForProfile(profile_));
   }
 }

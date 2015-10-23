@@ -15,12 +15,7 @@
 #include "base/mac/sdk_forward_declarations.h"
 #include "device/bluetooth/bluetooth_device.h"
 
-@class BluetoothLowEnergyDiscoveryManagerMacBridge;
-
 namespace device {
-
-class BluetoothLowEnergyDeviceMac;
-class BluetoothLowEnergyDiscoveryManagerMacDelegate;
 
 // This class will scan for Bluetooth LE device on Mac.
 class BluetoothLowEnergyDiscoveryManagerMac {
@@ -28,11 +23,10 @@ class BluetoothLowEnergyDiscoveryManagerMac {
   // Interface for being notified of events during a device discovery session.
   class Observer {
    public:
-    // Called when |this| manager has found a device.
-    virtual void DeviceFound(BluetoothLowEnergyDeviceMac* device) = 0;
-
-    // Called when |this| manager has updated on a device.
-    virtual void DeviceUpdated(BluetoothLowEnergyDeviceMac* device) = 0;
+    // Called when |this| manager has found a device or an update on a device.
+    virtual void LowEnergyDeviceUpdated(CBPeripheral* peripheral,
+                                        NSDictionary* advertisementData,
+                                        int rssi) = 0;
 
    protected:
     virtual ~Observer() {}
@@ -54,6 +48,8 @@ class BluetoothLowEnergyDiscoveryManagerMac {
   // Returns a new BluetoothLowEnergyDiscoveryManagerMac.
   static BluetoothLowEnergyDiscoveryManagerMac* Create(Observer* observer);
 
+  virtual void SetCentralManager(CBCentralManager* central_manager);
+
  protected:
   // Called when a discovery or an update of a BLE device occurred.
   virtual void DiscoveredPeripheral(CBPeripheral* peripheral,
@@ -69,15 +65,15 @@ class BluetoothLowEnergyDiscoveryManagerMac {
 
  private:
   explicit BluetoothLowEnergyDiscoveryManagerMac(Observer* observer);
-  void ClearDevices();
 
-  friend class BluetoothLowEnergyDiscoveryManagerMacDelegate;
+  friend class BluetoothAdapterMacTest;
+  friend class BluetoothLowEnergyCentralManagerBridge;
 
   // Observer interested in notifications from us.
   Observer* observer_;
 
-  // Underlaying CoreBluetooth central manager.
-  base::scoped_nsobject<CBCentralManager> manager_;
+  // Underlying CoreBluetooth central manager, owned by |observer_|.
+  CBCentralManager* central_manager_ = nil;
 
   // Discovery has been initiated by calling the API StartDiscovery().
   bool discovering_;
@@ -85,12 +81,6 @@ class BluetoothLowEnergyDiscoveryManagerMac {
   // A discovery has been initiated but has not started yet because it's
   // waiting for Bluetooth to turn on.
   bool pending_;
-
-  // Delegate of the central manager.
-  base::scoped_nsobject<BluetoothLowEnergyDiscoveryManagerMacBridge> bridge_;
-
-  // Map of the device identifiers to the discovered device.
-  std::map<const std::string, BluetoothLowEnergyDeviceMac*> devices_;
 
   // List of service UUIDs to scan.
   BluetoothDevice::UUIDList services_uuids_;

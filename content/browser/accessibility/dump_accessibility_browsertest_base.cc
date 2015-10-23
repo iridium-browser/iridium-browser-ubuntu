@@ -89,12 +89,9 @@ void DumpAccessibilityTestBase::ParseHtmlForExtraDirectives(
     const std::string& test_html,
     std::vector<Filter>* filters,
     std::string* wait_for) {
-  std::vector<std::string> lines;
-  base::SplitString(test_html, '\n', &lines);
-  for (std::vector<std::string>::const_iterator iter = lines.begin();
-       iter != lines.end();
-       ++iter) {
-    const std::string& line = *iter;
+  for (const std::string& line :
+       base::SplitString(test_html, "\n", base::TRIM_WHITESPACE,
+                         base::SPLIT_WANT_ALL)) {
     const std::string& allow_empty_str =
         AccessibilityTreeFormatter::GetAllowEmptyString();
     const std::string& allow_str =
@@ -102,19 +99,23 @@ void DumpAccessibilityTestBase::ParseHtmlForExtraDirectives(
     const std::string& deny_str =
         AccessibilityTreeFormatter::GetDenyString();
     const std::string& wait_str = "@WAIT-FOR:";
-    if (StartsWithASCII(line, allow_empty_str, true)) {
+    if (base::StartsWith(line, allow_empty_str,
+                         base::CompareCase::SENSITIVE)) {
       filters->push_back(
           Filter(base::UTF8ToUTF16(line.substr(allow_empty_str.size())),
                  Filter::ALLOW_EMPTY));
-    } else if (StartsWithASCII(line, allow_str, true)) {
+    } else if (base::StartsWith(line, allow_str,
+                                base::CompareCase::SENSITIVE)) {
       filters->push_back(Filter(base::UTF8ToUTF16(
           line.substr(allow_str.size())),
                                 Filter::ALLOW));
-    } else if (StartsWithASCII(line, deny_str, true)) {
+    } else if (base::StartsWith(line, deny_str,
+                                base::CompareCase::SENSITIVE)) {
       filters->push_back(Filter(base::UTF8ToUTF16(
           line.substr(deny_str.size())),
                                 Filter::DENY));
-    } else if (StartsWithASCII(line, wait_str, true)) {
+    } else if (base::StartsWith(line, wait_str,
+                                base::CompareCase::SENSITIVE)) {
       *wait_for = line.substr(wait_str.size());
     }
   }
@@ -195,13 +196,14 @@ void DumpAccessibilityTestBase::RunTest(
   std::vector<std::string> actual_lines = Dump();
 
   // Perform a diff (or write the initial baseline).
-  std::vector<std::string> expected_lines;
-  Tokenize(expected_contents, "\n", &expected_lines);
+  std::vector<std::string> expected_lines = base::SplitString(
+      expected_contents, "\n", base::KEEP_WHITESPACE,
+      base::SPLIT_WANT_NONEMPTY);
   // Marking the end of the file with a line of text ensures that
   // file length differences are found.
   expected_lines.push_back(kMarkEndOfFile);
   actual_lines.push_back(kMarkEndOfFile);
-  std::string actual_contents = JoinString(actual_lines, "\n");
+  std::string actual_contents = base::JoinString(actual_lines, "\n");
 
   std::vector<int> diff_lines = DiffLines(expected_lines, actual_lines);
   bool is_different = diff_lines.size() > 0;

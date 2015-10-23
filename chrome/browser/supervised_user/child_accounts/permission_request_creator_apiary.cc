@@ -190,7 +190,7 @@ void PermissionRequestCreatorApiary::OnGetTokenSuccess(
   dict.SetStringWithoutPathExpansion(kStateKey, kState);
 
   std::string body;
-  base::JSONWriter::Write(&dict, &body);
+  base::JSONWriter::Write(dict, &body);
   (*it)->url_fetcher->SetUploadData("application/json", body);
 
   (*it)->url_fetcher->Start();
@@ -232,9 +232,8 @@ void PermissionRequestCreatorApiary::OnURLFetchComplete(
     (*it)->access_token_expired = true;
     OAuth2TokenService::ScopeSet scopes;
     scopes.insert(GetApiScope());
-    oauth2_token_service_->InvalidateToken(account_id_,
-                                           scopes,
-                                           (*it)->access_token);
+    oauth2_token_service_->InvalidateAccessToken(account_id_, scopes,
+                                                 (*it)->access_token);
     StartFetching(*it);
     return;
   }
@@ -248,7 +247,7 @@ void PermissionRequestCreatorApiary::OnURLFetchComplete(
 
   std::string response_body;
   source->GetResponseAsString(&response_body);
-  scoped_ptr<base::Value> value(base::JSONReader::Read(response_body));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(response_body);
   base::DictionaryValue* dict = NULL;
   if (!value || !value->GetAsDictionary(&dict)) {
     DispatchNetworkError(it, net::ERR_INVALID_RESPONSE);

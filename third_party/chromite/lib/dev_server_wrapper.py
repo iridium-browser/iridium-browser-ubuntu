@@ -21,6 +21,7 @@ from chromite.cbuildbot import constants
 from chromite.cli import command
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
+from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import path_util
 from chromite.lib import remote_access
@@ -33,20 +34,6 @@ DEFAULT_PORT = 8080
 DEVSERVER_PKG_DIR = os.path.join(constants.SOURCE_ROOT, 'src/platform/dev')
 DEFAULT_STATIC_DIR = path_util.FromChrootPath(
     os.path.join(constants.SOURCE_ROOT, 'src', 'platform', 'dev', 'static'))
-
-IMAGE_NAME_TO_TYPE = {
-    'chromiumos_test_image.bin': 'test',
-    'chromiumos_image.bin': 'dev',
-    'chromiumos_base_image.bin': 'base',
-    'recovery_image.bin': 'recovery',
-}
-
-IMAGE_TYPE_TO_NAME = {
-    'test': 'chromiumos_test_image.bin',
-    'dev': 'chromiumos_image.bin',
-    'base': 'chromiumos_base_image.bin',
-    'recovery': 'recovery_image.bin',
-}
 
 XBUDDY_REMOTE = 'remote'
 XBUDDY_LOCAL = 'local'
@@ -78,7 +65,7 @@ def ConvertTranslatedPath(original_path, translated_path):
       requests: {local|remote}/build-id/version/image_type
   """
   chunks = translated_path.split(os.path.sep)
-  chunks[-1] = IMAGE_NAME_TO_TYPE[chunks[-1]]
+  chunks[-1] = constants.IMAGE_NAME_TO_TYPE[chunks[-1]]
 
   if GetXbuddyPath(original_path).startswith(XBUDDY_REMOTE):
     chunks = [XBUDDY_REMOTE] + chunks
@@ -113,7 +100,6 @@ def GetXbuddyPath(path):
     raise ValueError('Do not support scheme %s.', parsed.scheme)
 
 
-# pylint: disable=import-error
 def GetImagePathWithXbuddy(path, board, version=None,
                            static_dir=DEFAULT_STATIC_DIR, lookup_only=False):
   """Gets image path and resolved XBuddy path using xbuddy.
@@ -136,18 +122,29 @@ def GetImagePathWithXbuddy(path, board, version=None,
     (build-id/version/image_name) as well as the fully resolved XBuddy path (in
     the case where |path| is an XBuddy alias).
   """
+  # Since xbuddy often wants to use gsutil from $PATH, make sure our local copy
+  # shows up first.
+  upath = os.environ['PATH'].split(os.pathsep)
+  upath.insert(0, os.path.dirname(gs.GSContext.GetDefaultGSUtilBin()))
+  os.environ['PATH'] = os.pathsep.join(upath)
+
   # Import xbuddy for translating, downloading and staging the image.
   if not os.path.exists(DEVSERVER_PKG_DIR):
     raise Exception('Cannot find xbuddy module. Devserver package directory '
                     'does not exist: %s' % DEVSERVER_PKG_DIR)
   sys.path.append(DEVSERVER_PKG_DIR)
+  # pylint: disable=import-error
   import xbuddy
   import cherrypy
 
   # If we are using the progress bar, quiet the logging output of cherrypy.
   if command.UseProgressBar():
-    cherrypy.log.access_log.setLevel(logging.NOTICE)
-    cherrypy.log.error_log.setLevel(logging.NOTICE)
+    if (hasattr(cherrypy.log, 'access_log') and
+        hasattr(cherrypy.log, 'error_log')):
+      cherrypy.log.access_log.setLevel(logging.NOTICE)
+      cherrypy.log.error_log.setLevel(logging.NOTICE)
+    else:
+      cherrypy.config.update({'server.log_to_screen': False})
 
   xb = xbuddy.XBuddy(static_dir=static_dir, board=board, version=version,
                      log_screen=False)
@@ -277,7 +274,8 @@ def ConvertLocalPathToXbuddyPath(path, image_tempdir, static_tempdir,
   # Rename the image to chromiumos_test_image.bin when copying.
   TEMP_IMAGE_TYPE = 'test'
   shutil.copy(path,
-              os.path.join(tempdir_path, IMAGE_TYPE_TO_NAME[TEMP_IMAGE_TYPE]))
+              os.path.join(tempdir_path,
+                           constants.IMAGE_TYPE_TO_NAME[TEMP_IMAGE_TYPE]))
   chroot_path = path_util.ToChrootPath(tempdir_path,
                                        workspace_path=workspace_path)
   # Create and link static_dir/local_imagexxxx/link to the image

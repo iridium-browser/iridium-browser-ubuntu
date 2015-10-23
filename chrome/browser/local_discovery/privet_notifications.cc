@@ -6,11 +6,13 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/local_discovery/privet_device_lister_impl.h"
 #include "chrome/browser/local_discovery/privet_http_asynchronous_factory.h"
@@ -196,11 +198,10 @@ PrivetNotificationsListener::DeviceContext::~DeviceContext() {
 PrivetNotificationService::PrivetNotificationService(
     content::BrowserContext* profile)
     : profile_(profile) {
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&PrivetNotificationService::Start, AsWeakPtr()),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&PrivetNotificationService::Start, AsWeakPtr()),
       base::TimeDelta::FromSeconds(kStartDelaySeconds +
-                                   base::RandInt(0, kStartDelaySeconds/4)));
+                                   base::RandInt(0, kStartDelaySeconds / 4)));
 }
 
 PrivetNotificationService::~PrivetNotificationService() {
@@ -256,17 +257,12 @@ void PrivetNotificationService::PrivetNotify(int devices_active,
           IDS_LOCAL_DISCOVERY_NOTIFICATIONS_DISABLE_BUTTON_LABEL)));
 
   Notification notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      GURL(kPrivetNotificationOriginUrl),
-      title,
-      body,
+      message_center::NOTIFICATION_TYPE_SIMPLE, title, body,
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_LOCAL_DISCOVERY_CLOUDPRINT_ICON),
       message_center::NotifierId(GURL(kPrivetNotificationOriginUrl)),
-      product_name,
-      kPrivetNotificationID,
-      rich_notification_data,
-      new PrivetNotificationDelegate(profile_));
+      product_name, GURL(kPrivetNotificationOriginUrl), kPrivetNotificationID,
+      rich_notification_data, new PrivetNotificationDelegate(profile_));
 
   bool updated = g_browser_process->notification_ui_manager()->Update(
       notification, profile_object);

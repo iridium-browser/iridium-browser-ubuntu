@@ -5,16 +5,19 @@
  * found in the LICENSE file.
  */
 
+#include "SkBmpCodec.h"
 #include "SkCodec.h"
 #include "SkData.h"
-#include "SkCodec_libbmp.h"
 #include "SkCodec_libgif.h"
 #include "SkCodec_libico.h"
 #include "SkCodec_libpng.h"
 #include "SkCodec_wbmp.h"
 #include "SkCodecPriv.h"
+#ifndef SK_BUILD_FOR_ANDROID_FRAMEWORK
 #include "SkJpegCodec.h"
+#endif
 #include "SkStream.h"
+#include "SkWebpCodec.h"
 
 struct DecoderProc {
     bool (*IsFormat)(SkStream*);
@@ -23,7 +26,10 @@ struct DecoderProc {
 
 static const DecoderProc gDecoderProcs[] = {
     { SkPngCodec::IsPng, SkPngCodec::NewFromStream },
+#ifndef SK_BUILD_FOR_ANDROID_FRAMEWORK
     { SkJpegCodec::IsJpeg, SkJpegCodec::NewFromStream },
+#endif
+    { SkWebpCodec::IsWebp, SkWebpCodec::NewFromStream },
     { SkGifCodec::IsGif, SkGifCodec::NewFromStream },
     { SkIcoCodec::IsIco, SkIcoCodec::NewFromStream },
     { SkBmpCodec::IsBmp, SkBmpCodec::NewFromStream },
@@ -70,40 +76,75 @@ SkCodec* SkCodec::NewFromData(SkData* data) {
 }
 
 SkCodec::SkCodec(const SkImageInfo& info, SkStream* stream)
-    : INHERITED(info)
+    : fInfo(info)
     , fStream(stream)
     , fNeedsRewind(false)
 {}
 
-SkCodec::RewindState SkCodec::rewindIfNeeded() {
+SkCodec::~SkCodec() {}
+
+bool SkCodec::rewindIfNeeded() {
     // Store the value of fNeedsRewind so we can update it. Next read will
     // require a rewind.
     const bool needsRewind = fNeedsRewind;
     fNeedsRewind = true;
     if (!needsRewind) {
-        return kNoRewindNecessary_RewindState;
+        return true;
     }
-    return fStream->rewind() ? kRewound_RewindState
-                             : kCouldNotRewind_RewindState;
+
+    if (!fStream->rewind()) {
+        return false;
+    }
+
+    return this->onRewind();
 }
 
-SkScanlineDecoder* SkCodec::getScanlineDecoder(const SkImageInfo& dstInfo, const Options* options,
-        SkPMColor ctable[], int* ctableCount) {
+SkCodec::Result SkCodec::getPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
+                                   const Options* options, SkPMColor ctable[], int* ctableCount) {
+    if (kUnknown_SkColorType == info.colorType()) {
+        return kInvalidConversion;
+    }
+    if (NULL == pixels) {
+        return kInvalidParameters;
+    }
+    if (rowBytes < info.minRowBytes()) {
+        return kInvalidParameters;
+    }
 
-    // Set options.
+    if (kIndex_8_SkColorType == info.colorType()) {
+        if (NULL == ctable || NULL == ctableCount) {
+            return kInvalidParameters;
+        }
+    } else {
+        if (ctableCount) {
+            *ctableCount = 0;
+        }
+        ctableCount = NULL;
+        ctable = NULL;
+    }
+
+    {
+        SkAlphaType canonical;
+        if (!SkColorTypeValidateAlphaType(info.colorType(), info.alphaType(), &canonical)
+            || canonical != info.alphaType())
+        {
+            return kInvalidConversion;
+        }
+    }
+
+    // Default options.
     Options optsStorage;
     if (NULL == options) {
         options = &optsStorage;
     }
+    const Result result = this->onGetPixels(info, pixels, rowBytes, *options, ctable, ctableCount);
 
-    fScanlineDecoder.reset(this->onGetScanlineDecoder(dstInfo, *options, ctable, ctableCount));
-    return fScanlineDecoder.get();
+    if ((kIncompleteInput == result || kSuccess == result) && ctableCount) {
+        SkASSERT(*ctableCount >= 0 && *ctableCount <= 256);
+    }
+    return result;
 }
 
-SkScanlineDecoder* SkCodec::getScanlineDecoder(const SkImageInfo& dstInfo) {
-    SkASSERT(kIndex_8_SkColorType != dstInfo.colorType());
-    if (kIndex_8_SkColorType == dstInfo.colorType()) {
-        return NULL;
-    }
-    return this->getScanlineDecoder(dstInfo, NULL, NULL, NULL);
+SkCodec::Result SkCodec::getPixels(const SkImageInfo& info, void* pixels, size_t rowBytes) {
+    return this->getPixels(info, pixels, rowBytes, NULL, NULL, NULL);
 }

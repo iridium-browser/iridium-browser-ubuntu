@@ -86,6 +86,12 @@ class FakeProvidedFileSystem : public ProvidedFileSystemInterface {
       ProvidedFileSystemInterface::MetadataFieldMask fields,
       const ProvidedFileSystemInterface::GetMetadataCallback& callback)
       override;
+  AbortCallback GetActions(const base::FilePath& entry_path,
+                           const GetActionsCallback& callback) override;
+  AbortCallback ExecuteAction(
+      const base::FilePath& entry_path,
+      const std::string& action_id,
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   AbortCallback ReadDirectory(
       const base::FilePath& directory_path,
       const storage::AsyncFileUtil::ReadDirectoryCallback& callback) override;
@@ -185,7 +191,7 @@ class FakeProvidedFileSystem : public ProvidedFileSystemInterface {
   OpenedFiles opened_files_;
   int last_file_handle_;
   base::CancelableTaskTracker tracker_;
-  ObserverList<ProvidedFileSystemObserver> observers_;
+  base::ObserverList<ProvidedFileSystemObserver> observers_;
   Watchers watchers_;
 
   base::WeakPtrFactory<FakeProvidedFileSystem> weak_ptr_factory_;

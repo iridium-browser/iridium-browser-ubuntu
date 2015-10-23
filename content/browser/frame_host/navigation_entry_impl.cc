@@ -9,10 +9,10 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/common/navigation_params.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
-#include "net/base/net_util.h"
 #include "ui/gfx/text_elider.h"
 
 // Use this to get a new unique ID for a NavigationEntry during construction.
@@ -33,22 +33,58 @@ NavigationEntryImpl::TreeNode::TreeNode(FrameNavigationEntry* frame_entry)
 NavigationEntryImpl::TreeNode::~TreeNode() {
 }
 
-NavigationEntryImpl::TreeNode* NavigationEntryImpl::TreeNode::Clone() const {
-  // Clone the tree using a copy of the FrameNavigationEntry, without sharing.
-  NavigationEntryImpl::TreeNode* copy =
-      new NavigationEntryImpl::TreeNode(frame_entry->Clone());
+bool NavigationEntryImpl::TreeNode::MatchesFrame(
+    FrameTreeNode* frame_tree_node) const {
+  if (frame_tree_node->frame_tree_node_id() ==
+      frame_entry->frame_tree_node_id())
+    return true;
 
-  // TODO(creis): Clone children once we add them.
-  return copy;
+  // For now, we set the root FNE's FrameTreeNode ID to -1.
+  return frame_tree_node->IsMainFrame() &&
+         frame_entry->frame_tree_node_id() == -1;
 }
 
-NavigationEntry* NavigationEntry::Create() {
-  return new NavigationEntryImpl();
+scoped_ptr<NavigationEntryImpl::TreeNode>
+NavigationEntryImpl::TreeNode::CloneAndReplace(
+    FrameTreeNode* frame_tree_node,
+    FrameNavigationEntry* frame_navigation_entry) const {
+  if (frame_tree_node && MatchesFrame(frame_tree_node)) {
+    // Replace this node in the cloned tree and prune its children.
+    return make_scoped_ptr(
+        new NavigationEntryImpl::TreeNode(frame_navigation_entry));
+  }
+
+  // Clone the tree using a copy of the FrameNavigationEntry, without sharing.
+  // TODO(creis): Share FNEs unless it's for another tab.
+  scoped_ptr<NavigationEntryImpl::TreeNode> copy(
+      new NavigationEntryImpl::TreeNode(frame_entry->Clone()));
+
+  // Recursively clone the children.
+  for (auto& child : children) {
+    copy->children.push_back(
+        child->CloneAndReplace(frame_tree_node, frame_navigation_entry));
+  }
+
+  return copy.Pass();
+}
+
+scoped_ptr<NavigationEntry> NavigationEntry::Create() {
+  return make_scoped_ptr(new NavigationEntryImpl()).Pass();
 }
 
 NavigationEntryImpl* NavigationEntryImpl::FromNavigationEntry(
     NavigationEntry* entry) {
   return static_cast<NavigationEntryImpl*>(entry);
+}
+
+const NavigationEntryImpl* NavigationEntryImpl::FromNavigationEntry(
+    const NavigationEntry* entry) {
+  return static_cast<const NavigationEntryImpl*>(entry);
+}
+
+scoped_ptr<NavigationEntryImpl> NavigationEntryImpl::FromNavigationEntry(
+    scoped_ptr<NavigationEntry> entry) {
+  return make_scoped_ptr(FromNavigationEntry(entry.release()));
 }
 
 NavigationEntryImpl::NavigationEntryImpl()
@@ -63,8 +99,8 @@ NavigationEntryImpl::NavigationEntryImpl(SiteInstanceImpl* instance,
                                          const base::string16& title,
                                          ui::PageTransition transition_type,
                                          bool is_renderer_initiated)
-    : frame_tree_(
-          new TreeNode(new FrameNavigationEntry(-1, instance, url, referrer))),
+    : frame_tree_(new TreeNode(
+          new FrameNavigationEntry(-1, -1, -1, instance, url, referrer))),
       unique_id_(GetUniqueIDInConstructor()),
       bindings_(kInvalidBindings),
       page_type_(PAGE_TYPE_NORMAL),
@@ -82,6 +118,9 @@ NavigationEntryImpl::NavigationEntryImpl(SiteInstanceImpl* instance,
       should_clear_history_list_(false),
       can_load_local_resources_(false),
       frame_tree_node_id_(-1) {
+#if defined(OS_ANDROID)
+  has_user_gesture_ = false;
+#endif
 }
 
 NavigationEntryImpl::~NavigationEntryImpl() {
@@ -139,11 +178,11 @@ const base::string16& NavigationEntryImpl::GetTitle() const {
 }
 
 void NavigationEntryImpl::SetPageState(const PageState& state) {
-  page_state_ = state;
+  frame_tree_->frame_entry->set_page_state(state);
 }
 
 const PageState& NavigationEntryImpl::GetPageState() const {
-  return page_state_;
+  return frame_tree_->frame_entry->page_state();
 }
 
 void NavigationEntryImpl::SetPageID(int page_id) {
@@ -186,14 +225,26 @@ const base::string16& NavigationEntryImpl::GetTitleForDisplay(
   // Use the virtual URL first if any, and fall back on using the real URL.
   base::string16 title;
   if (!virtual_url_.is_empty()) {
-    title = net::FormatUrl(virtual_url_, languages);
+    title = url_formatter::FormatUrl(virtual_url_, languages);
   } else if (!GetURL().is_empty()) {
-    title = net::FormatUrl(GetURL(), languages);
+    title = url_formatter::FormatUrl(GetURL(), languages);
   }
 
   // For file:// URLs use the filename as the title, not the full path.
   if (GetURL().SchemeIsFile()) {
-    base::string16::size_type slashpos = title.rfind('/');
+    // It is necessary to ignore the reference and query parameters or else
+    // looking for slashes might accidentally return one of those values. See
+    // https://crbug.com/503003.
+    base::string16::size_type refpos = title.find('#');
+    base::string16::size_type querypos = title.find('?');
+    base::string16::size_type lastpos;
+    if (refpos == base::string16::npos)
+      lastpos = querypos;
+    else if (querypos == base::string16::npos)
+      lastpos = refpos;
+    else
+      lastpos = (refpos < querypos) ? refpos : querypos;
+    base::string16::size_type slashpos = title.rfind('/', lastpos);
     if (slashpos != base::string16::npos)
       title = title.substr(slashpos + 1);
   }
@@ -334,22 +385,29 @@ void NavigationEntryImpl::ClearExtraData(const std::string& key) {
   extra_data_.erase(key);
 }
 
-NavigationEntryImpl* NavigationEntryImpl::Clone() const {
-  NavigationEntryImpl* copy = new NavigationEntryImpl();
+scoped_ptr<NavigationEntryImpl> NavigationEntryImpl::Clone() const {
+  return NavigationEntryImpl::CloneAndReplace(nullptr, nullptr);
+}
+
+scoped_ptr<NavigationEntryImpl> NavigationEntryImpl::CloneAndReplace(
+    FrameTreeNode* frame_tree_node,
+    FrameNavigationEntry* frame_navigation_entry) const {
+  scoped_ptr<NavigationEntryImpl> copy =
+      make_scoped_ptr(new NavigationEntryImpl());
 
   // TODO(creis): Only share the same FrameNavigationEntries if cloning within
   // the same tab.
-  copy->frame_tree_.reset(frame_tree_->Clone());
+  copy->frame_tree_ =
+      frame_tree_->CloneAndReplace(frame_tree_node, frame_navigation_entry);
 
-  // Copy all state over, unless cleared in ResetForCommit.
-  copy->unique_id_ = unique_id_;
+  // Copy most state over, unless cleared in ResetForCommit.
+  // Don't copy unique_id_, otherwise it won't be unique.
   copy->bindings_ = bindings_;
   copy->page_type_ = page_type_;
   copy->virtual_url_ = virtual_url_;
   copy->update_virtual_url_with_url_ = update_virtual_url_with_url_;
   copy->title_ = title_;
   copy->favicon_ = favicon_;
-  copy->page_state_ = page_state_;
   copy->page_id_ = page_id_;
   copy->ssl_ = ssl_;
   copy->transition_type_ = transition_type_;
@@ -376,10 +434,13 @@ NavigationEntryImpl* NavigationEntryImpl::Clone() const {
   // ResetForCommit: intent_received_timestamp_
   copy->extra_data_ = extra_data_;
 
-  return copy;
+  return copy.Pass();
 }
 
 CommonNavigationParams NavigationEntryImpl::ConstructCommonNavigationParams(
+    const GURL& dest_url,
+    const Referrer& dest_referrer,
+    const FrameNavigationEntry& frame_entry,
     FrameMsg_Navigate_Type::Value navigation_type) const {
   FrameMsg_UILoadMetricsReportType::Value report_type =
       FrameMsg_UILoadMetricsReportType::NO_REPORT;
@@ -391,9 +452,9 @@ CommonNavigationParams NavigationEntryImpl::ConstructCommonNavigationParams(
 #endif
 
   return CommonNavigationParams(
-      GetURL(), GetReferrer(), GetTransitionType(), navigation_type,
-      !IsViewSourceMode(), ui_timestamp, report_type, GetBaseURLForDataURL(),
-      GetHistoryURLForDataURL());
+      dest_url, dest_referrer, GetTransitionType(), navigation_type,
+      !IsViewSourceMode(), should_replace_entry(), ui_timestamp, report_type,
+      GetBaseURLForDataURL(), GetHistoryURLForDataURL());
 }
 
 StartNavigationParams NavigationEntryImpl::ConstructStartNavigationParams()
@@ -406,14 +467,20 @@ StartNavigationParams NavigationEntryImpl::ConstructStartNavigationParams()
             GetBrowserInitiatedPostData()->size());
   }
 
-  return StartNavigationParams(
-      GetHasPostData(), extra_headers(), browser_initiated_post_data,
-      should_replace_entry(), transferred_global_request_id().child_id,
-      transferred_global_request_id().request_id);
+  return StartNavigationParams(GetHasPostData(), extra_headers(),
+                               browser_initiated_post_data,
+#if defined(OS_ANDROID)
+                               has_user_gesture(),
+#endif
+                               transferred_global_request_id().child_id,
+                               transferred_global_request_id().request_id);
 }
 
 RequestNavigationParams NavigationEntryImpl::ConstructRequestNavigationParams(
+    const FrameNavigationEntry& frame_entry,
     base::TimeTicks navigation_start,
+    bool is_same_document_history_load,
+    bool has_committed_real_load,
     bool intended_as_new_entry,
     int pending_history_list_offset,
     int current_history_list_offset,
@@ -438,8 +505,9 @@ RequestNavigationParams NavigationEntryImpl::ConstructRequestNavigationParams(
   }
   return RequestNavigationParams(
       GetIsOverridingUserAgent(), navigation_start, redirects,
-      GetCanLoadLocalResources(), base::Time::Now(), GetPageState(),
-      GetPageID(), GetUniqueID(), intended_as_new_entry, pending_offset_to_send,
+      GetCanLoadLocalResources(), base::Time::Now(), frame_entry.page_state(),
+      GetPageID(), GetUniqueID(), is_same_document_history_load,
+      has_committed_real_load, intended_as_new_entry, pending_offset_to_send,
       current_offset_to_send, current_length_to_send,
       should_clear_history_list());
 }
@@ -466,56 +534,52 @@ void NavigationEntryImpl::ResetForCommit() {
 }
 
 void NavigationEntryImpl::AddOrUpdateFrameEntry(FrameTreeNode* frame_tree_node,
+                                                int64 item_sequence_number,
+                                                int64 document_sequence_number,
                                                 SiteInstanceImpl* site_instance,
                                                 const GURL& url,
-                                                const Referrer& referrer) {
+                                                const Referrer& referrer,
+                                                const PageState& page_state) {
   // We should already have a TreeNode for the parent node by the time this node
   // commits.  Find it first.
   DCHECK(frame_tree_node->parent());
-  int parent_ftn_id = frame_tree_node->parent()->frame_tree_node_id();
-  bool found = false;
-  NavigationEntryImpl::TreeNode* parent_node = nullptr;
-  std::queue<NavigationEntryImpl::TreeNode*> work_queue;
-  work_queue.push(root_node());
-  while (!found && !work_queue.empty()) {
-    parent_node = work_queue.front();
-    work_queue.pop();
-    // The root FNE will have an ID of -1, so check for that as well.
-    if (parent_node->frame_entry->frame_tree_node_id() == parent_ftn_id ||
-        (parent_node->frame_entry->frame_tree_node_id() == -1 &&
-         parent_node == root_node() &&
-         frame_tree_node->parent()->IsMainFrame())) {
-      found = true;
-      break;
-    }
-    // Enqueue any children and keep looking.
-    for (auto& child : parent_node->children)
-      work_queue.push(child);
-  }
-  if (!found) {
+  NavigationEntryImpl::TreeNode* parent_node =
+      FindFrameEntry(frame_tree_node->parent());
+  if (!parent_node) {
     // The renderer should not send a commit for a subframe before its parent.
-    // TODO(creis): This can currently happen because we don't yet clone the
-    // FrameNavigationEntry tree on manual subframe navigations.  Once that's
-    // added, we should kill the renderer if we get here.
-    return;
+    // TODO(creis): Kill the renderer if we get here.  For now, crash to
+    // diagnose https://crbug.com/522193, since we most likely fail here when
+    // creating the first subframe entry before the CloneAndReplace call fails.
+    CHECK(false) << "Shouldn't see a commit for a subframe before parent.";
   }
 
   // Now check whether we have a TreeNode for the node itself.
   int frame_tree_node_id = frame_tree_node->frame_tree_node_id();
   for (TreeNode* child : parent_node->children) {
     if (child->frame_entry->frame_tree_node_id() == frame_tree_node_id) {
-      // Update the existing FrameNavigationEntry.
-      child->frame_entry->UpdateEntry(site_instance, url, referrer);
+      // Update the existing FrameNavigationEntry (e.g., for replaceState).
+      child->frame_entry->UpdateEntry(item_sequence_number,
+                                      document_sequence_number, site_instance,
+                                      url, referrer, page_state);
       return;
     }
   }
 
-  // No entry exists yet, so create a new one.  Unordered list, since we expect
-  // to look up entries by frame sequence number or unique name.
+  // No entry exists yet, so create a new one.
+  // Unordered list, since we expect to look up entries by frame sequence number
+  // or unique name.
   FrameNavigationEntry* frame_entry = new FrameNavigationEntry(
-      frame_tree_node_id, site_instance, url, referrer);
+      frame_tree_node_id, item_sequence_number, document_sequence_number,
+      site_instance, url, referrer);
+  frame_entry->set_page_state(page_state);
   parent_node->children.push_back(
       new NavigationEntryImpl::TreeNode(frame_entry));
+}
+
+FrameNavigationEntry* NavigationEntryImpl::GetFrameEntry(
+    FrameTreeNode* frame_tree_node) const {
+  NavigationEntryImpl::TreeNode* tree_node = FindFrameEntry(frame_tree_node);
+  return tree_node ? tree_node->frame_entry.get() : nullptr;
 }
 
 void NavigationEntryImpl::SetScreenshotPNGData(
@@ -527,6 +591,27 @@ void NavigationEntryImpl::SetScreenshotPNGData(
 
 GURL NavigationEntryImpl::GetHistoryURLForDataURL() const {
   return GetBaseURLForDataURL().is_empty() ? GURL() : GetVirtualURL();
+}
+
+NavigationEntryImpl::TreeNode* NavigationEntryImpl::FindFrameEntry(
+    FrameTreeNode* frame_tree_node) const {
+  NavigationEntryImpl::TreeNode* node = nullptr;
+  std::queue<NavigationEntryImpl::TreeNode*> work_queue;
+  work_queue.push(root_node());
+  while (!work_queue.empty()) {
+    node = work_queue.front();
+    work_queue.pop();
+    if (node->MatchesFrame(frame_tree_node)) {
+      // Only the root TreeNode should have a FTN ID of -1.
+      DCHECK_IMPLIES(node->frame_entry->frame_tree_node_id() == -1,
+                     node == root_node());
+      return node;
+    }
+    // Enqueue any children and keep looking.
+    for (auto& child : node->children)
+      work_queue.push(child);
+  }
+  return nullptr;
 }
 
 }  // namespace content

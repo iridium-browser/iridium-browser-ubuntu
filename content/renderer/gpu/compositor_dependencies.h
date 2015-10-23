@@ -5,6 +5,8 @@
 #ifndef CONTENT_RENDERER_GPU_COMPOSITOR_DEPENDENCIES_H_
 #define CONTENT_RENDERER_GPU_COMPOSITOR_DEPENDENCIES_H_
 
+#include <vector>
+
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 
@@ -31,7 +33,6 @@ namespace content {
 
 class CompositorDependencies {
  public:
-  virtual bool IsImplSidePaintingEnabled() = 0;
   virtual bool IsGpuRasterizationForced() = 0;
   virtual bool IsGpuRasterizationEnabled() = 0;
   virtual int GetGpuRasterizationMSAASampleCount() = 0;
@@ -39,10 +40,9 @@ class CompositorDependencies {
   virtual bool IsDistanceFieldTextEnabled() = 0;
   virtual bool IsZeroCopyEnabled() = 0;
   virtual bool IsOneCopyEnabled() = 0;
+  virtual bool IsPersistentGpuMemoryBufferEnabled() = 0;
   virtual bool IsElasticOverscrollEnabled() = 0;
-  // Only valid in single threaded mode.
-  virtual bool UseSingleThreadScheduler() = 0;
-  virtual uint32 GetImageTextureTarget() = 0;
+  virtual std::vector<unsigned> GetImageTextureTargets() = 0;
   virtual scoped_refptr<base::SingleThreadTaskRunner>
   GetCompositorMainThreadTaskRunner() = 0;
   // Returns null if the compositor is in single-threaded mode (ie. there is no
@@ -57,6 +57,7 @@ class CompositorDependencies {
       int routing_id) = 0;
   virtual cc::TaskGraphRunner* GetTaskGraphRunner() = 0;
   virtual bool IsGatherPixelRefsEnabled() = 0;
+  virtual bool IsThreadedAnimationEnabled() = 0;
 
   virtual ~CompositorDependencies() {}
 };

@@ -35,10 +35,17 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   // WebContentsImpl overrides (returning the same values, but in Test* types)
   TestRenderFrameHost* GetMainFrame() override;
   TestRenderViewHost* GetRenderViewHost() const override;
+  // Overrides to avoid establishing Mojo connection with renderer process.
+  int DownloadImage(const GURL& url,
+                    bool is_favicon,
+                    uint32_t max_bitmap_size,
+                    bool bypass_cache,
+                    const ImageDownloadCallback& callback) override;
 
   // WebContentsTester implementation.
   void CommitPendingNavigation() override;
   TestRenderFrameHost* GetPendingMainFrame() const override;
+  void StartNavigation(const GURL& url) override;
   void NavigateAndCommit(const GURL& url) override;
   void TestSetIsLoading(bool value) override;
   void ProceedWithCrossSiteNavigation() override;
@@ -61,10 +68,12 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   bool CrossProcessNavigationPending();
 
   // Prevent interaction with views.
-  bool CreateRenderViewForRenderManager(RenderViewHost* render_view_host,
-                                        int opener_route_id,
-                                        int proxy_routing_id,
-                                        bool for_main_frame) override;
+  bool CreateRenderViewForRenderManager(
+      RenderViewHost* render_view_host,
+      int opener_frame_routing_id,
+      int proxy_routing_id,
+      const FrameReplicationState& replicated_frame_state,
+      bool for_main_frame) override;
   void UpdateRenderViewSizeForRenderManager() override {}
 
   // Returns a clone of this TestWebContents. The returned object is also a
@@ -77,7 +86,8 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
     delegate_view_override_ = view;
   }
 
-  // Allows us to simulate this tab having an opener.
+  // Allows us to simulate this tab's main frame having an opener that points
+  // to the main frame of the |opener|.
   void SetOpener(TestWebContents* opener);
 
   // Allows us to simulate that a contents was created via CreateNewWindow.
@@ -97,7 +107,8 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   void TestDidFinishLoad(const GURL& url);
   void TestDidFailLoadWithError(const GURL& url,
                                 int error_code,
-                                const base::string16& error_description);
+                                const base::string16& error_description,
+                                bool was_ignored_by_handler);
 
  protected:
   // The deprecated WebContentsTester still needs to subclass this.
@@ -106,7 +117,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
  private:
   // WebContentsImpl overrides
   void CreateNewWindow(
-      int render_process_id,
+      SiteInstance* source_site_instance,
       int route_id,
       int main_frame_route_id,
       const ViewHostMsg_CreateWindow_Params& params,

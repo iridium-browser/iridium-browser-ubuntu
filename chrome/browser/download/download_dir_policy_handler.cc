@@ -11,6 +11,7 @@
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "chrome/common/pref_names.h"
+#include "components/drive/drive_pref_names.h"
 #include "components/policy/core/browser/configuration_policy_handler_parameters.h"
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/policy/core/common/policy_map.h"
@@ -99,17 +100,15 @@ void DownloadDirPolicyHandler::ApplyPolicySettingsWithParameters(
   if (expanded_value.empty())
     expanded_value = DownloadPrefs::GetDefaultDownloadDirectory().value();
   prefs->SetValue(prefs::kDownloadDefaultDirectory,
-                  new base::StringValue(expanded_value));
+                  make_scoped_ptr(new base::StringValue(expanded_value)));
 
   // If the policy is mandatory, prompt for download should be disabled.
   // Otherwise, it would enable a user to bypass the mandatory policy.
   if (policies.Get(policy_name())->level == policy::POLICY_LEVEL_MANDATORY) {
-    prefs->SetValue(prefs::kPromptForDownload,
-                    new base::FundamentalValue(false));
+    prefs->SetBoolean(prefs::kPromptForDownload, false);
 #if defined(OS_CHROMEOS)
     if (download_to_drive) {
-      prefs->SetValue(prefs::kDisableDrive,
-                      new base::FundamentalValue(false));
+      prefs->SetBoolean(drive::prefs::kDisableDrive, false);
     }
 #endif
   }

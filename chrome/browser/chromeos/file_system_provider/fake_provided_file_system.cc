@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/file_system_provider/fake_provided_file_system.h"
 
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/thread_task_runner_handle.h"
 #include "net/base/io_buffer.h"
 
 namespace chromeos {
@@ -109,6 +109,22 @@ AbortCallback FakeProvidedFileSystem::GetMetadata(
       base::Bind(callback, base::Passed(&metadata), base::File::FILE_OK));
 }
 
+AbortCallback FakeProvidedFileSystem::GetActions(
+    const base::FilePath& entry_path,
+    const ProvidedFileSystemInterface::GetActionsCallback& callback) {
+  // TODO(mtomasz): Implement it once needed.
+  const std::vector<Action> actions;
+  return PostAbortableTask(base::Bind(callback, actions, base::File::FILE_OK));
+}
+
+AbortCallback FakeProvidedFileSystem::ExecuteAction(
+    const base::FilePath& entry_path,
+    const std::string& action_id,
+    const storage::AsyncFileUtil::StatusCallback& callback) {
+  // TODO(mtomasz): Implement it once needed.
+  return PostAbortableTask(base::Bind(callback, base::File::FILE_OK));
+}
+
 AbortCallback FakeProvidedFileSystem::ReadDirectory(
     const base::FilePath& directory_path,
     const storage::AsyncFileUtil::ReadDirectoryCallback& callback) {
@@ -208,11 +224,10 @@ AbortCallback FakeProvidedFileSystem::ReadFile(
     buffer->data()[current_offset - offset] = entry->contents[current_offset];
     const bool has_more =
         (current_offset + 1 < entry->metadata->size) && (current_length - 1);
-    const int task_id = tracker_.PostTask(
-        base::MessageLoopProxy::current().get(),
-        FROM_HERE,
-        base::Bind(
-            callback, 1 /* chunk_length */, has_more, base::File::FILE_OK));
+    const int task_id =
+        tracker_.PostTask(base::ThreadTaskRunnerHandle::Get().get(), FROM_HERE,
+                          base::Bind(callback, 1 /* chunk_length */, has_more,
+                                     base::File::FILE_OK));
     task_ids.push_back(task_id);
     current_offset++;
     current_length--;
@@ -392,7 +407,7 @@ FakeProvidedFileSystem::GetWeakPtr() {
 AbortCallback FakeProvidedFileSystem::PostAbortableTask(
     const base::Closure& callback) {
   const int task_id = tracker_.PostTask(
-      base::MessageLoopProxy::current().get(), FROM_HERE, callback);
+      base::ThreadTaskRunnerHandle::Get().get(), FROM_HERE, callback);
   return base::Bind(
       &FakeProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), task_id);
 }

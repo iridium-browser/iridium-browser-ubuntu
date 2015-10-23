@@ -10,11 +10,11 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
-#include "ui/ozone/platform/drm/drm_surface_factory.h"
 #include "ui/ozone/platform/drm/gpu/drm_buffer.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_generator.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_manager.h"
 #include "ui/ozone/platform/drm/gpu/drm_surface.h"
+#include "ui/ozone/platform/drm/gpu/drm_surface_factory.h"
 #include "ui/ozone/platform/drm/gpu/drm_window.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_controller.h"
 #include "ui/ozone/platform/drm/gpu/screen_manager.h"
@@ -35,7 +35,7 @@ const int kDefaultCursorSize = 64;
 std::vector<skia::RefPtr<SkSurface>> GetCursorBuffers(
     const scoped_refptr<ui::MockDrmDevice> drm) {
   std::vector<skia::RefPtr<SkSurface>> cursor_buffers;
-  for (const skia::RefPtr<SkSurface>& cursor_buffer : drm->buffers()) {
+  for (const auto& cursor_buffer : drm->buffers()) {
     if (cursor_buffer->width() == kDefaultCursorSize &&
         cursor_buffer->height() == kDefaultCursorSize) {
       cursor_buffers.push_back(cursor_buffer);
@@ -85,18 +85,18 @@ void DrmWindowTest::SetUp() {
 
   drm_device_manager_.reset(new ui::DrmDeviceManager(nullptr));
 
-  scoped_ptr<ui::DrmWindow> window_delegate(new ui::DrmWindow(
+  scoped_ptr<ui::DrmWindow> window(new ui::DrmWindow(
       kDefaultWidgetHandle, drm_device_manager_.get(), screen_manager_.get()));
-  window_delegate->Initialize();
-  window_delegate->OnBoundsChanged(
+  window->Initialize();
+  window->OnBoundsChanged(
       gfx::Rect(gfx::Size(kDefaultMode.hdisplay, kDefaultMode.vdisplay)));
-  screen_manager_->AddWindow(kDefaultWidgetHandle, window_delegate.Pass());
+  screen_manager_->AddWindow(kDefaultWidgetHandle, window.Pass());
 }
 
 void DrmWindowTest::TearDown() {
-  scoped_ptr<ui::DrmWindow> delegate =
+  scoped_ptr<ui::DrmWindow> window =
       screen_manager_->RemoveWindow(kDefaultWidgetHandle);
-  delegate->Shutdown();
+  window->Shutdown();
   message_loop_.reset();
 }
 

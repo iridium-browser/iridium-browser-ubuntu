@@ -121,11 +121,9 @@ bool IsUnRemovableDefaultApp(const std::string& id) {
 }
 
 void UninstallExtension(ExtensionService* service, const std::string& id) {
-  if (service && service->GetInstalledExtension(id)) {
-    service->UninstallExtension(id,
-                                extensions::UNINSTALL_REASON_SYNC,
-                                base::Bind(&base::DoNothing),
-                                NULL);
+  if (service) {
+    ExtensionService::UninstallExtensionHelper(
+        service, id, extensions::UNINSTALL_REASON_SYNC);
   }
 }
 
@@ -144,7 +142,8 @@ bool GetAppListItemType(AppListItem* item,
 }
 
 bool IsDriveAppSyncId(const std::string& sync_id) {
-  return StartsWithASCII(sync_id, kDriveAppSyncIdPrefix, true);
+  return base::StartsWith(sync_id, kDriveAppSyncIdPrefix,
+                          base::CompareCase::SENSITIVE);
 }
 
 std::string GetDriveAppSyncId(const std::string& drive_app_id) {

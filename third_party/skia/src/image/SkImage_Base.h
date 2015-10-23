@@ -11,14 +11,20 @@
 #include "SkImage.h"
 #include "SkSurface.h"
 
+#include <new>
+
+enum {
+    kNeedNewImageUniqueID = 0
+};
+
 static SkSurfaceProps copy_or_safe_defaults(const SkSurfaceProps* props) {
     return props ? *props : SkSurfaceProps(0, kUnknown_SkPixelGeometry);
 }
 
 class SkImage_Base : public SkImage {
 public:
-    SkImage_Base(int width, int height, const SkSurfaceProps* props)
-        : INHERITED(width, height)
+    SkImage_Base(int width, int height, uint32_t uniqueID, const SkSurfaceProps* props)
+        : INHERITED(width, height, uniqueID)
         , fProps(copy_or_safe_defaults(props))
     {}
 
@@ -46,7 +52,7 @@ public:
     virtual bool onReadPixels(const SkImageInfo& dstInfo, void* dstPixels, size_t dstRowBytes,
                               int srcX, int srcY) const;
     
-    virtual GrTexture* onGetTexture() const { return NULL; }
+    virtual GrTexture* getTexture() const { return NULL; }
 
     // return a read-only copy of the pixels. We promise to not modify them,
     // but only inspect them (or encode them).
@@ -54,11 +60,16 @@ public:
 
     virtual SkShader* onNewShader(SkShader::TileMode,
                                   SkShader::TileMode,
-                                  const SkMatrix* localMatrix) const { return NULL; };
+                                  const SkMatrix* localMatrix) const { return NULL; }
 
     // newWidth > 0, newHeight > 0, subset either NULL or a proper subset of this bounds
     virtual SkImage* onNewImage(int newWidth, int newHeight, const SkIRect* subset,
                                 SkFilterQuality) const;
+    virtual SkData* onRefEncoded() const { return NULL; }
+
+    virtual bool onAsLegacyBitmap(SkBitmap*, LegacyBitmapMode) const;
+
+    virtual bool onIsLazyGenerated() const { return false; }
 
 private:
     const SkSurfaceProps fProps;

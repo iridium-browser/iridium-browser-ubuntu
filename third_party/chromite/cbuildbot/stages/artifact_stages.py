@@ -15,13 +15,12 @@ import shutil
 
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import failures_lib
-from chromite.cbuildbot import cbuildbot_config
+from chromite.cbuildbot import config_lib
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import prebuilts
 from chromite.cbuildbot.stages import generic_stages
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
-from chromite.lib import dev_server_wrapper
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import path_util
@@ -205,6 +204,7 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
     #             \- ArchiveStandaloneArtifact
     #          \- ArchiveZipFiles
     #          \- ArchiveHWQual
+    #          \- ArchiveGceTarballs
     #       \- PushImage (blocks on BuildAndArchiveAllImages)
     #    \- ArchiveManifest
     #    \- ArchiveStrippedChrome
@@ -261,6 +261,28 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
       if config['upload_standalone_images']:
         parallel.RunTasksInProcessPool(ArchiveStandaloneArtifact,
                                        [[x] for x in self.artifacts])
+
+    def ArchiveGceTarballs():
+      """Creates .tar.gz files that can be converted to GCE images.
+
+      These files will be uploaded to GCS buckets, where they can be
+      used as input to the "gcloud compute images create" command.
+      This will convert them into images that can be used to create
+      GCE VM instances.
+      """
+      image_bins = []
+      if 'base' in config['images']:
+        image_bins.append(constants.IMAGE_TYPE_TO_NAME['base'])
+      if 'test' in config['images']:
+        image_bins.append(constants.IMAGE_TYPE_TO_NAME['test'])
+
+      for image_bin in image_bins:
+        if not os.path.exists(os.path.join(image_dir, image_bin)):
+          logging.warning('Missing image file skipped: %s', image_bin)
+          continue
+        output_file = commands.BuildGceTarball(
+            archive_path, image_dir, image_bin)
+        self._release_upload_queue.put([output_file])
 
     def ArchiveZipFiles():
       """Build and archive zip files.
@@ -326,10 +348,15 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
         self._recovery_image_status_queue.put(False)
 
       if config['images']:
-        parallel.RunParallelSteps([BuildAndArchiveFactoryImages,
-                                   ArchiveHWQual,
-                                   ArchiveStandaloneArtifacts,
-                                   ArchiveZipFiles])
+        steps = [
+            BuildAndArchiveFactoryImages,
+            ArchiveHWQual,
+            ArchiveStandaloneArtifacts,
+            ArchiveZipFiles,
+        ]
+        if config['upload_gce_images']:
+          steps.append(ArchiveGceTarballs)
+        parallel.RunParallelSteps(steps)
 
     def ArchiveImageScripts():
       """Archive tarball of generated image manipulation scripts."""
@@ -351,9 +378,9 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
       # TODO: When we support branches fully, the friendly name of the branch
       # needs to be used with PushImages
       sign_types = []
-      if config['name'].endswith('-%s' % cbuildbot_config.CONFIG_TYPE_FIRMWARE):
+      if config['name'].endswith('-%s' % config_lib.CONFIG_TYPE_FIRMWARE):
         sign_types += ['firmware']
-      if config['name'].endswith('-%s' % cbuildbot_config.CONFIG_TYPE_FACTORY):
+      if config['name'].endswith('-%s' % config_lib.CONFIG_TYPE_FACTORY):
         sign_types += ['factory']
       urls = commands.PushImages(
           board=board,
@@ -545,7 +572,7 @@ class MasterUploadPrebuiltsStage(generic_stages.BuilderStage):
 
     # Distributed builders that use manifest-versions to sync with one another
     # share prebuilt logic by passing around versions.
-    assert cbuildbot_config.IsPFQType(self._prebuilt_type)
+    assert config_lib.IsPFQType(self._prebuilt_type)
 
     # Public pfqs should upload host preflight prebuilts.
     public_args.append('--sync-host')
@@ -609,7 +636,7 @@ class UploadPrebuiltsStage(generic_stages.BoardSpecificBuilderStage):
 
     if self._run.config.git_sync:
       # Git sync should never be set for pfq type builds.
-      assert not cbuildbot_config.IsPFQType(self._prebuilt_type)
+      assert not config_lib.IsPFQType(self._prebuilt_type)
       generated_args.extend(['--git-sync'])
 
     return generated_args
@@ -658,7 +685,7 @@ class UploadPrebuiltsStage(generic_stages.BoardSpecificBuilderStage):
 
     # Distributed builders that use manifest-versions to sync with one another
     # share prebuilt logic by passing around versions.
-    if cbuildbot_config.IsPFQType(prebuilt_type):
+    if config_lib.IsPFQType(prebuilt_type):
       # Public pfqs should upload host preflight prebuilts.
       if prebuilt_type != constants.CHROME_PFQ_TYPE:
         public_args.append('--sync-host')
@@ -785,7 +812,7 @@ class UploadTestArtifactsStage(generic_stages.BoardSpecificBuilderStage,
         if t in self._run.config.images:
           payload_type = t
           break
-    image_name = dev_server_wrapper.IMAGE_TYPE_TO_NAME[payload_type]
+    image_name = constants.IMAGE_TYPE_TO_NAME[payload_type]
     logging.info('Generating payloads to upload for %s', image_name)
     self._GeneratePayloads(image_name, full=True, stateful=True)
     self.board_runattrs.SetParallel('payloads_generated', True)

@@ -9,13 +9,13 @@
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
-#include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+#include "components/sync_driver/profile_sync_components_factory.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/api/sync_error.h"
 #include "sync/api/syncable_service.h"
@@ -26,15 +26,19 @@ namespace browser_sync {
 
 AutofillWalletDataTypeController::AutofillWalletDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
-    Profile* profile)
+    Profile* profile,
+    syncer::ModelType model_type)
     : NonUIDataTypeController(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
           base::Bind(&ChromeReportUnrecoverableError),
           profile_sync_factory),
       profile_(profile),
       callback_registered_(false),
+      model_type_(model_type),
       currently_enabled_(IsEnabled()) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(model_type_ == syncer::AUTOFILL_WALLET_DATA ||
+         model_type_ == syncer::AUTOFILL_WALLET_METADATA);
   pref_registrar_.Init(profile->GetPrefs());
   pref_registrar_.Add(
       autofill::prefs::kAutofillWalletSyncExperimentEnabled,
@@ -50,7 +54,7 @@ AutofillWalletDataTypeController::~AutofillWalletDataTypeController() {
 }
 
 syncer::ModelType AutofillWalletDataTypeController::type() const {
-  return syncer::AUTOFILL_WALLET_DATA;
+  return model_type_;
 }
 
 syncer::ModelSafeGroup
@@ -81,7 +85,7 @@ bool AutofillWalletDataTypeController::StartModels() {
 
   if (!callback_registered_) {
      web_data_service->RegisterDBLoadedCallback(base::Bind(
-          &AutofillWalletDataTypeController::WebDatabaseLoaded, this));
+          &AutofillWalletDataTypeController::OnModelLoaded, this));
      callback_registered_ = true;
   }
 
@@ -101,11 +105,11 @@ void AutofillWalletDataTypeController::StopModels() {
       ProfileSyncServiceFactory::GetForProfile(profile_);
 
   // HasSyncSetupCompleted indicates if sync is currently enabled at all. The
-  // preferred data type indicates if wallet sync is enabled, and
+  // preferred data type indicates if wallet sync data/metadata is enabled, and
   // currently_enabled_ indicates if the other prefs are enabled. All of these
-  // have to be enabled to sync wallet cards.
+  // have to be enabled to sync wallet data/metadata.
   if (!service->HasSyncSetupCompleted() ||
-      !service->GetPreferredDataTypes().Has(syncer::AUTOFILL_WALLET_DATA) ||
+      !service->GetPreferredDataTypes().Has(type()) ||
       !currently_enabled_) {
     autofill::PersonalDataManager* pdm =
         autofill::PersonalDataManagerFactory::GetForProfile(profile_);
@@ -117,10 +121,6 @@ void AutofillWalletDataTypeController::StopModels() {
 bool AutofillWalletDataTypeController::ReadyForStart() const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return currently_enabled_;
-}
-
-void AutofillWalletDataTypeController::WebDatabaseLoaded() {
-  OnModelLoaded();
 }
 
 void AutofillWalletDataTypeController::OnSyncPrefChanged() {
@@ -140,15 +140,15 @@ void AutofillWalletDataTypeController::OnSyncPrefChanged() {
   } else {
     // Post a task to the backend thread to stop the datatype.
     if (state() != NOT_RUNNING && state() != STOPPING) {
-      syncer::SyncError error(FROM_HERE,
-                              syncer::SyncError::DATATYPE_POLICY_ERROR,
-                              "Wallet syncing is disabled by policy.",
-                              syncer::AUTOFILL_WALLET_DATA);
       PostTaskOnBackendThread(
           FROM_HERE,
           base::Bind(&DataTypeController::OnSingleDataTypeUnrecoverableError,
                      this,
-                     error));
+                     syncer::SyncError(
+                         FROM_HERE,
+                         syncer::SyncError::DATATYPE_POLICY_ERROR,
+                         "Wallet syncing is disabled by policy.",
+                         type())));
     }
   }
 }
@@ -157,7 +157,7 @@ bool AutofillWalletDataTypeController::IsEnabled() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Require both the sync experiment and the user-visible pref to be
-  // enabled to sync Wallet data.
+  // enabled to sync Wallet data/metadata.
   PrefService* ps = profile_->GetPrefs();
   return
       ps->GetBoolean(autofill::prefs::kAutofillWalletSyncExperimentEnabled) &&

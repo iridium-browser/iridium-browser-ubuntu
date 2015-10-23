@@ -38,82 +38,13 @@
 
 namespace syncer {
 
-using syncable::BASE_SERVER_SPECIFICS;
-using syncable::BASE_VERSION;
 using syncable::CHANGES_VERSION;
-using syncable::CREATE_NEW_UPDATE_ITEM;
-using syncable::CTIME;
 using syncable::Directory;
 using syncable::Entry;
 using syncable::GET_BY_HANDLE;
 using syncable::GET_BY_ID;
 using syncable::ID;
-using syncable::IS_DEL;
-using syncable::IS_DIR;
-using syncable::IS_UNAPPLIED_UPDATE;
-using syncable::IS_UNSYNCED;
 using syncable::Id;
-using syncable::META_HANDLE;
-using syncable::MTIME;
-using syncable::MutableEntry;
-using syncable::NON_UNIQUE_NAME;
-using syncable::PARENT_ID;
-using syncable::SERVER_CTIME;
-using syncable::SERVER_IS_DEL;
-using syncable::SERVER_IS_DIR;
-using syncable::SERVER_MTIME;
-using syncable::SERVER_NON_UNIQUE_NAME;
-using syncable::SERVER_PARENT_ID;
-using syncable::SERVER_SPECIFICS;
-using syncable::SERVER_UNIQUE_POSITION;
-using syncable::SERVER_VERSION;
-using syncable::SPECIFICS;
-using syncable::SYNCER;
-using syncable::UNIQUE_BOOKMARK_TAG;
-using syncable::UNIQUE_CLIENT_TAG;
-using syncable::UNIQUE_POSITION;
-using syncable::UNIQUE_SERVER_TAG;
-using syncable::WriteTransaction;
-
-// TODO (stanisc): crbug.com/362467: remove this function once
-// issue 362467 is fixed.
-// Validates that the local ID picked by FindLocalIdToUpdate doesn't
-// conflict with already existing item with update_id.
-void VerifyLocalIdToUpdate(syncable::BaseTransaction* trans,
-                           const syncable::Id& local_id,
-                           const syncable::Id& update_id,
-                           bool local_deleted,
-                           bool deleted_in_update) {
-  if (local_id == update_id) {
-    // ID matches, everything is good.
-    return;
-  }
-
-  // If the ID doesn't match, it means that an entry with |local_id| has been
-  // picked and an entry with |update_id| isn't supposed to exist.
-  syncable::Entry update_entry(trans, GET_BY_ID, update_id);
-  if (!update_entry.good())
-    return;
-
-  // Fail early so that the crash dump indicates which of the cases below
-  // has triggered the issue.
-  // Crash dumps don't always preserve data. The 2 separate cases below are
-  // to make it easy to see the the state of item with |update_id| in the
-  // crash dump.
-  if (update_entry.GetIsDel()) {
-    LOG(FATAL) << "VerifyLocalIdToUpdate: existing deleted entry " << update_id
-               << " conflicts with local entry " << local_id
-               << " picked by an update.\n"
-               << "Local item deleted: " << local_deleted
-               << ", deleted flag in update: " << deleted_in_update;
-  } else {
-    LOG(FATAL) << "VerifyLocalIdToUpdate: existing entry " << update_id
-               << " conflicts with local entry " << local_id
-               << " picked by an update.\n"
-               << "Local item deleted: " << local_deleted
-               << ", deleted flag in update: " << deleted_in_update;
-  }
-}
 
 syncable::Id FindLocalIdToUpdate(
     syncable::BaseTransaction* trans,
@@ -167,8 +98,6 @@ syncable::Id FindLocalIdToUpdate(
         // Target this change to the existing local entry; later,
         // we'll change the ID of the local entry to update_id
         // if needed.
-        VerifyLocalIdToUpdate(trans, local_entry.GetId(), update_id,
-                              local_entry.GetIsDel(), update.deleted());
         return local_entry.GetId();
       } else {
         // Case 3: We have a local entry with the same client tag.
@@ -178,8 +107,6 @@ syncable::Id FindLocalIdToUpdate(
         // update will now be applied to local_entry.
         DCHECK(0 == local_entry.GetBaseVersion() ||
                CHANGES_VERSION == local_entry.GetBaseVersion());
-        VerifyLocalIdToUpdate(trans, local_entry.GetId(), update_id,
-                              local_entry.GetIsDel(), update.deleted());
         return local_entry.GetId();
       }
     }
@@ -226,8 +153,6 @@ syncable::Id FindLocalIdToUpdate(
                << update_id << " local id: " << local_entry.GetId()
                << " new version: " << new_version;
 
-      VerifyLocalIdToUpdate(trans, local_entry.GetId(), update_id,
-                            local_entry.GetIsDel(), update.deleted());
       return local_entry.GetId();
     }
   } else if (update.has_server_defined_unique_tag() &&
@@ -243,8 +168,6 @@ syncable::Id FindLocalIdToUpdate(
                                 update.server_defined_unique_tag());
     if (local_entry.good() && !local_entry.GetId().ServerKnows()) {
       DCHECK(local_entry.GetId() != update_id);
-      VerifyLocalIdToUpdate(trans, local_entry.GetId(), update_id,
-                            local_entry.GetIsDel(), update.deleted());
       return local_entry.GetId();
     }
   }
@@ -435,6 +358,8 @@ void UpdateServerFieldsFromUpdate(
       // the version number check has a similar effect.
       return;
     }
+    // Mark entry as unapplied update first to ensure journaling the deletion.
+    target->PutIsUnappliedUpdate(true);
     // The server returns very lightweight replies for deletions, so we don't
     // clobber a bunch of fields on delete.
     target->PutServerIsDel(true);
@@ -447,13 +372,16 @@ void UpdateServerFieldsFromUpdate(
       target->PutServerVersion(
           std::max(target->GetServerVersion(), target->GetBaseVersion()) + 1);
     }
-    target->PutIsUnappliedUpdate(true);
     return;
   }
 
   DCHECK_EQ(target->GetId(), SyncableIdFromProto(update.id_string()))
       << "ID Changing not supported here";
-  target->PutServerParentId(SyncableIdFromProto(update.parent_id_string()));
+  if (SyncerProtoUtil::ShouldMaintainHierarchy(update)) {
+    target->PutServerParentId(SyncableIdFromProto(update.parent_id_string()));
+  } else {
+    target->PutServerParentId(syncable::Id());
+  }
   target->PutServerNonUniqueName(name);
   target->PutServerVersion(update.version());
   target->PutServerCtime(ProtoTimeToTime(update.ctime()));
@@ -486,13 +414,14 @@ void UpdateServerFieldsFromUpdate(
     UpdateBookmarkPositioning(update, target);
   }
 
-  target->PutServerIsDel(update.deleted());
   // We only mark the entry as unapplied if its version is greater than the
   // local data. If we're processing the update that corresponds to one of our
   // commit we don't apply it as time differences may occur.
   if (update.version() > target->GetBaseVersion()) {
     target->PutIsUnappliedUpdate(true);
   }
+  DCHECK(!update.deleted());
+  target->PutServerIsDel(false);
 }
 
 // Creates a new Entry iff no Entry exists with the given id.

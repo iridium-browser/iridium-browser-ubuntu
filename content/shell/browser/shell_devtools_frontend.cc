@@ -111,7 +111,7 @@ ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
       ShellContentBrowserClient::Get()
           ->shell_browser_main_parts()
           ->devtools_http_handler();
-  shell->LoadURL(http_handler->GetFrontendURL("/devtools/devtools.html"));
+  shell->LoadURL(http_handler->GetFrontendURL("/devtools/inspector.html"));
 
   return devtools_frontend;
 }
@@ -179,7 +179,7 @@ void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontend(
   std::string method;
   base::ListValue* params = NULL;
   base::DictionaryValue* dict = NULL;
-  scoped_ptr<base::Value> parsed_message(base::JSONReader::Read(message));
+  scoped_ptr<base::Value> parsed_message = base::JSONReader::Read(message);
   if (!parsed_message ||
       !parsed_message->GetAsDictionary(&dict) ||
       !dict->GetString("method", &method)) {
@@ -194,7 +194,7 @@ void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontend(
       params->GetSize() == 1 && params->GetString(0, &browser_message)) {
     agent_host_->DispatchProtocolMessage(browser_message);
   } else if (method == "loadCompleted") {
-    web_contents()->GetMainFrame()->ExecuteJavaScript(
+    web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
         base::ASCIIToUTF16("DevToolsAPI.setUseSoftMenu(true);"));
   } else if (method == "loadNetworkResource" && params->GetSize() == 3) {
     // TODO(pfeldman): handle some of the embedder messages in content.
@@ -261,18 +261,18 @@ void ShellDevToolsFrontend::DispatchProtocolMessage(
   if (message.length() < kMaxMessageChunkSize) {
     base::string16 javascript = base::UTF8ToUTF16(
         "DevToolsAPI.dispatchMessage(" + message + ");");
-    web_contents()->GetMainFrame()->ExecuteJavaScript(javascript);
+    web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(javascript);
     return;
   }
 
   base::FundamentalValue total_size(static_cast<int>(message.length()));
   for (size_t pos = 0; pos < message.length(); pos += kMaxMessageChunkSize) {
-    base::StringValue message_value(message.substr(pos, kMaxMessageChunkSize));
     std::string param;
-    base::JSONWriter::Write(&message_value, &param);
+    base::JSONWriter::Write(
+        base::StringValue(message.substr(pos, kMaxMessageChunkSize)), &param);
     std::string code = "DevToolsAPI.dispatchMessageChunk(" + param + ");";
     base::string16 javascript = base::UTF8ToUTF16(code);
-    web_contents()->GetMainFrame()->ExecuteJavaScript(javascript);
+    web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(javascript);
   }
 }
 
@@ -308,19 +308,19 @@ void ShellDevToolsFrontend::CallClientFunction(
   std::string javascript = function_name + "(";
   if (arg1) {
     std::string json;
-    base::JSONWriter::Write(arg1, &json);
+    base::JSONWriter::Write(*arg1, &json);
     javascript.append(json);
     if (arg2) {
-      base::JSONWriter::Write(arg2, &json);
+      base::JSONWriter::Write(*arg2, &json);
       javascript.append(", ").append(json);
       if (arg3) {
-        base::JSONWriter::Write(arg3, &json);
+        base::JSONWriter::Write(*arg3, &json);
         javascript.append(", ").append(json);
       }
     }
   }
   javascript.append(");");
-  web_contents()->GetMainFrame()->ExecuteJavaScript(
+  web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
       base::UTF8ToUTF16(javascript));
 }
 

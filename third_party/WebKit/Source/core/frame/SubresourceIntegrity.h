@@ -27,6 +27,7 @@ public:
     };
 
     static bool CheckSubresourceIntegrity(const Element&, const WTF::String& content, const KURL& resourceUrl, const Resource&);
+    static bool CheckSubresourceIntegrity(const String&, const WTF::String& content, const KURL& resourceUrl, Document&, WTF::String&);
 
 private:
     // FIXME: After the merge with the Chromium repo, this should be refactored
@@ -34,6 +35,7 @@ private:
     friend class SubresourceIntegrityTest;
     friend class SubresourceIntegrityTest_Parsing_Test;
     friend class SubresourceIntegrityTest_ParseAlgorithm_Test;
+    friend class SubresourceIntegrityTest_Prioritization_Test;
 
     enum AlgorithmParseResult {
         AlgorithmValid,
@@ -46,6 +48,7 @@ private:
         HashAlgorithm algorithm;
     };
 
+    static HashAlgorithm getPrioritizedHashFunction(HashAlgorithm, HashAlgorithm);
     static AlgorithmParseResult parseAlgorithm(const UChar*& begin, const UChar* end, HashAlgorithm&);
     static bool parseDigest(const UChar*& begin, const UChar* end, String& digest);
 

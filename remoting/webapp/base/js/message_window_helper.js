@@ -66,7 +66,7 @@ remoting.MessageWindow = function(options) {
   var onTimeout = options.onTimeout;
 
   /** @type {number} */
-  this.id_ = remoting.MessageWindowManager.addMessageWindow(this);
+  this.id_ = remoting.messageWindowManager.addMessageWindow(this);
 
   /** @type {?function(number):void} */
   this.onResult_ = onResult;
@@ -100,7 +100,9 @@ remoting.MessageWindow = function(options) {
   var windowAttributes = {
     bounds: {
       width: options.minimumWidth || 400,
-      height: 100
+      height: 100,
+      top: undefined,
+      left: undefined
     },
     resizable: false,
     frame: options.frame || 'chrome'
@@ -109,7 +111,7 @@ remoting.MessageWindow = function(options) {
   /** @type {remoting.MessageWindow} */
   var that = this;
 
-  /** @param {AppWindow} appWindow */
+  /** @param {chrome.app.window.AppWindow} appWindow */
   var onCreate = function(appWindow) {
     that.setWindow_(/** @type {Window} */(appWindow.contentWindow));
     var onLoad = function() {
@@ -119,13 +121,24 @@ remoting.MessageWindow = function(options) {
   };
 
   var htmlFile = options.htmlFile || 'message_window.html';
-  chrome.app.window.create(htmlFile, windowAttributes, onCreate);
+  chrome.app.window.create(
+      remoting.MessageWindow.htmlFilePrefix + htmlFile,
+      windowAttributes, onCreate);
 
   if (duration != 0) {
     this.timer_ = window.setTimeout(this.onTimeoutHandler_.bind(this),
                                     duration);
   }
 };
+
+/**
+ * This string is prepended to the htmlFile when message windows are created.
+ * Normally, this should be left empty, but the shared module needs to specify
+ * this so that the shared HTML files can be found when running in the
+ * context of the app stub.
+ * @type {string}
+ */
+remoting.MessageWindow.htmlFilePrefix = "";
 
 /**
  * Called when the timer runs out. This in turn calls the window's
@@ -174,7 +187,7 @@ remoting.MessageWindow.prototype.close = function() {
   // Unregister the window with the window manager.
   // After this call, events sent to this window will no longer trigger the
   // onResult callback.
-  remoting.MessageWindowManager.deleteMessageWindow(this.id_);
+  remoting.messageWindowManager.deleteMessageWindow(this.id_);
   this.window_.close();
   this.window_ = null;
 };
@@ -197,7 +210,7 @@ remoting.MessageWindow.prototype.handleResult = function(result) {
  * @private
  */
 remoting.MessageWindow.prototype.setWindow_ = function(window) {
-  base.debug.assert(this.window_ == null);
+  console.assert(this.window_ == null, 'Duplicate call to setWindow_().');
   this.window_ = window;
   for (var i = 0; i < this.pendingWindowOperations_.length; ++i) {
     var pendingOperation = this.pendingWindowOperations_[i];
@@ -274,6 +287,6 @@ remoting.MessageWindow.showErrorMessage = function(title, message) {
  * @param {number} result The dialog result.
  */
 remoting.MessageWindow.quitApp = function(result) {
-  remoting.MessageWindowManager.closeAllMessageWindows();
+  remoting.messageWindowManager.closeAllMessageWindows();
   window.close();
 };

@@ -184,9 +184,27 @@ def RunCommandWithRetries(max_retry, *args, **kwargs):
   return RetryCommand(cros_build_lib.RunCommand, max_retry, *args, **kwargs)
 
 
-def RunCurl(args, **kwargs):
-  """Runs curl and wraps around all necessary hacks."""
+class DownloadError(Exception):
+  """Fetching file via curl failed"""
+
+
+def RunCurl(args, fail=True, **kwargs):
+  """Runs curl and wraps around all necessary hacks.
+
+  Args:
+    args: Command line to pass to curl.
+    fail: Whether to use --fail w/curl.
+    **kwargs: See RunCommandWithRetries and RunCommand.
+
+  Returns:
+    A CommandResult object.
+
+  Raises:
+    DownloadError: Whenever curl fails for any reason.
+  """
   cmd = ['curl']
+  if fail:
+    cmd.append('--fail')
   cmd.extend(args)
 
   # These values were discerned via scraping the curl manpage; they're all
@@ -216,21 +234,23 @@ def RunCurl(args, **kwargs):
       # We'll let the common exit code filter do the right thing.
       return None
 
-  kwargs.update({
+  args = {
       'retry_on': retriable_exits,
       'error_check': _CheckExit,
       'capture_output': True,
-  })
+  }
+  args.update(kwargs)
   try:
-    return RunCommandWithRetries(5, cmd, sleep=3, **kwargs)
+    return RunCommandWithRetries(5, cmd, sleep=3, **args)
   except cros_build_lib.RunCommandError as e:
     code = e.result.returncode
     if code in (51, 58, 60):
       # These are the return codes of failing certs as per 'man curl'.
-      msg = 'Download failed with certificate error? Try "sudo c_rehash".'
-      cros_build_lib.Die(msg)
+      raise DownloadError(
+          'Download failed with certificate error? Try "sudo c_rehash".')
     else:
       try:
         return RunCommandWithRetries(5, cmd, sleep=60, **kwargs)
       except cros_build_lib.RunCommandError as e:
-        cros_build_lib.Die("Curl failed w/ exit code %i", code)
+        raise DownloadError('Curl failed w/ exit code %i: %s' %
+                            (e.result.returncode, e.result.error))

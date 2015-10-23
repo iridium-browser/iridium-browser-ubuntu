@@ -18,7 +18,7 @@
 
 /**
  * @type {?{
- *   filter: !Object.<string, *>,
+ *   filter: !Object<*>,
  *   webstoreUrl: ?string
  * }}
  */
@@ -53,8 +53,7 @@ function getString(id) {
 }
 
 /**
- * @param {Object.<string, string>} strings Localized strings used by the
- *     container.
+ * @param {Object<string>} strings Localized strings used by the container.
  * @return {!CWSWidgetContainer.PlatformDelegate}
  */
 function createPlatformDelegate(strings) {
@@ -62,25 +61,57 @@ function createPlatformDelegate(strings) {
     strings: {
       UI_LOCALE: getString('language'),
       LINK_TO_WEBSTORE: getString('LINK_TO_WEBSTORE'),
-      INSTALLATION_FAILED_MESSAGE: getString('INSTALLATION_FAILED_MESSAGE')
+      INSTALLATION_FAILED_MESSAGE: getString('INSTALLATION_FAILED_MESSAGE'),
+      LOADING_SPINNER_ALT: getString('LOADING_SPINNER_ALT'),
+      INSTALLING_SPINNER_ALT: getString('INSTALLING_SPINNER_ALT')
     },
 
     metricsImpl: {
+      /**
+       * Map from interval name to interval start timestamp.
+       * @type {Object<string, Date>}
+       */
+      intervals: {},
+
       /**
        * @param {string} enumName
        * @param {number} value
        * @param {number} enumSize
        */
-      recordEnum: function(enumName, value, enumSize) {},
+      recordEnum: function(enumName, value, enumSize) {
+        var index = (value >= 0 && value < enumSize) ? value : enumSize;
+        chrome.metricsPrivate.recordValue({
+          'metricName': 'WebstoreWidgetApp.' + enumName,
+          'type': 'histogram-linear',
+          'min': 1,
+          'max': enumSize,
+          'buckets': enumSize + 1
+        }, index);
+      },
 
       /** @param {string} actionName */
-      recordUserAction: function(actionName) {},
+      recordUserAction: function(actionName) {
+        chrome.metricsPrivate.recordUserAction(
+            'WebstoreWidgetApp.' + actionName);
+      },
 
       /** @param {string} intervalName */
-      startInterval: function(intervalName) {},
+      startInterval: function(intervalName) {
+        this.intervals[intervalName] = Date.now();
+      },
 
       /** @param {string} intervalName */
-      recordInterval: function(intervalName) {}
+      recordInterval: function(intervalName) {
+        if (!intervalName in this.intervals) {
+          console.error('Interval \'' + intervalName + '\' not started');
+          return;
+        }
+
+       chrome.metricsPrivate.recordTime(
+           'WebstoreWidgetApp.' + intervalName,
+           Date.now() - this.intervals[intervalName]);
+        delete this.intervals[intervalName];
+      }
     },
 
     /**
@@ -98,7 +129,7 @@ function createPlatformDelegate(strings) {
           });
     },
 
-    /** @param {function(Array.<string>)} callback */
+    /** @param {function(Array<string>)} callback */
     getInstalledItems: function(callback) { callback([]); },
 
     /**

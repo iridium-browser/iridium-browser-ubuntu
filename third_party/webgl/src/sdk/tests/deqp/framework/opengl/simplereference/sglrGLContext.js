@@ -20,19 +20,19 @@
 
 'use strict';
 goog.provide('framework.opengl.simplereference.sglrGLContext');
-goog.require('framework.common.tcuTexture');
-goog.require('framework.delibs.debase.deUtil');
-goog.require('framework.delibs.debase.deMath');
-goog.require('framework.common.tcuTextureUtil');
 goog.require('framework.common.tcuPixelFormat');
+goog.require('framework.common.tcuTexture');
+goog.require('framework.common.tcuTextureUtil');
+goog.require('framework.delibs.debase.deMath');
+goog.require('framework.delibs.debase.deUtil');
 goog.require('framework.opengl.gluShaderProgram');
 goog.require('framework.opengl.gluShaderUtil');
 goog.require('framework.opengl.gluTextureUtil');
 goog.require('framework.opengl.simplereference.sglrShaderProgram');
 goog.require('framework.referencerenderer.rrDefs');
 goog.require('framework.referencerenderer.rrMultisamplePixelBufferAccess');
-goog.require('framework.referencerenderer.rrRenderer');
 goog.require('framework.referencerenderer.rrRenderState');
+goog.require('framework.referencerenderer.rrRenderer');
 goog.require('framework.referencerenderer.rrVertexAttrib');
 
 goog.scope(function() {
@@ -53,15 +53,6 @@ goog.scope(function() {
     var rrRenderState = framework.referencerenderer.rrRenderState;
     var rrVertexAttrib = framework.referencerenderer.rrVertexAttrib;
 
-    sglrGLContext.DE_NULL = null;
-
-    sglrGLContext.GLU_EXPECT_NO_ERROR = function(error, message) {
-        if (error !== gl.NONE) {
-            console.log('Assertion failed message:' + message);
-            // throw new Error(message);
-        }
-    };
-
     var DE_ASSERT = function(x) {
         if (!x)
             throw new Error('Assert failed');
@@ -70,100 +61,132 @@ goog.scope(function() {
     /**
      * sglrGLContext.GLContext wraps the standard WebGL context to be able to be used interchangeably with the ReferenceContext
      * @constructor
-     * @param {WebGL2RenderingContext} context
+     * @extends {WebGL2RenderingContext}
+     * @param {?WebGL2RenderingContext} context
+     * @param {Array<number>=} viewport
      */
-    sglrGLContext.GLContext = function(context) {
-        this.m_context = context;
-        this.m_programs = [];
-        this.m_allocatedVaos = [];
+    sglrGLContext.GLContext = function(context, viewport) {
+        DE_ASSERT(context);
 
-        // Copy all properties from the context.
+        var functionwrapper = function(context, fname) {
+            return function() {
+                return context[fname].apply(context, arguments);
+            };
+        };
 
-        var prototypes = [];
-        var prototype = Object.getPrototypeOf(this.m_context);
-
-        //Traverse all the prototype hierarchy of the context object.
-        while (prototype && prototype !== Object.prototype) {
-            prototypes.push(prototype);
-            prototype = Object.getPrototypeOf(prototype);
-        }
-
-        for (prototype in prototypes) {
-            var keys = Object.keys(prototypes[prototype]);
-            for(var key in keys) {
-                var name = keys[key];
-
-                var exists = false;
-                var selfkeys = Object.keys(sglrGLContext.GLContext.prototype);
-                for(var selfkey in selfkeys) {
-                    var selfname = selfkeys[selfkey];
-
-                    if(selfname == name) {
-                        exists = true;
-                        break;
-                    }
-                }
-
-                if (!exists) {
-                    Object.getPrototypeOf(this)[name] = (
-                        function(originalobject, originalfunction) {
-                            return function() {
-                                return originalfunction.apply(originalobject, arguments);
-                            };
-                        }
-                    )(this.m_context, this.m_context[name]);
-                }
+        var wrap = {};
+        for (var i in context) {
+            try {
+              if (typeof context[i] == 'function') {
+                wrap[i] = functionwrapper(context, i);
+              } else {
+                wrap[i] = context[i];
+              }
+            } catch (e) {
+              throw new Error('GLContext: Error accessing ' + i);
             }
         }
+        if (viewport)
+            context.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+
+        /**
+         * createProgram
+         * @override
+         * @param {sglrShaderProgram.ShaderProgram=} shader
+         * @return {!WebGLProgram}
+         */
+        this.createProgram = function(shader) {
+            var program = new gluShaderProgram.ShaderProgram(
+                    context,
+                    gluShaderProgram.makeVtxFragSources(
+                        shader.m_vertSrc,
+                        shader.m_fragSrc
+                    )
+                );
+
+            if (!program.isOk()) {
+                bufferedLogToConsole(program.toString());
+                testFailedOptions('Compile failed', true);
+            }
+            return program.getProgram();
+        };
+        wrap['createProgram'] = this.createProgram;
+
+        /**
+         * Draws quads from vertex arrays
+         * @param {number} primitive Primitive type
+         * @param {number} first First vertex to begin drawing with
+         * @param {number} count Number of vertices
+         */
+        var drawQuads = function(primitive, first, count) {
+            context.drawArrays(primitive, first, count);
+        };
+        wrap['drawQuads'] = drawQuads;
+
+        /**
+         * @return {number}
+         */
+        var getWidth = function() {
+            return context.getParameter(gl.VIEWPORT)[2];
+        };
+        wrap['getWidth'] = getWidth;
+
+        /**
+         * @return {number}
+         */
+        var getHeight = function() {
+            return context.getParameter(gl.VIEWPORT)[3];
+        };
+        wrap['getHeight'] = getHeight;
+
+        /**
+         * @param {number} x
+         * @param {number} y
+         * @param {number} width
+         * @param {number} height
+         * @param {number} format
+         * @param {number} dataType
+         * @param {ArrayBuffer|ArrayBufferView} data
+         */
+        var readPixels = function(x, y, width, height, format, dataType, data) {
+            /** @type {?ArrayBufferView} */ var dataArr;
+            if (!ArrayBuffer.isView(data)) {
+                var type = gluTextureUtil.mapGLChannelType(dataType, true);
+                var dataArrType = tcuTexture.getTypedArray(type);
+                dataArr = new dataArrType(data);
+            } else {
+                dataArr = /** @type {?ArrayBufferView} */ (data);
+            }
+
+            context.readPixels(x, y, width, height, format, dataType, dataArr);
+        };
+        wrap['readPixels'] = readPixels;
+
+        return wrap;
     };
 
     /**
-     * createProgram
-     * @param {sglrShaderProgram.ShaderProgram} shader
-     * @return {WebGLProgram}
+     * createProgram - This had to be added here as dummy to remove a warning when the only context used is GLContext (no reference context)
+     * @override
+     * @param {sglrShaderProgram.ShaderProgram=} shader
+     * @return {!WebGLProgram}
      */
-    sglrGLContext.GLContext.prototype.createProgram = function(shader) {
-        /** @type {gluShaderProgram.ShaderProgram} */ var program = null;
+    sglrGLContext.GLContext.prototype.createProgram = function(shader) {return this.createProgram();};
 
-        program = new gluShaderProgram.ShaderProgram(
-            this.m_context,
-            gluShaderProgram.makeVtxFragSources(
-                shader.m_vertSrc,
-                shader.m_fragSrc
-            )
-        );
-
-        if (!program.isOk()) {
-            bufferedLogToConsole(program.toString());
-            testFailedOptions("Compile failed", true);
+    /**
+    * @param ctx GL-like context
+    * @param {string} name
+    * @return {boolean}
+    */
+    sglrGLContext.isExtensionSupported = function(ctx, name) {
+        var extns = ctx.getSupportedExtensions();
+        var found = false;
+        if (extns) {
+            var index = extns.indexOf(name);
+            if (index != -1)
+                found = true;
         }
-
-        return program.getProgram();
-    };
-
-    /**
-     * createVertexArray - Creates a new vertex array object, stores it and returns the added array object.
-     * @return {number} ID of created VAO
-     */
-    sglrGLContext.GLContext.prototype.createVertexArray = function() {
-        var currentlength = this.m_allocatedVaos.length;
-
-        var createdArray = this.m_context.createVertexArray();
-        deUtil.dePushUniqueToArray(
-            this.m_allocatedVaos,
-            createdArray
-        );
-
-        return this.m_allocatedVaos[currentlength];
-    };
-
-    /**
-     * Draws quads from vertex arrays
-     * @param {number} first First vertex to begin drawing with
-     * @param {number} count How many quads to draw (array should provide first + (count * 4) vertices at least)
-     */
-    sglrGLContext.GLContext.prototype.drawQuads = function (first, count) {
-        this.m_context.drawArrays(gl.TRIANGLES, first, (count * 6) - first);
+        return found;
     };
 
 });

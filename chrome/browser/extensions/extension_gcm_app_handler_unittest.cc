@@ -15,6 +15,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -132,13 +133,14 @@ class FakeExtensionGCMAppHandler : public ExtensionGCMAppHandler {
       : ExtensionGCMAppHandler(profile),
         waiter_(waiter),
         unregistration_result_(gcm::GCMClient::UNKNOWN_ERROR),
+        delete_id_result_(instance_id::InstanceID::UNKNOWN_ERROR),
         app_handler_count_drop_to_zero_(false) {
   }
 
   ~FakeExtensionGCMAppHandler() override {}
 
   void OnMessage(const std::string& app_id,
-                 const gcm::GCMClient::IncomingMessage& message) override {}
+                 const gcm::IncomingMessage& message) override {}
 
   void OnMessagesDeleted(const std::string& app_id) override {}
 
@@ -153,6 +155,12 @@ class FakeExtensionGCMAppHandler : public ExtensionGCMAppHandler {
     waiter_->SignalCompleted();
   }
 
+  void OnDeleteIDCompleted(const std::string& app_id,
+                           instance_id::InstanceID::Result result) override {
+    delete_id_result_ = result;
+    ExtensionGCMAppHandler::OnDeleteIDCompleted(app_id, result);
+  }
+
   void RemoveAppHandler(const std::string& app_id) override {
     ExtensionGCMAppHandler::RemoveAppHandler(app_id);
     if (!GetGCMDriver()->app_handlers().size())
@@ -162,6 +170,9 @@ class FakeExtensionGCMAppHandler : public ExtensionGCMAppHandler {
   gcm::GCMClient::Result unregistration_result() const {
     return unregistration_result_;
   }
+  instance_id::InstanceID::Result delete_id_result() const {
+    return delete_id_result_;
+  }
   bool app_handler_count_drop_to_zero() const {
     return app_handler_count_drop_to_zero_;
   }
@@ -169,6 +180,7 @@ class FakeExtensionGCMAppHandler : public ExtensionGCMAppHandler {
  private:
   Waiter* waiter_;
   gcm::GCMClient::Result unregistration_result_;
+  instance_id::InstanceID::Result delete_id_result_;
   bool app_handler_count_drop_to_zero_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeExtensionGCMAppHandler);
@@ -176,15 +188,15 @@ class FakeExtensionGCMAppHandler : public ExtensionGCMAppHandler {
 
 class ExtensionGCMAppHandlerTest : public testing::Test {
  public:
-  static KeyedService* BuildGCMProfileService(
+  static scoped_ptr<KeyedService> BuildGCMProfileService(
       content::BrowserContext* context) {
-    return new gcm::GCMProfileService(
+    return make_scoped_ptr(new gcm::GCMProfileService(
         Profile::FromBrowserContext(context),
         scoped_ptr<gcm::GCMClientFactory>(new gcm::FakeGCMClientFactory(
             content::BrowserThread::GetMessageLoopProxyForThread(
                 content::BrowserThread::UI),
             content::BrowserThread::GetMessageLoopProxyForThread(
-                content::BrowserThread::IO))));
+                content::BrowserThread::IO)))));
   }
 
   ExtensionGCMAppHandlerTest()
@@ -418,9 +430,12 @@ TEST_F(ExtensionGCMAppHandlerTest, UnregisterOnExtensionUninstall) {
   waiter()->WaitUntilCompleted();
   EXPECT_EQ(gcm::GCMClient::SUCCESS, registration_result());
 
-  // Unregistration should be triggered when the extension is uninstalled.
+  // Both token deletion and unregistration should be triggered when the
+  // extension is uninstalled.
   UninstallExtension(extension.get());
   waiter()->WaitUntilCompleted();
+  EXPECT_EQ(instance_id::InstanceID::SUCCESS,
+            gcm_app_handler()->delete_id_result());
   EXPECT_EQ(gcm::GCMClient::SUCCESS,
             gcm_app_handler()->unregistration_result());
 }

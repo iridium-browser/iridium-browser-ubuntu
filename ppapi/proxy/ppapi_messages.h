@@ -79,7 +79,6 @@
 #include "ppapi/shared_impl/socket_option_data.h"
 #include "ppapi/shared_impl/url_request_info_data.h"
 #include "ppapi/shared_impl/url_response_info_data.h"
-#include "ui/events/ipc/latency_info_param_traits.h"
 
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT PPAPI_PROXY_EXPORT
@@ -115,7 +114,6 @@ IPC_ENUM_TRAITS(PP_PrintOutputFormat_Dev)
 IPC_ENUM_TRAITS(PP_PrintScalingOption_Dev)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_PrivateDuplexMode_Dev, PP_PRIVATEDUPLEXMODE_LAST)
 IPC_ENUM_TRAITS(PP_PrivateFontCharset)
-IPC_ENUM_TRAITS(PP_ResourceImage)
 IPC_ENUM_TRAITS(PP_ResourceString)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_SessionType, PP_SESSIONTYPE_PERSISTENT_RELEASE)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_TCPSocket_Option,
@@ -378,7 +376,6 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::InputEventData)
   IPC_STRUCT_TRAITS_MEMBER(touches)
   IPC_STRUCT_TRAITS_MEMBER(changed_touches)
   IPC_STRUCT_TRAITS_MEMBER(target_touches)
-  IPC_STRUCT_TRAITS_MEMBER(latency_info)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(ppapi::HostPortPair)
@@ -1007,8 +1004,6 @@ IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_RequestInputEvents,
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_ClearInputEvents,
                     PP_Instance /* instance */,
                     uint32_t /* event_classes */)
-IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBInstance_StartTrackingLatency,
-                    PP_Instance /* instance */)
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_PostMessage,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* message */)
@@ -1556,8 +1551,7 @@ IPC_MESSAGE_CONTROL1(PpapiHostMsg_Graphics2D_SetScale,
                      float /* scale */)
 
 // Graphics2D, plugin -> host -> plugin
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_Graphics2D_Flush,
-                     std::vector<ui::LatencyInfo> /* latency_info */)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_Graphics2D_Flush)
 IPC_MESSAGE_CONTROL0(PpapiPluginMsg_Graphics2D_FlushAck)
 
 IPC_MESSAGE_CONTROL2(PpapiHostMsg_Graphics2D_ReadImageData,
@@ -1976,10 +1970,11 @@ IPC_MESSAGE_CONTROL2(PpapiPluginMsg_OutputProtection_QueryStatusReply,
 // VideoDecoder ------------------------------------------------------
 
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_VideoDecoder_Create)
-IPC_MESSAGE_CONTROL3(PpapiHostMsg_VideoDecoder_Initialize,
+IPC_MESSAGE_CONTROL4(PpapiHostMsg_VideoDecoder_Initialize,
                      ppapi::HostResource /* graphics_context */,
                      PP_VideoProfile /* profile */,
-                     PP_HardwareAcceleration /* acceleration */)
+                     PP_HardwareAcceleration /* acceleration */,
+                     uint32_t /* min_picture_count */)
 IPC_MESSAGE_CONTROL0(PpapiPluginMsg_VideoDecoder_InitializeReply)
 IPC_MESSAGE_CONTROL2(PpapiHostMsg_VideoDecoder_GetShm,
                      uint32_t /* shm_id */,
@@ -2306,18 +2301,6 @@ IPC_MESSAGE_CONTROL0(PpapiHostMsg_PDF_Print)
 
 // Notifies the renderer to save the current PDF.
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_PDF_SaveAs)
-
-// Requests a resource image for the plugin at a particular scale.
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_PDF_GetResourceImage,
-                     PP_ResourceImage /* image_id */,
-                     float /* scale */)
-
-// Reply for PpapiHostMsg_PDF_GetResourceImage containing the host resource id
-// of the image and a PP_ImageDataDesc which describes the image. Also carries
-// a shared memory handle pointing to the memory containg the image.
-IPC_MESSAGE_CONTROL2(PpapiPluginMsg_PDF_GetResourceImageReply,
-                     ppapi::HostResource /* resource_id */,
-                     PP_ImageDataDesc /* image_data_desc */)
 
 // Called by the plugin when its selection changes.
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_PDF_SetSelectedText,

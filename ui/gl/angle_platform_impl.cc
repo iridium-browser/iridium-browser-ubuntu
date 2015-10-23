@@ -21,13 +21,24 @@ double ANGLEPlatformImpl::currentTime() {
 }
 
 double ANGLEPlatformImpl::monotonicallyIncreasingTime() {
-  return base::TimeTicks::Now().ToInternalValue() /
-         static_cast<double>(base::Time::kMicrosecondsPerSecond);
+  return (base::TraceTicks::Now() - base::TraceTicks()).InSecondsF();
 }
 
 const unsigned char* ANGLEPlatformImpl::getTraceCategoryEnabledFlag(
     const char* category_group) {
   return TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED(category_group);
+}
+
+void ANGLEPlatformImpl::logError(const char* errorMessage) {
+  LOG(ERROR) << errorMessage;
+}
+
+void ANGLEPlatformImpl::logWarning(const char* warningMessage) {
+  LOG(WARNING) << warningMessage;
+}
+
+void ANGLEPlatformImpl::logInfo(const char* infoMessage) {
+  LOG(INFO) << infoMessage;
 }
 
 angle::Platform::TraceEventHandle ANGLEPlatformImpl::addTraceEvent(
@@ -41,11 +52,11 @@ angle::Platform::TraceEventHandle ANGLEPlatformImpl::addTraceEvent(
     const unsigned char* arg_types,
     const unsigned long long* arg_values,
     unsigned char flags) {
-  base::TimeTicks timestamp_tt = base::TimeTicks::FromInternalValue(
-      static_cast<int64>(timestamp * base::Time::kMicrosecondsPerSecond));
+  base::TraceTicks timestamp_tt =
+      base::TraceTicks() + base::TimeDelta::FromSecondsD(timestamp);
   base::trace_event::TraceEventHandle handle =
       TRACE_EVENT_API_ADD_TRACE_EVENT_WITH_THREAD_ID_AND_TIMESTAMP(
-          phase, category_group_enabled, name, id,
+          phase, category_group_enabled, name, id, trace_event_internal::kNoId,
           base::PlatformThread::CurrentId(), timestamp_tt, num_args, arg_names,
           arg_types, arg_values, nullptr, flags);
   angle::Platform::TraceEventHandle result;
@@ -93,6 +104,10 @@ void ANGLEPlatformImpl::histogramSparse(const char* name, int sample) {
   // For sparse histograms, we can use the macro, as it does not incorporate a
   // static.
   UMA_HISTOGRAM_SPARSE_SLOWLY(name, sample);
+}
+
+void ANGLEPlatformImpl::histogramBoolean(const char* name, bool sample) {
+  histogramEnumeration(name, sample ? 1 : 0, 2);
 }
 
 }  // namespace gfx

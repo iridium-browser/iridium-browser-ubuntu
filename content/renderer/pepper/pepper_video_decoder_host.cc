@@ -6,13 +6,16 @@
 
 #include "base/bind.h"
 #include "base/memory/shared_memory.h"
-#include "content/common/gpu/client/gpu_channel_host.h"
+#include "content/common/gpu/client/command_buffer_proxy_impl.h"
 #include "content/common/pepper_file_util.h"
+#include "content/public/common/content_client.h"
+#include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "content/renderer/pepper/gfx_conversion.h"
 #include "content/renderer/pepper/ppb_graphics_3d_impl.h"
 #include "content/renderer/pepper/video_decoder_shim.h"
+#include "media/base/limits.h"
 #include "media/video/video_decode_accelerator.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
@@ -81,6 +84,7 @@ PepperVideoDecoderHost::PepperVideoDecoderHost(RendererPpapiHost* host,
                                                PP_Resource resource)
     : ResourceHost(host->GetPpapiHost(), instance, resource),
       renderer_ppapi_host_(host),
+      min_picture_count_(0),
       initialized_(false) {
 }
 
@@ -113,9 +117,12 @@ int32_t PepperVideoDecoderHost::OnHostMsgInitialize(
     ppapi::host::HostMessageContext* context,
     const ppapi::HostResource& graphics_context,
     PP_VideoProfile profile,
-    PP_HardwareAcceleration acceleration) {
+    PP_HardwareAcceleration acceleration,
+    uint32_t min_picture_count) {
   if (initialized_)
     return PP_ERROR_FAILED;
+  if (min_picture_count > ppapi::proxy::kMaximumPictureCount)
+    return PP_ERROR_BADARGUMENT;
 
   EnterResourceNoLock<PPB_Graphics3D_API> enter_graphics(
       graphics_context.host_resource(), true);
@@ -124,18 +131,27 @@ int32_t PepperVideoDecoderHost::OnHostMsgInitialize(
   PPB_Graphics3D_Impl* graphics3d =
       static_cast<PPB_Graphics3D_Impl*>(enter_graphics.object());
 
-  int command_buffer_route_id = graphics3d->GetCommandBufferRouteId();
-  if (!command_buffer_route_id)
+  CommandBufferProxyImpl* command_buffer = graphics3d->GetCommandBufferProxy();
+  if (!command_buffer)
     return PP_ERROR_FAILED;
 
   media::VideoCodecProfile media_profile = PepperToMediaVideoProfile(profile);
 
+  // Check for Dev API use
+  // TODO(lpique): remove check when PPB_VideoDecoder_1_1 reaches beta/stable.
+  // https://crbug.com/520323
+  if (min_picture_count != 0) {
+    ContentRendererClient* client = GetContentClient()->renderer();
+    bool allowed = client->IsPluginAllowedToUseDevChannelAPIs();
+    if (!allowed)
+      return PP_ERROR_NOTSUPPORTED;
+  }
+  min_picture_count_ = min_picture_count;
+
   if (acceleration != PP_HARDWAREACCELERATION_NONE) {
     // This is not synchronous, but subsequent IPC messages will be buffered, so
-    // it is okay to immediately send IPC messages through the returned channel.
-    GpuChannelHost* channel = graphics3d->channel();
-    DCHECK(channel);
-    decoder_ = channel->CreateVideoDecoder(command_buffer_route_id);
+    // it is okay to immediately send IPC messages.
+    decoder_ = command_buffer->CreateVideoDecoder();
     if (decoder_ && decoder_->Initialize(media_profile, this)) {
       initialized_ = true;
       return PP_OK;
@@ -148,7 +164,10 @@ int32_t PepperVideoDecoderHost::OnHostMsgInitialize(
 #if defined(OS_ANDROID)
   return PP_ERROR_NOTSUPPORTED;
 #else
-  decoder_.reset(new VideoDecoderShim(this));
+  uint32_t shim_texture_pool_size = media::limits::kMaxVideoFrames + 1;
+  shim_texture_pool_size = std::max(shim_texture_pool_size,
+                                    min_picture_count_);
+  decoder_.reset(new VideoDecoderShim(this, shim_texture_pool_size));
   initialize_reply_context_ = context->MakeReplyMessageContext();
   decoder_->Initialize(media_profile, this);
 
@@ -196,10 +215,8 @@ int32_t PepperVideoDecoderHost::OnHostMsgGetShm(
     shm_buffers_[shm_id] = shm.release();
   }
 
-  base::PlatformFile platform_file =
-      PlatformFileFromSharedMemoryHandle(shm_handle);
   SerializedHandle handle(
-      renderer_ppapi_host_->ShareHandleWithRemote(platform_file, false),
+      renderer_ppapi_host_->ShareSharedMemoryHandleWithRemote(shm_handle),
       shm_size);
   ppapi::host::ReplyMessageContext reply_context =
       context->MakeReplyMessageContext();
@@ -321,7 +338,7 @@ void PepperVideoDecoderHost::ProvidePictureBuffers(
     uint32 requested_num_of_buffers,
     const gfx::Size& dimensions,
     uint32 texture_target) {
-  RequestTextures(requested_num_of_buffers,
+  RequestTextures(std::max(min_picture_count_, requested_num_of_buffers),
                   dimensions,
                   texture_target,
                   std::vector<gpu::Mailbox>());

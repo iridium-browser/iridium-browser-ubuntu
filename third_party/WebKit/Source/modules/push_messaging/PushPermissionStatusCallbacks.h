@@ -9,8 +9,6 @@
 #include "public/platform/modules/push_messaging/WebPushPermissionStatus.h"
 #include "public/platform/modules/push_messaging/WebPushProvider.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefPtr.h"
 
 namespace WTF {
 class String;
@@ -25,17 +23,17 @@ class PushPermissionStatusCallbacks final : public WebPushPermissionStatusCallba
     WTF_MAKE_NONCOPYABLE(PushPermissionStatusCallbacks);
 
 public:
-    explicit PushPermissionStatusCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver>);
-    virtual ~PushPermissionStatusCallbacks();
+    explicit PushPermissionStatusCallbacks(ScriptPromiseResolver*);
+    ~PushPermissionStatusCallbacks() override;
 
-    void onSuccess(WebPushPermissionStatus*) override;
+    void onSuccess(WebPushPermissionStatus) override;
 
     // Called if for some reason the status of the push permission cannot be checked.
-    void onError(WebPushError*) override;
+    void onError(const WebPushError&) override;
 
 private:
     static WTF::String permissionString(WebPushPermissionStatus);
-    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
+    Persistent<ScriptPromiseResolver> m_resolver;
 };
 
 } // namespace blink

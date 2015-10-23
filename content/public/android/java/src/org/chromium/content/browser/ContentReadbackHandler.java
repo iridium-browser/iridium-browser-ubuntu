@@ -8,9 +8,9 @@ import android.graphics.Bitmap;
 import android.graphics.Rect;
 import android.util.SparseArray;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.content_public.browser.readback_types.ReadbackResponse;
 import org.chromium.ui.base.WindowAndroid;
 
@@ -103,9 +103,15 @@ public abstract class ContentReadbackHandler {
      * @param windowAndroid The window that hosts the compositor.
      * @param callback      The callback to be executed after readback completes.
      */
-    public void getCompositorBitmapAsync(WindowAndroid windowAndroid, GetBitmapCallback callback) {
+    public void getCompositorBitmapAsync(
+            WindowAndroid windowAndroid, final GetBitmapCallback callback) {
         if (!readyForReadback()) {
-            callback.onFinishGetBitmap(null, ReadbackResponse.SURFACE_UNAVAILABLE);
+            ThreadUtils.postOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    callback.onFinishGetBitmap(null, ReadbackResponse.SURFACE_UNAVAILABLE);
+                }
+            });
             return;
         }
         ThreadUtils.assertOnUiThread();

@@ -27,10 +27,12 @@
 
 #include "wtf/HashTableDeletedValueType.h"
 #include "wtf/WTFExport.h"
+#include "wtf/testing/WTFUnitTestHelpersExport.h"
 #include "wtf/text/ASCIIFastPath.h"
 #include "wtf/text/StringImpl.h"
 #include "wtf/text/StringView.h"
 #include <algorithm>
+#include <iosfwd>
 
 #ifdef __OBJC__
 #include <objc/objc.h>
@@ -199,6 +201,9 @@ public:
     // Find a single character or string, also with match function & latin1 forms.
     size_t find(UChar c, unsigned start = 0) const
         { return m_impl ? m_impl->find(c, start) : kNotFound; }
+    size_t find(LChar c, unsigned start = 0) const
+        { return m_impl ? m_impl->find(c, start) : kNotFound; }
+    size_t find(char c, unsigned start = 0) const { return find(static_cast<LChar>(c), start); }
 
     size_t find(const String& str) const
         { return m_impl ? m_impl->find(str.impl()) : kNotFound; }
@@ -248,8 +253,8 @@ public:
     void prependTo(Vector<UChar, inlineCapacity>&, unsigned pos = 0, unsigned len = UINT_MAX) const;
 
     UChar32 characterStartingAt(unsigned) const;
-
-    bool contains(UChar c) const { return find(c) != kNotFound; }
+    template<typename CharacterType>
+    bool contains(CharacterType c) const { return find(c) != kNotFound; }
     bool contains(const LChar* str, TextCaseSensitivity caseSensitivity = TextCaseSensitive) const { return find(str, 0, caseSensitivity) != kNotFound; }
     bool contains(const String& str, TextCaseSensitivity caseSensitivity = TextCaseSensitive) const { return find(str, 0, caseSensitivity) != kNotFound; }
 
@@ -390,13 +395,13 @@ public:
     // the input data contains invalid UTF-8 sequences.
     static String fromUTF8(const LChar*, size_t);
     static String fromUTF8(const LChar*);
-    static String fromUTF8(const char* s, size_t length) { return fromUTF8(reinterpret_cast<const LChar*>(s), length); };
-    static String fromUTF8(const char* s) { return fromUTF8(reinterpret_cast<const LChar*>(s)); };
+    static String fromUTF8(const char* s, size_t length) { return fromUTF8(reinterpret_cast<const LChar*>(s), length); }
+    static String fromUTF8(const char* s) { return fromUTF8(reinterpret_cast<const LChar*>(s)); }
     static String fromUTF8(const CString&);
 
     // Tries to convert the passed in string to UTF-8, but will fall back to Latin-1 if the string is not valid UTF-8.
     static String fromUTF8WithLatin1Fallback(const LChar*, size_t);
-    static String fromUTF8WithLatin1Fallback(const char* s, size_t length) { return fromUTF8WithLatin1Fallback(reinterpret_cast<const LChar*>(s), length); };
+    static String fromUTF8WithLatin1Fallback(const char* s, size_t length) { return fromUTF8WithLatin1Fallback(reinterpret_cast<const LChar*>(s), length); }
 
     bool containsOnlyASCII() const;
     bool containsOnlyLatin1() const;
@@ -629,6 +634,9 @@ template<> struct DefaultHash<String> {
 WTF_EXPORT const String& emptyString();
 WTF_EXPORT const String& emptyString16Bit();
 WTF_EXPORT extern const String& xmlnsWithColon;
+
+// Pretty printer for gtest. Declared here to avoid ODR violations.
+WTF_UNITTEST_HELPERS_EXPORT std::ostream& operator<<(std::ostream&, const String&);
 
 } // namespace WTF
 

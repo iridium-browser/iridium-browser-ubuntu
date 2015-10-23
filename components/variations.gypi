@@ -30,6 +30,8 @@
         'variations/caching_permuted_entropy_provider.h',
         'variations/entropy_provider.cc',
         'variations/entropy_provider.h',
+        'variations/experiment_labels.cc',
+        'variations/experiment_labels.h',
         'variations/metrics_util.cc',
         'variations/metrics_util.h',
         'variations/pref_names.cc',
@@ -44,10 +46,19 @@
         'variations/study_filtering.h',
         'variations/variations_associated_data.cc',
         'variations/variations_associated_data.h',
+        'variations/variations_experiment_util.cc',
+        'variations/variations_experiment_util.h',
+        'variations/variations_request_scheduler.cc',
+        'variations/variations_request_scheduler.h',
+        'variations/variations_request_scheduler_mobile.cc',
+        'variations/variations_request_scheduler_mobile.h',
         'variations/variations_seed_processor.cc',
         'variations/variations_seed_processor.h',
         'variations/variations_seed_simulator.cc',
         'variations/variations_seed_simulator.h',
+        'variations/variations_service_client.h',
+        'variations/variations_url_constants.cc',
+        'variations/variations_url_constants.h',
       ],
       'variables': {
         'proto_in_dir': 'variations/proto',
@@ -58,6 +69,11 @@
         ['OS == "android"', {
           'dependencies': [
             'variations_jni_headers',
+          ],
+        }],
+        ['OS!="android" and OS!="ios"', {
+          'sources!': [
+            'variations/variations_request_scheduler_mobile.cc',
           ],
         }],
       ],

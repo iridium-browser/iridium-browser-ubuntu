@@ -9,9 +9,9 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/version.h"
 #include "components/update_client/crx_update_item.h"
 #include "components/update_client/test_configurator.h"
@@ -86,10 +86,10 @@ UpdateCheckerTest::~UpdateCheckerTest() {
 }
 
 void UpdateCheckerTest::SetUp() {
-  config_ = new TestConfigurator(base::MessageLoopProxy::current(),
-                                 base::MessageLoopProxy::current());
+  config_ = new TestConfigurator(base::ThreadTaskRunnerHandle::Get(),
+                                 base::ThreadTaskRunnerHandle::Get());
   interceptor_factory_.reset(
-      new InterceptorFactory(base::MessageLoopProxy::current()));
+      new InterceptorFactory(base::ThreadTaskRunnerHandle::Get()));
   post_interceptor_ = interceptor_factory_->CreateInterceptor();
   EXPECT_TRUE(post_interceptor_);
 
@@ -181,7 +181,7 @@ TEST_F(UpdateCheckerTest, UpdateCheckSuccess) {
 
   EXPECT_EQ(1, post_interceptor_->GetHitCount())
       << post_interceptor_->GetRequestsAsString();
-  EXPECT_EQ(1, post_interceptor_->GetCount())
+  ASSERT_EQ(1, post_interceptor_->GetCount())
       << post_interceptor_->GetRequestsAsString();
 
   // Sanity check the request.
@@ -197,6 +197,7 @@ TEST_F(UpdateCheckerTest, UpdateCheckSuccess) {
             post_interceptor_->GetRequests()[0].find("<hw physmemory="));
 
   // Sanity check the arguments of the callback after parsing.
+  ASSERT_FALSE(config_->UpdateUrl().empty());
   EXPECT_EQ(config_->UpdateUrl().front(), original_url_);
   EXPECT_EQ(0, error_);
   EXPECT_TRUE(error_message_.empty());
@@ -228,6 +229,7 @@ TEST_F(UpdateCheckerTest, UpdateCheckError) {
   EXPECT_EQ(1, post_interceptor_->GetCount())
       << post_interceptor_->GetRequestsAsString();
 
+  ASSERT_FALSE(config_->UpdateUrl().empty());
   EXPECT_EQ(config_->UpdateUrl().front(), original_url_);
   EXPECT_EQ(403, error_);
   EXPECT_STREQ("network error", error_message_.c_str());

@@ -9,6 +9,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "components/guest_view/browser/guest_view_manager.h"
+#include "components/guest_view/browser/guest_view_manager_delegate.h"
 #include "components/guest_view/browser/guest_view_manager_factory.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
 #include "content/public/browser/render_process_host.h"
@@ -16,11 +17,10 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/api/test/test_api.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
-#include "extensions/browser/extension_host.h"
-#include "extensions/browser/guest_view/extensions_guest_view_manager_delegate.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_paths.h"
@@ -46,6 +46,7 @@ const char kUserAgentRedirectResponsePath[] = "/detect-user-agent";
 const char kTestDataDirectory[] = "testDataDirectory";
 const char kTestServerPort[] = "testServer.port";
 const char kTestWebSocketPort[] = "testWebSocketPort";
+const char kSitePerProcess[] = "sitePerProcess";
 
 class EmptyHttpResponse : public net::test_server::HttpResponse {
  public:
@@ -58,13 +59,14 @@ static scoped_ptr<net::test_server::HttpResponse> UserAgentResponseHandler(
     const std::string& path,
     const GURL& redirect_target,
     const net::test_server::HttpRequest& request) {
-  if (!StartsWithASCII(path, request.relative_url, true))
+  if (!base::StartsWith(path, request.relative_url,
+                        base::CompareCase::SENSITIVE))
     return scoped_ptr<net::test_server::HttpResponse>();
 
   std::map<std::string, std::string>::const_iterator it =
         request.headers.find("User-Agent");
   EXPECT_TRUE(it != request.headers.end());
-  if (!StartsWithASCII("foobar", it->second, true))
+  if (!base::StartsWith("foobar", it->second, base::CompareCase::SENSITIVE))
     return scoped_ptr<net::test_server::HttpResponse>();
 
   scoped_ptr<net::test_server::BasicHttpResponse> http_response(
@@ -103,7 +105,8 @@ scoped_ptr<net::test_server::HttpResponse> RedirectResponseHandler(
     const std::string& path,
     const GURL& redirect_target,
     const net::test_server::HttpRequest& request) {
-  if (!StartsWithASCII(path, request.relative_url, true))
+  if (!base::StartsWith(path, request.relative_url,
+                        base::CompareCase::SENSITIVE))
     return scoped_ptr<net::test_server::HttpResponse>();
 
   scoped_ptr<net::test_server::BasicHttpResponse> http_response(
@@ -117,7 +120,8 @@ scoped_ptr<net::test_server::HttpResponse> RedirectResponseHandler(
 scoped_ptr<net::test_server::HttpResponse> EmptyResponseHandler(
     const std::string& path,
     const net::test_server::HttpRequest& request) {
-  if (StartsWithASCII(path, request.relative_url, true)) {
+  if (base::StartsWith(path, request.relative_url,
+                       base::CompareCase::SENSITIVE)) {
     return scoped_ptr<net::test_server::HttpResponse>(new EmptyHttpResponse);
   }
 
@@ -156,7 +160,7 @@ void WebViewAPITest::LaunchApp(const std::string& app_location) {
 content::WebContents* WebViewAPITest::GetFirstAppWindowWebContents() {
   const AppWindowRegistry::AppWindowList& app_window_list =
       AppWindowRegistry::Get(browser_context_)->app_windows();
-  DCHECK(app_window_list.size() == 1);
+  DCHECK_EQ(1u, app_window_list.size());
   return (*app_window_list.begin())->web_contents();
 }
 
@@ -189,6 +193,9 @@ void WebViewAPITest::SetUpOnMainThread() {
   TestGetConfigFunction::set_test_config_state(&test_config_);
   base::FilePath test_data_dir;
   test_config_.SetInteger(kTestWebSocketPort, 0);
+  test_config_.SetBoolean(kSitePerProcess,
+                          base::CommandLine::ForCurrentProcess()->HasSwitch(
+                              switches::kSitePerProcess));
 }
 
 void WebViewAPITest::StartTestServer() {
@@ -248,11 +255,11 @@ TestGuestViewManager* WebViewAPITest::GetGuestViewManager() {
   // TestGuestViewManager::WaitForSingleGuestCreated may and will get called
   // before a guest is created.
   if (!manager) {
-    manager = static_cast<TestGuestViewManager*>(
-        GuestViewManager::CreateWithDelegate(
+    manager =
+        static_cast<TestGuestViewManager*>(GuestViewManager::CreateWithDelegate(
             context,
-            scoped_ptr<guest_view::GuestViewManagerDelegate>(
-                new ExtensionsGuestViewManagerDelegate(context))));
+            ExtensionsAPIClient::Get()->CreateGuestViewManagerDelegate(
+                context)));
   }
   return manager;
 }
@@ -662,7 +669,7 @@ IN_PROC_BROWSER_TEST_F(WebViewAPITest, TestRemoveWebviewOnExit) {
                                      "runTest('testRemoveWebviewOnExit')"));
 
   content::WebContents* guest_web_contents = GetGuestWebContents();
-  EXPECT_TRUE(guest_web_contents->GetRenderProcessHost()->IsIsolatedGuest());
+  EXPECT_TRUE(guest_web_contents->GetRenderProcessHost()->IsForGuestsOnly());
   ASSERT_TRUE(guest_loaded_listener.WaitUntilSatisfied());
 
   content::WebContentsDestroyedWatcher destroyed_watcher(guest_web_contents);

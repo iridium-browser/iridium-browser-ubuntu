@@ -35,32 +35,17 @@
 
 namespace {
 
-#if defined(OS_WIN)
-const wchar_t kFlashRegistryRoot[] = L"SOFTWARE\\Macromedia\\FlashPlayerPepper";
-
-const wchar_t kFlashPlayerPathValueName[] = L"PlayerPath";
-#endif
-
-// File name of the internal Flash plugin on different platforms.
-const base::FilePath::CharType kInternalFlashPluginFileName[] =
-#if defined(OS_MACOSX)
-    FILE_PATH_LITERAL("Flash Player Plugin for Chrome.plugin");
-#elif defined(OS_WIN)
-    FILE_PATH_LITERAL("gcswf32.dll");
-#else  // OS_LINUX, etc.
-    FILE_PATH_LITERAL("libgcflashplayer.so");
-#endif
-
 // The Pepper Flash plugins are in a directory with this name.
 const base::FilePath::CharType kPepperFlashBaseDirectory[] =
     FILE_PATH_LITERAL("PepperFlash");
 
-#if defined(OS_WIN)
-const base::FilePath::CharType kPepperFlashSystemBaseDirectory[] =
-    FILE_PATH_LITERAL("Macromed\\Flash");
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
 const base::FilePath::CharType kPepperFlashSystemBaseDirectory[] =
     FILE_PATH_LITERAL("Internet Plug-Ins/PepperFlashPlayer");
+const base::FilePath::CharType kFlashSystemBaseDirectory[] =
+    FILE_PATH_LITERAL("Internet Plug-Ins");
+const base::FilePath::CharType kFlashSystemPluginName[] =
+    FILE_PATH_LITERAL("Flash Player.plugin");
 #endif
 
 const base::FilePath::CharType kInternalNaClPluginFileName[] =
@@ -75,6 +60,11 @@ const base::FilePath::CharType kFilepathSinglePrefExtensions[] =
 #else
     FILE_PATH_LITERAL("/usr/share/chromium/extensions");
 #endif  // defined(GOOGLE_CHROME_BUILD)
+
+// The path to the hint file that tells the pepper plugin loader
+// where it can find the latest component updated flash.
+const base::FilePath::CharType kComponentUpdatedFlashHint[] =
+    FILE_PATH_LITERAL("latest-component-updated-flash");
 #endif  // defined(OS_LINUX)
 
 static base::LazyInstance<base::FilePath>
@@ -99,15 +89,23 @@ bool GetInternalPluginsDirectory(base::FilePath* result) {
 }
 
 #if defined(OS_WIN)
-// Gets the Flash path if installed on the system.
-bool GetSystemFlashDirectory(base::FilePath* out_path) {
-  base::win::RegKey path_key(HKEY_LOCAL_MACHINE, kFlashRegistryRoot, KEY_READ);
+// Gets the Flash path if installed on the system. |is_npapi| determines whether
+// to return the NPAPI of the PPAPI version of the system plugin.
+bool GetSystemFlashFilename(base::FilePath* out_path, bool is_npapi) {
+  const wchar_t kNpapiFlashRegistryRoot[] =
+      L"SOFTWARE\\Macromedia\\FlashPlayerPlugin";
+  const wchar_t kPepperFlashRegistryRoot[] =
+      L"SOFTWARE\\Macromedia\\FlashPlayerPepper";
+  const wchar_t kFlashPlayerPathValueName[] = L"PlayerPath";
+
+  base::win::RegKey path_key(
+      HKEY_LOCAL_MACHINE,
+      is_npapi ? kNpapiFlashRegistryRoot : kPepperFlashRegistryRoot, KEY_READ);
   base::string16 path_str;
   if (FAILED(path_key.ReadValue(kFlashPlayerPathValueName, &path_str)))
     return false;
-  base::FilePath plugin_path = base::FilePath(path_str).DirName();
 
-  *out_path = plugin_path;
+  *out_path = base::FilePath(path_str);
   return true;
 }
 #endif
@@ -273,17 +271,32 @@ bool PathProvider(int key, base::FilePath* result) {
         return false;
       cur = cur.Append(kPepperFlashBaseDirectory);
       break;
-    case chrome::DIR_PEPPER_FLASH_SYSTEM_PLUGIN:
+    case chrome::FILE_PEPPER_FLASH_SYSTEM_PLUGIN:
 #if defined(OS_WIN)
-      if (!GetSystemFlashDirectory(&cur))
+      if (!GetSystemFlashFilename(&cur, false))
         return false;
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
       if (!GetLocalLibraryDirectory(&cur))
         return false;
       cur = cur.Append(kPepperFlashSystemBaseDirectory);
+      cur = cur.Append(chrome::kPepperFlashPluginFilename);
 #else
       // Chrome on iOS does not supports PPAPI binaries, return false.
       // TODO(wfh): If Adobe release PPAPI binaries for Linux, add support here.
+      return false;
+#endif
+      break;
+    case chrome::FILE_FLASH_SYSTEM_PLUGIN:
+#if defined(OS_WIN)
+      if (!GetSystemFlashFilename(&cur, true))
+        return false;
+#elif defined(OS_MACOSX) && !defined(OS_IOS)
+      if (!GetLocalLibraryDirectory(&cur))
+        return false;
+      cur = cur.Append(kFlashSystemBaseDirectory);
+      cur = cur.Append(kFlashSystemPluginName);
+#else
+      // Chrome on other platforms does not supports system NPAPI binaries.
       return false;
 #endif
       break;
@@ -296,11 +309,6 @@ bool PathProvider(int key, base::FilePath* result) {
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("script.log"));
-      break;
-    case chrome::FILE_FLASH_PLUGIN:
-      if (!GetInternalPluginsDirectory(&cur))
-        return false;
-      cur = cur.Append(kInternalFlashPluginFileName);
       break;
     case chrome::FILE_PEPPER_FLASH_PLUGIN:
       if (!PathService::Get(chrome::DIR_PEPPER_FLASH_PLUGIN, &cur))
@@ -478,7 +486,8 @@ bool PathProvider(int key, base::FilePath* result) {
       break;
     }
 #endif
-#if defined(OS_CHROMEOS) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_CHROMEOS) || (defined(OS_LINUX) && defined(CHROMIUM_BUILD)) || \
+    (defined(OS_MACOSX) && !defined(OS_IOS))
     case chrome::DIR_USER_EXTERNAL_EXTENSIONS: {
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;
@@ -555,6 +564,22 @@ bool PathProvider(int key, base::FilePath* result) {
       cur = cur.Append(kGCMStoreDirname);
       break;
 #endif  // !defined(OS_ANDROID)
+#if defined(OS_ANDROID)
+    case chrome::DIR_OFFLINE_PAGE_METADATA:
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
+        return false;
+      cur = cur.Append(kOfflinePageMetadataDirname);
+      break;
+#endif  // defined(OS_ANDROID)
+#if defined(OS_LINUX)
+    case chrome::FILE_COMPONENT_FLASH_HINT:
+      if (!PathService::Get(chrome::DIR_COMPONENT_UPDATED_PEPPER_FLASH_PLUGIN,
+                            &cur)) {
+        return false;
+      }
+      cur = cur.Append(kComponentUpdatedFlashHint);
+      break;
+#endif  // defined(OS_LINUX)
 
     default:
       return false;

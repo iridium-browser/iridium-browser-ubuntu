@@ -33,7 +33,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/browser_shutdown.h"
+#include "components/tracing/tracing_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_service.h"
@@ -185,12 +185,11 @@ void StartShutdownTracing() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kTraceShutdown)) {
-    base::trace_event::CategoryFilter category_filter(
-        command_line.GetSwitchValueASCII(switches::kTraceShutdown));
+    base::trace_event::TraceConfig trace_config(
+        command_line.GetSwitchValueASCII(switches::kTraceShutdown), "");
     base::trace_event::TraceLog::GetInstance()->SetEnabled(
-        category_filter,
-        base::trace_event::TraceLog::RECORDING_MODE,
-        base::trace_event::TraceOptions());
+        trace_config,
+        base::trace_event::TraceLog::RECORDING_MODE);
   }
   TRACE_EVENT0("shutdown", "StartShutdownTracing");
 }

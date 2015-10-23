@@ -7,16 +7,14 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
-#include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system/create_file_operation.h"
 #include "chrome/browser/chromeos/drive/file_system/download_operation.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_delegate.h"
 #include "chrome/browser/chromeos/drive/file_write_watcher.h"
-#include "chrome/browser/chromeos/drive/job_scheduler.h"
-#include "chrome/browser/drive/event_logger.h"
+#include "components/drive/event_logger.h"
+#include "components/drive/file_cache.h"
+#include "components/drive/job_scheduler.h"
 #include "content/public/browser/browser_thread.h"
-
-using content::BrowserThread;
 
 namespace drive {
 namespace file_system {
@@ -40,22 +38,22 @@ FileError OpenCacheFileForWrite(
 GetFileForSavingOperation::GetFileForSavingOperation(
     EventLogger* logger,
     base::SequencedTaskRunner* blocking_task_runner,
+    base::SingleThreadTaskRunner* file_task_runner,
     OperationDelegate* delegate,
     JobScheduler* scheduler,
     internal::ResourceMetadata* metadata,
     internal::FileCache* cache,
     const base::FilePath& temporary_file_directory)
     : logger_(logger),
-      create_file_operation_(new CreateFileOperation(blocking_task_runner,
-                                                     delegate,
-                                                     metadata)),
+      create_file_operation_(
+          new CreateFileOperation(blocking_task_runner, delegate, metadata)),
       download_operation_(new DownloadOperation(blocking_task_runner,
                                                 delegate,
                                                 scheduler,
                                                 metadata,
                                                 cache,
                                                 temporary_file_directory)),
-      file_write_watcher_(new internal::FileWriteWatcher),
+      file_write_watcher_(new internal::FileWriteWatcher(file_task_runner)),
       blocking_task_runner_(blocking_task_runner),
       delegate_(delegate),
       metadata_(metadata),
@@ -69,7 +67,7 @@ GetFileForSavingOperation::~GetFileForSavingOperation() {
 void GetFileForSavingOperation::GetFileForSaving(
     const base::FilePath& file_path,
     const GetFileCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   create_file_operation_->CreateFile(
@@ -86,7 +84,7 @@ void GetFileForSavingOperation::GetFileForSavingAfterCreate(
     const base::FilePath& file_path,
     const GetFileCallback& callback,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error != FILE_ERROR_OK) {
@@ -109,7 +107,7 @@ void GetFileForSavingOperation::GetFileForSavingAfterDownload(
     FileError error,
     const base::FilePath& cache_path,
     scoped_ptr<ResourceEntry> entry) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error != FILE_ERROR_OK) {
@@ -144,7 +142,7 @@ void GetFileForSavingOperation::GetFileForSavingAfterOpenForWrite(
     scoped_ptr<ResourceEntry> entry,
     scoped_ptr<base::ScopedClosureRunner>* file_closer,
     FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error != FILE_ERROR_OK) {
@@ -171,7 +169,7 @@ void GetFileForSavingOperation::GetFileForSavingAfterWatch(
     const base::FilePath& cache_path,
     scoped_ptr<ResourceEntry> entry,
     bool success) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   logger_->Log(logging::LOG_INFO, "Started watching modification to %s [%s].",

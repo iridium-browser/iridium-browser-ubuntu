@@ -5,19 +5,21 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_FEATURE_INFO_H_
 #define GPU_COMMAND_BUFFER_SERVICE_FEATURE_INFO_H_
 
-#include <set>
 #include <string>
-#include "base/containers/hash_tables.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/sys_info.h"
+#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/gles2_cmd_validation.h"
 #include "gpu/config/gpu_driver_bug_workaround_type.h"
 #include "gpu/gpu_export.h"
-#include "ui/gl/gl_version_info.h"
 
 namespace base {
 class CommandLine;
+}
+
+namespace gfx {
+struct GLVersionInfo;
 }
 
 namespace gpu {
@@ -77,8 +79,10 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool blend_equation_advanced;
     bool blend_equation_advanced_coherent;
     bool ext_texture_rg;
+    bool chromium_image_ycbcr_422;
     bool enable_subscribe_uniform;
     bool emulate_primitive_restart_fixed_index;
+    bool ext_render_buffer_format_bgra8888;
   };
 
   struct Workarounds {
@@ -94,6 +98,7 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     GLint max_fragment_uniform_vectors;
     GLint max_varying_vectors;
     GLint max_vertex_uniform_vectors;
+    GLint max_copy_texture_chromium_size;
   };
 
   // Constructor with workarounds taken from the current process's CommandLine
@@ -108,10 +113,6 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
 
   const Validators* validators() const {
     return &validators_;
-  }
-
-  const ValueValidator<GLenum>& GetTextureFormatValidator(GLenum format) {
-    return texture_format_validators_[format];
   }
 
   const std::string& extensions() const {
@@ -134,17 +135,18 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
   bool IsES3Capable() const;
   void EnableES3Validators();
 
+  bool IsES3Enabled() const {
+    return unsafe_es3_apis_enabled_;
+  }
+
  private:
   friend class base::RefCounted<FeatureInfo>;
   friend class BufferManagerClientSideArraysTest;
 
-  typedef base::hash_map<GLenum, ValueValidator<GLenum> > ValidatorMap;
-  ValidatorMap texture_format_validators_;
-
   ~FeatureInfo();
 
   void AddExtensionString(const char* s);
-  void InitializeBasicState(const base::CommandLine& command_line);
+  void InitializeBasicState(const base::CommandLine* command_line);
   void InitializeFeatures();
 
   Validators validators_;
@@ -161,7 +163,12 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
   Workarounds workarounds_;
 
   // Whether the command line switch kEnableUnsafeES3APIs is passed in.
+  bool enable_unsafe_es3_apis_switch_;
+
   bool unsafe_es3_apis_enabled_;
+
+  // Whether the command line switch kEnableGLPathRendering is passed in.
+  bool enable_gl_path_rendering_switch_;
 
   scoped_ptr<gfx::GLVersionInfo> gl_version_info_;
 

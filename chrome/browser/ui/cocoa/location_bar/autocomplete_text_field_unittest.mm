@@ -12,7 +12,6 @@
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_unittest_helper.h"
-#import "chrome/browser/ui/cocoa/location_bar/button_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_decoration.h"
 #include "grit/theme_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -308,14 +307,14 @@ TEST_F(AutocompleteTextFieldTest, ResetFieldEditorBase) {
   // A decoration should result in a strictly smaller editor frame.
   mock_left_decoration_.SetVisible(true);
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_FALSE(NSEqualRects(baseEditorFrame, EditorFrame()));
+  EXPECT_NSNE(baseEditorFrame, EditorFrame());
   EXPECT_TRUE(NSContainsRect(baseEditorFrame, EditorFrame()));
 
   // Removing the decoration and using -resetFieldEditorFrameIfNeeded
   // should result in the same frame as the standard focus machinery.
   mock_left_decoration_.SetVisible(false);
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_TRUE(NSEqualRects(baseEditorFrame, EditorFrame()));
+  EXPECT_NSEQ(baseEditorFrame, EditorFrame());
 }
 
 // Test that the field editor gets the same bounds when focus is
@@ -343,7 +342,7 @@ TEST_F(AutocompleteTextFieldTest, ResetFieldEditorWithDecoration) {
   EXPECT_TRUE(NSIsEmptyRect([cell frameForDecoration:&mock_left_decoration_
                                              inFrame:[field_ bounds]]));
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_FALSE(NSEqualRects(baseEditorFrame, EditorFrame()));
+  EXPECT_NSNE(baseEditorFrame, EditorFrame());
   EXPECT_TRUE(NSContainsRect(EditorFrame(), baseEditorFrame));
 
   // When the decoration is visible, -resetFieldEditorFrameIfNeeded
@@ -353,7 +352,7 @@ TEST_F(AutocompleteTextFieldTest, ResetFieldEditorWithDecoration) {
                                               inFrame:[field_ bounds]]));
 
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_TRUE(NSEqualRects(baseEditorFrame, EditorFrame()));
+  EXPECT_NSEQ(baseEditorFrame, EditorFrame());
 }
 
 // Test that resetting the field editor bounds does not cause untoward
@@ -380,7 +379,7 @@ TEST_F(AutocompleteTextFieldObserverTest, ResetFieldEditorContinuesEditing) {
   // No messages to |field_observer_| when the frame actually changes.
   mock_left_decoration_.SetVisible(true);
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_FALSE(NSEqualRects(baseEditorFrame, EditorFrame()));
+  EXPECT_NSNE(baseEditorFrame, EditorFrame());
 }
 
 // Clicking in a right-hand decoration which does not handle the mouse
@@ -828,6 +827,7 @@ TEST_F(AutocompleteTextFieldObserverTest,
   EXPECT_CALL(field_observer_, OnSetFocus(false)).Times(testing::AnyNumber());
   EXPECT_CALL(field_observer_, OnKillFocus()).Times(testing::AnyNumber());
   EXPECT_CALL(field_observer_, OnDidEndEditing()).Times(testing::AnyNumber());
+  EXPECT_CALL(field_observer_, OnDidDrawRect()).Times(testing::AnyNumber());
 
   // Ensure the field is currently not first responder.
   [test_window() makePretendKeyWindowAndSetFirstResponder:nil];

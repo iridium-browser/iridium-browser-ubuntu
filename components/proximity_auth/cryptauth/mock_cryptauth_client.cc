@@ -13,8 +13,8 @@ MockCryptAuthClient::MockCryptAuthClient() {
 MockCryptAuthClient::~MockCryptAuthClient() {
 }
 
-MockCryptAuthClientFactory::MockCryptAuthClientFactory(bool is_strict)
-    : is_strict_(is_strict) {
+MockCryptAuthClientFactory::MockCryptAuthClientFactory(MockType mock_type)
+    : mock_type_(mock_type) {
 }
 
 MockCryptAuthClientFactory::~MockCryptAuthClientFactory() {
@@ -22,7 +22,7 @@ MockCryptAuthClientFactory::~MockCryptAuthClientFactory() {
 
 scoped_ptr<CryptAuthClient> MockCryptAuthClientFactory::CreateInstance() {
   scoped_ptr<MockCryptAuthClient> client;
-  if (is_strict_)
+  if (mock_type_ == MockType::MAKE_STRICT_MOCKS)
     client.reset(new testing::StrictMock<MockCryptAuthClient>());
   else
     client.reset(new testing::NiceMock<MockCryptAuthClient>());

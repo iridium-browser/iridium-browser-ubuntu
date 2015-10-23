@@ -14,10 +14,10 @@
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/drive/fake_file_system.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/drive/test_util.h"
-#include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/browser/drive/test_util.h"
+#include "components/drive/drive_test_util.h"
+#include "components/drive/file_system_core_util.h"
+#include "components/drive/service/fake_drive_service.h"
+#include "components/drive/service/test_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/time_util.h"
@@ -72,9 +72,7 @@ TEST_F(WebkitFileStreamReaderImplTest, ReadThenGetLength) {
       util::GetDriveMyDriveRootPath().AppendASCII("File 1.txt");
 
   scoped_ptr<WebkitFileStreamReaderImpl> reader(new WebkitFileStreamReaderImpl(
-      GetFileSystemGetter(),
-      worker_thread_->message_loop_proxy().get(),
-      kDriveFile,
+      GetFileSystemGetter(), worker_thread_->task_runner().get(), kDriveFile,
       0,               // offset
       base::Time()));  // expected modification time
 
@@ -92,9 +90,7 @@ TEST_F(WebkitFileStreamReaderImplTest, GetLengthThenRead) {
       util::GetDriveMyDriveRootPath().AppendASCII("File 1.txt");
 
   scoped_ptr<WebkitFileStreamReaderImpl> reader(new WebkitFileStreamReaderImpl(
-      GetFileSystemGetter(),
-      worker_thread_->message_loop_proxy().get(),
-      kDriveFile,
+      GetFileSystemGetter(), worker_thread_->task_runner().get(), kDriveFile,
       0,               // offset
       base::Time()));  // expected modification time
 
@@ -113,9 +109,7 @@ TEST_F(WebkitFileStreamReaderImplTest, ReadWithOffset) {
   const int kOffset = 5;
 
   scoped_ptr<WebkitFileStreamReaderImpl> reader(new WebkitFileStreamReaderImpl(
-      GetFileSystemGetter(),
-      worker_thread_->message_loop_proxy().get(),
-      kDriveFile,
+      GetFileSystemGetter(), worker_thread_->task_runner().get(), kDriveFile,
       kOffset,
       base::Time()));  // expected modification time
 
@@ -133,9 +127,7 @@ TEST_F(WebkitFileStreamReaderImplTest, ReadError) {
       util::GetDriveMyDriveRootPath().AppendASCII("non-existing.txt");
 
   scoped_ptr<WebkitFileStreamReaderImpl> reader(new WebkitFileStreamReaderImpl(
-      GetFileSystemGetter(),
-      worker_thread_->message_loop_proxy().get(),
-      kDriveFile,
+      GetFileSystemGetter(), worker_thread_->task_runner().get(), kDriveFile,
       0,               // offset
       base::Time()));  // expected modification time
 
@@ -152,9 +144,7 @@ TEST_F(WebkitFileStreamReaderImplTest, GetLengthError) {
       util::GetDriveMyDriveRootPath().AppendASCII("non-existing.txt");
 
   scoped_ptr<WebkitFileStreamReaderImpl> reader(new WebkitFileStreamReaderImpl(
-      GetFileSystemGetter(),
-      worker_thread_->message_loop_proxy().get(),
-      kDriveFile,
+      GetFileSystemGetter(), worker_thread_->task_runner().get(), kDriveFile,
       0,               // offset
       base::Time()));  // expected modification time
 
@@ -193,12 +183,10 @@ TEST_F(WebkitFileStreamReaderImplTest, LastModification) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(google_apis::HTTP_SUCCESS, status);
 
-  scoped_ptr<WebkitFileStreamReaderImpl> reader(
-      new WebkitFileStreamReaderImpl(GetFileSystemGetter(),
-                                     worker_thread_->message_loop_proxy().get(),
-                                     kDriveFile,
-                                     0,  // offset
-                                     expected_modification_time));
+  scoped_ptr<WebkitFileStreamReaderImpl> reader(new WebkitFileStreamReaderImpl(
+      GetFileSystemGetter(), worker_thread_->task_runner().get(), kDriveFile,
+      0,  // offset
+      expected_modification_time));
 
   net::TestInt64CompletionCallback callback;
   int64 result = reader->GetLength(callback.callback());
@@ -214,12 +202,10 @@ TEST_F(WebkitFileStreamReaderImplTest, DISABLED_LastModificationError) {
   const base::FilePath kDriveFile =
       util::GetDriveMyDriveRootPath().AppendASCII("File 1.txt");
 
-  scoped_ptr<WebkitFileStreamReaderImpl> reader(
-      new WebkitFileStreamReaderImpl(GetFileSystemGetter(),
-                                     worker_thread_->message_loop_proxy().get(),
-                                     kDriveFile,
-                                     0,  // offset
-                                     base::Time::FromInternalValue(1)));
+  scoped_ptr<WebkitFileStreamReaderImpl> reader(new WebkitFileStreamReaderImpl(
+      GetFileSystemGetter(), worker_thread_->task_runner().get(), kDriveFile,
+      0,  // offset
+      base::Time::FromInternalValue(1)));
 
   net::TestInt64CompletionCallback callback;
   int64 result = reader->GetLength(callback.callback());

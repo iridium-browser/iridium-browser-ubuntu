@@ -11,7 +11,6 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/task_runner_util.h"
 
 namespace base {
@@ -84,8 +83,8 @@ class WebThread {
 
     // NOTE: do not add new threads here that are only used by a small number of
     // files. Instead you should just use a Thread class and pass its
-    // MessageLoopProxy around. Named threads there are only for threads that
-    // are used in many places.
+    // SingleThreadTaskRunner around. Named threads there are only for threads
+    // that are used in many places.
 
     // This identifier does not represent a thread.  Instead it counts the
     // number of well-known threads.  Insert new well-known threads before this
@@ -104,6 +103,14 @@ class WebThread {
                               const tracked_objects::Location& from_here,
                               const base::Closure& task,
                               base::TimeDelta delay);
+  static bool PostNonNestableTask(ID identifier,
+                                  const tracked_objects::Location& from_here,
+                                  const base::Closure& task);
+  static bool PostNonNestableDelayedTask(
+      ID identifier,
+      const tracked_objects::Location& from_here,
+      const base::Closure& task,
+      base::TimeDelta delay);
 
   static bool PostTaskAndReply(ID identifier,
                                const tracked_objects::Location& from_here,
@@ -116,18 +123,17 @@ class WebThread {
       const tracked_objects::Location& from_here,
       const base::Callback<ReturnType(void)>& task,
       const base::Callback<void(ReplyArgType)>& reply) {
-    scoped_refptr<base::MessageLoopProxy> message_loop_proxy =
-        GetMessageLoopProxyForThread(identifier);
-    return base::PostTaskAndReplyWithResult(message_loop_proxy.get(), from_here,
-                                            task, reply);
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+        GetTaskRunnerForThread(identifier);
+    return base::PostTaskAndReplyWithResult(task_runner.get(), from_here, task,
+                                            reply);
   }
 
   template <class T>
   static bool DeleteSoon(ID identifier,
                          const tracked_objects::Location& from_here,
                          const T* object) {
-    return GetMessageLoopProxyForThread(identifier)
-        ->DeleteSoon(from_here, object);
+    return GetTaskRunnerForThread(identifier)->DeleteSoon(from_here, object);
   }
 
   // Simplified wrappers for posting to the blocking thread pool. Use this
@@ -153,6 +159,10 @@ class WebThread {
   // runner.
   static bool PostBlockingPoolTask(const tracked_objects::Location& from_here,
                                    const base::Closure& task);
+  static bool PostBlockingPoolTaskAndReply(
+      const tracked_objects::Location& from_here,
+      const base::Closure& task,
+      const base::Closure& reply);
   static bool PostBlockingPoolSequencedTask(
       const std::string& sequence_token_name,
       const tracked_objects::Location& from_here,
@@ -172,14 +182,27 @@ class WebThread {
   // delete the pointer.
   static base::MessageLoop* UnsafeGetMessageLoopForThread(ID identifier);
 
+  // Callable on any thread.  Returns whether the given well-known thread is
+  // initialized.
+  static bool IsThreadInitialized(ID identifier) WARN_UNUSED_RESULT;
+
   // Callable on any thread.  Returns whether execution is currently on the
   // given thread.  To DCHECK this, use the DCHECK_CURRENTLY_ON_WEB_THREAD()
   // macro above.
   static bool CurrentlyOn(ID identifier) WARN_UNUSED_RESULT;
 
-  // Callers can hold on to a refcounted MessageLoopProxy beyond the lifetime
-  // of the thread.
-  static scoped_refptr<base::MessageLoopProxy> GetMessageLoopProxyForThread(
+  // Callable on any thread.  Returns whether the threads message loop is valid.
+  // If this returns false it means the thread is in the process of shutting
+  // down.
+  static bool IsMessageLoopValid(ID identifier) WARN_UNUSED_RESULT;
+
+  // If the current message loop is one of the known threads, returns true and
+  // sets identifier to its ID.
+  static bool GetCurrentThreadIdentifier(ID* identifier) WARN_UNUSED_RESULT;
+
+  // Callers can hold on to a refcounted SingleThreadTaskRunner beyond the
+  // lifetime of the thread.
+  static scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunnerForThread(
       ID identifier);
 
   // Returns an appropriate error message for when
@@ -187,6 +210,8 @@ class WebThread {
   static std::string GetDCheckCurrentlyOnErrorMessage(ID expected);
 
  private:
+  friend class WebThreadImpl;
+
   WebThread() {}
   DISALLOW_COPY_AND_ASSIGN(WebThread);
 };

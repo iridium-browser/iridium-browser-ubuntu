@@ -48,7 +48,7 @@ static const int kPointSize = 300;
 class ShaderText3GM : public GM {
 public:
     ShaderText3GM() {
-        this->setBGColor(0xFFDDDDDD);
+        this->setBGColor(sk_tool_utils::color_to_565(0xFFDDDDDD));
     }
 
 protected:

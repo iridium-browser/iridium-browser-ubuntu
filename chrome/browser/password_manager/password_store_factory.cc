@@ -15,7 +15,7 @@
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
@@ -35,7 +35,7 @@
 #include "chrome/browser/password_manager/password_store_win.h"
 #include "components/password_manager/core/browser/webdata/password_web_data_service_win.h"
 #elif defined(OS_MACOSX)
-#include "chrome/browser/password_manager/password_store_mac.h"
+#include "chrome/browser/password_manager/password_store_proxy_mac.h"
 #include "crypto/apple_keychain.h"
 #include "crypto/mock_apple_keychain.h"
 #elif defined(OS_CHROMEOS) || defined(OS_ANDROID)
@@ -98,8 +98,8 @@ bool ShouldAffiliationBasedMatchingBeActive(Profile* profile) {
   ProfileSyncService* profile_sync_service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
   return profile_sync_service &&
-         profile_sync_service->IsSyncEnabledAndLoggedIn() &&
-         profile_sync_service->SyncActive() &&
+         profile_sync_service->CanSyncStart() &&
+         profile_sync_service->IsSyncActive() &&
          profile_sync_service->GetPreferredDataTypes().Has(syncer::PASSWORDS) &&
          !profile_sync_service->IsUsingSecondaryPassphrase();
 }
@@ -270,8 +270,8 @@ KeyedService* PasswordStoreFactory::BuildServiceInstanceFor(
           os_crypt::switches::kUseMockKeychain)
           ? new crypto::MockAppleKeychain()
           : new crypto::AppleKeychain());
-  ps = new PasswordStoreMac(main_thread_runner, db_thread_runner,
-                            keychain.Pass(), login_db.Pass());
+  ps = new PasswordStoreProxyMac(main_thread_runner, keychain.Pass(),
+                                 login_db.Pass(), profile->GetPrefs());
 #elif defined(OS_CHROMEOS) || defined(OS_ANDROID)
   // For now, we use PasswordStoreDefault. We might want to make a native
   // backend for PasswordStoreX (see below) in the future though.
@@ -312,8 +312,9 @@ KeyedService* PasswordStoreFactory::BuildServiceInstanceFor(
     if (backend->Init()) {
       VLOG(1) << "Using KWallet for password storage.";
       used_backend = KWALLET;
-    } else
+    } else {
       backend.reset();
+    }
   } else if (used_desktop_env == base::nix::DESKTOP_ENVIRONMENT_GNOME ||
              used_desktop_env == base::nix::DESKTOP_ENVIRONMENT_UNITY ||
              used_desktop_env == base::nix::DESKTOP_ENVIRONMENT_XFCE) {
@@ -325,8 +326,9 @@ KeyedService* PasswordStoreFactory::BuildServiceInstanceFor(
       if (backend->Init()) {
         VLOG(1) << "Using libsecret keyring for password storage.";
         used_backend = LIBSECRET;
-      } else
+      } else {
         backend.reset();
+      }
     }
 #endif  // defined(USE_LIBSECRET)
     if (!backend.get()) {
@@ -336,8 +338,9 @@ KeyedService* PasswordStoreFactory::BuildServiceInstanceFor(
       if (backend->Init()) {
         VLOG(1) << "Using GNOME keyring for password storage.";
         used_backend = GNOME_KEYRING;
-      } else
+      } else {
         backend.reset();
+      }
 #endif  // defined(USE_GNOME_KEYRING)
     }
   }

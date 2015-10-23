@@ -5,12 +5,14 @@
 #include "chrome/browser/ui/panels/panel_host.h"
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/extensions/window_controller.h"
-#include "chrome/browser/favicon/favicon_helper.h"
+#include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -24,12 +26,10 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/view_type_utils.h"
-#include "extensions/common/extension_messages.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 #include "ui/gfx/geometry/rect.h"
@@ -40,7 +40,6 @@ using base::UserMetricsAction;
 PanelHost::PanelHost(Panel* panel, Profile* profile)
     : panel_(panel),
       profile_(profile),
-      extension_function_dispatcher_(profile, this),
       weak_factory_(this) {
 }
 
@@ -71,6 +70,8 @@ void PanelHost::Init(const GURL& url) {
   PrefsTabHelper::CreateForWebContents(web_contents_.get());
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents_.get());
+  extensions::ExtensionWebContentsObserver::GetForWebContents(
+      web_contents_.get())->dispatcher()->set_delegate(this);
 
   web_contents_->GetController().LoadURL(
       url, content::Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
@@ -199,12 +200,6 @@ void PanelHost::ResizeDueToAutoResize(content::WebContents* web_contents,
   panel_->OnContentsAutoResized(new_size);
 }
 
-void PanelHost::RenderViewCreated(content::RenderViewHost* render_view_host) {
-  extensions::WindowController* window = GetExtensionWindowController();
-  render_view_host->Send(new ExtensionMsg_UpdateBrowserWindowId(
-      render_view_host->GetRoutingID(), window->GetWindowId()));
-}
-
 void PanelHost::RenderProcessGone(base::TerminationStatus status) {
   CloseContents(web_contents_.get());
 }
@@ -216,30 +211,13 @@ void PanelHost::WebContentsDestroyed() {
   // Close the panel after we return to the message loop (not immediately,
   // otherwise, it may destroy this object before the stack has a chance
   // to cleanly unwind.)
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&PanelHost::ClosePanel, weak_factory_.GetWeakPtr()));
 }
 
 void PanelHost::ClosePanel() {
   panel_->Close();
-}
-
-bool PanelHost::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(PanelHost, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
-}
-
-void PanelHost::OnRequest(const ExtensionHostMsg_Request_Params& params) {
-  if (!web_contents_.get())
-    return;
-
-  extension_function_dispatcher_.Dispatch(params,
-                                          web_contents_->GetRenderViewHost());
 }
 
 extensions::WindowController* PanelHost::GetExtensionWindowController() const {

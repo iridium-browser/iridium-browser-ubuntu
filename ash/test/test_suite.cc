@@ -9,10 +9,11 @@
 #include "base/files/file_path.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/aura/env.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/gfx/gfx_paths.h"
-#include "ui/gl/gl_surface.h"
+#include "ui/gl/test/gl_surface_test_support.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -33,7 +34,7 @@ AuraShellTestSuite::~AuraShellTestSuite() {
 
 void AuraShellTestSuite::Initialize() {
   base::TestSuite::Initialize();
-  gfx::GLSurface::InitializeOneOffForTests();
+  gfx::GLSurfaceTestSupport::InitializeOneOff();
 
 #if defined(OS_WIN)
   base::win::Version version = base::win::GetVersion();
@@ -58,9 +59,11 @@ void AuraShellTestSuite::Initialize() {
       "en-US", NULL, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
 
   base::DiscardableMemoryAllocator::SetInstance(&discardable_memory_allocator_);
+  aura::Env::CreateInstance(true);
 }
 
 void AuraShellTestSuite::Shutdown() {
+  aura::Env::DeleteInstance();
   ui::ResourceBundle::CleanupSharedInstance();
 #if defined(OS_WIN)
   com_initializer_.reset();

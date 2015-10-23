@@ -9,6 +9,7 @@
 #include "SkCanvas.h"
 #include "SkGradientShader.h"
 #include "SkPaint.h"
+#include "SkPath.h"
 #include "SkString.h"
 
 enum ColorPattern {
@@ -112,7 +113,7 @@ protected:
         return fName.c_str();
     }
 
-    virtual void onPreDraw() {
+    void onPreDraw() override {
         int w = 40;
         int h = 40;
         makebm(&fBmp, w, h);

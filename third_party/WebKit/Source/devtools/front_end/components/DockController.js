@@ -36,17 +36,23 @@
 WebInspector.DockController = function(canDock)
 {
     this._canDock = canDock;
+
+    this._closeButton = new WebInspector.ToolbarButton(WebInspector.UIString("Close"), "delete-toolbar-item");
+    this._closeButton.addEventListener("click", InspectorFrontendHost.closeWindow.bind(InspectorFrontendHost));
+
     if (!canDock) {
         this._dockSide = WebInspector.DockController.State.Undocked;
         this._updateUI();
         return;
     }
 
-    this._currentDockStateSetting = WebInspector.settings.createSetting("currentDockState", "");
-    this._lastDockStateSetting = WebInspector.settings.createSetting("lastDockState", "");
-
-    /** @type {!WebInspector.ToolbarStatesSettingButton|undefined} */
-    this._dockToggleButton;
+    this._states = [WebInspector.DockController.State.DockedToRight, WebInspector.DockController.State.DockedToBottom, WebInspector.DockController.State.Undocked];
+    this._currentDockStateSetting = WebInspector.settings.createSetting("currentDockState", "right");
+    this._lastDockStateSetting = WebInspector.settings.createSetting("lastDockState", "bottom");
+    if (this._states.indexOf(this._currentDockStateSetting.get()) === -1)
+        this._currentDockStateSetting.set("right");
+    if (this._states.indexOf(this._lastDockStateSetting.get()) === -1)
+        this._currentDockStateSetting.set("bottom");
 }
 
 WebInspector.DockController.State = {
@@ -70,11 +76,8 @@ WebInspector.DockController.prototype = {
         if (!this._canDock)
             return;
 
-        this._states = [WebInspector.DockController.State.DockedToRight, WebInspector.DockController.State.DockedToBottom, WebInspector.DockController.State.Undocked];
         this._titles = [WebInspector.UIString("Dock to right"), WebInspector.UIString("Dock to bottom"), WebInspector.UIString("Undock into separate window")];
-        var initialState = this._currentDockStateSetting.get();
-        initialState = this._states.indexOf(initialState) >= 0 ? initialState : this._states[0];
-        this._dockSideChanged(initialState);
+        this.setDockSide(this._currentDockStateSetting.get());
     },
 
     /**
@@ -104,13 +107,16 @@ WebInspector.DockController.prototype = {
     /**
      * @param {string} dockSide
      */
-    _dockSideChanged: function(dockSide)
+    setDockSide: function(dockSide)
     {
+        if (this._states.indexOf(dockSide) === -1)
+            dockSide = this._states[0];
+
         if (this._dockSide === dockSide)
             return;
 
-        if (this._dockToggleButton)
-            this._dockToggleButton.setEnabled(false);
+        this._lastDockStateSetting.set(this._dockSide);
+        this._currentDockStateSetting.set(dockSide);
         var eventData = { from: this._dockSide, to: dockSide };
         this.dispatchEventToListeners(WebInspector.DockController.Events.BeforeDockSideChanged, eventData);
         console.timeStamp("DockController.setIsDocked");
@@ -126,8 +132,6 @@ WebInspector.DockController.prototype = {
     _setIsDockedResponse: function(eventData)
     {
         this.dispatchEventToListeners(WebInspector.DockController.Events.AfterDockSideChanged, eventData);
-        if (this._dockToggleButton)
-            this._dockToggleButton.setEnabled(true);
     },
 
     /**
@@ -153,41 +157,19 @@ WebInspector.DockController.prototype = {
             body.classList.remove("dock-to-bottom");
             break;
         }
+        this._closeButton.setVisible(this._dockSide !== WebInspector.DockController.State.Undocked);
+    },
+
+    _toggleDockSide: function()
+    {
+        if (this._lastDockStateSetting.get() === this._currentDockStateSetting.get()) {
+            var index = this._states.indexOf(this._currentDockStateSetting.get()) || 0;
+            this._lastDockStateSetting.set(this._states[(index + 1) % this._states.length]);
+        }
+        this.setDockSide(this._lastDockStateSetting.get());
     },
 
     __proto__: WebInspector.Object.prototype
-}
-
-/**
- * @constructor
- * @implements {WebInspector.ToolbarItem.Provider}
- */
-WebInspector.DockController.ButtonProvider = function()
-{
-}
-
-WebInspector.DockController.ButtonProvider.prototype = {
-    /**
-     * @override
-     * @return {?WebInspector.ToolbarItem}
-     */
-    item: function()
-    {
-        if (!WebInspector.dockController.canDock())
-            return null;
-
-        if (!WebInspector.dockController._dockToggleButton) {
-            WebInspector.dockController._dockToggleButton = new WebInspector.ToolbarStatesSettingButton(
-                    "dock-toolbar-item",
-                    WebInspector.dockController._states,
-                    WebInspector.dockController._titles,
-                    WebInspector.dockController.dockSide(),
-                    WebInspector.dockController._currentDockStateSetting,
-                    WebInspector.dockController._lastDockStateSetting,
-                    WebInspector.dockController._dockSideChanged.bind(WebInspector.dockController));
-        }
-        return WebInspector.dockController._dockToggleButton;
-    }
 }
 
 /**
@@ -206,10 +188,26 @@ WebInspector.DockController.ToggleDockActionDelegate.prototype = {
      */
     handleAction: function(context, actionId)
     {
-        var toggleButton = new WebInspector.DockController.ButtonProvider().item();
-        if (!toggleButton || !toggleButton.enabled())
-            return;
-        /** @type {!WebInspector.ToolbarStatesSettingButton} */ (toggleButton).toggle();
+        WebInspector.dockController._toggleDockSide();
+    }
+}
+
+/**
+ * @constructor
+ * @implements {WebInspector.ToolbarItem.Provider}
+ */
+WebInspector.DockController.CloseButtonProvider = function()
+{
+}
+
+WebInspector.DockController.CloseButtonProvider.prototype = {
+    /**
+     * @override
+     * @return {?WebInspector.ToolbarItem}
+     */
+    item: function()
+    {
+        return WebInspector.dockController._closeButton;
     }
 }
 

@@ -39,8 +39,6 @@
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/workers/SharedWorker.h"
-#include "core/workers/WorkerScriptLoader.h"
-#include "core/workers/WorkerScriptLoaderClient.h"
 #include "platform/network/ResourceResponse.h"
 #include "public/platform/WebMessagePortChannel.h"
 #include "public/platform/WebString.h"
@@ -57,7 +55,7 @@ namespace blink {
 // Callback class that keeps the SharedWorker and WebSharedWorker objects alive while connecting.
 class SharedWorkerConnector : private WebSharedWorkerConnector::ConnectListener {
 public:
-    SharedWorkerConnector(PassRefPtrWillBeRawPtr<SharedWorker> worker, const KURL& url, const String& name, PassOwnPtr<WebMessagePortChannel> channel, PassOwnPtr<WebSharedWorkerConnector> webWorkerConnector)
+    SharedWorkerConnector(SharedWorker* worker, const KURL& url, const String& name, PassOwnPtr<WebMessagePortChannel> channel, PassOwnPtr<WebSharedWorkerConnector> webWorkerConnector)
         : m_worker(worker)
         , m_url(url)
         , m_name(name)
@@ -69,10 +67,10 @@ public:
 
 private:
     // WebSharedWorkerConnector::ConnectListener overrides.
-    virtual void connected() override;
-    virtual void scriptLoadFailed() override;
+    void connected() override;
+    void scriptLoadFailed() override;
 
-    RefPtrWillBePersistent<SharedWorker> m_worker;
+    Persistent<SharedWorker> m_worker;
     KURL m_url;
     String m_name;
     OwnPtr<WebSharedWorkerConnector> m_webWorkerConnector;
@@ -109,14 +107,28 @@ static WebSharedWorkerRepositoryClient::DocumentID getId(void* document)
     return reinterpret_cast<WebSharedWorkerRepositoryClient::DocumentID>(document);
 }
 
-void SharedWorkerRepositoryClientImpl::connect(PassRefPtrWillBeRawPtr<SharedWorker> worker, PassOwnPtr<WebMessagePortChannel> port, const KURL& url, const String& name, ExceptionState& exceptionState)
+void SharedWorkerRepositoryClientImpl::connect(SharedWorker* worker, PassOwnPtr<WebMessagePortChannel> port, const KURL& url, const String& name, ExceptionState& exceptionState)
 {
     ASSERT(m_client);
 
     // No nested workers (for now) - connect() should only be called from document context.
     ASSERT(worker->executionContext()->isDocument());
     Document* document = toDocument(worker->executionContext());
-    OwnPtr<WebSharedWorkerConnector> webWorkerConnector = adoptPtr(m_client->createSharedWorkerConnector(url, name, getId(document), worker->executionContext()->contentSecurityPolicy()->deprecatedHeader(), static_cast<WebContentSecurityPolicyType>(worker->executionContext()->contentSecurityPolicy()->deprecatedHeaderType())));
+
+    // TODO(estark): this is broken, as it only uses the first header
+    // when multiple might have been sent. Fix by making the
+    // SharedWorkerConnector interface take a map that can contain
+    // multiple headers.
+    OwnPtr<Vector<CSPHeaderAndType>> headers = worker->executionContext()->contentSecurityPolicy()->headers();
+    WebString header;
+    WebContentSecurityPolicyType headerType = WebContentSecurityPolicyTypeReport;
+
+    if (headers->size() > 0) {
+        header = (*headers)[0].first;
+        headerType = static_cast<WebContentSecurityPolicyType>((*headers)[0].second);
+    }
+
+    OwnPtr<WebSharedWorkerConnector> webWorkerConnector = adoptPtr(m_client->createSharedWorkerConnector(url, name, getId(document), header, headerType));
     if (!webWorkerConnector) {
         // Existing worker does not match this url, so return an error back to the caller.
         exceptionState.throwDOMException(URLMismatchError, "The location of the SharedWorker named '" + name + "' does not exactly match the provided URL ('" + url.elidedString() + "').");

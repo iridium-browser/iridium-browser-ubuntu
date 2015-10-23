@@ -25,6 +25,10 @@ blink_platform_neon_files = [
   "graphics/cpu/arm/WebGLImageConversionNEON.h",
 ]
 
+blink_platform_sse_files = [
+  "graphics/cpu/x86/WebGLImageConversionSSE.h",
+]
+
 # blink_common in blink_platform.gyp
 component("blink_common") {
   visibility = []  # Allow re-assignment of list.
@@ -78,6 +82,7 @@ if (is_mac) {
       "WebScrollbarPainterDelegate=ChromiumWebCoreObjCWebScrollbarPainterDelegate",
       "WebScrollbarPartAnimation=ChromiumWebCoreObjCWebScrollbarPartAnimation",
       "WebCoreFlippedView=ChromiumWebCoreObjCWebCoreFlippedView",
+      "WebCoreScrollbarObserver=ChromiumWebCoreObjCWebCoreScrollbarObserver",
       "WebCoreTextFieldCell=ChromiumWebCoreObjCWebCoreTextFieldCell",
     ]
   }
@@ -168,6 +173,7 @@ component("platform") {
 
   sources = platform_files
   sources -= blink_platform_neon_files
+  sources -= blink_platform_sse_files
 
   # Add in the generated files.
   sources +=
@@ -299,6 +305,10 @@ component("platform") {
     deps += [ ":blink_arm_neon" ]
   }
 
+  if (current_cpu == "x86" || current_cpu == "x64") {
+    deps += [ ":blink_x86_sse" ]
+  }
+
   if (use_webaudio_ffmpeg) {
     include_dirs += [ "//third_party/ffmpeg" ]
     deps += [ "//third_party/ffmpeg" ]
@@ -307,6 +317,21 @@ component("platform") {
     include_dirs += [ "//third_party/openmax_dl" ]
     deps += [ "//third_party/openmax_dl/dl" ]
   }
+}
+
+source_set("test_support") {
+  sources = platform_test_support_files
+  visibility += [ "//third_party/WebKit/*" ]
+
+  configs += [
+    "//third_party/WebKit/Source:config",
+    "//third_party/WebKit/Source:inside_blink",
+    "//third_party/WebKit/Source:non_test_config",
+  ]
+
+  deps = [
+    ":platform",
+  ]
 }
 
 if (!is_mac) {
@@ -358,6 +383,7 @@ if (!is_mac) {
     deps = [
       ":blink_common",
       ":platform",
+      ":test_support",
       "//base",
       "//base/allocator",
       "//base/test:test_support",
@@ -396,6 +422,14 @@ if (current_cpu == "arm") {
     #      }],
     #    ],
 
+    deps = [ ":blink_common" ]
+  }
+}
+
+
+if (current_cpu == "x86" || current_cpu == "x64") {
+  source_set("blink_x86_sse") {
+    sources = blink_platform_sse_files
     deps = [ ":blink_common" ]
   }
 }

@@ -54,7 +54,7 @@ public:
     {
         return adoptPtrWillBeNoop(new InspectorDatabaseAgent(page));
     }
-    virtual ~InspectorDatabaseAgent();
+    ~InspectorDatabaseAgent() override;
     DECLARE_VIRTUAL_TRACE();
 
     void disable(ErrorString*) override;
@@ -62,9 +62,9 @@ public:
     void didCommitLoadForLocalFrame(LocalFrame*) override;
 
     // Called from the front-end.
-    virtual void enable(ErrorString*) override;
-    virtual void getDatabaseTableNames(ErrorString*, const String& databaseId, RefPtr<TypeBuilder::Array<String>>& names) override;
-    virtual void executeSQL(ErrorString*, const String& databaseId, const String& query, PassRefPtrWillBeRawPtr<ExecuteSQLCallback>) override;
+    void enable(ErrorString*) override;
+    void getDatabaseTableNames(ErrorString*, const String& databaseId, RefPtr<TypeBuilder::Array<String>>& names) override;
+    void executeSQL(ErrorString*, const String& databaseId, const String& query, PassRefPtrWillBeRawPtr<ExecuteSQLCallback>) override;
 
     void didOpenDatabase(Database*, const String& domain, const String& name, const String& version);
 private:
@@ -73,7 +73,7 @@ private:
     Database* databaseForId(const String& databaseId);
     InspectorDatabaseResource* findByFileName(const String& fileName);
 
-    Page* m_page;
+    RawPtrWillBeMember<Page> m_page;
     typedef PersistentHeapHashMapWillBeHeapHashMap<String, Member<InspectorDatabaseResource>> DatabaseResourcesHeapMap;
     DatabaseResourcesHeapMap m_resources;
     bool m_enabled;

@@ -24,7 +24,6 @@ var it;
 
 QUnit.module('host_daemon_facade', {
   beforeEach: function(/** QUnit.Assert */ assert) {
-    chromeMocks.activate(['runtime']);
     chromeMocks.identity.mock$setToken('my_token');
     nativePortMock =
         chromeMocks.runtime.connectNative('com.google.chrome.remote_desktop');
@@ -38,7 +37,6 @@ QUnit.module('host_daemon_facade', {
     }
     mockHostResponses = null;
     postMessageStub.restore();
-    chromeMocks.restore();
     it = null;
   }
 });
@@ -121,13 +119,13 @@ function postInitTest(description, callback) {
       type: 'helloResponse',
       version: ''
     });
-    base.debug.assert(it == null);
+    console.assert(it == null, 'Daemon facade already exists.');
     it = new remoting.HostDaemonFacade();
     assert.deepEqual(postMessageStub.args[0][0], {
       id: 0,
       type: 'hello'
     });
-    it.getDaemonVersion().then(function() {
+    return it.getDaemonVersion().then(function() {
       return callback(assert);
     });
   });

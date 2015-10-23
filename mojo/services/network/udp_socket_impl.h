@@ -9,10 +9,10 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "mojo/application/public/cpp/app_lifetime_helper.h"
 #include "mojo/services/network/public/interfaces/udp_socket.mojom.h"
 #include "net/base/ip_endpoint.h"
 #include "net/udp/udp_socket.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
 #include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
 
 namespace net {
@@ -26,7 +26,8 @@ class UDPSocketImpl : public UDPSocket {
  public:
   // The lifetime of a new UDPSocketImpl is bound to the connection associated
   // with |request|.
-  explicit UDPSocketImpl(InterfaceRequest<UDPSocket> request);
+  UDPSocketImpl(InterfaceRequest<UDPSocket> request,
+                scoped_ptr<mojo::AppRefCount> app_refcount);
   ~UDPSocketImpl() override;
 
   // UDPSocket implementation.
@@ -118,6 +119,8 @@ class UDPSocketImpl : public UDPSocket {
   std::deque<PendingSendRequest*> pending_send_requests_;
   // The maximum size of the |pending_send_requests_| queue.
   size_t max_pending_send_requests_;
+
+  scoped_ptr<mojo::AppRefCount> app_refcount_;
 
   DISALLOW_COPY_AND_ASSIGN(UDPSocketImpl);
 };

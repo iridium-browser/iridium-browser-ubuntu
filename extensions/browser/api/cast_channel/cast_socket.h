@@ -36,7 +36,7 @@ class TransportSecurityState;
 }
 
 namespace extensions {
-namespace core_api {
+namespace api {
 namespace cast_channel {
 class CastMessage;
 class Logger;
@@ -89,10 +89,6 @@ class CastSocket : public ApiResource {
 
   // The authentication level requested for the channel.
   virtual ChannelAuthType channel_auth() const = 0;
-
-  // Returns a cast:// or casts:// URL for the channel endpoint.
-  // For backwards compatibility.
-  virtual std::string cast_url() const = 0;
 
   // The ready state of the channel.
   virtual ReadyState ready_state() const = 0;
@@ -162,7 +158,6 @@ class CastSocketImpl : public CastSocket {
   int id() const override;
   void set_id(int channel_id) override;
   ChannelAuthType channel_auth() const override;
-  std::string cast_url() const override;
   ReadyState ready_state() const override;
   ChannelError error_state() const override;
   bool keep_alive() const override;
@@ -370,7 +365,7 @@ class CastSocketImpl : public CastSocket {
   DISALLOW_COPY_AND_ASSIGN(CastSocketImpl);
 };
 }  // namespace cast_channel
-}  // namespace core_api
+}  // namespace api
 }  // namespace extensions
 
 #endif  // EXTENSIONS_BROWSER_API_CAST_CHANNEL_CAST_SOCKET_H_

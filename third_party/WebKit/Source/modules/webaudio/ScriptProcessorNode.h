@@ -34,8 +34,8 @@
 
 namespace blink {
 
+class AbstractAudioContext;
 class AudioBuffer;
-class AudioContext;
 
 // ScriptProcessorNode is an AudioNode which allows for arbitrary synthesis or processing directly using JavaScript.
 // The API allows for a variable number of inputs and outputs, although it must have at least one input or output.
@@ -46,23 +46,23 @@ class AudioContext;
 class ScriptProcessorHandler final : public AudioHandler {
 public:
     static PassRefPtr<ScriptProcessorHandler> create(AudioNode&, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
-    virtual ~ScriptProcessorHandler();
+    ~ScriptProcessorHandler() override;
 
     // AudioHandler
-    virtual void process(size_t framesToProcess) override;
-    virtual void initialize() override;
+    void process(size_t framesToProcess) override;
+    void initialize() override;
 
     size_t bufferSize() const { return m_bufferSize; }
 
-    virtual void setChannelCount(unsigned long, ExceptionState&) override;
-    virtual void setChannelCountMode(const String&, ExceptionState&) override;
+    void setChannelCount(unsigned long, ExceptionState&) override;
+    void setChannelCountMode(const String&, ExceptionState&) override;
 
     virtual unsigned numberOfOutputChannels() const { return m_numberOfOutputChannels; }
 
 private:
     ScriptProcessorHandler(AudioNode&, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
-    virtual double tailTime() const override;
-    virtual double latencyTime() const override;
+    double tailTime() const override;
+    double latencyTime() const override;
 
     void fireProcessEvent();
 
@@ -101,13 +101,13 @@ public:
     // latency. Higher numbers will be necessary to avoid audio breakup and
     // glitches.
     // The value chosen must carefully balance between latency and audio quality.
-    static ScriptProcessorNode* create(AudioContext&, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
+    static ScriptProcessorNode* create(AbstractAudioContext&, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(audioprocess);
     size_t bufferSize() const;
 
 private:
-    ScriptProcessorNode(AudioContext&, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
+    ScriptProcessorNode(AbstractAudioContext&, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
 };
 
 } // namespace blink

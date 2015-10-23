@@ -12,9 +12,7 @@
 #include "ash/accelerators/debug_commands.h"
 #include "ash/ash_switches.h"
 #include "ash/debug.h"
-#include "ash/display/display_controller.h"
-#include "ash/display/display_manager.h"
-#include "ash/display/display_util.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/focus_cycler.h"
 #include "ash/gpu_support.h"
 #include "ash/ime_control_delegate.h"
@@ -78,37 +76,6 @@ namespace ash {
 namespace {
 
 using base::UserMetricsAction;
-
-bool CanHandleAccessibleFocusCycle() {
-  if (!Shell::GetInstance()->accessibility_delegate()->
-      IsSpokenFeedbackEnabled()) {
-    return false;
-  }
-  aura::Window* active_window = ash::wm::GetActiveWindow();
-  if (!active_window)
-    return false;
-  views::Widget* widget =
-      views::Widget::GetWidgetForNativeWindow(active_window);
-  if (!widget)
-    return false;
-  views::FocusManager* focus_manager = widget->GetFocusManager();
-  if (!focus_manager)
-    return false;
-  views::View* view = focus_manager->GetFocusedView();
-  return view && strcmp(view->GetClassName(), views::WebView::kViewClassName);
-}
-
-void HandleAccessibleFocusCycle(bool reverse) {
-  if (reverse)
-    base::RecordAction(UserMetricsAction("Accel_Accessible_Focus_Previous"));
-  else
-    base::RecordAction(UserMetricsAction("Accel_Accessible_Focus_Next"));
-
-  aura::Window* active_window = ash::wm::GetActiveWindow();
-  views::Widget* widget =
-      views::Widget::GetWidgetForNativeWindow(active_window);
-  widget->GetFocusManager()->AdvanceFocus(reverse);
-}
 
 void HandleCycleBackwardMRU(const ui::Accelerator& accelerator) {
   if (accelerator.key_code() == ui::VKEY_TAB)
@@ -289,6 +256,9 @@ gfx::Display::Rotation GetNextRotation(gfx::Display::Rotation current) {
 
 // Rotates the screen.
 void HandleRotateScreen() {
+  if (Shell::GetInstance()->display_manager()->IsInUnifiedMode())
+    return;
+
   base::RecordAction(UserMetricsAction("Accel_Rotate_Window"));
   gfx::Point point = Shell::GetScreen()->GetCursorScreenPoint();
   gfx::Display display = Shell::GetScreen()->GetDisplayNearestPoint(point);
@@ -314,42 +284,6 @@ void HandleRotateActiveWindow() {
         new ui::LayerAnimationSequence(
             new ash::WindowRotation(360, active_window->layer())));
   }
-}
-
-bool CanHandleScaleReset() {
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  int64 display_id = display_manager->GetDisplayIdForUIScaling();
-  return (display_id != gfx::Display::kInvalidDisplayID &&
-          display_manager->GetDisplayInfo(display_id).configured_ui_scale() !=
-              1.0f);
-}
-
-void HandleScaleReset() {
-  base::RecordAction(UserMetricsAction("Accel_Scale_Ui_Reset"));
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  int64 display_id = display_manager->GetDisplayIdForUIScaling();
-  display_manager->SetDisplayUIScale(display_id, 1.0f);
-}
-
-bool CanHandleScaleUI() {
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  int64 display_id = display_manager->GetDisplayIdForUIScaling();
-  return display_id != gfx::Display::kInvalidDisplayID;
-}
-
-void HandleScaleUI(bool up) {
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  int64 display_id = display_manager->GetDisplayIdForUIScaling();
-
-  if (up) {
-    base::RecordAction(UserMetricsAction("Accel_Scale_Ui_Up"));
-  } else {
-    base::RecordAction(UserMetricsAction("Accel_Scale_Ui_Down"));
-  }
-
-  const DisplayInfo& display_info = display_manager->GetDisplayInfo(display_id);
-  float next_scale = GetNextUIScale(display_info, up);
-  display_manager->SetDisplayUIScale(display_id, next_scale);
 }
 
 void HandleShowKeyboardOverlay() {
@@ -464,9 +398,7 @@ bool CanHandleWindowSnapOrDock() {
   wm::WindowState* window_state = wm::GetActiveWindowState();
   // Disable window snapping shortcut key for full screen window due to
   // http://crbug.com/135487.
-  return (window_state &&
-          (window_state->window()->type() == ui::wm::WINDOW_TYPE_NORMAL ||
-           window_state->window()->type() == ui::wm::WINDOW_TYPE_PANEL) &&
+  return (window_state && window_state->IsUserPositionable() &&
           !window_state->IsFullscreen());
 }
 
@@ -582,7 +514,7 @@ void HandleSilenceSpokenFeedback() {
 
 void HandleSwapPrimaryDisplay() {
   base::RecordAction(UserMetricsAction("Accel_Swap_Primary_Display"));
-  Shell::GetInstance()->display_controller()->SwapPrimaryDisplay();
+  Shell::GetInstance()->window_tree_host_manager()->SwapPrimaryDisplay();
 }
 
 bool CanHandleCycleUser() {
@@ -631,7 +563,7 @@ void HandleToggleCapsLock() {
 
 void HandleToggleMirrorMode() {
   base::RecordAction(UserMetricsAction("Accel_Toggle_Mirror_Mode"));
-  Shell::GetInstance()->display_controller()->ToggleMirrorMode();
+  Shell::GetInstance()->window_tree_host_manager()->ToggleMirrorMode();
 }
 
 void HandleToggleSpokenFeedback() {
@@ -882,9 +814,6 @@ bool AcceleratorController::CanPerformAction(
   // false should be returned to give the web contents a chance at handling the
   // accelerator.
   switch (action) {
-    case ACCESSIBLE_FOCUS_NEXT:
-    case ACCESSIBLE_FOCUS_PREVIOUS:
-      return CanHandleAccessibleFocusCycle();
     case DEBUG_PRINT_LAYER_HIERARCHY:
     case DEBUG_PRINT_VIEW_HIERARCHY:
     case DEBUG_PRINT_WINDOW_HIERARCHY:
@@ -906,10 +835,9 @@ bool AcceleratorController::CanPerformAction(
     case PREVIOUS_IME:
       return CanHandlePreviousIme(ime_control_delegate_.get());
     case SCALE_UI_RESET:
-      return CanHandleScaleReset();
     case SCALE_UI_UP:
     case SCALE_UI_DOWN:
-      return CanHandleScaleUI();
+      return accelerators::IsInternalDisplayZoomEnabled();
     case SHOW_MESSAGE_CENTER_BUBBLE:
       return CanHandleShowMessageCenterBubble();
     case SWITCH_IME:
@@ -923,6 +851,7 @@ bool AcceleratorController::CanPerformAction(
       return CanHandlePositionCenter();
 #if defined(OS_CHROMEOS)
     case DEBUG_ADD_REMOVE_DISPLAY:
+    case DEBUG_TOGGLE_UNIFIED_DESKTOP:
       return debug::DebugAcceleratorsEnabled();
     case DISABLE_CAPS_LOCK:
       return CanHandleDisableCapsLock(previous_accelerator);
@@ -1015,12 +944,6 @@ void AcceleratorController::PerformAction(AcceleratorAction action,
   // implement it in your module's controller code (like TOGGLE_MIRROR_MODE
   // below) or pull it into a HandleFoo() function above.
   switch (action) {
-    case ACCESSIBLE_FOCUS_NEXT:
-      HandleAccessibleFocusCycle(false);
-      break;
-    case ACCESSIBLE_FOCUS_PREVIOUS:
-      HandleAccessibleFocusCycle(true);
-      break;
     case CYCLE_BACKWARD_MRU:
       HandleCycleBackwardMRU(accelerator);
       break;
@@ -1124,13 +1047,13 @@ void AcceleratorController::PerformAction(AcceleratorAction action,
       HandleRotateActiveWindow();
       break;
     case SCALE_UI_DOWN:
-      HandleScaleUI(false /* down */);
+      accelerators::ZoomInternalDisplay(false /* down */);
       break;
     case SCALE_UI_RESET:
-      HandleScaleReset();
+      accelerators::ResetInternalDisplayZoom();
       break;
     case SCALE_UI_UP:
-      HandleScaleUI(true /* up */);
+      accelerators::ZoomInternalDisplay(true /* up */);
       break;
     case SHOW_KEYBOARD_OVERLAY:
       HandleShowKeyboardOverlay();
@@ -1183,6 +1106,9 @@ void AcceleratorController::PerformAction(AcceleratorAction action,
       HandleBrightnessUp(brightness_control_delegate_.get(), accelerator);
       break;
     case DEBUG_ADD_REMOVE_DISPLAY:
+      debug::PerformDebugActionIfEnabled(action);
+      break;
+    case DEBUG_TOGGLE_UNIFIED_DESKTOP:
       debug::PerformDebugActionIfEnabled(action);
       break;
     case DISABLE_CAPS_LOCK:

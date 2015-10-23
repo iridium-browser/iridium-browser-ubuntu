@@ -156,6 +156,19 @@ bool GetWindowManagerName(std::string* wm_name) {
   return !err_tracker.FoundNewError() && result;
 }
 
+struct XImageDeleter {
+  void operator()(XImage* image) const { XDestroyImage(image); }
+};
+
+// Custom release function that will be passed to Skia so that it deletes the
+// image when the SkBitmap goes out of scope.
+// |address| is the pointer to the data inside the XImage.
+// |context| is the pointer to the XImage.
+void ReleaseXImage(void* address, void* context) {
+  if (context)
+    XDestroyImage(static_cast<XImage*>(context));
+}
+
 // A process wide singleton that manages the usage of X cursors.
 class XCursorCache {
  public:
@@ -282,76 +295,6 @@ class XCustomCursorCache {
 
 bool IsXInput2Available() {
   return DeviceDataManagerX11::GetInstance()->IsXInput2Available();
-}
-
-static SharedMemorySupport DoQuerySharedMemorySupport(XDisplay* dpy) {
-  int dummy;
-  Bool pixmaps_supported;
-  // Query the server's support for XSHM.
-  if (!XShmQueryVersion(dpy, &dummy, &dummy, &pixmaps_supported))
-    return SHARED_MEMORY_NONE;
-
-#if defined(OS_FREEBSD)
-  // On FreeBSD we can't access the shared memory after it was marked for
-  // deletion, unless this behaviour is explicitly enabled by the user.
-  // In case it's not enabled disable shared memory support.
-  int allow_removed;
-  size_t length = sizeof(allow_removed);
-
-  if ((sysctlbyname("kern.ipc.shm_allow_removed", &allow_removed, &length,
-      NULL, 0) < 0) || allow_removed < 1) {
-    return SHARED_MEMORY_NONE;
-  }
-#endif
-
-  // Next we probe to see if shared memory will really work
-  int shmkey = shmget(IPC_PRIVATE, 1, 0600);
-  if (shmkey == -1) {
-    LOG(WARNING) << "Failed to get shared memory segment.";
-    return SHARED_MEMORY_NONE;
-  } else {
-    VLOG(1) << "Got shared memory segment " << shmkey;
-  }
-
-  void* address = shmat(shmkey, NULL, 0);
-  // Mark the shared memory region for deletion
-  shmctl(shmkey, IPC_RMID, NULL);
-
-  XShmSegmentInfo shminfo;
-  memset(&shminfo, 0, sizeof(shminfo));
-  shminfo.shmid = shmkey;
-
-  gfx::X11ErrorTracker err_tracker;
-  bool result = XShmAttach(dpy, &shminfo);
-  if (result)
-    VLOG(1) << "X got shared memory segment " << shmkey;
-  else
-    LOG(WARNING) << "X failed to attach to shared memory segment " << shmkey;
-  if (err_tracker.FoundNewError())
-    result = false;
-  shmdt(address);
-  if (!result) {
-    LOG(WARNING) << "X failed to attach to shared memory segment " << shmkey;
-    return SHARED_MEMORY_NONE;
-  }
-
-  VLOG(1) << "X attached to shared memory segment " << shmkey;
-
-  XShmDetach(dpy, &shminfo);
-  return pixmaps_supported ? SHARED_MEMORY_PIXMAP : SHARED_MEMORY_PUTIMAGE;
-}
-
-SharedMemorySupport QuerySharedMemorySupport(XDisplay* dpy) {
-  static SharedMemorySupport shared_memory_support = SHARED_MEMORY_NONE;
-  static bool shared_memory_support_cached = false;
-
-  if (shared_memory_support_cached)
-    return shared_memory_support;
-
-  shared_memory_support = DoQuerySharedMemorySupport(dpy);
-  shared_memory_support_cached = true;
-
-  return shared_memory_support;
 }
 
 bool QueryRenderSupport(Display* dpy) {
@@ -1181,12 +1124,9 @@ bool CopyAreaToCanvas(XID drawable,
                       gfx::Rect source_bounds,
                       gfx::Point dest_offset,
                       gfx::Canvas* canvas) {
-  ui::XScopedImage scoped_image(
-      XGetImage(gfx::GetXDisplay(), drawable,
-                source_bounds.x(), source_bounds.y(),
-                source_bounds.width(), source_bounds.height(),
-                AllPlanes, ZPixmap));
-  XImage* image = scoped_image.get();
+  scoped_ptr<XImage, XImageDeleter> image(XGetImage(
+      gfx::GetXDisplay(), drawable, source_bounds.x(), source_bounds.y(),
+      source_bounds.width(), source_bounds.height(), AllPlanes, ZPixmap));
   if (!image) {
     LOG(ERROR) << "XGetImage failed";
     return false;
@@ -1210,9 +1150,9 @@ bool CopyAreaToCanvas(XID drawable,
       image->data[i + 3] = 0xff;
 
     SkBitmap bitmap;
-    bitmap.installPixels(SkImageInfo::MakeN32Premul(image->width,
-                                                    image->height),
-                         image->data, image->bytes_per_line);
+    bitmap.installPixels(
+        SkImageInfo::MakeN32Premul(image->width, image->height), image->data,
+        image->bytes_per_line, nullptr, &ReleaseXImage, image.release());
     gfx::ImageSkia image_skia;
     gfx::ImageSkiaRep image_rep(bitmap, canvas->image_scale());
     image_skia.AddRepresentation(image_rep);
@@ -1241,7 +1181,7 @@ WindowManagerName GuessWindowManager() {
       return WM_FLUXBOX;
     if (name == "i3")
       return WM_I3;
-    if (StartsWithASCII(name, "IceWM", true))
+    if (base::StartsWith(name, "IceWM", base::CompareCase::SENSITIVE))
       return WM_ICE_WM;
     if (name == "ion3")
       return WM_ION3;
@@ -1347,18 +1287,6 @@ size_t XRefcountedMemory::size() const {
 }
 
 XRefcountedMemory::~XRefcountedMemory() {
-}
-
-XScopedImage::~XScopedImage() {
-  reset(NULL);
-}
-
-void XScopedImage::reset(XImage* image) {
-  if (image_ == image)
-    return;
-  if (image_)
-    XDestroyImage(image_);
-  image_ = image;
 }
 
 XScopedCursor::XScopedCursor(::Cursor cursor, XDisplay* display)

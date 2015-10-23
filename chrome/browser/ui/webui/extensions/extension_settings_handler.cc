@@ -6,57 +6,29 @@
 
 #include <vector>
 
-#include "base/auto_reset.h"
-#include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/location.h"
-#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/values.h"
-#include "base/version.h"
-#include "chrome/browser/background/background_contents.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/apps/app_info_dialog.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/browser/ui/webui/extensions/extension_basic_info.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
-#include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
-#include "extensions/browser/api/device_permissions_manager.h"
-#include "extensions/browser/blacklist_state.h"
-#include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/management_policy.h"
-#include "extensions/browser/notification_types.h"
-#include "extensions/browser/pref_names.h"
-#include "extensions/browser/warning_set.h"
-#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest.h"
-#include "extensions/common/permissions/permissions_data.h"
 #include "grit/browser_resources.h"
 #include "grit/components_strings.h"
 #include "grit/theme_resources.h"
@@ -65,17 +37,8 @@
 
 namespace extensions {
 
-///////////////////////////////////////////////////////////////////////////////
-//
-// ExtensionSettingsHandler
-//
-///////////////////////////////////////////////////////////////////////////////
-
 ExtensionSettingsHandler::ExtensionSettingsHandler()
-    : extension_service_(NULL),
-      warning_service_observer_(this),
-      extension_prefs_observer_(this),
-      extension_management_observer_(this) {
+    : extension_service_(nullptr) {
 }
 
 ExtensionSettingsHandler::~ExtensionSettingsHandler() {
@@ -131,6 +94,8 @@ void ExtensionSettingsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_VIEW_INCOGNITO));
   source->AddString("viewInactive",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_VIEW_INACTIVE));
+  source->AddString("viewIframe",
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_VIEW_IFRAME));
   source->AddString("backgroundPage",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_BACKGROUND_PAGE));
   source->AddString("extensionSettingsEnable",
@@ -179,6 +144,8 @@ void ExtensionSettingsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_DEPENDENT_EXTENSIONS));
   source->AddString("extensionSettingsSupervisedUser",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_LOCKED_SUPERVISED_USER));
+  source->AddString("loading",
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_LOADING));
   source->AddString("extensionSettingsCorruptInstall",
       l10n_util::GetStringUTF16(
           IDS_EXTENSIONS_CORRUPTED_EXTENSION));
@@ -275,15 +242,23 @@ void ExtensionSettingsHandler::GetLocalizedValues(
   source->AddString(
       "extensionErrorOverlayNoCodeToDisplay",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_ERROR_NO_CODE_TO_DISPLAY));
-}
 
-void ExtensionSettingsHandler::RenderViewDeleted(
-    content::RenderViewHost* render_view_host) {
-  Profile* source_profile = Profile::FromBrowserContext(
-      render_view_host->GetSiteInstance()->GetBrowserContext());
-  if (!Profile::FromWebUI(web_ui())->IsSameProfile(source_profile))
-    return;
-  MaybeUpdateAfterNotification();
+  // Extension Commands Overlay:
+  source->AddString("extensionCommandsOverlay",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_COMMANDS_DIALOG_TITLE));
+  source->AddString("extensionCommandsEmpty",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_COMMANDS_EMPTY));
+  source->AddString("extensionCommandsInactive",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_COMMANDS_INACTIVE));
+  source->AddString("extensionCommandsStartTyping",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_TYPE_SHORTCUT));
+  source->AddString("extensionCommandsDelete",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_DELETE_SHORTCUT));
+  source->AddString("extensionCommandsGlobal",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_COMMANDS_GLOBAL));
+  source->AddString("extensionCommandsRegular",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_COMMANDS_NOT_GLOBAL));
+  source->AddString("ok", l10n_util::GetStringUTF16(IDS_OK));
 }
 
 void ExtensionSettingsHandler::DidStartNavigationToPendingEntry(
@@ -297,23 +272,10 @@ void ExtensionSettingsHandler::RegisterMessages() {
   Profile* profile = Profile::FromWebUI(web_ui())->GetOriginalProfile();
   extension_service_ =
       extensions::ExtensionSystem::Get(profile)->extension_service();
-
-  web_ui()->RegisterMessageCallback("extensionSettingsRegister",
-      base::Bind(&ExtensionSettingsHandler::HandleRegisterMessage,
-                 AsWeakPtr()));
-}
-
-void ExtensionSettingsHandler::OnExtensionDisableReasonsChanged(
-    const std::string& extension_id, int disable_reasons) {
-  MaybeUpdateAfterNotification();
-}
-
-void ExtensionSettingsHandler::OnExtensionManagementSettingsChanged() {
-  MaybeUpdateAfterNotification();
-}
-
-void ExtensionSettingsHandler::ExtensionWarningsChanged() {
-  MaybeUpdateAfterNotification();
+  // Clear the preference for the ADT Promo before fully removing it.
+  // TODO(devlin): Take this out when everyone's been updated.
+  Profile::FromWebUI(web_ui())->GetPrefs()->ClearPref(
+      prefs::kExtensionsUIDismissedADTPromo);
 }
 
 void ExtensionSettingsHandler::ReloadUnpackedExtensions() {
@@ -329,31 +291,6 @@ void ExtensionSettingsHandler::ReloadUnpackedExtensions() {
   for (std::vector<const Extension*>::iterator iter =
        unpacked_extensions.begin(); iter != unpacked_extensions.end(); ++iter) {
     extension_service_->ReloadExtensionWithQuietFailure((*iter)->id());
-  }
-}
-
-void ExtensionSettingsHandler::HandleRegisterMessage(
-    const base::ListValue* args) {
-  if (content::WebContentsObserver::web_contents())
-    return;  // Only register once.
-
-  content::WebContentsObserver::Observe(web_ui()->GetWebContents());
-
-  Profile* profile = Profile::FromWebUI(web_ui());
-  warning_service_observer_.Add(WarningService::Get(profile));
-  extension_management_observer_.Add(
-      ExtensionManagementFactory::GetForBrowserContext(profile));
-
-  // Clear the preference for the ADT Promo before fully removing it.
-  // TODO(devlin): Take this out when everyone's been updated.
-  profile->GetPrefs()->ClearPref(prefs::kExtensionsUIDismissedADTPromo);
-}
-
-void ExtensionSettingsHandler::MaybeUpdateAfterNotification() {
-  content::WebContents* contents = web_ui()->GetWebContents();
-  if (contents && contents->GetRenderViewHost()) {
-    web_ui()->CallJavascriptFunction(
-        "extensions.ExtensionSettings.onExtensionsChanged");
   }
 }
 

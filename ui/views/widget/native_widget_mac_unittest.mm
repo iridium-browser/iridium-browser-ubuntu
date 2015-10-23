@@ -6,33 +6,163 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "base/mac/foundation_util.h"
 #import "base/mac/scoped_nsobject.h"
+#import "base/mac/scoped_objc_class_swizzler.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/strings/sys_string_conversions.h"
+#include "base/test/test_timeouts.h"
 #import "testing/gtest_mac.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkCanvas.h"
+#import "ui/base/cocoa/constrained_window/constrained_window_animation.h"
+#import "ui/base/cocoa/window_size_constants.h"
 #import "ui/events/test/cocoa_test_event_utils.h"
 #include "ui/events/test/event_generator.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
 #import "ui/views/cocoa/bridged_native_widget.h"
+#import "ui/views/cocoa/native_widget_mac_nswindow.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/native_cursor.h"
 #include "ui/views/test/test_widget_observer.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/widget/native_widget_private.h"
+#include "ui/views/window/dialog_delegate.h"
+
+// Donates an implementation of -[NSAnimation stopAnimation] which calls the
+// original implementation, then quits a nested run loop.
+@interface TestStopAnimationWaiter : NSObject
+@end
+
+@interface ConstrainedWindowAnimationBase (TestingAPI)
+- (void)setWindowStateForEnd;
+@end
+
+@interface NSWindow (PrivateAPI)
+- (BOOL)_isTitleHidden;
+@end
+
+// Test NSWindow that provides hooks via method overrides to verify behavior.
+@interface NativeWidetMacTestWindow : NativeWidgetMacNSWindow {
+ @private
+  int invalidateShadowCount_;
+}
+@property(readonly, nonatomic) int invalidateShadowCount;
+@end
 
 namespace views {
 namespace test {
 
+// BridgedNativeWidget friend to access private members.
+class BridgedNativeWidgetTestApi {
+ public:
+  explicit BridgedNativeWidgetTestApi(NSWindow* window) {
+    bridge_ = NativeWidgetMac::GetBridgeForNativeWindow(window);
+  }
+
+  // Simulate a frame swap from the compositor. Assumes scale factor of 1.0f.
+  void SimulateFrameSwap(const gfx::Size& size) {
+    const float kScaleFactor = 1.0f;
+    SkBitmap bitmap;
+    bitmap.allocN32Pixels(size.width(), size.height());
+    SkCanvas canvas(bitmap);
+    bridge_->compositor_widget_->GotSoftwareFrame(kScaleFactor, &canvas);
+    std::vector<ui::LatencyInfo> latency_info;
+    bridge_->AcceleratedWidgetSwapCompleted(latency_info);
+  }
+
+ private:
+  BridgedNativeWidget* bridge_;
+
+  DISALLOW_COPY_AND_ASSIGN(BridgedNativeWidgetTestApi);
+};
+
+// Custom native_widget to create a NativeWidgetMacTestWindow.
+class TestWindowNativeWidgetMac : public NativeWidgetMac {
+ public:
+  explicit TestWindowNativeWidgetMac(Widget* delegate)
+      : NativeWidgetMac(delegate) {}
+
+ protected:
+  // NativeWidgetMac:
+  gfx::NativeWindow CreateNSWindow(const Widget::InitParams& params) override {
+    NSUInteger style_mask = NSBorderlessWindowMask;
+    if (params.type == Widget::InitParams::TYPE_WINDOW) {
+      style_mask = NSTexturedBackgroundWindowMask | NSTitledWindowMask |
+                   NSClosableWindowMask | NSMiniaturizableWindowMask |
+                   NSResizableWindowMask;
+    }
+    return [[[NativeWidetMacTestWindow alloc]
+        initWithContentRect:ui::kWindowSizeDeterminedLater
+                  styleMask:style_mask
+                    backing:NSBackingStoreBuffered
+                      defer:NO] autorelease];
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestWindowNativeWidgetMac);
+};
+
 // Tests for parts of NativeWidgetMac not covered by BridgedNativeWidget, which
 // need access to Cocoa APIs.
-typedef WidgetTest NativeWidgetMacTest;
+class NativeWidgetMacTest : public WidgetTest {
+ public:
+  NativeWidgetMacTest() {}
+
+  // The content size of NSWindows made by MakeNativeParent().
+  NSRect ParentRect() const { return NSMakeRect(100, 100, 300, 200); }
+
+  // Make a native NSWindow to use as a parent.
+  NSWindow* MakeNativeParent() {
+    native_parent_.reset(
+        [[NSWindow alloc] initWithContentRect:ParentRect()
+                                    styleMask:NSBorderlessWindowMask
+                                      backing:NSBackingStoreBuffered
+                                        defer:NO]);
+    [native_parent_ setReleasedWhenClosed:NO];  // Owned by scoped_nsobject.
+    [native_parent_ makeKeyAndOrderFront:nil];
+    return native_parent_;
+  }
+
+  // Create a Widget backed by the NativeWidetMacTestWindow NSWindow subclass.
+  Widget* CreateWidgetWithTestWindow(Widget::InitParams params,
+                                     NativeWidetMacTestWindow** window) {
+    Widget* widget = new Widget;
+    params.native_widget = new TestWindowNativeWidgetMac(widget);
+    widget->Init(params);
+    widget->Show();
+    *window = base::mac::ObjCCastStrict<NativeWidetMacTestWindow>(
+        widget->GetNativeWindow());
+    EXPECT_TRUE(*window);
+    return widget;
+  }
+
+ private:
+  base::scoped_nsobject<NSWindow> native_parent_;
+
+  DISALLOW_COPY_AND_ASSIGN(NativeWidgetMacTest);
+};
 
 class WidgetChangeObserver : public TestWidgetObserver {
  public:
-  WidgetChangeObserver(Widget* widget)
-      : TestWidgetObserver(widget),
-        gained_visible_count_(0),
-        lost_visible_count_(0) {}
+  WidgetChangeObserver(Widget* widget) : TestWidgetObserver(widget) {}
+
+  void WaitForVisibleCounts(int gained, int lost) {
+    if (gained_visible_count_ >= gained && lost_visible_count_ >= lost)
+      return;
+
+    target_gained_visible_count_ = gained;
+    target_lost_visible_count_ = lost;
+
+    base::RunLoop run_loop;
+    run_loop_ = &run_loop;
+    base::MessageLoop::current()->task_runner()->PostDelayedTask(
+        FROM_HERE, run_loop.QuitClosure(), TestTimeouts::action_timeout());
+    run_loop.Run();
+    run_loop_ = nullptr;
+  }
 
   int gained_visible_count() const { return gained_visible_count_; }
   int lost_visible_count() const { return lost_visible_count_; }
@@ -42,10 +172,16 @@ class WidgetChangeObserver : public TestWidgetObserver {
   void OnWidgetVisibilityChanged(Widget* widget,
                                  bool visible) override {
     ++(visible ? gained_visible_count_ : lost_visible_count_);
+    if (run_loop_ && gained_visible_count_ >= target_gained_visible_count_ &&
+        lost_visible_count_ >= target_lost_visible_count_)
+      run_loop_->Quit();
   }
 
-  int gained_visible_count_;
-  int lost_visible_count_;
+  int gained_visible_count_ = 0;
+  int lost_visible_count_ = 0;
+  int target_gained_visible_count_ = 0;
+  int target_lost_visible_count_ = 0;
+  base::RunLoop* run_loop_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(WidgetChangeObserver);
 };
@@ -98,16 +234,16 @@ TEST_F(NativeWidgetMacTest, HideAndShowExternally) {
   [NSApp hide:nil];
   // When the activation policy is NSApplicationActivationPolicyRegular, the
   // calls via NSApp are asynchronous, and the run loop needs to be flushed.
-  // With NSApplicationActivationPolicyProhibited, the following RunUntilIdle
-  // calls are superfluous, but don't hurt.
-  base::RunLoop().RunUntilIdle();
+  // With NSApplicationActivationPolicyProhibited, the following
+  // WaitForVisibleCounts calls are superfluous, but don't hurt.
+  observer.WaitForVisibleCounts(3, 3);
   EXPECT_FALSE(widget->IsVisible());
   EXPECT_FALSE([ns_window isVisible]);
   EXPECT_EQ(3, observer.gained_visible_count());
   EXPECT_EQ(3, observer.lost_visible_count());
 
   [NSApp unhideWithoutActivation];
-  base::RunLoop().RunUntilIdle();
+  observer.WaitForVisibleCounts(4, 3);
   EXPECT_TRUE(widget->IsVisible());
   EXPECT_TRUE([ns_window isVisible]);
   EXPECT_EQ(4, observer.gained_visible_count());
@@ -115,10 +251,10 @@ TEST_F(NativeWidgetMacTest, HideAndShowExternally) {
 
   // Hide again to test unhiding with an activation.
   [NSApp hide:nil];
-  base::RunLoop().RunUntilIdle();
+  observer.WaitForVisibleCounts(4, 4);
   EXPECT_EQ(4, observer.lost_visible_count());
   [NSApp unhide:nil];
-  base::RunLoop().RunUntilIdle();
+  observer.WaitForVisibleCounts(5, 4);
   EXPECT_EQ(5, observer.gained_visible_count());
 
   // Hide again to test makeKeyAndOrderFront:.
@@ -166,9 +302,6 @@ class PaintCountView : public View {
 TEST_F(NativeWidgetMacTest, MiniaturizeExternally) {
   Widget* widget = new Widget;
   Widget::InitParams init_params(Widget::InitParams::TYPE_WINDOW);
-  // Make the layer not drawn, so that calls to paint can be observed
-  // synchronously.
-  init_params.layer_type = ui::LAYER_NOT_DRAWN;
   widget->Init(init_params);
 
   PaintCountView* view = new PaintCountView();
@@ -181,6 +314,7 @@ TEST_F(NativeWidgetMacTest, MiniaturizeExternally) {
   EXPECT_TRUE(view->IsDrawn());
   EXPECT_EQ(0, view->paint_count());
   widget->Show();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(1, observer.gained_visible_count());
   EXPECT_EQ(0, observer.lost_visible_count());
@@ -196,6 +330,7 @@ TEST_F(NativeWidgetMacTest, MiniaturizeExternally) {
   // Cocoa just blocks the UI thread during the animation, so no need to do
   // anything fancy to wait for it finish.
   [ns_window performMiniaturize:nil];
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(widget->IsMinimized());
   EXPECT_FALSE(widget->IsVisible());  // Minimizing also makes things invisible.
@@ -210,6 +345,7 @@ TEST_F(NativeWidgetMacTest, MiniaturizeExternally) {
   EXPECT_EQ(1, view->paint_count());
 
   [ns_window deminiaturize:nil];
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_FALSE(widget->IsMinimized());
   EXPECT_TRUE(widget->IsVisible());
@@ -221,6 +357,7 @@ TEST_F(NativeWidgetMacTest, MiniaturizeExternally) {
   EXPECT_FALSE([ns_window isMiniaturized]);
 
   widget->Minimize();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(widget->IsMinimized());
   EXPECT_TRUE([ns_window isMiniaturized]);
@@ -230,6 +367,7 @@ TEST_F(NativeWidgetMacTest, MiniaturizeExternally) {
   EXPECT_EQ(2, view->paint_count());  // No paint when miniaturizing.
 
   widget->Restore();  // If miniaturized, should deminiaturize.
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_FALSE(widget->IsMinimized());
   EXPECT_FALSE([ns_window isMiniaturized]);
@@ -239,6 +377,7 @@ TEST_F(NativeWidgetMacTest, MiniaturizeExternally) {
   EXPECT_EQ(3, view->paint_count());
 
   widget->Restore();  // If not miniaturized, does nothing.
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_FALSE(widget->IsMinimized());
   EXPECT_FALSE([ns_window isMiniaturized]);
@@ -365,25 +504,24 @@ TEST_F(NativeWidgetMacTest, AccessibilityIntegration) {
   id hit = [widget->GetNativeWindow() accessibilityHitTest:midpoint];
   id title = [hit accessibilityAttributeValue:NSAccessibilityTitleAttribute];
   EXPECT_NSEQ(title, @"Green");
+
+  widget->CloseNow();
 }
 
 // Tests creating a views::Widget parented off a native NSWindow.
 TEST_F(NativeWidgetMacTest, NonWidgetParent) {
-  NSRect parent_nsrect = NSMakeRect(100, 100, 300, 200);
-  base::scoped_nsobject<NSWindow> native_parent(
-      [[NSWindow alloc] initWithContentRect:parent_nsrect
-                                  styleMask:NSBorderlessWindowMask
-                                    backing:NSBackingStoreBuffered
-                                      defer:NO]);
-  [native_parent setReleasedWhenClosed:NO];  // Owned by scoped_nsobject.
-  [native_parent makeKeyAndOrderFront:nil];
+  NSWindow* native_parent = MakeNativeParent();
+
+  base::scoped_nsobject<NSView> anchor_view(
+      [[NSView alloc] initWithFrame:[[native_parent contentView] bounds]]);
+  [[native_parent contentView] addSubview:anchor_view];
 
   // Note: Don't use WidgetTest::CreateChildPlatformWidget because that makes
   // windows of TYPE_CONTROL which are automatically made visible. But still
   // mark it as a child to test window positioning.
   Widget* child = new Widget;
   Widget::InitParams init_params;
-  init_params.parent = [native_parent contentView];
+  init_params.parent = anchor_view;
   init_params.child = true;
   child->Init(init_params);
 
@@ -413,10 +551,16 @@ TEST_F(NativeWidgetMacTest, NonWidgetParent) {
   EXPECT_EQ(native_parent, [child->GetNativeWindow() parentWindow]);
 
   // Child should be positioned on screen relative to the parent, but note we
-  // positioned the parent in Cooca coordinates, so we need to convert.
-  gfx::Point parent_origin = gfx::ScreenRectFromNSRect(parent_nsrect).origin();
+  // positioned the parent in Cocoa coordinates, so we need to convert.
+  gfx::Point parent_origin = gfx::ScreenRectFromNSRect(ParentRect()).origin();
   EXPECT_EQ(gfx::Rect(150, parent_origin.y() + 50, 200, 100),
             child->GetWindowBoundsInScreen());
+
+  // Removing the anchor_view from its view hierarchy is permitted. This should
+  // not break the relationship between the two windows.
+  [anchor_view removeFromSuperview];
+  anchor_view.reset();
+  EXPECT_EQ(native_parent, bridged_native_widget->parent()->GetNSWindow());
 
   // Closing the parent should close and destroy the child.
   EXPECT_FALSE(child_observer.widget_closed());
@@ -426,5 +570,435 @@ TEST_F(NativeWidgetMacTest, NonWidgetParent) {
   EXPECT_EQ(0u, [[native_parent childWindows] count]);
 }
 
+// Use Native APIs to query the tooltip text that would be shown once the
+// tooltip delay had elapsed.
+base::string16 TooltipTextForWidget(Widget* widget) {
+  // For Mac, the actual location doesn't matter, since there is only one native
+  // view and it fills the window. This just assumes the window is at least big
+  // big enough for a constant coordinate to be within it.
+  NSPoint point = NSMakePoint(30, 30);
+  NSView* view = [widget->GetNativeView() hitTest:point];
+  NSString* text =
+      [view view:view stringForToolTip:0 point:point userData:nullptr];
+  return base::SysNSStringToUTF16(text);
+}
+
+// Tests tooltips. The test doesn't wait for tooltips to appear. That is, the
+// test assumes Cocoa calls stringForToolTip: at appropriate times and that,
+// when a tooltip is already visible, changing it causes an update. These were
+// tested manually by inserting a base::RunLoop.Run().
+TEST_F(NativeWidgetMacTest, Tooltips) {
+  Widget* widget = CreateTopLevelPlatformWidget();
+  gfx::Rect screen_rect(50, 50, 100, 100);
+  widget->SetBounds(screen_rect);
+
+  const base::string16 tooltip_back = base::ASCIIToUTF16("Back");
+  const base::string16 tooltip_front = base::ASCIIToUTF16("Front");
+  const base::string16 long_tooltip(2000, 'W');
+
+  // Create a nested layout to test corner cases.
+  LabelButton* back = new LabelButton(nullptr, base::string16());
+  back->SetBounds(10, 10, 80, 80);
+  widget->GetContentsView()->AddChildView(back);
+  widget->Show();
+
+  ui::test::EventGenerator event_generator(GetContext(),
+                                           widget->GetNativeWindow());
+
+  // Initially, there should be no tooltip.
+  event_generator.MoveMouseTo(gfx::Point(50, 50));
+  EXPECT_TRUE(TooltipTextForWidget(widget).empty());
+
+  // Create a new button for the "front", and set the tooltip, but don't add it
+  // to the view hierarchy yet.
+  LabelButton* front = new LabelButton(nullptr, base::string16());
+  front->SetBounds(20, 20, 40, 40);
+  front->SetTooltipText(tooltip_front);
+
+  // Changing the tooltip text shouldn't require an additional mousemove to take
+  // effect.
+  EXPECT_TRUE(TooltipTextForWidget(widget).empty());
+  back->SetTooltipText(tooltip_back);
+  EXPECT_EQ(tooltip_back, TooltipTextForWidget(widget));
+
+  // Adding a new view under the mouse should also take immediate effect.
+  back->AddChildView(front);
+  EXPECT_EQ(tooltip_front, TooltipTextForWidget(widget));
+
+  // A long tooltip will be wrapped by Cocoa, but the full string should appear.
+  // Note that render widget hosts clip at 1024 to prevent DOS, but in toolkit-
+  // views the UI is more trusted.
+  front->SetTooltipText(long_tooltip);
+  EXPECT_EQ(long_tooltip, TooltipTextForWidget(widget));
+
+  // Move the mouse to a different view - tooltip should change.
+  event_generator.MoveMouseTo(gfx::Point(15, 15));
+  EXPECT_EQ(tooltip_back, TooltipTextForWidget(widget));
+
+  // Move the mouse off of any view, tooltip should clear.
+  event_generator.MoveMouseTo(gfx::Point(5, 5));
+  EXPECT_TRUE(TooltipTextForWidget(widget).empty());
+
+  widget->CloseNow();
+}
+
+namespace {
+
+// Delegate to make Widgets of MODAL_TYPE_CHILD.
+class ChildModalDialogDelegate : public DialogDelegateView {
+ public:
+  ChildModalDialogDelegate() {}
+
+  // WidgetDelegate:
+  ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_CHILD; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ChildModalDialogDelegate);
+};
+
+// While in scope, waits for a call to a swizzled objective C method, then quits
+// a nested run loop.
+class ScopedSwizzleWaiter {
+ public:
+  explicit ScopedSwizzleWaiter(Class target)
+      : swizzler_(target,
+                  [TestStopAnimationWaiter class],
+                  @selector(setWindowStateForEnd)) {
+    DCHECK(!instance_);
+    instance_ = this;
+  }
+
+  ~ScopedSwizzleWaiter() { instance_ = nullptr; }
+
+  static IMP GetMethodAndMarkCalled() {
+    return instance_->GetMethodInternal();
+  }
+
+  void WaitForMethod() {
+    if (method_called_)
+      return;
+
+    base::RunLoop run_loop;
+    base::MessageLoop::current()->task_runner()->PostDelayedTask(
+        FROM_HERE, run_loop.QuitClosure(), TestTimeouts::action_timeout());
+    run_loop_ = &run_loop;
+    run_loop.Run();
+    run_loop_ = nullptr;
+  }
+
+  bool method_called() const { return method_called_; }
+
+ private:
+  IMP GetMethodInternal() {
+    DCHECK(!method_called_);
+    method_called_ = true;
+    if (run_loop_)
+      run_loop_->Quit();
+    return swizzler_.GetOriginalImplementation();
+  }
+
+  static ScopedSwizzleWaiter* instance_;
+
+  base::mac::ScopedObjCClassSwizzler swizzler_;
+  base::RunLoop* run_loop_ = nullptr;
+  bool method_called_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedSwizzleWaiter);
+};
+
+ScopedSwizzleWaiter* ScopedSwizzleWaiter::instance_ = nullptr;
+
+// Shows a modal widget and waits for the show animation to complete. Waiting is
+// not compulsory (calling Close() while animating the show will cancel the show
+// animation). However, testing with overlapping swizzlers is tricky.
+Widget* ShowChildModalWidgetAndWait(NSWindow* native_parent) {
+  Widget* modal_dialog_widget = views::DialogDelegate::CreateDialogWidget(
+      new ChildModalDialogDelegate, nullptr, [native_parent contentView]);
+
+  modal_dialog_widget->SetBounds(gfx::Rect(50, 50, 200, 150));
+  EXPECT_FALSE(modal_dialog_widget->IsVisible());
+  ScopedSwizzleWaiter show_waiter([ConstrainedWindowAnimationShow class]);
+
+  modal_dialog_widget->Show();
+  // Visible immediately (although it animates from transparent).
+  EXPECT_TRUE(modal_dialog_widget->IsVisible());
+
+  // Run the animation.
+  show_waiter.WaitForMethod();
+  EXPECT_TRUE(modal_dialog_widget->IsVisible());
+  EXPECT_TRUE(show_waiter.method_called());
+  return modal_dialog_widget;
+}
+
+}  // namespace
+
+// Tests object lifetime for the show/hide animations used for child-modal
+// windows. Parents the dialog off a native parent window (not a views::Widget).
+TEST_F(NativeWidgetMacTest, NativeWindowChildModalShowHide) {
+  NSWindow* native_parent = MakeNativeParent();
+  {
+    Widget* modal_dialog_widget = ShowChildModalWidgetAndWait(native_parent);
+    TestWidgetObserver widget_observer(modal_dialog_widget);
+
+    ScopedSwizzleWaiter hide_waiter([ConstrainedWindowAnimationHide class]);
+    EXPECT_TRUE(modal_dialog_widget->IsVisible());
+    EXPECT_FALSE(widget_observer.widget_closed());
+
+    // Widget::Close() is always asynchronous, so we can check that the widget
+    // is initially visible, but then it's destroyed.
+    modal_dialog_widget->Close();
+    EXPECT_TRUE(modal_dialog_widget->IsVisible());
+    EXPECT_FALSE(hide_waiter.method_called());
+    EXPECT_FALSE(widget_observer.widget_closed());
+
+    // Wait for a hide to finish.
+    hide_waiter.WaitForMethod();
+    EXPECT_TRUE(hide_waiter.method_called());
+
+    // The animation finishing should also mean it has closed the window.
+    EXPECT_TRUE(widget_observer.widget_closed());
+  }
+
+  {
+    // Make a new dialog to test another lifetime flow.
+    Widget* modal_dialog_widget = ShowChildModalWidgetAndWait(native_parent);
+    TestWidgetObserver widget_observer(modal_dialog_widget);
+
+    // Start an asynchronous close as above.
+    ScopedSwizzleWaiter hide_waiter([ConstrainedWindowAnimationHide class]);
+    modal_dialog_widget->Close();
+    EXPECT_FALSE(widget_observer.widget_closed());
+    EXPECT_FALSE(hide_waiter.method_called());
+
+    // Now close the _parent_ window to force a synchronous close of the child.
+    [native_parent close];
+
+    // Widget is destroyed immediately. No longer paints, but the animation is
+    // still running.
+    EXPECT_TRUE(widget_observer.widget_closed());
+    EXPECT_FALSE(hide_waiter.method_called());
+
+    // Wait for the hide again. It will call close on its retained copy of the
+    // child NSWindow, but that's fine since all the C++ objects are detached.
+    hide_waiter.WaitForMethod();
+    EXPECT_TRUE(hide_waiter.method_called());
+  }
+}
+
+// Test calls to Widget::ReparentNativeView() that result in a no-op on Mac.
+// Tests with both native and non-native parents.
+TEST_F(NativeWidgetMacTest, NoopReparentNativeView) {
+  NSWindow* parent = MakeNativeParent();
+  Widget* dialog = views::DialogDelegate::CreateDialogWidget(
+      new DialogDelegateView, nullptr, [parent contentView]);
+  BridgedNativeWidget* bridge =
+      NativeWidgetMac::GetBridgeForNativeWindow(dialog->GetNativeWindow());
+
+  EXPECT_EQ(bridge->parent()->GetNSWindow(), parent);
+  Widget::ReparentNativeView(dialog->GetNativeView(), [parent contentView]);
+  EXPECT_EQ(bridge->parent()->GetNSWindow(), parent);
+
+  [parent close];
+
+  Widget* parent_widget = CreateNativeDesktopWidget();
+  parent = parent_widget->GetNativeWindow();
+  dialog = views::DialogDelegate::CreateDialogWidget(
+      new DialogDelegateView, nullptr, [parent contentView]);
+  bridge = NativeWidgetMac::GetBridgeForNativeWindow(dialog->GetNativeWindow());
+
+  EXPECT_EQ(bridge->parent()->GetNSWindow(), parent);
+  Widget::ReparentNativeView(dialog->GetNativeView(), [parent contentView]);
+  EXPECT_EQ(bridge->parent()->GetNSWindow(), parent);
+
+  parent_widget->CloseNow();
+}
+
+// Tests Cocoa properties that should be given to particular widget types.
+TEST_F(NativeWidgetMacTest, NativeProperties) {
+  // Create a regular widget (TYPE_WINDOW).
+  Widget* regular_widget = CreateNativeDesktopWidget();
+  EXPECT_TRUE([regular_widget->GetNativeWindow() canBecomeKeyWindow]);
+  EXPECT_TRUE([regular_widget->GetNativeWindow() canBecomeMainWindow]);
+
+  // Disabling activation should prevent key and main status.
+  regular_widget->widget_delegate()->set_can_activate(false);
+  EXPECT_FALSE([regular_widget->GetNativeWindow() canBecomeKeyWindow]);
+  EXPECT_FALSE([regular_widget->GetNativeWindow() canBecomeMainWindow]);
+
+  // Create a dialog widget (also TYPE_WINDOW), but with a DialogDelegate.
+  Widget* dialog_widget = views::DialogDelegate::CreateDialogWidget(
+      new ChildModalDialogDelegate, nullptr, regular_widget->GetNativeView());
+  EXPECT_TRUE([dialog_widget->GetNativeWindow() canBecomeKeyWindow]);
+  // Dialogs shouldn't take main status away from their parent.
+  EXPECT_FALSE([dialog_widget->GetNativeWindow() canBecomeMainWindow]);
+
+  regular_widget->CloseNow();
+}
+
+NSData* WindowContentsAsTIFF(NSWindow* window) {
+  NSView* frame_view = [[window contentView] superview];
+  EXPECT_TRUE(frame_view);
+
+  // Inset to mask off left and right edges which vary in HighDPI.
+  NSRect bounds = NSInsetRect([frame_view bounds], 4, 0);
+
+  // On 10.6, the grippy changes appearance slightly when painted the second
+  // time in a textured window. Since this test cares about the window title,
+  // cut off the bottom of the window.
+  bounds.size.height -= 40;
+  bounds.origin.y += 40;
+
+  NSBitmapImageRep* bitmap =
+      [frame_view bitmapImageRepForCachingDisplayInRect:bounds];
+  EXPECT_TRUE(bitmap);
+
+  [frame_view cacheDisplayInRect:bounds toBitmapImageRep:bitmap];
+  NSData* tiff = [bitmap TIFFRepresentation];
+  EXPECT_TRUE(tiff);
+  return tiff;
+}
+
+class CustomTitleWidgetDelegate : public WidgetDelegate {
+ public:
+  CustomTitleWidgetDelegate(Widget* widget)
+      : widget_(widget), should_show_title_(true) {}
+
+  void set_title(const base::string16& title) { title_ = title; }
+  void set_should_show_title(bool show) { should_show_title_ = show; }
+
+  // WidgetDelegate:
+  base::string16 GetWindowTitle() const override { return title_; }
+  bool ShouldShowWindowTitle() const override { return should_show_title_; }
+  Widget* GetWidget() override { return widget_; };
+  const Widget* GetWidget() const override { return widget_; };
+
+ private:
+  Widget* widget_;
+  base::string16 title_;
+  bool should_show_title_;
+
+  DISALLOW_COPY_AND_ASSIGN(CustomTitleWidgetDelegate);
+};
+
+// Test that undocumented title-hiding API we're using does the job.
+TEST_F(NativeWidgetMacTest, DoesHideTitle) {
+  // Same as CreateTopLevelPlatformWidget but with a custom delegate.
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
+  Widget* widget = new Widget;
+  params.native_widget = new NativeWidgetCapture(widget);
+  CustomTitleWidgetDelegate delegate(widget);
+  params.delegate = &delegate;
+  params.bounds = gfx::Rect(0, 0, 800, 600);
+  widget->Init(params);
+  widget->Show();
+
+  NSWindow* ns_window = widget->GetNativeWindow();
+  // Disable color correction so we can read unmodified values from the bitmap.
+  [ns_window setColorSpace:[NSColorSpace sRGBColorSpace]];
+
+  EXPECT_EQ(base::string16(), delegate.GetWindowTitle());
+  EXPECT_NSEQ(@"", [ns_window title]);
+  NSData* empty_title_data = WindowContentsAsTIFF(ns_window);
+
+  delegate.set_title(base::ASCIIToUTF16("This is a title"));
+  widget->UpdateWindowTitle();
+  NSData* this_title_data = WindowContentsAsTIFF(ns_window);
+
+  // The default window with a title should look different from the
+  // window with an empty title.
+  EXPECT_FALSE([empty_title_data isEqualToData:this_title_data]);
+
+  delegate.set_should_show_title(false);
+  delegate.set_title(base::ASCIIToUTF16("This is another title"));
+  widget->UpdateWindowTitle();
+  NSData* hidden_title_data = WindowContentsAsTIFF(ns_window);
+
+  // With our magic setting, the window with a title should look the
+  // same as the window with an empty title.
+  EXPECT_TRUE([ns_window _isTitleHidden]);
+  EXPECT_TRUE([empty_title_data isEqualToData:hidden_title_data]);
+
+  widget->CloseNow();
+}
+
+// Test calls to invalidate the shadow when composited frames arrive.
+TEST_F(NativeWidgetMacTest, InvalidateShadow) {
+  NativeWidetMacTestWindow* window;
+  const gfx::Rect rect(0, 0, 100, 200);
+  Widget::InitParams init_params =
+      CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
+  init_params.bounds = rect;
+  Widget* widget = CreateWidgetWithTestWindow(init_params, &window);
+
+  // Simulate the initial paint.
+  BridgedNativeWidgetTestApi(window).SimulateFrameSwap(rect.size());
+
+  // Default is an opaque window, so shadow doesn't need to be invalidated.
+  EXPECT_EQ(0, [window invalidateShadowCount]);
+  widget->CloseNow();
+
+  init_params.opacity = Widget::InitParams::TRANSLUCENT_WINDOW;
+  widget = CreateWidgetWithTestWindow(init_params, &window);
+  BridgedNativeWidgetTestApi test_api(window);
+
+  // First paint on a translucent window needs to invalidate the shadow. Once.
+  EXPECT_EQ(0, [window invalidateShadowCount]);
+  test_api.SimulateFrameSwap(rect.size());
+  EXPECT_EQ(1, [window invalidateShadowCount]);
+  test_api.SimulateFrameSwap(rect.size());
+  EXPECT_EQ(1, [window invalidateShadowCount]);
+
+  // Resizing the window also needs to trigger a shadow invalidation.
+  [window setContentSize:NSMakeSize(123, 456)];
+  // A "late" frame swap at the old size should do nothing.
+  test_api.SimulateFrameSwap(rect.size());
+  EXPECT_EQ(1, [window invalidateShadowCount]);
+
+  test_api.SimulateFrameSwap(gfx::Size(123, 456));
+  EXPECT_EQ(2, [window invalidateShadowCount]);
+  test_api.SimulateFrameSwap(gfx::Size(123, 456));
+  EXPECT_EQ(2, [window invalidateShadowCount]);
+
+  widget->CloseNow();
+}
+
+// Test the expected result of GetWorkAreaBoundsInScreen().
+TEST_F(NativeWidgetMacTest, GetWorkAreaBoundsInScreen) {
+  Widget widget;
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+
+  // This is relative to the top-left of the primary screen, so unless the bot's
+  // display is smaller than 400x300, the window will be wholly contained there.
+  params.bounds = gfx::Rect(100, 100, 300, 200);
+  widget.Init(params);
+  widget.Show();
+  NSRect expected = [[[NSScreen screens] objectAtIndex:0] visibleFrame];
+  NSRect actual = gfx::ScreenRectToNSRect(widget.GetWorkAreaBoundsInScreen());
+  EXPECT_FALSE(NSIsEmptyRect(actual));
+  EXPECT_NSEQ(expected, actual);
+
+  [widget.GetNativeWindow() close];
+  actual = gfx::ScreenRectToNSRect(widget.GetWorkAreaBoundsInScreen());
+  EXPECT_TRUE(NSIsEmptyRect(actual));
+}
+
 }  // namespace test
 }  // namespace views
+
+@implementation TestStopAnimationWaiter
+- (void)setWindowStateForEnd {
+  views::test::ScopedSwizzleWaiter::GetMethodAndMarkCalled()(self, _cmd);
+}
+@end
+
+@implementation NativeWidetMacTestWindow
+
+@synthesize invalidateShadowCount = invalidateShadowCount_;
+
+- (void)invalidateShadow {
+  ++invalidateShadowCount_;
+  [super invalidateShadow];
+}
+
+@end

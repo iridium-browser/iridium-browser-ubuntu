@@ -6,15 +6,18 @@
 #include "base/cancelable_callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/devtools/device/self_device_provider.h"
+#include "chrome/browser/devtools/device/tcp_device_provider.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -50,8 +53,9 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/switches.h"
-#include "net/socket/tcp_listen_socket.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "ui/compositor/compositor_switches.h"
+#include "ui/gl/gl_switches.h"
 
 using app_modal::AppModalDialog;
 using app_modal::JavaScriptAppModalDialog;
@@ -86,8 +90,6 @@ const char kReloadSharedWorkerTestPage[] =
     "files/workers/debug_shared_worker_initialization.html";
 const char kReloadSharedWorkerTestWorker[] =
     "files/workers/debug_shared_worker_initialization.js";
-
-const int kRemoteDebuggingPort = 9225;
 
 void RunTestFunction(DevToolsWindow* window, const char* test_name) {
   std::string result;
@@ -332,7 +334,7 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
                     content::NotificationService::AllSources());
       base::CancelableClosure timeout(
           base::Bind(&TimeoutCallback, "Extension load timed out."));
-      base::MessageLoop::current()->PostDelayedTask(
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
           FROM_HERE, timeout.callback(), TestTimeouts::action_timeout());
       extensions::UnpackedInstaller::Create(service)->Load(path);
       content::RunMessageLoop();
@@ -356,7 +358,7 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
                   content::NotificationService::AllSources());
     base::CancelableClosure timeout(
         base::Bind(&TimeoutCallback, "Extension host load timed out."));
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, timeout.callback(), TestTimeouts::action_timeout());
 
     extensions::ProcessManager* manager =
@@ -638,8 +640,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
 
 // Tests that BeforeUnload event gets called on devtools that are opened
 // on another devtools.
+// Disabled because of http://crbug.com/497857
 IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
-                       TestDevToolsOnDevTools) {
+                       DISABLED_TestDevToolsOnDevTools) {
   ASSERT_TRUE(test_server()->Start());
   LoadTestPage(kDebuggerTestPage);
 
@@ -815,6 +818,13 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestDeviceEmulation) {
   RunTest("testDeviceMetricsOverrides", "about:blank");
 }
 
+// Tests that settings are stored in profile correctly.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestSettings) {
+  OpenDevToolsWindow("about:blank", true);
+  RunTestFunction(window_, "testSettings");
+  CloseDevToolsWindow();
+}
+
 // Tests that external navigation from inspector page is always handled by
 // DevToolsWindow and results in inspected page navigation.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestDevToolsExternalNavigation) {
@@ -969,18 +979,24 @@ IN_PROC_BROWSER_TEST_F(DevToolsPolicyTest, PolicyTrue) {
   ASSERT_FALSE(window);
 }
 
-class RemoteWebSocketTest : public DevToolsSanityTest {
+class DevToolsPixelOutputTests : public DevToolsSanityTest {
+ public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    DevToolsSanityTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(switches::kRemoteDebuggingPort,
-        base::IntToString(kRemoteDebuggingPort));
+    command_line->AppendSwitch(switches::kEnablePixelOutputInTests);
+    command_line->AppendSwitch(switches::kUseGpuInTests);
   }
 };
 
-IN_PROC_BROWSER_TEST_F(RemoteWebSocketTest, TestWebSocket) {
-  AndroidDeviceManager::DeviceProviders device_providers;
-  device_providers.push_back(new SelfAsDeviceProvider(kRemoteDebuggingPort));
-  DevToolsAndroidBridge::Factory::GetForProfile(browser()->profile())->
-      set_device_providers_for_test(device_providers);
-  RunTest("testRemoteWebSocket", "about:blank");
+// This test enables switches::kUseGpuInTests which causes false positives
+// with MemorySanitizer.
+#if defined(MEMORY_SANITIZER) || \
+    (defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD))
+#define MAYBE_TestScreenshotRecording DISABLED_TestScreenshotRecording
+#else
+#define MAYBE_TestScreenshotRecording TestScreenshotRecording
+#endif
+// Tests raw headers text.
+IN_PROC_BROWSER_TEST_F(DevToolsPixelOutputTests,
+                       MAYBE_TestScreenshotRecording) {
+  RunTest("testScreenshotRecording", std::string());
 }

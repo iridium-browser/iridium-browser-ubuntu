@@ -16,15 +16,13 @@ PassRefPtrWillBeRawPtr<FetchEvent> FetchEvent::create()
     return adoptRefWillBeNoop(new FetchEvent());
 }
 
-PassRefPtrWillBeRawPtr<FetchEvent> FetchEvent::create(const AtomicString& type, FetchEventInit& initializer)
+PassRefPtrWillBeRawPtr<FetchEvent> FetchEvent::create(const AtomicString& type, const FetchEventInit& initializer)
 {
-    initializer.setCancelable(true);
     return adoptRefWillBeNoop(new FetchEvent(type, initializer, nullptr));
 }
 
-PassRefPtrWillBeRawPtr<FetchEvent> FetchEvent::create(const AtomicString& type, FetchEventInit& initializer, RespondWithObserver* observer)
+PassRefPtrWillBeRawPtr<FetchEvent> FetchEvent::create(const AtomicString& type, const FetchEventInit& initializer, RespondWithObserver* observer)
 {
-    initializer.setCancelable(true);
     return adoptRefWillBeNoop(new FetchEvent(type, initializer, observer));
 }
 
@@ -38,10 +36,10 @@ bool FetchEvent::isReload() const
     return m_isReload;
 }
 
-void FetchEvent::respondWith(ScriptState* scriptState, const ScriptValue& value, ExceptionState& exceptionState)
+void FetchEvent::respondWith(ScriptState* scriptState, ScriptPromise scriptPromise, ExceptionState& exceptionState)
 {
     stopImmediatePropagation();
-    m_observer->respondWith(scriptState, value, exceptionState);
+    m_observer->respondWith(scriptState, scriptPromise, exceptionState);
 }
 
 const AtomicString& FetchEvent::interfaceName() const

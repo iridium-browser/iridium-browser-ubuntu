@@ -4,6 +4,8 @@
 
 #include "extensions/browser/mojo/keep_alive_impl.h"
 
+#include "base/bind.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/process_manager.h"
 
 namespace extensions {
@@ -12,16 +14,37 @@ namespace extensions {
 void KeepAliveImpl::Create(content::BrowserContext* context,
                            const Extension* extension,
                            mojo::InterfaceRequest<KeepAlive> request) {
-  mojo::BindToRequest(new KeepAliveImpl(context, extension), &request);
+  new KeepAliveImpl(context, extension, request.Pass());
 }
 
 KeepAliveImpl::KeepAliveImpl(content::BrowserContext* context,
-                             const Extension* extension)
-    : context_(context), extension_(extension) {
+                             const Extension* extension,
+                             mojo::InterfaceRequest<KeepAlive> request)
+    : context_(context),
+      extension_(extension),
+      extension_registry_observer_(this),
+      binding_(this, request.Pass()) {
   ProcessManager::Get(context_)->IncrementLazyKeepaliveCount(extension_);
+  binding_.set_connection_error_handler(
+      base::Bind(&KeepAliveImpl::OnDisconnected, base::Unretained(this)));
+  extension_registry_observer_.Add(ExtensionRegistry::Get(context_));
 }
 
-KeepAliveImpl::~KeepAliveImpl() {
+KeepAliveImpl::~KeepAliveImpl() = default;
+
+void KeepAliveImpl::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const Extension* extension,
+    UnloadedExtensionInfo::Reason reason) {
+  if (browser_context == context_ && extension == extension_)
+    delete this;
+}
+
+void KeepAliveImpl::OnShutdown(ExtensionRegistry* registry) {
+  delete this;
+}
+
+void KeepAliveImpl::OnDisconnected() {
   ProcessManager::Get(context_)->DecrementLazyKeepaliveCount(extension_);
 }
 

@@ -23,7 +23,6 @@
 #include "chrome/browser/translate/translate_service.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/test_switches.h"
@@ -37,6 +36,7 @@
 #include "components/autofill/core/browser/validation.h"
 #include "components/infobars/core/infobar.h"
 #include "components/translate/core/browser/translate_infobar_delegate.h"
+#include "components/translate/core/browser/translate_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -46,7 +46,9 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_renderer_host.h"
+#include "net/base/net_errors.h"
 #include "net/url_request/test_url_fetcher_factory.h"
+#include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -221,9 +223,7 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
   void SimulateURLFetch(bool success) {
     net::TestURLFetcher* fetcher = url_fetcher_factory_.GetFetcherByID(0);
     ASSERT_TRUE(fetcher);
-    net::URLRequestStatus status;
-    status.set_status(success ? net::URLRequestStatus::SUCCESS :
-                                net::URLRequestStatus::FAILED);
+    net::Error error = success ? net::OK : net::ERR_FAILED;
 
     std::string script = " var google = {};"
         "google.translate = (function() {"
@@ -253,7 +253,7 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
         "cr.googleTranslate.onTranslateElementLoad();";
 
     fetcher->set_url(fetcher->GetOriginalURL());
-    fetcher->set_status(status);
+    fetcher->set_status(net::URLRequestStatus::FromError(error));
     fetcher->set_response_code(success ? 200 : 500);
     fetcher->SetResponseString(script);
     fetcher->delegate()->OnURLFetchComplete(fetcher);
@@ -448,7 +448,13 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillViaDownArrow) {
   ExpectFilledTestForm();
 }
 
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillSelectViaTab) {
+// Flaky on the official cros-trunk. crbug.com/516052
+#if defined(OFFICIAL_BUILD)
+#define MAYBE_AutofillSelectViaTab DISABLED_AutofillSelectViaTab
+#else
+#define MAYBE_AutofillSelectViaTab AutofillSelectViaTab
+#endif  // defined(OFFICIAL_BUILD)
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_AutofillSelectViaTab) {
   CreateTestProfile();
 
   // Load the test page.
@@ -473,7 +479,13 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillSelectViaTab) {
   ExpectFilledTestForm();
 }
 
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillViaClick) {
+// Flaky on the official cros-trunk. crbug.com/516052
+#if defined(OFFICIAL_BUILD)
+#define MAYBE_AutofillViaClick DISABLED_AutofillViaClick
+#else
+#define MAYBE_AutofillViaClick AutofillViaClick
+#endif  // defined(OFFICIAL_BUILD)
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_AutofillViaClick) {
   CreateTestProfile();
 
   // Load the test page.
@@ -1056,6 +1068,8 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillAfterTranslate) {
   if (TranslateService::IsTranslateBubbleEnabled())
     return;
 
+  translate::TranslateManager::SetIgnoreMissingKeyForTesting(true);
+
   CreateTestProfile();
 
   GURL url(std::string(kDataURIPrefix) +
@@ -1132,11 +1146,12 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillAfterTranslate) {
 // field, invoke the autofill popup list, select the first profile within the
 // list, and commit to the profile to populate the form.
 // Flakily times out on windows. http://crbug.com/390564
-#if defined(OS_WIN)
+// Flaky on the official cros-trunk crbug.com/516052
+#if defined(OS_WIN) || defined(OFFICIAL_BUILD)
 #define MAYBE_ComparePhoneNumbers DISABLED_ComparePhoneNumbers
 #else
 #define MAYBE_ComparePhoneNumbers ComparePhoneNumbers
-#endif
+#endif  // defined(OS_WIN) || defined(OFFICIAL_BUILD)
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_ComparePhoneNumbers) {
   ASSERT_TRUE(test_server()->Start());
 
@@ -1174,7 +1189,14 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_ComparePhoneNumbers) {
 }
 
 // Test that Autofill does not fill in read-only fields.
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, NoAutofillForReadOnlyFields) {
+// Flaky on the official cros-trunk. crbug.com/516052
+#if defined(OFFICIAL_BUILD)
+#define MAYBE_NoAutofillForReadOnlyFields DISABLED_NoAutofillForReadOnlyFields
+#else
+#define MAYBE_NoAutofillForReadOnlyFields NoAutofillForReadOnlyFields
+#endif  // defined(OFFICIAL_BUILD)
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
+                       MAYBE_NoAutofillForReadOnlyFields) {
   ASSERT_TRUE(test_server()->Start());
 
   std::string addr_line1("1234 H St.");

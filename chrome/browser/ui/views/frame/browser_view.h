@@ -14,12 +14,10 @@
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/infobar_container_delegate.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_model_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/views/exclusive_access_bubble_views_context.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
@@ -27,6 +25,7 @@
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/frame/web_contents_close_handler.h"
 #include "chrome/browser/ui/views/load_complete_listener.h"
+#include "components/omnibox/browser/omnibox_popup_model_observer.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/native_widget_types.h"
@@ -52,7 +51,6 @@ class DownloadShelfView;
 class ExclusiveAccessBubbleViews;
 class InfoBarContainerView;
 class LocationBarView;
-class PermissionBubbleViewViews;
 class StatusBubbleViews;
 class TabStrip;
 class ToolbarView;
@@ -645,10 +643,6 @@ class BrowserView : public BrowserWindow,
 
   // The Status information bubble that appears at the bottom of the window.
   scoped_ptr<StatusBubbleViews> status_bubble_;
-
-  // The permission bubble view is the toolkit-specific implementation of the
-  // interface used by the manager to display permissions bubbles.
-  scoped_ptr<PermissionBubbleViewViews> permission_bubble_;
 
   // A mapping between accelerators and commands.
   std::map<ui::Accelerator, int> accelerator_table_;

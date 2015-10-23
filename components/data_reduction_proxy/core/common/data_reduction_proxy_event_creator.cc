@@ -35,51 +35,42 @@ int64 GetExpirationTicks(int bypass_seconds) {
   return (expiration_ticks - base::TimeTicks()).InMilliseconds();
 }
 
-// The following method creates a string resembling the output of
-// net::ProxyServer::ToURI().
-std::string GetNormalizedProxyString(const std::string& proxy_origin) {
-  net::ProxyServer proxy_server =
-      net::ProxyServer::FromURI(proxy_origin, net::ProxyServer::SCHEME_HTTP);
-  if (proxy_server.is_valid())
-    return proxy_origin;
-
-  return std::string();
-}
-
 // A callback which creates a base::Value containing information about enabling
-// the Data Reduction Proxy. Ownership of the base::Value is passed to the
-// caller.
-base::Value* EnableDataReductionProxyCallback(
-    bool primary_restricted,
-    bool fallback_restricted,
-    const std::string& primary_origin,
-    const std::string& fallback_origin,
-    const std::string& ssl_origin,
+// the Data Reduction Proxy.
+scoped_ptr<base::Value> EnableDataReductionProxyCallback(
+    bool secure_transport_restricted,
+    const std::vector<net::ProxyServer>& proxies_for_http,
+    const std::vector<net::ProxyServer>& proxies_for_https,
     net::NetLogCaptureMode /* capture_mode */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetBoolean("enabled", true);
-  dict->SetBoolean("primary_restricted", primary_restricted);
-  dict->SetBoolean("fallback_restricted", fallback_restricted);
-  dict->SetString("primary_origin", GetNormalizedProxyString(primary_origin));
-  dict->SetString("fallback_origin", GetNormalizedProxyString(fallback_origin));
-  dict->SetString("ssl_origin", GetNormalizedProxyString(ssl_origin));
-  return dict;
+  dict->SetBoolean("secure_transport_restricted", secure_transport_restricted);
+  scoped_ptr<base::ListValue> http_proxy_list(new base::ListValue());
+  for (const auto& proxy : proxies_for_http)
+    http_proxy_list->AppendString(proxy.ToURI());
+
+  scoped_ptr<base::ListValue> https_proxy_list(new base::ListValue());
+  for (const auto& proxy : proxies_for_https)
+    https_proxy_list->AppendString(proxy.ToURI());
+
+  dict->Set("http_proxy_list", http_proxy_list.Pass());
+  dict->Set("https_proxy_list", https_proxy_list.Pass());
+
+  return dict.Pass();
 }
 
 // A callback which creates a base::Value containing information about disabling
-// the Data Reduction Proxy. Ownership of the base::Value is passed to the
-// caller.
-base::Value* DisableDataReductionProxyCallback(
+// the Data Reduction Proxy.
+scoped_ptr<base::Value> DisableDataReductionProxyCallback(
     net::NetLogCaptureMode /* capture_mode */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetBoolean("enabled", false);
-  return dict;
+  return dict.Pass();
 }
 
 // A callback which creates a base::Value containing information about bypassing
-// the Data Reduction Proxy. Ownership of the base::Value is passed to the
-// caller.
-base::Value* UrlBypassActionCallback(
+// the Data Reduction Proxy.
+scoped_ptr<base::Value> UrlBypassActionCallback(
     DataReductionProxyBypassAction action,
     const std::string& request_method,
     const GURL& url,
@@ -87,7 +78,7 @@ base::Value* UrlBypassActionCallback(
     int bypass_seconds,
     int64 expiration_ticks,
     net::NetLogCaptureMode /* capture_mode */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("bypass_action_type", action);
   dict->SetString("method", request_method);
   dict->SetString("url", url.spec());
@@ -95,20 +86,20 @@ base::Value* UrlBypassActionCallback(
   dict->SetString("bypass_duration_seconds",
                   base::Int64ToString(bypass_seconds));
   dict->SetString("expiration", base::Int64ToString(expiration_ticks));
-  return dict;
+  return dict.Pass();
 }
 
 // A callback which creates a base::Value containing information about bypassing
-// the Data Reduction Proxy. Ownership of the base::Value is passed to the
-// caller.
-base::Value* UrlBypassTypeCallback(DataReductionProxyBypassType bypass_type,
-                                   const std::string& request_method,
-                                   const GURL& url,
-                                   bool should_retry,
-                                   int bypass_seconds,
-                                   int64 expiration_ticks,
-                                   net::NetLogCaptureMode /* capture_mode */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+// the Data Reduction Proxy.
+scoped_ptr<base::Value> UrlBypassTypeCallback(
+    DataReductionProxyBypassType bypass_type,
+    const std::string& request_method,
+    const GURL& url,
+    bool should_retry,
+    int bypass_seconds,
+    int64 expiration_ticks,
+    net::NetLogCaptureMode /* capture_mode */) {
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("bypass_type", bypass_type);
   dict->SetString("method", request_method);
   dict->SetString("url", url.spec());
@@ -116,39 +107,49 @@ base::Value* UrlBypassTypeCallback(DataReductionProxyBypassType bypass_type,
   dict->SetString("bypass_duration_seconds",
                   base::Int64ToString(bypass_seconds));
   dict->SetString("expiration", base::Int64ToString(expiration_ticks));
-  return dict;
+  return dict.Pass();
+}
+
+// A callback that creates a base::Value containing information about a proxy
+// fallback event for a Data Reduction Proxy.
+scoped_ptr<base::Value> FallbackCallback(
+    const std::string& proxy_url,
+    int net_error,
+    net::NetLogCaptureMode /* capture_mode */) {
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  dict->SetString("proxy", proxy_url);
+  dict->SetInteger("net_error", net_error);
+  return dict.Pass();
 }
 
 // A callback which creates a base::Value containing information about
-// completing the Data Reduction Proxy secure proxy check. Ownership of the
-// base::Value is passed to the caller.
-base::Value* EndCanaryRequestCallback(
+// completing the Data Reduction Proxy secure proxy check.
+scoped_ptr<base::Value> EndCanaryRequestCallback(
     int net_error,
     int http_response_code,
     bool succeeded,
     net::NetLogCaptureMode /* capture_mode */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("net_error", net_error);
   dict->SetInteger("http_response_code", http_response_code);
   dict->SetBoolean("check_succeeded", succeeded);
-  return dict;
+  return dict.Pass();
 }
 
 // A callback that creates a base::Value containing information about
-// completing the Data Reduction Proxy configuration request. Ownership of the
-// base::Value is passed to the caller.
-base::Value* EndConfigRequestCallback(
+// completing the Data Reduction Proxy configuration request.
+scoped_ptr<base::Value> EndConfigRequestCallback(
     int net_error,
     int http_response_code,
     int failure_count,
     int64 expiration_ticks,
     net::NetLogCaptureMode /* capture_mode */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("net_error", net_error);
   dict->SetInteger("http_response_code", http_response_code);
   dict->SetInteger("failure_count", failure_count);
   dict->SetString("expiration", base::Int64ToString(expiration_ticks));
-  return dict;
+  return dict.Pass();
 }
 
 }  // namespace
@@ -166,15 +167,13 @@ DataReductionProxyEventCreator::~DataReductionProxyEventCreator() {
 
 void DataReductionProxyEventCreator::AddProxyEnabledEvent(
     net::NetLog* net_log,
-    bool primary_restricted,
-    bool fallback_restricted,
-    const std::string& primary_origin,
-    const std::string& fallback_origin,
-    const std::string& ssl_origin) {
+    bool secure_transport_restricted,
+    const std::vector<net::ProxyServer>& proxies_for_http,
+    const std::vector<net::ProxyServer>& proxies_for_https) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  const net::NetLog::ParametersCallback& parameters_callback = base::Bind(
-      &EnableDataReductionProxyCallback, primary_restricted,
-      fallback_restricted, primary_origin, fallback_origin, ssl_origin);
+  const net::NetLog::ParametersCallback& parameters_callback =
+      base::Bind(&EnableDataReductionProxyCallback, secure_transport_restricted,
+                 proxies_for_http, proxies_for_https);
   PostEnabledEvent(net_log, net::NetLog::TYPE_DATA_REDUCTION_PROXY_ENABLED,
                    true, parameters_callback);
 }
@@ -222,6 +221,17 @@ void DataReductionProxyEventCreator::AddBypassTypeEvent(
       net::NetLog::PHASE_NONE, expiration_ticks, parameters_callback);
 }
 
+void DataReductionProxyEventCreator::AddProxyFallbackEvent(
+    net::NetLog* net_log,
+    const std::string& proxy_url,
+    int net_error) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  const net::NetLog::ParametersCallback& parameters_callback =
+      base::Bind(&FallbackCallback, proxy_url, net_error);
+  PostEvent(net_log, net::NetLog::TYPE_DATA_REDUCTION_PROXY_FALLBACK,
+            parameters_callback);
+}
+
 void DataReductionProxyEventCreator::BeginSecureProxyCheck(
     const net::BoundNetLog& net_log,
     const GURL& url) {
@@ -247,8 +257,8 @@ void DataReductionProxyEventCreator::EndSecureProxyCheck(
   PostBoundNetLogSecureProxyCheckEvent(
       net_log, net::NetLog::TYPE_DATA_REDUCTION_PROXY_CANARY_REQUEST,
       net::NetLog::PHASE_END,
-      net_error == 0 ? DataReductionProxyEventStorageDelegate::CHECK_SUCCESS
-                     : DataReductionProxyEventStorageDelegate::CHECK_FAILED,
+      succeeded ? DataReductionProxyEventStorageDelegate::CHECK_SUCCESS
+                : DataReductionProxyEventStorageDelegate::CHECK_FAILED,
       parameters_callback);
 }
 
@@ -276,6 +286,19 @@ void DataReductionProxyEventCreator::EndConfigRequest(
   PostBoundNetLogConfigRequestEvent(
       net_log, net::NetLog::TYPE_DATA_REDUCTION_PROXY_CONFIG_REQUEST,
       net::NetLog::PHASE_END, parameters_callback);
+}
+
+void DataReductionProxyEventCreator::PostEvent(
+    net::NetLog* net_log,
+    net::NetLog::EventType type,
+    const net::NetLog::ParametersCallback& callback) {
+  scoped_ptr<base::Value> event = BuildDataReductionProxyEvent(
+      type, net::NetLog::Source(), net::NetLog::PHASE_NONE, callback);
+  if (event)
+    storage_delegate_->AddEvent(event.Pass());
+
+  if (net_log)
+    net_log->AddGlobalEntry(type, callback);
 }
 
 void DataReductionProxyEventCreator::PostEnabledEvent(

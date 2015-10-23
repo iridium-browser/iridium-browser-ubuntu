@@ -51,24 +51,11 @@ using extensions::UpdatedExtensionPermissionsInfo;
 
 class ExtensionNameComparator {
  public:
-  explicit ExtensionNameComparator(icu::Collator* collator);
   bool operator()(const scoped_refptr<const Extension>& x,
-                  const scoped_refptr<const Extension>& y);
-
- private:
-  icu::Collator* collator_;
+                  const scoped_refptr<const Extension>& y) {
+    return x->name() < y->name();
+  }
 };
-
-ExtensionNameComparator::ExtensionNameComparator(icu::Collator* collator)
-  : collator_(collator) {
-}
-
-bool ExtensionNameComparator::operator()(
-    const scoped_refptr<const Extension>& x,
-    const scoped_refptr<const Extension>& y) {
-  return l10n_util::StringComparator<base::string16>(collator_)(
-      base::UTF8ToUTF16(x->name()), base::UTF8ToUTF16(y->name()));
-}
 
 // Background application representation, private to the
 // BackgroundApplicationListModel class.
@@ -121,12 +108,8 @@ void GetServiceApplications(ExtensionService* service,
     }
   }
 
-  std::string locale = g_browser_process->GetApplicationLocale();
-  icu::Locale loc(locale.c_str());
-  UErrorCode error = U_ZERO_ERROR;
-  scoped_ptr<icu::Collator> collator(icu::Collator::createInstance(loc, error));
   std::sort(applications_result->begin(), applications_result->end(),
-       ExtensionNameComparator(collator.get()));
+            ExtensionNameComparator());
 }
 
 }  // namespace

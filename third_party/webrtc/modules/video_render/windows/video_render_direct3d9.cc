@@ -142,8 +142,7 @@ int D3D9Channel::FrameSizeChange(int width, int height, int numberOfStreams)
 }
 
 int32_t D3D9Channel::RenderFrame(const uint32_t streamId,
-                                 const I420VideoFrame& videoFrame)
-{
+                                 const VideoFrame& videoFrame) {
     CriticalSectionScoped cs(_critSect);
     if (_width != videoFrame.width() || _height != videoFrame.height())
     {
@@ -156,7 +155,7 @@ int32_t D3D9Channel::RenderFrame(const uint32_t streamId,
 }
 
 // Called from video engine when a new frame should be rendered.
-int D3D9Channel::DeliverFrame(const I420VideoFrame& videoFrame) {
+int D3D9Channel::DeliverFrame(const VideoFrame& videoFrame) {
   WEBRTC_TRACE(kTraceStream, kTraceVideo, -1,
                "DeliverFrame to D3D9Channel");
 
@@ -602,9 +601,6 @@ int VideoRenderDirect3D9::UpdateRenderSurface()
     {
         _pd3dDevice->SetStreamSource(0, _pVB, 0, sizeof(CUSTOMVERTEX));
         _pd3dDevice->SetFVF(D3DFVF_CUSTOMVERTEX);
-
-        D3DXMATRIX matWorld;
-        D3DXMATRIX matWorldTemp;
 
         //draw all the channels
         //get texture from the channels

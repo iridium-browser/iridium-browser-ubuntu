@@ -31,21 +31,14 @@
 <meta charset="utf-8">
 <title>GLSL: test that length() method called on a complex expression does not compile</title>
 <link rel="stylesheet" href="../../resources/js-test-style.css"/>
-<link rel="stylesheet" href="../../conformance/resources/glsl-feature-tests.css"/>
-<script src="../../resources/js-test-pre.js"></script>
-<script src="../../conformance/resources/webgl-test-utils.js"></script>
-<script src="../../conformance/resources/glsl-conformance-test.js"></script>
+<link rel="stylesheet" href="../../resources/glsl-feature-tests.css"/>
+<script src="../../js/js-test-pre.js"></script>
+<script src="../../js/webgl-test-utils.js"></script>
+<script src="../../js/glsl-conformance-test.js"></script>
 </head>
 <body>
 <div id="description"></div>
 <div id="console"></div>
-<script id="vshader" type="x-shader/x-vertex">#version 300 es
-in vec3 aPosition;
-
-void main() {
-    gl_Position = vec4(aPosition, 1);
-}
-</script>
 <script id="fshaderLengthOfAssignment" type="x-shader/x-fragment">#version 300 es
 precision mediump float;
 
@@ -83,30 +76,24 @@ void main() {
     my_FragColor = vec4(float(a));
 }
 </script>
-<script type="text/javascript">
+<script type="application/javascript">
 "use strict";
 description();
 debug("These restrictions come from ESSL 3.00 section 5.9 definition of expression, which only allows length to be called on array names, not on arbitrary expressions returning an array.");
 GLSLConformanceTester.runTests([
   {
-    vShaderId: "vshader",
-    vShaderSuccess: true,
     fShaderId: "fshaderLengthOfAssignment",
     fShaderSuccess: false,
     linkSuccess: false,
     passMsg: "Fragment shader which tries to evaluate the length of an assignment operation should fail."
   },
   {
-    vShaderId: "vshader",
-    vShaderSuccess: true,
     fShaderId: "fshaderLengthOfFunctionCall",
     fShaderSuccess: false,
     linkSuccess: false,
     passMsg: "Fragment shader which tries to evaluate the length of a return value should fail."
   },
   {
-    vShaderId: "vshader",
-    vShaderSuccess: true,
     fShaderId: "fshaderLengthOfConstructor",
     fShaderSuccess: false,
     linkSuccess: false,

@@ -21,7 +21,6 @@
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/strings/stringprintf.h"
-#include "client/crashpad_client.h"
 #include "util/mach/child_port_handshake.h"
 #include "util/mach/exception_ports.h"
 #include "util/mach/mach_extensions.h"
@@ -208,13 +207,11 @@ bool CrashpadClient::UseHandler() {
   //
   // EXC_MASK_RESOURCE and EXC_MASK_GUARD are not available on all systems, and
   // the kernel will reject attempts to use them if it does not understand them,
-  // so AND them with ExcMaskAll(). EXC_MASK_CRASH is not present in
-  // ExcMaskAll() but is always supported. See the documentation for
-  // ExcMaskAll().
+  // so AND them with ExcMaskValid(). EXC_MASK_CRASH is always supported.
   ExceptionPorts exception_ports(ExceptionPorts::kTargetTypeTask, TASK_NULL);
   if (!exception_ports.SetExceptionPort(
-          EXC_MASK_CRASH |
-              ((EXC_MASK_RESOURCE | EXC_MASK_GUARD) & ExcMaskAll()),
+          (EXC_MASK_CRASH | EXC_MASK_RESOURCE | EXC_MASK_GUARD) &
+              ExcMaskValid(),
           exception_port_,
           EXCEPTION_STATE_IDENTITY | MACH_EXCEPTION_CODES,
           MACHINE_THREAD_STATE)) {

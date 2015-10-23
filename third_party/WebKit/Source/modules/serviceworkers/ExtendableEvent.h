@@ -31,7 +31,7 @@
 #ifndef ExtendableEvent_h
 #define ExtendableEvent_h
 
-#include "bindings/core/v8/ScriptValue.h"
+#include "bindings/core/v8/ScriptPromise.h"
 #include "modules/EventModules.h"
 #include "modules/ModulesExport.h"
 #include "modules/serviceworkers/ExtendableEventInit.h"
@@ -47,11 +47,11 @@ public:
     static PassRefPtrWillBeRawPtr<ExtendableEvent> create(const AtomicString& type, const ExtendableEventInit&);
     static PassRefPtrWillBeRawPtr<ExtendableEvent> create(const AtomicString& type, const ExtendableEventInit&, WaitUntilObserver*);
 
-    virtual ~ExtendableEvent();
+    ~ExtendableEvent() override;
 
-    void waitUntil(ScriptState*, const ScriptValue&, ExceptionState&);
+    void waitUntil(ScriptState*, ScriptPromise, ExceptionState&);
 
-    virtual const AtomicString& interfaceName() const override;
+    const AtomicString& interfaceName() const override;
     DECLARE_VIRTUAL_TRACE();
 
 protected:

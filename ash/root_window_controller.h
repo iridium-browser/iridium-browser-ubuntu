@@ -74,7 +74,7 @@ class AshTouchExplorationManager;
 // This class maintains the per root window state for ash. This class
 // owns the root window and other dependent objects that should be
 // deleted upon the deletion of the root window. This object is
-// indirectly owned and deleted by |DisplayController|.
+// indirectly owned and deleted by |WindowTreeHostManager|.
 // The RootWindowController for particular root window is stored in
 // its property (RootWindowSettings) and can be obtained using
 // |GetRootWindowController(aura::WindowEventDispatcher*)| function.
@@ -223,7 +223,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
 
   // Returns the topmost window or one of its transient parents, if any of them
   // are in fullscreen mode.
-  const aura::Window* GetWindowForFullscreenMode() const;
+  aura::Window* GetWindowForFullscreenMode();
 
   // Activate virtual keyboard on current root window controller.
   void ActivateKeyboard(keyboard::KeyboardController* keyboard_controller);

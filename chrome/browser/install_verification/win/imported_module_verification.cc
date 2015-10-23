@@ -16,6 +16,7 @@
 
 namespace {
 
+#if !defined(_WIN64)
 // We must make sure not to include modules here that are likely to get unloaded
 // because the scanning of the module is not done within a loader lock, so is
 // not resilient to changes made to the modules list.
@@ -71,6 +72,7 @@ void ScanImportAddressTable(
     image_descriptor += sizeof(image_descriptor) / sizeof(uintptr_t);
   }
 }
+#endif  // !defined(_WIN64)
 
 }  // namespace
 

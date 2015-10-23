@@ -47,15 +47,19 @@ class VideoEncoderVpx : public VideoEncoder {
 
   // Updates the active map according to |updated_region|. Active map is then
   // given to the encoder to speed up encoding.
-  void PrepareActiveMap(const webrtc::DesktopRegion& updated_region);
+  void SetActiveMapFromRegion(const webrtc::DesktopRegion& updated_region);
+
+  // Adds areas changed in the most recent frame to |updated_region|. This
+  // includes both content changes and areas enhanced by cyclic refresh.
+  void UpdateRegionFromActiveMap(webrtc::DesktopRegion* updated_region);
 
   // True if the encoder is for VP9, false for VP8.
   const bool use_vp9_;
 
   // Options controlling VP9 encode quantization and color space.
   // These are always off (false) for VP8.
-  bool lossless_encode_;
-  bool lossless_color_;
+  bool lossless_encode_ = false;
+  bool lossless_color_ = false;
 
   // Holds the initialized & configured codec.
   ScopedVpxCodec codec_;
@@ -69,8 +73,10 @@ class VideoEncoderVpx : public VideoEncoder {
 
   // Active map used to optimize out processing of un-changed macroblocks.
   scoped_ptr<uint8[]> active_map_;
-  int active_map_width_;
-  int active_map_height_;
+  webrtc::DesktopSize active_map_size_;
+
+  // True if the codec wants unchanged frames to finish topping-off with.
+  bool encode_unchanged_frame_;
 
   // Used to help initialize VideoPackets from DesktopFrames.
   VideoEncoderHelper helper_;

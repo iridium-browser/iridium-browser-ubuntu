@@ -24,6 +24,7 @@
 #define CSSDefaultStyleSheets_h
 
 #include "platform/heap/Handle.h"
+#include "wtf/Allocator.h"
 
 namespace blink {
 
@@ -32,16 +33,17 @@ class RuleSet;
 class StyleSheetContents;
 
 class CSSDefaultStyleSheets : public NoBaseWillBeGarbageCollected<CSSDefaultStyleSheets> {
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(CSSDefaultStyleSheets);
+    WTF_MAKE_NONCOPYABLE(CSSDefaultStyleSheets);
 public:
     static CSSDefaultStyleSheets& instance();
 
-    void ensureDefaultStyleSheetsForElement(Element*, bool& changedDefaultStyle);
+    void ensureDefaultStyleSheetsForElement(const Element&, bool& changedDefaultStyle);
 
     RuleSet* defaultStyle() { return m_defaultStyle.get(); }
     RuleSet* defaultQuirksStyle() { return m_defaultQuirksStyle.get(); }
     RuleSet* defaultPrintStyle() { return m_defaultPrintStyle.get(); }
     RuleSet* defaultViewSourceStyle();
-    RuleSet* defaultTransitionStyle();
     RuleSet* defaultMobileViewportStyle();
 
     // FIXME: Remove WAP support.
@@ -65,7 +67,6 @@ private:
     OwnPtrWillBeMember<RuleSet> m_defaultPrintStyle;
     OwnPtrWillBeMember<RuleSet> m_defaultViewSourceStyle;
     OwnPtrWillBeMember<RuleSet> m_defaultXHTMLMobileProfileStyle;
-    OwnPtrWillBeMember<RuleSet> m_defaultTransitionStyle;
 
     RefPtrWillBeMember<StyleSheetContents> m_defaultStyleSheet;
     RefPtrWillBeMember<StyleSheetContents> m_mobileViewportStyleSheet;

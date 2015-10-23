@@ -37,8 +37,8 @@ using blink::WebVector;
 
 namespace autofill {
 
-typedef Tuple<int, autofill::FormData, autofill::FormFieldData, gfx::RectF>
-    AutofillQueryParam;
+typedef base::Tuple<int, autofill::FormData, autofill::FormFieldData,
+                    gfx::RectF> AutofillQueryParam;
 
 class AutofillRendererTest : public ChromeRenderViewTest {
  public:
@@ -86,7 +86,7 @@ TEST_F(AutofillRendererTest, SendForms) {
   ASSERT_NE(nullptr, message);
   AutofillHostMsg_FormsSeen::Param params;
   AutofillHostMsg_FormsSeen::Read(message, &params);
-  std::vector<FormData> forms = get<0>(params);
+  std::vector<FormData> forms = base::get<0>(params);
   ASSERT_EQ(1UL, forms.size());
   ASSERT_EQ(4UL, forms[0].fields.size());
 
@@ -122,7 +122,7 @@ TEST_F(AutofillRendererTest, SendForms) {
 
   // Dynamically create a new form. A new message should be sent for it, but
   // not for the previous form.
-  ExecuteJavaScript(
+  ExecuteJavaScriptForTests(
       "var newForm=document.createElement('form');"
       "newForm.id='new_testform';"
       "newForm.action='http://google.com';"
@@ -149,7 +149,7 @@ TEST_F(AutofillRendererTest, SendForms) {
       AutofillHostMsg_FormsSeen::ID);
   ASSERT_NE(nullptr, message);
   AutofillHostMsg_FormsSeen::Read(message, &params);
-  forms = get<0>(params);
+  forms = base::get<0>(params);
   ASSERT_EQ(1UL, forms.size());
   ASSERT_EQ(3UL, forms[0].fields.size());
 
@@ -181,7 +181,7 @@ TEST_F(AutofillRendererTest, EnsureNoFormSeenIfTooFewFields) {
   ASSERT_NE(nullptr, message);
   AutofillHostMsg_FormsSeen::Param params;
   AutofillHostMsg_FormsSeen::Read(message, &params);
-  const std::vector<FormData>& forms = get<0>(params);
+  const std::vector<FormData>& forms = base::get<0>(params);
   ASSERT_EQ(0UL, forms.size());
 }
 
@@ -214,20 +214,20 @@ TEST_F(AutofillRendererTest, DynamicallyAddedUnownedFormElements) {
   ASSERT_NE(nullptr, message);
   AutofillHostMsg_FormsSeen::Param params;
   AutofillHostMsg_FormsSeen::Read(message, &params);
-  std::vector<FormData> forms = get<0>(params);
+  std::vector<FormData> forms = base::get<0>(params);
   ASSERT_EQ(1UL, forms.size());
   ASSERT_EQ(7UL, forms[0].fields.size());
 
   render_thread_->sink().ClearMessages();
 
-  ExecuteJavaScript("AddFields()");
+  ExecuteJavaScriptForTests("AddFields()");
   msg_loop_.RunUntilIdle();
 
   message = render_thread_->sink().GetFirstMessageMatching(
       AutofillHostMsg_FormsSeen::ID);
   ASSERT_NE(nullptr, message);
   AutofillHostMsg_FormsSeen::Read(message, &params);
-  forms = get<0>(params);
+  forms = base::get<0>(params);
   ASSERT_EQ(1UL, forms.size());
   ASSERT_EQ(9UL, forms[0].fields.size());
 
@@ -258,6 +258,7 @@ TEST_F(AutofillRendererTest, IgnoreNonUserGestureTextFieldChanges) {
     GetMainFrame()->view()->advanceFocus(false);
 
   // Not a user gesture, so no IPC message to browser.
+  DisableUserGestureSimulationForAutofill();
   full_name.setValue("Alice", true);
   GetMainFrame()->toWebLocalFrame()->autofillClient()->textFieldDidChange(
       full_name);
@@ -266,6 +267,7 @@ TEST_F(AutofillRendererTest, IgnoreNonUserGestureTextFieldChanges) {
                          AutofillHostMsg_TextFieldDidChange::ID));
 
   // A user gesture will send a message to the browser.
+  EnableUserGestureSimulationForAutofill();
   SimulateUserInputChangeForElement(&full_name, "Alice");
   ASSERT_NE(nullptr, render_thread_->sink().GetFirstMessageMatching(
                          AutofillHostMsg_TextFieldDidChange::ID));

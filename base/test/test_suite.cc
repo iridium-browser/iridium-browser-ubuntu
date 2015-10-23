@@ -17,7 +17,9 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/process/launch.h"
 #include "base/process/memory.h"
+#include "base/test/gtest_xml_unittest_result_printer.h"
 #include "base/test/gtest_xml_util.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/multiprocess_test.h"
@@ -311,6 +313,7 @@ void TestSuite::Initialize() {
 
   CHECK(debug::EnableInProcessStackDumping());
 #if defined(OS_WIN)
+  RouteStdioToConsole(true);
   // Make sure we run with high resolution timer to minimize differences
   // between production code and test code.
   Time::EnableHighResolutionTimer(true);
@@ -337,7 +340,7 @@ void TestSuite::Initialize() {
   i18n::SetICUDefaultLocale("en_US");
 #else
   std::string default_locale(uloc_getDefault());
-  if (EndsWith(default_locale, "POSIX", false))
+  if (EndsWith(default_locale, "POSIX", CompareCase::INSENSITIVE_ASCII))
     i18n::SetICUDefaultLocale("en_US");
 #endif
 #endif

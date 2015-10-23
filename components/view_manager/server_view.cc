@@ -18,10 +18,11 @@ ServerView::ServerView(ServerViewDelegate* delegate, const ViewId& id)
       parent_(nullptr),
       visible_(false),
       opacity_(1),
+      allows_reembed_(false),
       // Don't notify newly added observers during notification. This causes
       // problems for code that adds an observer as part of an observer
       // notification (such as ServerViewDrawTracker).
-      observers_(ObserverList<ServerViewObserver>::NOTIFY_EXISTING_ONLY) {
+      observers_(base::ObserverList<ServerViewObserver>::NOTIFY_EXISTING_ONLY) {
   DCHECK(delegate);  // Must provide a delegate.
 }
 
@@ -117,10 +118,7 @@ void ServerView::SetBounds(const gfx::Rect& bounds) {
 }
 
 const ServerView* ServerView::GetRoot() const {
-  const ServerView* view = this;
-  while (view && view->parent())
-    view = view->parent();
-  return view;
+  return delegate_->GetRootView(this);
 }
 
 std::vector<const ServerView*> ServerView::GetChildren() const {
@@ -193,13 +191,25 @@ void ServerView::SetProperty(const std::string& name,
                     OnViewSharedPropertyChanged(this, name, value));
 }
 
-bool ServerView::IsDrawn(const ServerView* root) const {
-  if (!root->visible_)
+void ServerView::SetTextInputState(const ui::TextInputState& state) {
+  const bool changed = !(text_input_state_ == state);
+  if (changed) {
+    text_input_state_ = state;
+    // keyboard even if the state is not changed. So we have to notify
+    // |observers_|.
+    FOR_EACH_OBSERVER(ServerViewObserver, observers_,
+                      OnViewTextInputStateChanged(this, state));
+  }
+}
+
+bool ServerView::IsDrawn() const {
+  const ServerView* root = delegate_->GetRootView(this);
+  if (!root || !root->visible())
     return false;
   const ServerView* view = this;
-  while (view && view != root && view->visible_)
-    view = view->parent_;
-  return view == root;
+  while (view && view != root && view->visible())
+    view = view->parent();
+  return root == view;
 }
 
 void ServerView::SetSurfaceId(cc::SurfaceId surface_id) {

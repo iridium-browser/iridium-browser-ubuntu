@@ -51,6 +51,8 @@ public:
         return adoptRefWillBeNoop(new WheelEvent);
     }
 
+    static PassRefPtrWillBeRawPtr<WheelEvent> create(const PlatformWheelEvent& platformEvent, PassRefPtrWillBeRawPtr<AbstractView>);
+
     static PassRefPtrWillBeRawPtr<WheelEvent> create(const AtomicString& type, const WheelEventInit& initializer)
     {
         return adoptRefWillBeNoop(new WheelEvent(type, initializer));
@@ -78,9 +80,11 @@ public:
     bool hasPreciseScrollingDeltas() const { return m_hasPreciseScrollingDeltas; }
     RailsMode railsMode() const { return m_railsMode; }
 
-    virtual const AtomicString& interfaceName() const override;
-    virtual bool isMouseEvent() const override;
-    virtual bool isWheelEvent() const override;
+    const AtomicString& interfaceName() const override;
+    bool isMouseEvent() const override;
+    bool isWheelEvent() const override;
+
+    PassRefPtrWillBeRawPtr<EventDispatchMediator> createMediator() override;
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -105,11 +109,12 @@ DEFINE_EVENT_TYPE_CASTS(WheelEvent);
 
 class WheelEventDispatchMediator final : public EventDispatchMediator {
 public:
-    static PassRefPtrWillBeRawPtr<WheelEventDispatchMediator> create(const PlatformWheelEvent&, PassRefPtrWillBeRawPtr<AbstractView>);
+    static PassRefPtrWillBeRawPtr<WheelEventDispatchMediator> create(PassRefPtrWillBeRawPtr<WheelEvent>);
+
 private:
-    WheelEventDispatchMediator(const PlatformWheelEvent&, PassRefPtrWillBeRawPtr<AbstractView>);
+    explicit WheelEventDispatchMediator(PassRefPtrWillBeRawPtr<WheelEvent>);
     WheelEvent& event() const;
-    virtual bool dispatchEvent(EventDispatcher&) const override;
+    bool dispatchEvent(EventDispatcher&) const override;
 };
 
 } // namespace blink

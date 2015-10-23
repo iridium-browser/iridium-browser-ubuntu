@@ -9,11 +9,14 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
+#include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
@@ -34,7 +37,7 @@
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/browser/signin/signin_header_helper.h"
+#include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
@@ -48,9 +51,6 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window_state.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/search/search_delegate.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/search/search_ui.h"
@@ -77,7 +77,6 @@
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
-#include "chrome/browser/ui/views/profiles/avatar_menu_bubble_view.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
 #include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
 #include "chrome/browser/ui/views/profiles/profile_reset_bubble_view.h"
@@ -105,6 +104,9 @@
 #include "components/app_modal/app_modal_dialog.h"
 #include "components/app_modal/app_modal_dialog_queue.h"
 #include "components/app_modal/native_app_modal_dialog.h"
+#include "components/omnibox/browser/omnibox_popup_model.h"
+#include "components/omnibox/browser/omnibox_popup_view.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/language_state.h"
 #include "content/app/resources/grit/content_resources.h"
@@ -445,8 +447,8 @@ const char BrowserView::kViewClassName[] = "BrowserView";
 
 BrowserView::BrowserView()
     : views::ClientView(nullptr, nullptr),
-      last_focused_view_storage_id_(
-          views::ViewStorage::GetInstance()->CreateStorageID()),
+      last_focused_view_storage_id_(views::ViewStorage::GetInstance()
+                                        ->CreateStorageID()),
       frame_(nullptr),
       top_container_(nullptr),
       tabstrip_(nullptr),
@@ -454,12 +456,13 @@ BrowserView::BrowserView()
       find_bar_host_view_(nullptr),
       infobar_container_(nullptr),
       contents_web_view_(nullptr),
+      devtools_web_view_(nullptr),
       contents_container_(nullptr),
       initialized_(false),
       in_process_fullscreen_(false),
 #if defined(OS_WIN)
-      hung_window_detector_(&hung_plugin_action_),
       ticker_(0),
+      hung_window_detector_(&hung_plugin_action_),
 #endif
       force_location_bar_focus_(false),
       activate_modal_dialog_factory_(this) {
@@ -867,14 +870,11 @@ void BrowserView::OnActiveTabChanged(content::WebContents* old_contents,
       InfoBarService::FromWebContents(new_contents));
 
   if (old_contents && PermissionBubbleManager::FromWebContents(old_contents))
-    PermissionBubbleManager::FromWebContents(old_contents)->SetView(nullptr);
+    PermissionBubbleManager::FromWebContents(old_contents)->HideBubble();
 
   if (new_contents && PermissionBubbleManager::FromWebContents(new_contents)) {
-    if (!permission_bubble_.get())
-      permission_bubble_.reset(new PermissionBubbleViewViews(browser_.get()));
-
-    PermissionBubbleManager::FromWebContents(new_contents)->SetView(
-        permission_bubble_.get());
+    PermissionBubbleManager::FromWebContents(new_contents)
+        ->DisplayPendingRequests(browser_.get());
   }
 
   UpdateUIForContents(new_contents);
@@ -1367,8 +1367,8 @@ void BrowserView::ShowWebsiteSettings(Profile* profile,
   if (!popup_anchor)
     popup_anchor = GetLocationBarView()->location_icon_view();
 
-  WebsiteSettingsPopupView::ShowPopup(popup_anchor, profile, web_contents, url,
-                                      ssl, browser_.get());
+  WebsiteSettingsPopupView::ShowPopup(popup_anchor, gfx::Rect(), profile,
+                                      web_contents, url, ssl);
 }
 
 void BrowserView::ShowAppMenu() {
@@ -1559,7 +1559,7 @@ void BrowserView::TabInsertedAt(WebContents* contents,
 
 void BrowserView::TabDetachedAt(WebContents* contents, int index) {
   if (PermissionBubbleManager::FromWebContents(contents))
-    PermissionBubbleManager::FromWebContents(contents)->SetView(nullptr);
+    PermissionBubbleManager::FromWebContents(contents)->HideBubble();
 
   // We use index here rather than comparing |contents| because by this time
   // the model has already removed |contents| from its list, so
@@ -1577,7 +1577,7 @@ void BrowserView::TabDetachedAt(WebContents* contents, int index) {
 
 void BrowserView::TabDeactivated(WebContents* contents) {
   if (PermissionBubbleManager::FromWebContents(contents))
-    PermissionBubbleManager::FromWebContents(contents)->SetView(nullptr);
+    PermissionBubbleManager::FromWebContents(contents)->HideBubble();
 
   // We do not store the focus when closing the tab to work-around bug 4633.
   // Some reports seem to show that the focus manager and/or focused view can
@@ -1642,10 +1642,9 @@ bool BrowserView::CanActivate() const {
   // has to be done in a post task, otherwise if the user clicked on a window
   // that doesn't have the modal dialog the windows keep trying to get the focus
   // from each other on Windows. http://crbug.com/141650.
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&BrowserView::ActivateAppModalDialog,
-                 activate_modal_dialog_factory_.GetWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&BrowserView::ActivateAppModalDialog,
+                            activate_modal_dialog_factory_.GetWeakPtr()));
 #endif
   return false;
 }
@@ -1692,6 +1691,10 @@ gfx::ImageSkia BrowserView::GetWindowAppIcon() {
 }
 
 gfx::ImageSkia BrowserView::GetWindowIcon() {
+  // Use the default icon for devtools.
+  if (browser_->is_devtools())
+    return gfx::ImageSkia();
+
   if (browser_->is_app() || browser_->is_type_popup())
     return browser_->GetCurrentPageIcon().AsImageSkia();
   return gfx::ImageSkia();
@@ -1893,11 +1896,6 @@ bool BrowserView::CanClose() {
     return false;
   }
 
-  // Empty TabStripModel, it's now safe to allow the Window to be closed.
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_WINDOW_CLOSED,
-      content::Source<gfx::NativeWindow>(frame_->GetNativeWindow()),
-      content::NotificationService::NoDetails());
   return true;
 }
 
@@ -2323,8 +2321,9 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
   in_process_fullscreen_ = false;
   ToolbarSizeChanged(false);
 
-  if (permission_bubble_.get())
-    permission_bubble_->UpdateAnchorPosition();
+  WebContents* contents = browser_->tab_strip_model()->GetActiveWebContents();
+  if (contents && PermissionBubbleManager::FromWebContents(contents))
+    PermissionBubbleManager::FromWebContents(contents)->UpdateAnchorPosition();
 }
 
 bool BrowserView::ShouldUseImmersiveFullscreenForUrl(const GURL& url) const {
@@ -2482,41 +2481,19 @@ void BrowserView::UpdateAcceleratorMetrics(const ui::Accelerator& accelerator,
 void BrowserView::ShowAvatarBubbleFromAvatarButton(
     AvatarBubbleMode mode,
     const signin::ManageAccountsParams& manage_accounts_params) {
-  views::BubbleBorder::Arrow arrow = views::BubbleBorder::TOP_RIGHT;
-  views::BubbleBorder::BubbleAlignment alignment =
-      views::BubbleBorder::ALIGN_ARROW_TO_MID_ANCHOR;
-  views::View* anchor_view = frame_->GetAvatarMenuButton();
-  if (!anchor_view)
-    anchor_view = toolbar_->app_menu();
-  else if (!frame_->GetAvatarMenuButton()->button_on_right())
-    arrow = views::BubbleBorder::TOP_LEFT;
-
-  if (switches::IsNewAvatarMenu()) {
-    NewAvatarButton* button = frame_->GetNewAvatarMenuButton();
-    if (button) {
-      anchor_view = button;
-      arrow = views::BubbleBorder::TOP_RIGHT;
-      alignment = views::BubbleBorder::ALIGN_EDGE_TO_ANCHOR_EDGE;
-    }
-
-    profiles::BubbleViewMode bubble_view_mode;
-    profiles::TutorialMode tutorial_mode;
-    profiles::BubbleViewModeFromAvatarBubbleMode(
-        mode, &bubble_view_mode, &tutorial_mode);
-    ProfileChooserView::ShowBubble(
-        bubble_view_mode, tutorial_mode,
-        manage_accounts_params, anchor_view, arrow, alignment, browser());
-  } else {
-    gfx::Point origin;
-    views::View::ConvertPointToScreen(anchor_view, &origin);
-    gfx::Rect bounds(origin, anchor_view->size());
-    views::BubbleBorder::ArrowPaintType arrow_paint_type =
-        ShouldHideUIForFullscreen() ? views::BubbleBorder::PAINT_TRANSPARENT :
-                                      views::BubbleBorder::PAINT_NORMAL;
-    AvatarMenuBubbleView::ShowBubble(anchor_view, arrow, arrow_paint_type,
-                                     alignment, bounds, browser());
-  }
+#if defined(FRAME_AVATAR_BUTTON)
+  profiles::BubbleViewMode bubble_view_mode;
+  profiles::TutorialMode tutorial_mode;
+  profiles::BubbleViewModeFromAvatarBubbleMode(mode, &bubble_view_mode,
+                                               &tutorial_mode);
+  ProfileChooserView::ShowBubble(
+      bubble_view_mode, tutorial_mode, manage_accounts_params,
+      frame_->GetNewAvatarMenuButton(), views::BubbleBorder::TOP_RIGHT,
+      views::BubbleBorder::ALIGN_EDGE_TO_ANCHOR_EDGE, browser());
   ProfileMetrics::LogProfileOpenMethod(ProfileMetrics::ICON_AVATAR_BUBBLE);
+#else
+  NOTREACHED();
+#endif
 }
 
 int BrowserView::GetRenderViewHeightInsetWithDetachedBookmarkBar() {

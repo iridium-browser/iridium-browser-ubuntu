@@ -5,21 +5,15 @@
 package org.chromium.base.test;
 
 import android.app.Activity;
-import android.content.Context;
-import android.os.SystemClock;
 import android.test.ActivityInstrumentationTestCase2;
-import android.util.Log;
 
-import org.chromium.base.BaseChromiumApplication;
-import org.chromium.base.CommandLine;
-import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.parameter.BaseParameter;
+import org.chromium.base.test.util.parameter.Parameter;
+import org.chromium.base.test.util.parameter.Parameterizable;
+import org.chromium.base.test.util.parameter.parameters.MethodParameter;
 
-import java.lang.reflect.AnnotatedElement;
-import java.lang.reflect.Method;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Base class for all Activity-based Instrumentation tests.
@@ -27,12 +21,9 @@ import java.util.Set;
  * @param <T> The Activity type.
  */
 public class BaseActivityInstrumentationTestCase<T extends Activity>
-        extends ActivityInstrumentationTestCase2<T> {
-
-    private static final String TAG = "BaseActivityInstrumentationTestCase";
-
-    private static final int SLEEP_INTERVAL = 50; // milliseconds
-    private static final int WAIT_DURATION = 5000; // milliseconds
+        extends ActivityInstrumentationTestCase2<T> implements Parameterizable {
+    private Parameter.Reader mParameterReader;
+    private Map<String, BaseParameter> mAvailableParameters;
 
     /**
      * Creates a instance for running tests against an Activity of the given class.
@@ -44,75 +35,55 @@ public class BaseActivityInstrumentationTestCase<T extends Activity>
     }
 
     /**
-     * Sets up the CommandLine with the appropriate flags.
+     * Creates the {@link Map} of available parameters for the test to use.
      *
-     * This will add the difference of the sets of flags specified by {@link CommandLineFlags.Add}
-     * and {@link CommandLineFlags.Remove} to the {@link org.chromium.base.CommandLine}. Note that
-     * trying to remove a flag set externally, i.e. by the command-line flags file, will not work.
+     * @return a {@link Map} of {@link BaseParameter} objects.
      */
-    @Override
-    protected void setUp() throws Exception {
-        super.setUp();
-
-        CommandLine.reset();
-        Context targetContext = getTargetContext();
-        assertNotNull("Unable to get a non-null target context.", targetContext);
-
-        BaseChromiumApplication.initCommandLine(targetContext);
-        Set<String> flags = getFlags(getClass().getMethod(getName()));
-        for (String flag : flags) {
-            CommandLine.getInstance().appendSwitch(flag);
-        }
+    protected Map<String, BaseParameter> createAvailableParameters() {
+        Map<String, BaseParameter> availableParameters = new HashMap<>();
+        availableParameters
+                .put(MethodParameter.PARAMETER_TAG, new MethodParameter(getParameterReader()));
+        return availableParameters;
     }
 
     /**
-     * Gets the target context.
+     * Gets the {@link Map} of available parameters that inherited classes can use.
      *
-     * On older versions of Android, getTargetContext() may initially return null, so we have to
-     * wait for it to become available.
-     *
-     * @return The target {@link android.content.Context} if available; null otherwise.
+     * @return a {@link Map} of {@link BaseParameter} objects to set as the available parameters.
      */
-    private Context getTargetContext() {
-        Context targetContext = getInstrumentation().getTargetContext();
-        try {
-            long startTime = SystemClock.uptimeMillis();
-            // TODO(jbudorick): Convert this to CriteriaHelper once that moves to base/.
-            while (targetContext == null
-                    && SystemClock.uptimeMillis() - startTime < WAIT_DURATION) {
-                Thread.sleep(SLEEP_INTERVAL);
-                targetContext = getInstrumentation().getTargetContext();
-            }
-        } catch (InterruptedException e) {
-            Log.e(TAG, "Interrupted while attempting to initialize the command line.");
-        }
-        return targetContext;
+    public Map<String, BaseParameter> getAvailableParameters() {
+        return mAvailableParameters;
     }
 
-    private static Set<String> getFlags(AnnotatedElement element) {
-        AnnotatedElement parent = (element instanceof Method)
-                ? ((Method) element).getDeclaringClass()
-                : ((Class) element).getSuperclass();
-        Set<String> flags = (parent == null) ? new HashSet<String>() : getFlags(parent);
+    /**
+     * Gets a specific parameter from the current test.
+     *
+     * @param parameterTag a string with the name of the {@link BaseParameter} we want.
+     * @return a parameter that extends {@link BaseParameter} that has the matching parameterTag.
+     */
+    @SuppressWarnings("unchecked")
+    public <T extends BaseParameter> T getAvailableParameter(String parameterTag) {
+        return (T) mAvailableParameters.get(parameterTag);
+    }
 
-        if (element.isAnnotationPresent(CommandLineFlags.Add.class)) {
-            flags.addAll(
-                    Arrays.asList(element.getAnnotation(CommandLineFlags.Add.class).value()));
-        }
+    /**
+     * Setter method for {@link Parameter.Reader}.
+     *
+     * @param parameterReader the {@link Parameter.Reader} to set.
+     */
+    public void setParameterReader(Parameter.Reader parameterReader) {
+        mParameterReader = parameterReader;
+        mAvailableParameters = createAvailableParameters();
+    }
 
-        if (element.isAnnotationPresent(CommandLineFlags.Remove.class)) {
-            List<String> flagsToRemove =
-                    Arrays.asList(element.getAnnotation(CommandLineFlags.Remove.class).value());
-            for (String flagToRemove : flagsToRemove) {
-                // If your test fails here, you have tried to remove a command-line flag via
-                // CommandLineFlags.Remove that was loaded into CommandLine via something other
-                // than CommandLineFlags.Add (probably the command-line flag file).
-                assertFalse("Unable to remove command-line flag \"" + flagToRemove + "\".",
-                        CommandLine.getInstance().hasSwitch(flagToRemove));
-            }
-            flags.removeAll(flagsToRemove);
-        }
-
-        return flags;
+    /**
+     * Getter method for {@link Parameter.Reader} object to be used by test cases reading the
+     * parameter.
+     *
+     * @return the {@link Parameter.Reader} for the current {@link
+     * org.chromium.base.test.util.parameter.ParameterizedTest} being run.
+     */
+    protected Parameter.Reader getParameterReader() {
+        return mParameterReader;
     }
 }

@@ -22,8 +22,8 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import org.chromium.base.CalledByNative;
 import org.chromium.base.Log;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
@@ -35,7 +35,7 @@ public class ConnectionInfoPopup implements OnClickListener {
     private static final String TAG = "ConnectionInfoPopup";
 
     private static final String HELP_URL =
-            "http://www.google.com/support/chrome/bin/answer.py?answer=95617";
+            "https://support.google.com/chrome/answer/95617";
     private static final int DESCRIPTION_TEXT_SIZE_SP = 12;
     private final Context mContext;
     private final Dialog mDialog;
@@ -73,6 +73,12 @@ public class ConnectionInfoPopup implements OnClickListener {
             public void navigationEntryCommitted() {
                 // If a navigation is committed (e.g. from in-page redirect), the data we're
                 // showing is stale so dismiss the dialog.
+                mDialog.dismiss();
+            }
+
+            @Override
+            public void destroy() {
+                super.destroy();
                 mDialog.dismiss();
             }
         };
@@ -151,8 +157,8 @@ public class ConnectionInfoPopup implements OnClickListener {
 
         mResetCertDecisionsButton = new Button(mContext);
         mResetCertDecisionsButton.setText(label);
-        mResetCertDecisionsButton.setBackground(mContext.getResources().getDrawable(
-                R.drawable.connection_info_reset_cert_decisions));
+        mResetCertDecisionsButton.setBackgroundResource(
+                R.drawable.connection_info_reset_cert_decisions);
         mResetCertDecisionsButton.setTextColor(
                 mContext.getResources().getColor(
                 R.color.connection_info_popup_reset_cert_decisions_button));

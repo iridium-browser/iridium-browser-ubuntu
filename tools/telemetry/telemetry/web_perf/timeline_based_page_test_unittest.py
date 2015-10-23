@@ -3,12 +3,12 @@
 # found in the LICENSE file.
 
 from telemetry import decorators
-from telemetry.core import wpr_modes
-from telemetry.core.platform import tracing_category_filter
 from telemetry.page import page as page_module
-from telemetry.unittest_util import browser_test_case
-from telemetry.unittest_util import options_for_unittests
-from telemetry.unittest_util import page_test_test_case
+from telemetry.testing import browser_test_case
+from telemetry.testing import options_for_unittests
+from telemetry.testing import page_test_test_case
+from telemetry.timeline import tracing_category_filter
+from telemetry.util import wpr_modes
 from telemetry.web_perf import timeline_based_measurement as tbm_module
 from telemetry.web_perf import timeline_based_page_test as tbpt_module
 
@@ -51,7 +51,7 @@ class TimelineBasedPageTestTest(page_test_test_case.PageTestTestCase):
   @decorators.Disabled('android', 'mac', 'chromeos')
   def testSmoothnessTimelineBasedMeasurementForSmoke(self):
     ps = self.CreateEmptyPageSet()
-    ps.AddUserStory(TestTimelinebasedMeasurementPage(
+    ps.AddStory(TestTimelinebasedMeasurementPage(
         ps, ps.base_dir, trigger_animation=True))
 
     tbm = tbm_module.TimelineBasedMeasurement(tbm_module.Options())
@@ -72,7 +72,7 @@ class TimelineBasedPageTestTest(page_test_test_case.PageTestTestCase):
   @decorators.Enabled('android')
   def testGPUTimesTimelineBasedMeasurementForSmoke(self):
     ps = self.CreateEmptyPageSet()
-    ps.AddUserStory(TestTimelinebasedMeasurementPage(
+    ps.AddStory(TestTimelinebasedMeasurementPage(
         ps, ps.base_dir, trigger_animation=True))
 
     cat_filter = tracing_category_filter.TracingCategoryFilter(
@@ -100,7 +100,7 @@ class TimelineBasedPageTestTest(page_test_test_case.PageTestTestCase):
   @decorators.Disabled('android', 'win', 'mac', 'chromeos')
   def testMainthreadJankTimelineBasedMeasurement(self):
     ps = self.CreateEmptyPageSet()
-    ps.AddUserStory(TestTimelinebasedMeasurementPage(
+    ps.AddStory(TestTimelinebasedMeasurementPage(
         ps, ps.base_dir, trigger_jank=True))
 
     tbm = tbm_module.TimelineBasedMeasurement(tbm_module.Options())
@@ -122,9 +122,10 @@ class TimelineBasedPageTestTest(page_test_test_case.PageTestTestCase):
         'JankThreadJSRun-responsive-total_big_jank_thread_time')
     self.assertGreaterEqual(v[0].value, 50)
 
+  @decorators.Disabled('win') # www.crbug.com/520781
   def testTimelineBasedMeasurementGestureAdjustmentSmoke(self):
     ps = self.CreateEmptyPageSet()
-    ps.AddUserStory(TestTimelinebasedMeasurementPage(
+    ps.AddStory(TestTimelinebasedMeasurementPage(
         ps, ps.base_dir, trigger_scroll_gesture=True))
 
     tbm = tbm_module.TimelineBasedMeasurement(tbm_module.Options())

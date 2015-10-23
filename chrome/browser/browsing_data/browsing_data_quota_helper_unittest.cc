@@ -8,7 +8,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browsing_data/browsing_data_quota_helper_impl.h"
 #include "content/public/test/mock_storage_client.h"
 #include "content/public/test/test_browser_thread.h"
@@ -25,21 +25,17 @@ class BrowsingDataQuotaHelperTest : public testing::Test {
   typedef BrowsingDataQuotaHelper::QuotaInfo QuotaInfo;
   typedef BrowsingDataQuotaHelper::QuotaInfoArray QuotaInfoArray;
 
-  BrowsingDataQuotaHelperTest()
-      : fetching_completed_(true),
-        quota_(-1),
-        weak_factory_(this) {}
+  BrowsingDataQuotaHelperTest() : weak_factory_(this) {}
 
   ~BrowsingDataQuotaHelperTest() override {}
 
   void SetUp() override {
     EXPECT_TRUE(dir_.CreateUniqueTempDir());
     quota_manager_ = new storage::QuotaManager(
-        false,
-        dir_.path(),
+        false, dir_.path(),
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get(),
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB).get(),
-        NULL);
+        nullptr);
     helper_ = new BrowsingDataQuotaHelperImpl(
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI).get(),
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get(),
@@ -47,8 +43,8 @@ class BrowsingDataQuotaHelperTest : public testing::Test {
   }
 
   void TearDown() override {
-    helper_ = NULL;
-    quota_manager_ = NULL;
+    helper_ = nullptr;
+    quota_manager_ = nullptr;
     quota_info_.clear();
     base::MessageLoop::current()->RunUntilIdle();
   }
@@ -120,9 +116,9 @@ class BrowsingDataQuotaHelperTest : public testing::Test {
   base::ScopedTempDir dir_;
   scoped_refptr<BrowsingDataQuotaHelper> helper_;
 
-  bool fetching_completed_;
+  bool fetching_completed_ = true;
   QuotaInfoArray quota_info_;
-  int64 quota_;
+  int64 quota_ = -1;
   base::WeakPtrFactory<BrowsingDataQuotaHelperTest> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingDataQuotaHelperTest);

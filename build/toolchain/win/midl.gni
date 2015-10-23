@@ -98,8 +98,16 @@ template("midl") {
     sources = process_file_template(invoker.sources,
                                     [ "$out_dir/$interface_identifier_file" ])
 
-    deps = [
+    public_deps = [
       ":$action_name",
     ]
+
+    config("midl_warnings") {
+      if (is_clang) {
+        # MIDL generates code like "#endif !_MIDL_USE_GUIDDEF_"
+        cflags = [ "-Wno-extra-tokens" ]
+      }
+    }
+    configs += [ ":midl_warnings" ]
   }
 }

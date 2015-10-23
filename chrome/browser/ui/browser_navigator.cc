@@ -17,6 +17,7 @@
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/task_management/web_contents_tags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
@@ -59,6 +60,9 @@ class BrowserNavigatorWebContentsAdoption {
  public:
   static void AttachTabHelpers(content::WebContents* contents) {
     TabHelpers::AttachTabHelpers(contents);
+
+    // Make the tab show up in the task manager.
+    task_management::WebContentsTags::CreateForTabContents(contents);
   }
 };
 
@@ -352,8 +356,7 @@ content::WebContents* CreateTargetContents(const chrome::NavigateParams& params,
   if (params.source_contents) {
     create_params.initial_size =
         params.source_contents->GetContainerBounds().size();
-    if (params.should_set_opener)
-      create_params.opener = params.source_contents;
+    create_params.created_with_opener = params.created_with_opener;
   }
   if (params.disposition == NEW_BACKGROUND_TAB)
     create_params.initially_hidden = true;
@@ -428,7 +431,7 @@ NavigateParams::NavigateParams(Browser* a_browser,
       initiating_profile(NULL),
       host_desktop_type(GetHostDesktop(a_browser)),
       should_replace_current_entry(false),
-      should_set_opener(false) {
+      created_with_opener(false) {
 }
 
 NavigateParams::NavigateParams(Browser* a_browser,
@@ -451,7 +454,7 @@ NavigateParams::NavigateParams(Browser* a_browser,
       initiating_profile(NULL),
       host_desktop_type(GetHostDesktop(a_browser)),
       should_replace_current_entry(false),
-      should_set_opener(false) {
+      created_with_opener(false) {
 }
 
 NavigateParams::NavigateParams(Profile* a_profile,
@@ -476,7 +479,7 @@ NavigateParams::NavigateParams(Profile* a_profile,
       initiating_profile(a_profile),
       host_desktop_type(chrome::GetActiveDesktop()),
       should_replace_current_entry(false),
-      should_set_opener(false) {
+      created_with_opener(false) {
 }
 
 NavigateParams::~NavigateParams() {}

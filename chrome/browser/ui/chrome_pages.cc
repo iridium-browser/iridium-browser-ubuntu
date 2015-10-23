@@ -24,6 +24,7 @@
 #include "chrome/browser/ui/webui/options/content_settings_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -234,6 +235,13 @@ GURL GetSettingsUrl(const std::string& sub_page) {
   return GURL(url);
 }
 
+bool IsSettingsSubPage(const GURL& url, const std::string& sub_page) {
+  return (url.SchemeIs(content::kChromeUIScheme) &&
+          (url.host() == chrome::kChromeUISettingsHost ||
+           url.host() == chrome::kChromeUISettingsFrameHost) &&
+          url.path() == "/" + sub_page);
+}
+
 bool IsTrustedPopupWindowWithScheme(const Browser* browser,
                                     const std::string& scheme) {
   if (!browser->is_type_popup() || !browser->is_trusted_source())
@@ -247,6 +255,7 @@ bool IsTrustedPopupWindowWithScheme(const Browser* browser,
   GURL url(web_contents->GetURL());
   return url.SchemeIs(scheme.c_str());
 }
+
 
 void ShowSettings(Browser* browser) {
   ShowSettingsSubPage(browser, std::string());
@@ -286,11 +295,20 @@ void ShowSettingsSubPageInTabbedBrowser(Browser* browser,
   ShowSingletonTabOverwritingNTP(browser, params);
 }
 
+void ShowContentSettingsExceptions(Browser* browser,
+                                   ContentSettingsType content_settings_type) {
+  ShowSettingsSubPage(
+      browser,
+      kContentSettingsExceptionsSubPage + std::string(kHashMark) +
+          options::ContentSettingsHandler::ContentSettingsTypeToGroupName(
+              content_settings_type));
+}
+
 void ShowContentSettings(Browser* browser,
                          ContentSettingsType content_settings_type) {
   ShowSettingsSubPage(
       browser,
-      kContentSettingsExceptionsSubPage + std::string(kHashMark) +
+      kContentSettingsSubPage + std::string(kHashMark) +
           options::ContentSettingsHandler::ContentSettingsTypeToGroupName(
               content_settings_type));
 }

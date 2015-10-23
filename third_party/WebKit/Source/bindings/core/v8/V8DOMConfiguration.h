@@ -37,21 +37,25 @@
 namespace blink {
 
 class CORE_EXPORT V8DOMConfiguration final {
+    DISALLOW_ALLOCATION();
+    WTF_MAKE_NONCOPYABLE(V8DOMConfiguration);
 public:
     // The following Configuration structs and install methods are used for
-    // setting multiple properties on an ObjectTemplate, used from the
-    // generated bindings initialization (ConfigureXXXTemplate). This greatly
-    // reduces the binary size by moving from code driven setup to data table
-    // driven setup.
+    // setting multiple properties on ObjectTemplate / FunctionTemplate, used
+    // from the generated bindings initialization (ConfigureXXXTemplate).
+    // This greatly reduces the binary size by moving from code driven setup to
+    // data table driven setup.
 
     enum ExposeConfiguration {
         ExposedToAllScripts,
         OnlyExposedToPrivateScript,
     };
 
-    enum InstanceOrPrototypeConfiguration {
-        OnInstance,
-        OnPrototype,
+    // Bitflags to show where the member will be defined.
+    enum PropertyLocationConfiguration {
+        OnInstance = 1 << 0,
+        OnPrototype = 1 << 1,
+        OnInterface = 1 << 2,
     };
 
     enum HolderCheckConfiguration {
@@ -62,6 +66,8 @@ public:
     // AttributeConfiguration translates into calls to SetAccessor() on either
     // the instance or the prototype ObjectTemplate, based on |instanceOrPrototypeConfiguration|.
     struct AttributeConfiguration {
+        AttributeConfiguration& operator=(const AttributeConfiguration&) = delete;
+        DISALLOW_ALLOCATION();
         const char* const name;
         v8::AccessorNameGetterCallback getter;
         v8::AccessorNameSetterCallback setter;
@@ -71,18 +77,19 @@ public:
         v8::AccessControl settings;
         v8::PropertyAttribute attribute;
         unsigned exposeConfiguration : 1; // ExposeConfiguration
-        unsigned instanceOrPrototypeConfiguration : 1; // InstanceOrPrototypeConfiguration
+        unsigned propertyLocationConfiguration : 3; // PropertyLocationConfiguration
+        unsigned holderCheckConfiguration : 1; // HolderCheckConfiguration
     };
 
     static void installAttributes(v8::Isolate*, v8::Local<v8::ObjectTemplate> instanceTemplate, v8::Local<v8::ObjectTemplate> prototypeTemplate, const AttributeConfiguration*, size_t attributeCount);
 
     static void installAttribute(v8::Isolate*, v8::Local<v8::ObjectTemplate> instanceTemplate, v8::Local<v8::ObjectTemplate> prototypeTemplate, const AttributeConfiguration&);
 
-    static void installAttribute(v8::Isolate*, v8::Local<v8::Object> instance, v8::Local<v8::Object> prototype, const AttributeConfiguration&);
-
     // AccessorConfiguration translates into calls to SetAccessorProperty()
     // on prototype ObjectTemplate.
     struct AccessorConfiguration {
+        AccessorConfiguration& operator=(const AccessorConfiguration&) = delete;
+        DISALLOW_ALLOCATION();
         const char* const name;
         v8::FunctionCallback getter;
         v8::FunctionCallback setter;
@@ -92,14 +99,15 @@ public:
         v8::AccessControl settings;
         v8::PropertyAttribute attribute;
         unsigned exposeConfiguration : 1; // ExposeConfiguration
+        unsigned propertyLocationConfiguration : 3; // PropertyLocationConfiguration
         unsigned holderCheckConfiguration : 1; // HolderCheckConfiguration
     };
 
-    static void installAccessors(v8::Isolate*, v8::Local<v8::ObjectTemplate> prototypeTemplate, v8::Local<v8::Signature>, const AccessorConfiguration*, size_t accessorCount);
+    static void installAccessors(v8::Isolate*, v8::Local<v8::ObjectTemplate> instanceTemplate, v8::Local<v8::ObjectTemplate> prototypeTemplate, v8::Local<v8::FunctionTemplate> interfaceTemplate, v8::Local<v8::Signature>, const AccessorConfiguration*, size_t accessorCount);
 
-    static void installAccessor(v8::Isolate*, v8::Local<v8::ObjectTemplate> prototypeTemplate, v8::Local<v8::Signature>, const AccessorConfiguration&);
+    static void installAccessor(v8::Isolate*, v8::Local<v8::ObjectTemplate> instanceTemplate, v8::Local<v8::ObjectTemplate> prototypeTemplate, v8::Local<v8::FunctionTemplate> interfaceTemplate, v8::Local<v8::Signature>, const AccessorConfiguration&);
 
-    static void installAccessor(v8::Isolate*, v8::Local<v8::Object> prototype, const AccessorConfiguration&);
+    static void installAccessor(v8::Isolate*, v8::Local<v8::Object> instance, v8::Local<v8::Object> prototype, v8::Local<v8::Function> interface, v8::Local<v8::Signature>, const AccessorConfiguration&);
 
     enum ConstantType {
         ConstantTypeShort,
@@ -115,6 +123,8 @@ public:
     // object's constants. It sets the constant on both the FunctionTemplate and
     // the ObjectTemplate. PropertyAttributes is always ReadOnly.
     struct ConstantConfiguration {
+        ConstantConfiguration& operator=(const ConstantConfiguration&) = delete;
+        DISALLOW_ALLOCATION();
         const char* const name;
         int ivalue;
         double dvalue;
@@ -140,6 +150,8 @@ public:
     // object's callbacks. It sets the method on both the FunctionTemplate or
     // the ObjectTemplate.
     struct MethodConfiguration {
+        MethodConfiguration& operator=(const MethodConfiguration&) = delete;
+        DISALLOW_ALLOCATION();
         v8::Local<v8::Name> methodName(v8::Isolate* isolate) const { return v8AtomicString(isolate, name); }
         v8::FunctionCallback callbackForWorld(const DOMWrapperWorld& world) const
         {
@@ -154,6 +166,8 @@ public:
     };
 
     struct SymbolKeyedMethodConfiguration {
+        SymbolKeyedMethodConfiguration& operator=(const SymbolKeyedMethodConfiguration&) = delete;
+        DISALLOW_ALLOCATION();
         v8::Local<v8::Name> methodName(v8::Isolate* isolate) const { return getSymbol(isolate); }
         v8::FunctionCallback callbackForWorld(const DOMWrapperWorld&) const
         {

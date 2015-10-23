@@ -10,8 +10,10 @@
 #include "components/view_manager/public/interfaces/view_manager.mojom.h"
 #include "components/view_manager/public/interfaces/view_manager_root.mojom.h"
 #include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
+
 namespace mojo {
 
+class ApplicationConnection;
 class ApplicationImpl;
 class ViewManagerDelegate;
 
@@ -30,15 +32,18 @@ class ViewManagerInit {
   // supplied to the constructor.
   ViewManagerRoot* view_manager_root() { return view_manager_root_.get(); }
 
+  // Returns the application connection established with the view manager.
+  ApplicationConnection* connection() { return connection_.get(); }
+
  private:
   class ClientFactory;
 
   void OnCreate(InterfaceRequest<ViewManagerClient> request);
 
   ApplicationImpl* app_;
+  scoped_ptr<ApplicationConnection> connection_;
   ViewManagerDelegate* delegate_;
   scoped_ptr<ClientFactory> client_factory_;
-  ViewManagerServicePtr service_;
   ViewManagerRootPtr view_manager_root_;
   scoped_ptr<Binding<ViewManagerRootClient>> root_client_binding_;
 

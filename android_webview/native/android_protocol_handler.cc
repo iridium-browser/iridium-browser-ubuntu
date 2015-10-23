@@ -11,7 +11,6 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/jni_weak_ref.h"
-#include "base/strings/string_util.h"
 #include "content/public/common/url_constants.h"
 #include "jni/AndroidProtocolHandler_jni.h"
 #include "net/base/io_buffer.h"
@@ -22,6 +21,7 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "url/gurl.h"
+#include "url/url_constants.h"
 
 using android_webview::InputStream;
 using android_webview::InputStreamImpl;
@@ -94,15 +94,7 @@ class AndroidRequestInterceptorBase : public net::URLRequestInterceptor {
 class AssetFileRequestInterceptor : public AndroidRequestInterceptorBase {
  public:
   AssetFileRequestInterceptor();
-
-  ~AssetFileRequestInterceptor() override;
   bool ShouldHandleRequest(const net::URLRequest* request) const override;
-
- private:
-  // file:///android_asset/
-  const std::string asset_prefix_;
-  // file:///android_res/
-  const std::string resource_prefix_;
 };
 
 // Protocol handler for content:// scheme requests.
@@ -234,30 +226,12 @@ net::URLRequestJob* AndroidRequestInterceptorBase::MaybeInterceptRequest(
 
 // AssetFileRequestInterceptor ------------------------------------------------
 
-AssetFileRequestInterceptor::AssetFileRequestInterceptor()
-    : asset_prefix_(std::string(url::kFileScheme) +
-                    std::string(url::kStandardSchemeSeparator) +
-                    android_webview::kAndroidAssetPath),
-      resource_prefix_(std::string(url::kFileScheme) +
-                       std::string(url::kStandardSchemeSeparator) +
-                       android_webview::kAndroidResourcePath) {
-}
-
-AssetFileRequestInterceptor::~AssetFileRequestInterceptor() {
+AssetFileRequestInterceptor::AssetFileRequestInterceptor() {
 }
 
 bool AssetFileRequestInterceptor::ShouldHandleRequest(
     const net::URLRequest* request) const {
-  if (!request->url().SchemeIsFile())
-    return false;
-
-  const std::string& url = request->url().spec();
-  if (!StartsWithASCII(url, asset_prefix_, /*case_sensitive=*/ true) &&
-      !StartsWithASCII(url, resource_prefix_, /*case_sensitive=*/ true)) {
-    return false;
-  }
-
-  return true;
+  return android_webview::IsAndroidSpecialFileUrl(request->url());
 }
 
 // ContentSchemeRequestInterceptor --------------------------------------------
@@ -267,7 +241,7 @@ ContentSchemeRequestInterceptor::ContentSchemeRequestInterceptor() {
 
 bool ContentSchemeRequestInterceptor::ShouldHandleRequest(
     const net::URLRequest* request) const {
-  return request->url().SchemeIs(android_webview::kContentScheme);
+  return request->url().SchemeIs(url::kContentScheme);
 }
 
 }  // namespace

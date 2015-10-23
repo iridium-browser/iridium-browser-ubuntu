@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/containers/hash_tables.h"
 #include "base/containers/mru_cache.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
@@ -42,10 +43,10 @@ class SingleThreadTaskRunner;
 namespace history {
 class CommitLaterTask;
 struct DownloadRow;
+class HistoryBackendClient;
 class HistoryBackendDBBaseTest;
 class HistoryBackendObserver;
 class HistoryBackendTest;
-class HistoryClient;
 class HistoryDatabase;
 struct HistoryDatabaseParams;
 struct HistoryDetails;
@@ -120,9 +121,13 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
     virtual void SetInMemoryBackend(
         scoped_ptr<InMemoryHistoryBackend> backend) = 0;
 
-    // Notify HistoryService that some URLs favicon changed that will forward
-    // the events to the FaviconChangedObservers in the correct thread.
-    virtual void NotifyFaviconChanged(const std::set<GURL>& urls) = 0;
+    // Notify HistoryService that the favicons for the given page URLs (e.g.
+    // http://www.google.com) and the given icon URL (e.g.
+    // http://www.google.com/favicon.ico) have changed. HistoryService notifies
+    // any registered callbacks. It is valid to call NotifyFaviconsChanged()
+    // with non-empty |page_urls| and an empty |icon_url| and vice versa.
+    virtual void NotifyFaviconsChanged(const std::set<GURL>& page_urls,
+                                       const GURL& icon_url) = 0;
 
     // Notify HistoryService that the user is visiting an URL. The event will
     // be forwarded to the HistoryServiceObservers in the correct thread.
@@ -171,7 +176,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // may be null.
   //
   // This constructor is fast and does no I/O, so can be called at any time.
-  HistoryBackend(Delegate* delegate, HistoryClient* history_client);
+  HistoryBackend(Delegate* delegate,
+                 scoped_ptr<HistoryBackendClient> backend_client,
+                 scoped_refptr<base::SequencedTaskRunner> task_runner);
 
   // Must be called after creation but before any objects are created. If this
   // fails, all other functions will fail as well. (Since this runs on another
@@ -196,6 +203,20 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 #endif
 
   void ClearCachedDataForContextID(ContextID context_id);
+
+  // Computes the |num_hosts| most-visited hostnames in the past 30 days. See
+  // history_service.h for details. Returns an empty list if db_ is not
+  // initialized.
+  //
+  // As a side effect, caches the list of top hosts for the purposes of
+  // generating internal metrics.
+  TopHostsList TopHosts(int num_hosts) const;
+
+  // Returns, for the given URL, a 0-based index into the list produced by
+  // TopHosts(), corresponding to that URL's host. If TopHosts() has not
+  // previously been run, or the host is not in the top kMaxTopHosts, returns
+  // kMaxTopHosts.
+  int HostRankIfAvailable(const GURL& url) const;
 
   // Navigation ----------------------------------------------------------------
 
@@ -455,6 +476,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   friend class HistoryBackendDBBaseTest;  // So the unit tests can poke our
                                           // innards.
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAll);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAllURLPreviouslyDeleted);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAllThenAddData);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, AddPagesWithDetails);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, UpdateURLs);
@@ -477,6 +499,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            SetFaviconMappingsForPageAndRedirects);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           SetFaviconMappingsForPageAndRedirectsWithFragment);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            SetFaviconMappingsForPageDuplicates);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, SetFaviconsDeleteBitmaps);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, SetFaviconsReplaceBitmapData);
@@ -494,6 +518,18 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            MergeIdenticalFaviconDoesNotChangeLastUpdatedTime);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           FaviconChangedNotificationNewFavicon);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           FaviconChangedNotificationBitmapDataChanged);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           FaviconChangedNotificationIconMappingChanged);
+  FRIEND_TEST_ALL_PREFIXES(
+      HistoryBackendTest,
+      FaviconChangedNotificationIconMappingAndBitmapDataChanged);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           FaviconChangedNotificationsMergeCopy);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, NoFaviconChangedNotifications);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            UpdateFaviconMappingsAndFetchMultipleIconTypes);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBEmpty);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
@@ -505,6 +541,14 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            UpdateFaviconMappingsAndFetchNoDB);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, QueryFilteredURLs);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, TopHosts);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, TopHosts_ElidePortAndScheme);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, TopHosts_ElideWWW);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, TopHosts_OnlyLast30Days);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, TopHosts_MaxNumHosts);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, TopHosts_IgnoreUnusualURLs);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, HostRankIfAvailable);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, RecordTopHostsMetrics);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, UpdateVisitDuration);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, ExpireHistoryForTimes);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteFTSIndexDatabases);
@@ -680,8 +724,16 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
       favicon_base::IconType icon_type,
       const std::vector<favicon_base::FaviconID>& icon_ids);
 
+  // Maps the favicon ids in |icon_ids| to URLs in |page_urls| for |icon_type|.
+  // Returns true if the function changed at least one of the |page_urls|
+  // mappings.
+  bool SetFaviconMappingsForPages(
+      const std::vector<GURL>& page_urls,
+      favicon_base::IconType icon_type,
+      const std::vector<favicon_base::FaviconID>& icon_ids);
+
   // Maps the favicon ids in |icon_ids| to |page_url| for |icon_type|.
-  // Returns true if the function changed some of |page_url|'s mappings.
+  // Returns true if the function changed at least one of |page_url|'s mappings.
   bool SetFaviconMappingsForPage(
       const GURL& page_url,
       favicon_base::IconType icon_type,
@@ -693,8 +745,15 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                                 RedirectList* redirect_list);
 
   // Send notification that the favicon has changed for |page_url| and all its
-  // redirects.
+  // redirects. This should be called if the mapping between the page URL
+  // (e.g. http://www.google.com) and the icon URL (e.g.
+  // http://www.google.com/favicon.ico) has changed.
   void SendFaviconChangedNotificationForPageAndRedirects(const GURL& page_url);
+
+  // Send notification that the bitmap data for the favicon at |icon_url| has
+  // changed. Sending this notification is important because the favicon at
+  // |icon_url| may be mapped to hundreds of page URLs.
+  void SendFaviconChangedNotificationForIconURL(const GURL& icon_url);
 
   // Generic stuff -------------------------------------------------------------
 
@@ -703,7 +762,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   void ProcessDBTaskImpl();
 
   // HistoryBackendNotifier:
-  void NotifyFaviconChanged(const std::set<GURL>& urls) override;
+  void NotifyFaviconsChanged(const std::set<GURL>& page_urls,
+                             const GURL& icon_url) override;
   void NotifyURLVisited(ui::PageTransition transition,
                         const URLRow& row,
                         const RedirectList& redirects,
@@ -713,6 +773,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                          bool expired,
                          const URLRows& rows,
                          const std::set<GURL>& favicon_urls) override;
+
+  void RecordTopHostsMetrics(const GURL& url);
 
   // Deleting all history ------------------------------------------------------
 
@@ -727,7 +789,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Given a vector of all URLs that we will keep, removes all thumbnails
   // referenced by any URL, and also all favicons that aren't used by those
   // URLs.
-  bool ClearAllThumbnailHistory(const URLRows& kept_urls);
+  bool ClearAllThumbnailHistory(const std::vector<GURL>& kept_urls);
 
   // Deletes all information in the history database, except for the supplied
   // set of URLs in the URL table (these should correspond to the bookmarked
@@ -738,10 +800,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Deletes the FTS index database files, which are no longer used.
   void DeleteFTSIndexDatabases();
-
-  // Returns the HistoryClient, blocking until the bookmarks are loaded. This
-  // may return null during testing.
-  HistoryClient* GetHistoryClient();
 
   // Data ----------------------------------------------------------------------
 
@@ -800,10 +858,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   std::list<QueuedHistoryDBTask*> queued_history_db_tasks_;
 
   // Used to determine if a URL is bookmarked; may be null.
-  //
-  // Use GetHistoryClient to access this, which makes sure the bookmarks are
-  // loaded before returning.
-  HistoryClient* history_client_;
+  scoped_ptr<HistoryBackendClient> backend_client_;
+
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   // Used to allow embedder code to stash random data by key. Those object will
   // be deleted before closing the databases (hence the member variable instead
@@ -817,8 +874,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Listens for the system being under memory pressure.
   scoped_ptr<base::MemoryPressureListener> memory_pressure_listener_;
 
+  // Map from host to index in the TopHosts list. It is updated only by
+  // TopHosts(), so it's usually stale.
+  mutable base::hash_map<std::string, int> host_ranks_;
+
   // List of observers
-  ObserverList<HistoryBackendObserver> observers_;
+  base::ObserverList<HistoryBackendObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(HistoryBackend);
 };

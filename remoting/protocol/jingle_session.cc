@@ -19,6 +19,7 @@
 #include "remoting/protocol/jingle_messages.h"
 #include "remoting/protocol/jingle_session_manager.h"
 #include "remoting/protocol/pseudotcp_channel_factory.h"
+#include "remoting/protocol/quic_channel_factory.h"
 #include "remoting/protocol/secure_channel_factory.h"
 #include "remoting/protocol/session_config.h"
 #include "remoting/protocol/stream_channel_factory.h"
@@ -78,6 +79,7 @@ JingleSession::JingleSession(JingleSessionManager* session_manager)
 
 JingleSession::~JingleSession() {
   channel_multiplexer_.reset();
+  quic_channel_factory_.reset();
   STLDeleteContainerPointers(pending_requests_.begin(),
                              pending_requests_.end());
   STLDeleteContainerPointers(transport_info_requests_.begin(),
@@ -99,17 +101,14 @@ ErrorCode JingleSession::error() {
   return error_;
 }
 
-void JingleSession::StartConnection(
-    const std::string& peer_jid,
-    scoped_ptr<Authenticator> authenticator,
-    scoped_ptr<CandidateSessionConfig> config) {
+void JingleSession::StartConnection(const std::string& peer_jid,
+                                    scoped_ptr<Authenticator> authenticator) {
   DCHECK(CalledOnValidThread());
   DCHECK(authenticator.get());
   DCHECK_EQ(authenticator->state(), Authenticator::MESSAGE_READY);
 
   peer_jid_ = peer_jid;
   authenticator_ = authenticator.Pass();
-  candidate_config_ = config.Pass();
 
   // Generate random session ID. There are usually not more than 1
   // concurrent session per host, so a random 64-bit integer provides
@@ -117,13 +116,16 @@ void JingleSession::StartConnection(
   // clients generate the same session ID concurrently.
   session_id_ = base::Int64ToString(base::RandGenerator(kint64max));
 
+  quic_channel_factory_.reset(new QuicChannelFactory(session_id_, false));
+
   // Send session-initiate message.
   JingleMessage message(peer_jid_, JingleMessage::SESSION_INITIATE,
                         session_id_);
   message.initiator = session_manager_->signal_strategy_->GetLocalJid();
-  message.description.reset(
-      new ContentDescription(candidate_config_->Clone(),
-                             authenticator_->GetNextMessage()));
+  message.description.reset(new ContentDescription(
+      session_manager_->protocol_config_->Clone(),
+      authenticator_->GetNextMessage(),
+      quic_channel_factory_->CreateSessionInitiateConfigMessage()));
   SendMessage(message);
 
   SetState(CONNECTING);
@@ -140,9 +142,26 @@ void JingleSession::InitializeIncomingConnection(
   peer_jid_ = initiate_message.from;
   authenticator_ = authenticator.Pass();
   session_id_ = initiate_message.sid;
-  candidate_config_ = initiate_message.description->config()->Clone();
 
   SetState(ACCEPTING);
+
+  config_ =
+      SessionConfig::SelectCommon(initiate_message.description->config(),
+                                  session_manager_->protocol_config_.get());
+  if (!config_) {
+    LOG(WARNING) << "Rejecting connection from " << peer_jid_
+                 << " because no compatible configuration has been found.";
+    CloseInternal(INCOMPATIBLE_PROTOCOL);
+    return;
+  }
+
+  if (config_->is_using_quic()) {
+    quic_channel_factory_.reset(new QuicChannelFactory(session_id_, true));
+    if (!quic_channel_factory_->ProcessSessionInitiateConfigMessage(
+            initiate_message.description->quic_config_message())) {
+      CloseInternal(INCOMPATIBLE_PROTOCOL);
+    }
+  }
 }
 
 void JingleSession::AcceptIncomingConnection(
@@ -181,9 +200,12 @@ void JingleSession::ContinueAcceptIncomingConnection() {
   if (authenticator_->state() == Authenticator::MESSAGE_READY)
     auth_message = authenticator_->GetNextMessage();
 
+  std::string quic_config;
+  if (config_->is_using_quic())
+    quic_config = quic_channel_factory_->CreateSessionAcceptConfigMessage();
   message.description.reset(
       new ContentDescription(CandidateSessionConfig::CreateFrom(*config_),
-                             auth_message.Pass()));
+                             auth_message.Pass(), quic_config));
   SendMessage(message);
 
   // Update state.
@@ -204,20 +226,9 @@ const std::string& JingleSession::jid() {
   return peer_jid_;
 }
 
-const CandidateSessionConfig* JingleSession::candidate_config() {
-  DCHECK(CalledOnValidThread());
-  return candidate_config_.get();
-}
-
 const SessionConfig& JingleSession::config() {
   DCHECK(CalledOnValidThread());
   return *config_;
-}
-
-void JingleSession::set_config(scoped_ptr<SessionConfig> config) {
-  DCHECK(CalledOnValidThread());
-  DCHECK(!config_);
-  config_ = config.Pass();
 }
 
 StreamChannelFactory* JingleSession::GetTransportChannelFactory() {
@@ -232,6 +243,11 @@ StreamChannelFactory* JingleSession::GetMultiplexedChannelFactory() {
         new ChannelMultiplexer(GetTransportChannelFactory(), kMuxChannelName));
   }
   return channel_multiplexer_.get();
+}
+
+StreamChannelFactory* JingleSession::GetQuicChannelFactory() {
+  DCHECK(CalledOnValidThread());
+  return quic_channel_factory_.get();
 }
 
 void JingleSession::Close() {
@@ -270,7 +286,6 @@ void JingleSession::CreateChannel(const std::string& name,
 
   scoped_ptr<Transport> channel =
       session_manager_->transport_factory_->CreateTransport();
-  channel->SetUseStandardIce(config_->standard_ice());
   channel->Connect(name, this, callback);
   AddPendingRemoteTransportInfo(channel.get());
   channels_[name] = channel.release();
@@ -380,8 +395,6 @@ void JingleSession::EnsurePendingTransportInfoMessage() {
   if (!pending_transport_info_message_) {
     pending_transport_info_message_.reset(new JingleMessage(
         peer_jid_, JingleMessage::TRANSPORT_INFO, session_id_));
-    pending_transport_info_message_->standard_ice = config_->standard_ice();
-
     // Delay sending the new candidates in case we get more candidates
     // that we can send in one message.
     transport_info_timer_.Start(
@@ -491,6 +504,16 @@ void JingleSession::OnAccept(const JingleMessage& message,
     return;
   }
 
+  if (config_->is_using_quic()) {
+    if (!quic_channel_factory_->ProcessSessionAcceptConfigMessage(
+            message.description->quic_config_message())) {
+      CloseInternal(INCOMPATIBLE_PROTOCOL);
+      return;
+    }
+  } else {
+    quic_channel_factory_.reset();
+  }
+
   SetState(CONNECTED);
 
   DCHECK(authenticator_->state() == Authenticator::WAITING_MESSAGE);
@@ -522,14 +545,6 @@ void JingleSession::OnSessionInfo(const JingleMessage& message,
 }
 
 void JingleSession::ProcessTransportInfo(const JingleMessage& message) {
-  // Check if the transport information version matches what was negotiated.
-  if (message.standard_ice != config_->standard_ice()) {
-    LOG(ERROR) << "Received transport-info message in format different from "
-                  "negotiated.";
-    CloseInternal(INCOMPATIBLE_PROTOCOL);
-    return;
-  }
-
   for (std::list<JingleMessage::IceCredentials>::const_iterator it =
            message.ice_credentials.begin();
        it != message.ice_credentials.end(); ++it) {
@@ -606,7 +621,7 @@ bool JingleSession::InitializeConfigFromDescription(
     LOG(ERROR) << "session-accept does not specify configuration";
     return false;
   }
-  if (!candidate_config()->IsSupported(*config_)) {
+  if (!session_manager_->protocol_config_->IsSupported(*config_)) {
     LOG(ERROR) << "session-accept specifies an invalid configuration";
     return false;
   }
@@ -661,6 +676,9 @@ void JingleSession::OnAuthenticated() {
   secure_channel_factory_.reset(
       new SecureChannelFactory(pseudotcp_channel_factory_.get(),
                                authenticator_.get()));
+
+  if (quic_channel_factory_)
+    quic_channel_factory_->Start(this, authenticator_->GetAuthKey());
 
   SetState(AUTHENTICATED);
 }

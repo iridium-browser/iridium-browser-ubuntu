@@ -103,17 +103,28 @@ if (enable_webrtc || !is_android) {
       "notifier/listener/fake_push_client_observer.cc",
       "notifier/listener/fake_push_client_observer.h",
     ]
-    deps = [
+    public_deps = [
+      ":jingle_glue",
       ":notifier",
+    ]
+    deps = [
       "//base",
       "//testing/gmock",
+    ]
+  }
+
+  # TODO(GYP): Delete this after we've converted everything to GN.
+  # The _run targets exist only for compatibility w/ GYP.
+  group("jingle_unittests_run") {
+    testonly = true
+    deps = [
+      ":jingle_unittests",
     ]
   }
 
   # GYP version: jingle/jingle.gyp:jingle_unittests
   test("jingle_unittests") {
     sources = [
-      "glue/channel_socket_adapter_unittest.cc",
       "glue/chrome_async_socket_unittest.cc",
       "glue/fake_ssl_client_socket_unittest.cc",
       "glue/jingle_glue_mock_objects.cc",
@@ -122,7 +133,6 @@ if (enable_webrtc || !is_android) {
       "glue/mock_task.cc",
       "glue/mock_task.h",
       "glue/proxy_resolving_client_socket_unittest.cc",
-      "glue/pseudotcp_adapter_unittest.cc",
       "glue/task_pump_unittest.cc",
       "glue/thread_wrapper_unittest.cc",
       "notifier/base/weak_xmpp_client_unittest.cc",

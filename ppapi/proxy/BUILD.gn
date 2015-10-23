@@ -196,6 +196,10 @@ component("proxy") {
 
   if (is_nacl) {
     sources += [
+      "../nacl_irt/irt_interfaces.cc",
+      "../nacl_irt/irt_interfaces.h",
+      "../nacl_irt/irt_pnacl_translator_compile.cc",
+      "../nacl_irt/irt_pnacl_translator_link.cc",
       "../nacl_irt/irt_ppapi.cc",
       "../nacl_irt/irt_ppapi.h",
       "../nacl_irt/irt_start.cc",
@@ -261,7 +265,10 @@ component("proxy") {
     ]
   }
 
-  configs += [ ":proxy_implementation" ]
+  configs += [
+    ":proxy_implementation",
+    "//build/config:precompiled_headers",
+  ]
 
   deps = [
     "//base",
@@ -275,9 +282,7 @@ component("proxy") {
     "//third_party/icu",
   ]
 
-  if (is_nacl) {
-    deps += [ "//ui/events:latency_info" ]
-  } else {
+  if (!is_nacl) {
     deps += [
       "//base/third_party/dynamic_annotations",
       "//gin",
@@ -336,10 +341,7 @@ source_set("ipc_sources") {
     "//ppapi/shared_impl",
   ]
   if (!is_nacl) {
-    deps += [
-      "//skia",
-      "//ui/events/ipc",
-    ]
+    deps += [ "//skia" ]
   }
 }
 

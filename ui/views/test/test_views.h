@@ -17,10 +17,23 @@ class StaticSizedView : public View {
   explicit StaticSizedView(const gfx::Size& size);
   ~StaticSizedView() override;
 
+  void set_minimum_size(const gfx::Size& minimum_size) {
+    minimum_size_ = minimum_size;
+  }
+
+  void set_maximum_size(const gfx::Size& maximum_size) {
+    maximum_size_ = maximum_size;
+  }
+
+  // View overrides:
   gfx::Size GetPreferredSize() const override;
+  gfx::Size GetMinimumSize() const override;
+  gfx::Size GetMaximumSize() const override;
 
  private:
   gfx::Size size_;
+  gfx::Size minimum_size_;
+  gfx::Size maximum_size_;
 
   DISALLOW_COPY_AND_ASSIGN(StaticSizedView);
 };
@@ -60,6 +73,44 @@ class CloseWidgetView : public View {
   const ui::EventType event_type_;
 
   DISALLOW_COPY_AND_ASSIGN(CloseWidgetView);
+};
+
+// A view that keeps track of the events it receives, optionally consuming them.
+class EventCountView : public View {
+ public:
+  // Whether to call SetHandled() on events as they are received. For some event
+  // types, this will allow EventCountView to receives future events in the
+  // event sequence, such as a drag.
+  enum HandleMode { PROPAGATE_EVENTS, CONSUME_EVENTS };
+
+  EventCountView();
+  ~EventCountView() override;
+
+  int GetEventCount(ui::EventType type);
+  void ResetCounts();
+
+  int last_flags() const { return last_flags_; }
+
+  void set_handle_mode(HandleMode handle_mode) { handle_mode_ = handle_mode; }
+
+ protected:
+  // Overridden from View:
+  void OnMouseMoved(const ui::MouseEvent& event) override;
+
+  // Overridden from ui::EventHandler:
+  void OnKeyEvent(ui::KeyEvent* event) override;
+  void OnMouseEvent(ui::MouseEvent* event) override;
+  void OnScrollEvent(ui::ScrollEvent* event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
+
+ private:
+  void RecordEvent(ui::Event* event);
+
+  std::map<ui::EventType, int> event_count_;
+  int last_flags_;
+  HandleMode handle_mode_;
+
+  DISALLOW_COPY_AND_ASSIGN(EventCountView);
 };
 
 }  // namespace views

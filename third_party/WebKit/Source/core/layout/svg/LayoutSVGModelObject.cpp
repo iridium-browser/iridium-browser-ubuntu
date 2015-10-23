@@ -53,7 +53,7 @@ bool LayoutSVGModelObject::isChildAllowed(LayoutObject* child, const ComputedSty
 
 LayoutRect LayoutSVGModelObject::clippedOverflowRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState* paintInvalidationState) const
 {
-    return SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(this, paintInvalidationContainer, paintInvalidationState);
+    return SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(*this, paintInvalidationContainer, paintInvalidationState);
 }
 
 void LayoutSVGModelObject::mapLocalToContainer(const LayoutBoxModelObject* paintInvalidationContainer, TransformState& transformState, MapCoordinatesFlags, bool* wasFixed, const PaintInvalidationState* paintInvalidationState) const
@@ -119,9 +119,9 @@ bool LayoutSVGModelObject::nodeAtPoint(HitTestResult&, const HitTestLocation&, c
     return false;
 }
 
-// The SVG addFocusRingRects() method adds rects in local coordinates so the default absoluteFocusRingBoundingBoxRect
+// The SVG addOutlineRects() method adds rects in local coordinates so the default absoluteOutlineBoundingBoxRect
 // returns incorrect values for SVG objects. Overriding this method provides access to the absolute bounds.
-IntRect LayoutSVGModelObject::absoluteFocusRingBoundingBoxRect() const
+IntRect LayoutSVGModelObject::absoluteOutlineBoundingBoxRect() const
 {
     return localToAbsoluteQuad(FloatQuad(paintInvalidationRectInLocalCoordinates())).enclosingBoundingBox();
 }

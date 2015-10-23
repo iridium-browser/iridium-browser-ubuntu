@@ -25,7 +25,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/webui/signin/login_ui_test_utils.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/invalidation/p2p_invalidation_service.h"
+#include "components/invalidation/impl/p2p_invalidation_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/sync_driver/data_type_controller.h"
@@ -79,7 +79,7 @@ class SyncSetupChecker : public SingleClientStatusChangeChecker {
       : SingleClientStatusChangeChecker(service) {}
 
   bool IsExitConditionSatisfied() override {
-    if (!service()->SyncActive())
+    if (!service()->IsSyncActive())
       return false;
     if (service()->ConfigurationDone())
       return true;
@@ -179,6 +179,9 @@ bool ProfileSyncServiceHarness::SetupSync(
   } else {
     LOG(ERROR) << "Unsupported profile signin type.";
   }
+
+  // Now that auth is completed, request that sync actually start.
+  service()->RequestStart();
 
   if (!AwaitBackendInitialization()) {
     return false;
@@ -313,7 +316,7 @@ void ProfileSyncServiceHarness::FinishSyncSetup() {
 
 SyncSessionSnapshot ProfileSyncServiceHarness::GetLastSessionSnapshot() const {
   DCHECK(service() != NULL) << "Sync service has not yet been set up.";
-  if (service()->SyncActive()) {
+  if (service()->IsSyncActive()) {
     return service()->GetLastSessionSnapshot();
   }
   return SyncSessionSnapshot();
@@ -417,7 +420,7 @@ bool ProfileSyncServiceHarness::DisableSyncForAllDatatypes() {
     return false;
   }
 
-  service()->DisableForUser();
+  service()->RequestStop(ProfileSyncService::CLEAR_DATA);
 
   DVLOG(1) << "DisableSyncForAllDatatypes(): Disabled sync for all "
            << "datatypes on " << profile_debug_name_;
@@ -436,7 +439,7 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
     service()->QueryDetailedSyncStatus(&status);
     // Capture select info from the sync session snapshot and syncer status.
     os << ", has_unsynced_items: "
-       << (service()->SyncActive() ? service()->HasUnsyncedItems() : 0)
+       << (service()->IsSyncActive() ? service()->HasUnsyncedItems() : 0)
        << ", did_commit: "
        << (snap.model_neutral_state().num_successful_commits == 0 &&
            snap.model_neutral_state().commit_result == syncer::SYNCER_OK)
@@ -454,7 +457,7 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
        << ", notifications_enabled: "
        << status.notifications_enabled
        << ", service_is_active: "
-       << service()->SyncActive();
+       << service()->IsSyncActive();
   } else {
     os << "Sync service not available";
   }
@@ -469,8 +472,7 @@ std::string ProfileSyncServiceHarness::GetServiceStatus() {
   scoped_ptr<base::DictionaryValue> value(
       sync_ui_util::ConstructAboutInformation(service()));
   std::string service_status;
-  base::JSONWriter::WriteWithOptions(value.get(),
-                                     base::JSONWriter::OPTIONS_PRETTY_PRINT,
-                                     &service_status);
+  base::JSONWriter::WriteWithOptions(
+      *value, base::JSONWriter::OPTIONS_PRETTY_PRINT, &service_status);
   return service_status;
 }

@@ -33,10 +33,9 @@
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include <gtest/gtest.h>
-
 #include <sstream>
 
-using blink::TimeRanges;
+namespace blink {
 
 static std::string ToString(const TimeRanges& ranges)
 {
@@ -51,17 +50,17 @@ static std::string ToString(const TimeRanges& ranges)
 
 #define ASSERT_RANGE(expected, range) ASSERT_EQ(expected, ToString(*range))
 
-TEST(TimeRanges, Empty)
+TEST(TimeRangesTest, Empty)
 {
     ASSERT_RANGE("{ }", TimeRanges::create());
 }
 
-TEST(TimeRanges, SingleRange)
+TEST(TimeRangesTest, SingleRange)
 {
     ASSERT_RANGE("{ [1,2) }", TimeRanges::create(1, 2));
 }
 
-TEST(TimeRanges, CreateFromWebTimeRanges)
+TEST(TimeRangesTest, CreateFromWebTimeRanges)
 {
     blink::WebTimeRanges webRanges(static_cast<size_t>(2));
     webRanges[0].start = 0;
@@ -71,10 +70,10 @@ TEST(TimeRanges, CreateFromWebTimeRanges)
     ASSERT_RANGE("{ [0,1) [2,3) }", TimeRanges::create(webRanges));
 }
 
-TEST(TimeRanges, AddOrder)
+TEST(TimeRangesTest, AddOrder)
 {
-    RefPtrWillBeRawPtr<TimeRanges> rangeA = TimeRanges::create();
-    RefPtrWillBeRawPtr<TimeRanges> rangeB = TimeRanges::create();
+    TimeRanges* rangeA = TimeRanges::create();
+    TimeRanges* rangeB = TimeRanges::create();
 
     rangeA->add(0, 2);
     rangeA->add(3, 4);
@@ -90,9 +89,9 @@ TEST(TimeRanges, AddOrder)
     ASSERT_RANGE(expected, rangeB);
 }
 
-TEST(TimeRanges, OverlappingAdds)
+TEST(TimeRangesTest, OverlappingAdds)
 {
-    RefPtrWillBeRawPtr<TimeRanges> ranges = TimeRanges::create();
+    TimeRanges* ranges = TimeRanges::create();
 
     ranges->add(0, 2);
     ranges->add(10, 11);
@@ -120,49 +119,49 @@ TEST(TimeRanges, OverlappingAdds)
     ASSERT_RANGE("{ [-1,11) }", ranges);
 }
 
-TEST(TimeRanges, IntersectWith_Self)
+TEST(TimeRangesTest, IntersectWith_Self)
 {
-    RefPtrWillBeRawPtr<TimeRanges> ranges = TimeRanges::create(0, 2);
+    TimeRanges* ranges = TimeRanges::create(0, 2);
 
     ASSERT_RANGE("{ [0,2) }", ranges);
 
-    ranges->intersectWith(ranges.get());
+    ranges->intersectWith(ranges);
 
     ASSERT_RANGE("{ [0,2) }", ranges);
 }
 
-TEST(TimeRanges, IntersectWith_IdenticalRange)
+TEST(TimeRangesTest, IntersectWith_IdenticalRange)
 {
-    RefPtrWillBeRawPtr<TimeRanges> rangesA = TimeRanges::create(0, 2);
-    RefPtrWillBeRawPtr<TimeRanges> rangesB = rangesA->copy();
+    TimeRanges* rangesA = TimeRanges::create(0, 2);
+    TimeRanges* rangesB = rangesA->copy();
 
     ASSERT_RANGE("{ [0,2) }", rangesA);
     ASSERT_RANGE("{ [0,2) }", rangesB);
 
-    rangesA->intersectWith(rangesB.get());
+    rangesA->intersectWith(rangesB);
 
     ASSERT_RANGE("{ [0,2) }", rangesA);
     ASSERT_RANGE("{ [0,2) }", rangesB);
 }
 
-TEST(TimeRanges, IntersectWith_Empty)
+TEST(TimeRangesTest, IntersectWith_Empty)
 {
-    RefPtrWillBeRawPtr<TimeRanges> rangesA = TimeRanges::create(0, 2);
-    RefPtrWillBeRawPtr<TimeRanges> rangesB = TimeRanges::create();
+    TimeRanges* rangesA = TimeRanges::create(0, 2);
+    TimeRanges* rangesB = TimeRanges::create();
 
     ASSERT_RANGE("{ [0,2) }", rangesA);
     ASSERT_RANGE("{ }", rangesB);
 
-    rangesA->intersectWith(rangesB.get());
+    rangesA->intersectWith(rangesB);
 
     ASSERT_RANGE("{ }", rangesA);
     ASSERT_RANGE("{ }", rangesB);
 }
 
-TEST(TimeRanges, IntersectWith_DisjointRanges1)
+TEST(TimeRangesTest, IntersectWith_DisjointRanges1)
 {
-    RefPtrWillBeRawPtr<TimeRanges> rangesA = TimeRanges::create();
-    RefPtrWillBeRawPtr<TimeRanges> rangesB = TimeRanges::create();
+    TimeRanges* rangesA = TimeRanges::create();
+    TimeRanges* rangesB = TimeRanges::create();
 
     rangesA->add(0, 1);
     rangesA->add(4, 5);
@@ -173,16 +172,16 @@ TEST(TimeRanges, IntersectWith_DisjointRanges1)
     ASSERT_RANGE("{ [0,1) [4,5) }", rangesA);
     ASSERT_RANGE("{ [2,3) [6,7) }", rangesB);
 
-    rangesA->intersectWith(rangesB.get());
+    rangesA->intersectWith(rangesB);
 
     ASSERT_RANGE("{ }", rangesA);
     ASSERT_RANGE("{ [2,3) [6,7) }", rangesB);
 }
 
-TEST(TimeRanges, IntersectWith_DisjointRanges2)
+TEST(TimeRangesTest, IntersectWith_DisjointRanges2)
 {
-    RefPtrWillBeRawPtr<TimeRanges> rangesA = TimeRanges::create();
-    RefPtrWillBeRawPtr<TimeRanges> rangesB = TimeRanges::create();
+    TimeRanges* rangesA = TimeRanges::create();
+    TimeRanges* rangesB = TimeRanges::create();
 
     rangesA->add(0, 1);
     rangesA->add(4, 5);
@@ -193,16 +192,16 @@ TEST(TimeRanges, IntersectWith_DisjointRanges2)
     ASSERT_RANGE("{ [0,1) [4,5) }", rangesA);
     ASSERT_RANGE("{ [1,4) [5,7) }", rangesB);
 
-    rangesA->intersectWith(rangesB.get());
+    rangesA->intersectWith(rangesB);
 
     ASSERT_RANGE("{ }", rangesA);
     ASSERT_RANGE("{ [1,4) [5,7) }", rangesB);
 }
 
-TEST(TimeRanges, IntersectWith_CompleteOverlap1)
+TEST(TimeRangesTest, IntersectWith_CompleteOverlap1)
 {
-    RefPtrWillBeRawPtr<TimeRanges> rangesA = TimeRanges::create();
-    RefPtrWillBeRawPtr<TimeRanges> rangesB = TimeRanges::create();
+    TimeRanges* rangesA = TimeRanges::create();
+    TimeRanges* rangesB = TimeRanges::create();
 
     rangesA->add(1, 3);
     rangesA->add(4, 5);
@@ -213,16 +212,16 @@ TEST(TimeRanges, IntersectWith_CompleteOverlap1)
     ASSERT_RANGE("{ [1,3) [4,5) [6,9) }", rangesA);
     ASSERT_RANGE("{ [0,10) }", rangesB);
 
-    rangesA->intersectWith(rangesB.get());
+    rangesA->intersectWith(rangesB);
 
     ASSERT_RANGE("{ [1,3) [4,5) [6,9) }", rangesA);
     ASSERT_RANGE("{ [0,10) }", rangesB);
 }
 
-TEST(TimeRanges, IntersectWith_CompleteOverlap2)
+TEST(TimeRangesTest, IntersectWith_CompleteOverlap2)
 {
-    RefPtrWillBeRawPtr<TimeRanges> rangesA = TimeRanges::create();
-    RefPtrWillBeRawPtr<TimeRanges> rangesB = TimeRanges::create();
+    TimeRanges* rangesA = TimeRanges::create();
+    TimeRanges* rangesB = TimeRanges::create();
 
     rangesA->add(1, 3);
     rangesA->add(4, 5);
@@ -233,16 +232,16 @@ TEST(TimeRanges, IntersectWith_CompleteOverlap2)
     ASSERT_RANGE("{ [1,3) [4,5) [6,9) }", rangesA);
     ASSERT_RANGE("{ [1,9) }", rangesB);
 
-    rangesA->intersectWith(rangesB.get());
+    rangesA->intersectWith(rangesB);
 
     ASSERT_RANGE("{ [1,3) [4,5) [6,9) }", rangesA);
     ASSERT_RANGE("{ [1,9) }", rangesB);
 }
 
-TEST(TimeRanges, IntersectWith_Gaps1)
+TEST(TimeRangesTest, IntersectWith_Gaps1)
 {
-    RefPtrWillBeRawPtr<TimeRanges> rangesA = TimeRanges::create();
-    RefPtrWillBeRawPtr<TimeRanges> rangesB = TimeRanges::create();
+    TimeRanges* rangesA = TimeRanges::create();
+    TimeRanges* rangesB = TimeRanges::create();
 
     rangesA->add(0, 2);
     rangesA->add(4, 6);
@@ -252,16 +251,16 @@ TEST(TimeRanges, IntersectWith_Gaps1)
     ASSERT_RANGE("{ [0,2) [4,6) }", rangesA);
     ASSERT_RANGE("{ [1,5) }", rangesB);
 
-    rangesA->intersectWith(rangesB.get());
+    rangesA->intersectWith(rangesB);
 
     ASSERT_RANGE("{ [1,2) [4,5) }", rangesA);
     ASSERT_RANGE("{ [1,5) }", rangesB);
 }
 
-TEST(TimeRanges, IntersectWith_Gaps2)
+TEST(TimeRangesTest, IntersectWith_Gaps2)
 {
-    RefPtrWillBeRawPtr<TimeRanges> rangesA = TimeRanges::create();
-    RefPtrWillBeRawPtr<TimeRanges> rangesB = TimeRanges::create();
+    TimeRanges* rangesA = TimeRanges::create();
+    TimeRanges* rangesB = TimeRanges::create();
 
     rangesA->add(0, 2);
     rangesA->add(4, 6);
@@ -272,16 +271,16 @@ TEST(TimeRanges, IntersectWith_Gaps2)
     ASSERT_RANGE("{ [0,2) [4,6) [8,10) }", rangesA);
     ASSERT_RANGE("{ [1,9) }", rangesB);
 
-    rangesA->intersectWith(rangesB.get());
+    rangesA->intersectWith(rangesB);
 
     ASSERT_RANGE("{ [1,2) [4,6) [8,9) }", rangesA);
     ASSERT_RANGE("{ [1,9) }", rangesB);
 }
 
-TEST(TimeRanges, IntersectWith_Gaps3)
+TEST(TimeRangesTest, IntersectWith_Gaps3)
 {
-    RefPtrWillBeRawPtr<TimeRanges> rangesA = TimeRanges::create();
-    RefPtrWillBeRawPtr<TimeRanges> rangesB = TimeRanges::create();
+    TimeRanges* rangesA = TimeRanges::create();
+    TimeRanges* rangesB = TimeRanges::create();
 
     rangesA->add(0, 2);
     rangesA->add(4, 7);
@@ -293,15 +292,15 @@ TEST(TimeRanges, IntersectWith_Gaps3)
     ASSERT_RANGE("{ [0,2) [4,7) [8,10) }", rangesA);
     ASSERT_RANGE("{ [1,5) [6,9) }", rangesB);
 
-    rangesA->intersectWith(rangesB.get());
+    rangesA->intersectWith(rangesB);
 
     ASSERT_RANGE("{ [1,2) [4,5) [6,7) [8,9) }", rangesA);
     ASSERT_RANGE("{ [1,5) [6,9) }", rangesB);
 }
 
-TEST(TimeRanges, Nearest)
+TEST(TimeRangesTest, Nearest)
 {
-    RefPtrWillBeRawPtr<TimeRanges> ranges = TimeRanges::create();
+    TimeRanges* ranges = TimeRanges::create();
     ranges->add(0, 2);
     ranges->add(5, 7);
 
@@ -318,3 +317,5 @@ TEST(TimeRanges, Nearest)
     ASSERT_EQ(7, ranges->nearest(8, 8));
     ASSERT_EQ(9, ranges->nearest(8, 10));
 }
+
+} // namespace blink

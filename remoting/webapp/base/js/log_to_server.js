@@ -17,6 +17,7 @@ var remoting = remoting || {};
  * @param {boolean=} opt_isHost True if this instance should log role=host
  *     events rather than role=client.
  * @constructor
+ * @implements {remoting.Logger}
  */
 remoting.LogToServer = function(signalStrategy, opt_isHost) {
   /** @private */
@@ -41,7 +42,6 @@ remoting.LogToServer = function(signalStrategy, opt_isHost) {
   this.role_ = opt_isHost ? 'host' : 'client';
 
   this.setSessionId();
-  signalStrategy.sendConnectionSetupResults(this);
 };
 
 // Constants used for generating a session ID.
@@ -51,21 +51,15 @@ remoting.LogToServer.SESSION_ID_ALPHABET_ =
 /** @private */
 remoting.LogToServer.SESSION_ID_LEN_ = 20;
 
-// The maximum age of a session ID, in milliseconds.
-remoting.LogToServer.MAX_SESSION_ID_AGE = 24 * 60 * 60 * 1000;
-
-// The time over which to accumulate connection statistics before logging them
-// to the server, in milliseconds.
-remoting.LogToServer.CONNECTION_STATS_ACCUMULATE_TIME = 60 * 1000;
-
 /**
  * Logs a client session state change.
  *
  * @param {remoting.ClientSession.State} state
  * @param {!remoting.Error} connectionError
+ * @param {?remoting.ChromotingEvent.XmppError} xmppError
  */
 remoting.LogToServer.prototype.logClientSessionStateChange =
-    function(state, connectionError) {
+    function(state, connectionError, xmppError) {
   this.maybeExpireSessionId_();
   // Log the session state change.
   var entry = remoting.ServerLogEntry.makeClientSessionStateChange(
@@ -74,6 +68,8 @@ remoting.LogToServer.prototype.logClientSessionStateChange =
   entry.addChromeVersionField();
   entry.addWebappVersionField();
   entry.addSessionIdField(this.sessionId_);
+  entry.addXmppError(xmppError);
+
   this.log_(entry);
   // Don't accumulate connection statistics across state changes.
   this.logAccumulatedStatistics_();
@@ -94,12 +90,23 @@ remoting.LogToServer.prototype.setConnectionType = function(connectionType) {
 };
 
 /**
- * @param {string} mode String indicating the connection mode. This should be
- *     one of the remoting.ServerLogEntry.VALUE_MODE_* values.
+ * @param {remoting.ChromotingEvent.Mode} mode
  */
 remoting.LogToServer.prototype.setLogEntryMode = function(mode) {
-  this.logEntryMode_ = mode;
-}
+  switch (mode) {
+    case remoting.ChromotingEvent.Mode.IT2ME:
+      this.logEntryMode_ = remoting.ServerLogEntry.VALUE_MODE_IT2ME;
+      break;
+    case remoting.ChromotingEvent.Mode.ME2ME:
+      this.logEntryMode_ = remoting.ServerLogEntry.VALUE_MODE_ME2ME;
+      break;
+    case remoting.ChromotingEvent.Mode.LGAPP:
+      this.logEntryMode_ = remoting.ServerLogEntry.VALUE_MODE_APP_REMOTING;
+      break;
+    default:
+      this.logEntryMode_ = remoting.ServerLogEntry.VALUE_MODE_UNKNOWN;
+  }
+};
 
 /**
  * @param {remoting.SignalStrategy.Type} strategyType
@@ -122,21 +129,6 @@ remoting.LogToServer.prototype.getSessionId = function() {
 };
 
 /**
- * Whether a session state is one of the states that occurs at the start of
- * a session.
- *
- * @private
- * @param {remoting.ClientSession.State} state
- * @return {boolean}
- */
-remoting.LogToServer.isStartOfSession_ = function(state) {
-  return ((state == remoting.ClientSession.State.CONNECTING) ||
-      (state == remoting.ClientSession.State.INITIALIZING) ||
-      (state == remoting.ClientSession.State.AUTHENTICATED) ||
-      (state == remoting.ClientSession.State.CONNECTED));
-};
-
-/**
  * Whether a session state is one of the states that occurs at the end of
  * a session.
  *
@@ -154,7 +146,7 @@ remoting.LogToServer.isEndOfSession_ = function(state) {
 
 /**
  * Logs connection statistics.
- * @param {Object<string, number>} stats The connection statistics
+ * @param {Object<number>} stats The connection statistics
  */
 remoting.LogToServer.prototype.logStatistics = function(stats) {
   this.maybeExpireSessionId_();
@@ -163,7 +155,7 @@ remoting.LogToServer.prototype.logStatistics = function(stats) {
   // Send statistics to the server if they've been accumulating for at least
   // 60 seconds.
   if (this.statsAccumulator_.getTimeSinceFirstValue() >=
-      remoting.LogToServer.CONNECTION_STATS_ACCUMULATE_TIME) {
+      remoting.Logger.CONNECTION_STATS_ACCUMULATE_TIME) {
     this.logAccumulatedStatistics_();
   }
 };
@@ -250,7 +242,7 @@ remoting.LogToServer.prototype.clearSessionId_ = function() {
 remoting.LogToServer.prototype.maybeExpireSessionId_ = function() {
   if ((this.sessionId_ != '') &&
       (new Date().getTime() - this.sessionIdGenerationTime_ >=
-      remoting.LogToServer.MAX_SESSION_ID_AGE)) {
+      remoting.Logger.MAX_SESSION_ID_AGE)) {
     // Log the old session ID.
     var entry = remoting.ServerLogEntry.makeSessionIdOld(this.sessionId_,
                                                          this.logEntryMode_);

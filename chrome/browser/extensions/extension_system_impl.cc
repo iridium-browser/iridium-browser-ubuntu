@@ -9,13 +9,11 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
-#include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
 #include "base/strings/string_tokenizer.h"
-#include "base/strings/string_util.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/extensions/chrome_app_sorting.h"
+#include "chrome/browser/extensions/chrome_content_verifier_delegate.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_management.h"
@@ -32,37 +30,24 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/url_data_source.h"
 #include "extensions/browser/content_verifier.h"
-#include "extensions/browser/content_verifier_delegate.h"
-#include "extensions/browser/declarative_user_script_manager.h"
-#include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_pref_store.h"
 #include "extensions/browser/extension_pref_value_map.h"
 #include "extensions/browser/extension_pref_value_map_factory.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/info_map.h"
-#include "extensions/browser/lazy_background_task_queue.h"
-#include "extensions/browser/management_policy.h"
 #include "extensions/browser/quota_service.h"
 #include "extensions/browser/runtime_data.h"
 #include "extensions/browser/state_store.h"
 #include "extensions/common/constants.h"
-#include "extensions/common/extension.h"
-#include "extensions/common/extension_urls.h"
-#include "extensions/common/extensions_client.h"
-#include "extensions/common/manifest.h"
-#include "extensions/common/manifest_url_handlers.h"
-#include "net/base/escape.h"
 
 #if defined(ENABLE_NOTIFICATIONS)
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/notifications/notifier_state_tracker.h"
+#include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "ui/message_center/notifier_settings.h"
 #endif
 
@@ -70,7 +55,6 @@
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/chromeos/extensions/device_local_account_management_policy_provider.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
-#include "chrome/browser/extensions/extension_assets_manager_chromeos.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/login_state.h"
 #include "components/user_manager/user.h"
@@ -79,12 +63,12 @@
 
 using content::BrowserThread;
 
-namespace {
-
-const char kContentVerificationExperimentName[] =
-    "ExtensionContentVerification";
-
-}  // namespace
+// Statistics are logged to UMA with this string as part of histogram name. They
+// can all be found under Extensions.Database.Open.<client>. Changing this needs
+// to synchronize with histograms.xml, AND will also become incompatible with
+// older browsers still reporting the previous values.
+const char kStateDatabaseUMAClientName[] = "State";
+const char kRulesDatabaseUMAClientName[] = "Rules";
 
 namespace extensions {
 
@@ -100,22 +84,18 @@ ExtensionSystemImpl::Shared::~Shared() {
 }
 
 void ExtensionSystemImpl::Shared::InitPrefs() {
-  lazy_background_task_queue_.reset(new LazyBackgroundTaskQueue(profile_));
-  event_router_.reset(new EventRouter(profile_, ExtensionPrefs::Get(profile_)));
   // Two state stores. The latter, which contains declarative rules, must be
   // loaded immediately so that the rules are ready before we issue network
   // requests.
   state_store_.reset(new StateStore(
-      profile_,
-      profile_->GetPath().AppendASCII(extensions::kStateStoreName),
-      true));
+      profile_, kStateDatabaseUMAClientName,
+      profile_->GetPath().AppendASCII(extensions::kStateStoreName), true));
   state_store_notification_observer_.reset(
       new StateStoreNotificationObserver(state_store_.get()));
 
   rules_store_.reset(new StateStore(
-      profile_,
-      profile_->GetPath().AppendASCII(extensions::kRulesStoreName),
-      false));
+      profile_, kRulesDatabaseUMAClientName,
+      profile_->GetPath().AppendASCII(extensions::kRulesStoreName), false));
 
 #if defined(OS_CHROMEOS)
   const user_manager::User* user =
@@ -142,156 +122,8 @@ void ExtensionSystemImpl::Shared::RegisterManagementPolicyProviders() {
   }
 #endif  // defined(OS_CHROMEOS)
 
-  management_policy_->RegisterProvider(install_verifier_.get());
+  management_policy_->RegisterProvider(InstallVerifier::Get(profile_));
 }
-
-namespace {
-
-class ContentVerifierDelegateImpl : public ContentVerifierDelegate {
- public:
-  explicit ContentVerifierDelegateImpl(ExtensionService* service)
-      : service_(service->AsWeakPtr()), default_mode_(GetDefaultMode()) {}
-
-  ~ContentVerifierDelegateImpl() override {}
-
-  Mode ShouldBeVerified(const Extension& extension) override {
-#if defined(OS_CHROMEOS)
-    if (ExtensionAssetsManagerChromeOS::IsSharedInstall(&extension))
-      return ContentVerifierDelegate::ENFORCE_STRICT;
-#endif
-
-    if (!extension.is_extension() && !extension.is_legacy_packaged_app())
-      return ContentVerifierDelegate::NONE;
-    if (!Manifest::IsAutoUpdateableLocation(extension.location()))
-      return ContentVerifierDelegate::NONE;
-
-    if (!ManifestURL::UpdatesFromGallery(&extension)) {
-      // It's possible that the webstore update url was overridden for testing
-      // so also consider extensions with the default (production) update url
-      // to be from the store as well.
-      GURL default_webstore_url = extension_urls::GetDefaultWebstoreUpdateUrl();
-      if (ManifestURL::GetUpdateURL(&extension) != default_webstore_url)
-        return ContentVerifierDelegate::NONE;
-    }
-
-    return default_mode_;
-  }
-
-  const ContentVerifierKey& PublicKey() override {
-    static ContentVerifierKey key(
-        extension_misc::kWebstoreSignaturesPublicKey,
-        extension_misc::kWebstoreSignaturesPublicKeySize);
-    return key;
-  }
-
-  GURL GetSignatureFetchUrl(const std::string& extension_id,
-                            const base::Version& version) override {
-    // TODO(asargent) Factor out common code from the extension updater's
-    // ManifestFetchData class that can be shared for use here.
-    std::vector<std::string> parts;
-    parts.push_back("uc");
-    parts.push_back("installsource=signature");
-    parts.push_back("id=" + extension_id);
-    parts.push_back("v=" + version.GetString());
-    std::string x_value =
-        net::EscapeQueryParamValue(JoinString(parts, "&"), true);
-    std::string query = "response=redirect&x=" + x_value;
-
-    GURL base_url = extension_urls::GetWebstoreUpdateUrl();
-    GURL::Replacements replacements;
-    replacements.SetQuery(query.c_str(), url::Component(0, query.length()));
-    return base_url.ReplaceComponents(replacements);
-  }
-
-  std::set<base::FilePath> GetBrowserImagePaths(
-      const extensions::Extension* extension) override {
-    return ExtensionsClient::Get()->GetBrowserImagePaths(extension);
-  }
-
-  void VerifyFailed(const std::string& extension_id,
-                    ContentVerifyJob::FailureReason reason) override {
-    if (!service_)
-      return;
-    ExtensionRegistry* registry = ExtensionRegistry::Get(service_->profile());
-    const Extension* extension =
-        registry->GetExtensionById(extension_id, ExtensionRegistry::ENABLED);
-    if (!extension)
-      return;
-    Mode mode = ShouldBeVerified(*extension);
-    if (mode >= ContentVerifierDelegate::ENFORCE) {
-      service_->DisableExtension(extension_id, Extension::DISABLE_CORRUPTED);
-      ExtensionPrefs::Get(service_->profile())
-          ->IncrementCorruptedDisableCount();
-      UMA_HISTOGRAM_BOOLEAN("Extensions.CorruptExtensionBecameDisabled", true);
-      UMA_HISTOGRAM_ENUMERATION("Extensions.CorruptExtensionDisabledReason",
-          reason, ContentVerifyJob::FAILURE_REASON_MAX);
-    } else if (!ContainsKey(would_be_disabled_ids_, extension_id)) {
-      UMA_HISTOGRAM_BOOLEAN("Extensions.CorruptExtensionWouldBeDisabled", true);
-      would_be_disabled_ids_.insert(extension_id);
-    }
-  }
-
-  static Mode GetDefaultMode() {
-    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-
-    Mode experiment_value = NONE;
-    const std::string group = base::FieldTrialList::FindFullName(
-        kContentVerificationExperimentName);
-    if (group == "EnforceStrict")
-      experiment_value = ContentVerifierDelegate::ENFORCE_STRICT;
-    else if (group == "Enforce")
-      experiment_value = ContentVerifierDelegate::ENFORCE;
-    else if (group == "Bootstrap")
-      experiment_value = ContentVerifierDelegate::BOOTSTRAP;
-
-    // The field trial value that normally comes from the server can be
-    // overridden on the command line, which we don't want to allow since
-    // malware can set chrome command line flags. There isn't currently a way
-    // to find out what the server-provided value is in this case, so we
-    // conservatively default to the strictest mode if we detect our experiment
-    // name being overridden.
-    if (command_line->HasSwitch(switches::kForceFieldTrials)) {
-      std::string forced_trials =
-          command_line->GetSwitchValueASCII(switches::kForceFieldTrials);
-      if (forced_trials.find(kContentVerificationExperimentName) !=
-              std::string::npos)
-        experiment_value = ContentVerifierDelegate::ENFORCE_STRICT;
-    }
-
-    Mode cmdline_value = NONE;
-    if (command_line->HasSwitch(switches::kExtensionContentVerification)) {
-      std::string switch_value = command_line->GetSwitchValueASCII(
-          switches::kExtensionContentVerification);
-      if (switch_value == switches::kExtensionContentVerificationBootstrap)
-        cmdline_value = ContentVerifierDelegate::BOOTSTRAP;
-      else if (switch_value == switches::kExtensionContentVerificationEnforce)
-        cmdline_value = ContentVerifierDelegate::ENFORCE;
-      else if (switch_value ==
-              switches::kExtensionContentVerificationEnforceStrict)
-        cmdline_value = ContentVerifierDelegate::ENFORCE_STRICT;
-      else
-        // If no value was provided (or the wrong one), just default to enforce.
-        cmdline_value = ContentVerifierDelegate::ENFORCE;
-    }
-
-    // We don't want to allow the command-line flags to eg disable enforcement
-    // if the experiment group says it should be on, or malware may just modify
-    // the command line flags. So return the more restrictive of the 2 values.
-    return std::max(experiment_value, cmdline_value);
-  }
-
- private:
-  base::WeakPtr<ExtensionService> service_;
-  ContentVerifierDelegate::Mode default_mode_;
-
-  // For reporting metrics in BOOTSTRAP mode, when an extension would be
-  // disabled if content verification was in ENFORCE mode.
-  std::set<std::string> would_be_disabled_ids_;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentVerifierDelegateImpl);
-};
-
-}  // namespace
 
 void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   TRACE_EVENT0("browser,startup", "ExtensionSystemImpl::Shared::Init");
@@ -303,9 +135,10 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   bool allow_noisy_errors = !command_line->HasSwitch(switches::kNoErrorDialogs);
   ExtensionErrorReporter::Init(allow_noisy_errors);
 
+  content_verifier_ = new ContentVerifier(
+      profile_, new ChromeContentVerifierDelegate(profile_));
+
   shared_user_script_master_.reset(new SharedUserScriptMaster(profile_));
-  declarative_user_script_manager_.reset(
-      new DeclarativeUserScriptManager(profile_));
 
   // ExtensionService depends on RuntimeData.
   runtime_data_.reset(new RuntimeData(ExtensionRegistry::Get(profile_)));
@@ -325,13 +158,9 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   // These services must be registered before the ExtensionService tries to
   // load any extensions.
   {
-    install_verifier_.reset(
-        new InstallVerifier(ExtensionPrefs::Get(profile_), profile_));
-    install_verifier_->Init();
-    content_verifier_ = new ContentVerifier(
-        profile_, new ContentVerifierDelegateImpl(extension_service_.get()));
+    InstallVerifier::Get(profile_)->Init();
     ContentVerifierDelegate::Mode mode =
-        ContentVerifierDelegateImpl::GetDefaultMode();
+        ChromeContentVerifierDelegate::GetDefaultMode();
 #if defined(OS_CHROMEOS)
     mode = std::max(mode, ContentVerifierDelegate::BOOTSTRAP);
 #endif  // defined(OS_CHROMEOS)
@@ -373,6 +202,9 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
           base::FilePath(t.token()));
     }
   }
+
+  app_sorting_.reset(new ChromeAppSorting(profile_));
+
   extension_service_->Init();
 
   // Make the chrome://extension-icon/ resource available.
@@ -431,32 +263,18 @@ ExtensionSystemImpl::Shared::shared_user_script_master() {
   return shared_user_script_master_.get();
 }
 
-DeclarativeUserScriptManager*
-ExtensionSystemImpl::Shared::declarative_user_script_manager() {
-  return declarative_user_script_manager_.get();
-}
-
 InfoMap* ExtensionSystemImpl::Shared::info_map() {
   if (!extension_info_map_.get())
     extension_info_map_ = new InfoMap();
   return extension_info_map_.get();
 }
 
-LazyBackgroundTaskQueue*
-    ExtensionSystemImpl::Shared::lazy_background_task_queue() {
-  return lazy_background_task_queue_.get();
-}
-
-EventRouter* ExtensionSystemImpl::Shared::event_router() {
-  return event_router_.get();
-}
-
-InstallVerifier* ExtensionSystemImpl::Shared::install_verifier() {
-  return install_verifier_.get();
-}
-
 QuotaService* ExtensionSystemImpl::Shared::quota_service() {
   return quota_service_.get();
+}
+
+AppSorting* ExtensionSystemImpl::Shared::app_sorting() {
+  return app_sorting_.get();
 }
 
 ContentVerifier* ExtensionSystemImpl::Shared::content_verifier() {
@@ -509,11 +327,6 @@ SharedUserScriptMaster* ExtensionSystemImpl::shared_user_script_master() {
   return shared_->shared_user_script_master();
 }
 
-DeclarativeUserScriptManager*
-ExtensionSystemImpl::declarative_user_script_manager() {
-  return shared_->declarative_user_script_manager();
-}
-
 StateStore* ExtensionSystemImpl::state_store() {
   return shared_->state_store();
 }
@@ -524,24 +337,16 @@ StateStore* ExtensionSystemImpl::rules_store() {
 
 InfoMap* ExtensionSystemImpl::info_map() { return shared_->info_map(); }
 
-LazyBackgroundTaskQueue* ExtensionSystemImpl::lazy_background_task_queue() {
-  return shared_->lazy_background_task_queue();
-}
-
-EventRouter* ExtensionSystemImpl::event_router() {
-  return shared_->event_router();
-}
-
 const OneShotEvent& ExtensionSystemImpl::ready() const {
   return shared_->ready();
 }
 
-InstallVerifier* ExtensionSystemImpl::install_verifier() {
-  return shared_->install_verifier();
-}
-
 QuotaService* ExtensionSystemImpl::quota_service() {
   return shared_->quota_service();
+}
+
+AppSorting* ExtensionSystemImpl::app_sorting() {
+  return shared_->app_sorting();
 }
 
 ContentVerifier* ExtensionSystemImpl::content_verifier() {
@@ -555,7 +360,8 @@ scoped_ptr<ExtensionSet> ExtensionSystemImpl::GetDependentExtensions(
 }
 
 void ExtensionSystemImpl::RegisterExtensionWithRequestContexts(
-    const Extension* extension) {
+    const Extension* extension,
+    const base::Closure& callback) {
   base::Time install_time;
   if (extension->location() != Manifest::COMPONENT) {
     install_time = ExtensionPrefs::Get(profile_)->
@@ -569,17 +375,18 @@ void ExtensionSystemImpl::RegisterExtensionWithRequestContexts(
       message_center::NotifierId::APPLICATION,
       extension->id());
 
-  DesktopNotificationService* notification_service =
-      DesktopNotificationServiceFactory::GetForProfile(profile_);
+  NotifierStateTracker* notifier_state_tracker =
+      NotifierStateTrackerFactory::GetForProfile(profile_);
   notifications_disabled =
-      !notification_service->IsNotifierEnabled(notifier_id);
+      !notifier_state_tracker->IsNotifierEnabled(notifier_id);
 #endif
 
-  BrowserThread::PostTask(
+  BrowserThread::PostTaskAndReply(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&InfoMap::AddExtension, info_map(),
-                 make_scoped_refptr(extension), install_time,
-                 incognito_enabled, notifications_disabled));
+                 make_scoped_refptr(extension), install_time, incognito_enabled,
+                 notifications_disabled),
+      callback);
 }
 
 void ExtensionSystemImpl::UnregisterExtensionWithRequestContexts(

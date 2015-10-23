@@ -47,10 +47,6 @@ class GPU_EXPORT Buffer : public base::RefCounted<Buffer> {
     return service_id_;
   }
 
-  GLenum target() const {
-    return target_;
-  }
-
   GLsizeiptr size() const {
     return size_;
   }
@@ -74,7 +70,7 @@ class GPU_EXPORT Buffer : public base::RefCounted<Buffer> {
   }
 
   bool IsValid() const {
-    return target() && !IsDeleted();
+    return initial_target() && !IsDeleted();
   }
 
   bool IsClientSideArray() const {
@@ -129,9 +125,13 @@ class GPU_EXPORT Buffer : public base::RefCounted<Buffer> {
 
   ~Buffer();
 
-  void set_target(GLenum target) {
-    DCHECK_EQ(target_, 0u);  // you can only set this once.
-    target_ = target;
+  GLenum initial_target() const {
+    return initial_target_;
+  }
+
+  void set_initial_target(GLenum target) {
+    DCHECK_EQ(0u, initial_target_);
+    initial_target_ = target;
   }
 
   bool shadowed() const {
@@ -182,10 +182,9 @@ class GPU_EXPORT Buffer : public base::RefCounted<Buffer> {
   // Service side buffer id.
   GLuint service_id_;
 
-  // The type of buffer. 0 = unset, GL_BUFFER_ARRAY = vertex data,
-  // GL_ELEMENT_BUFFER_ARRAY = index data.
-  // Once set a buffer can not be used for something else.
-  GLenum target_;
+  // The first target of buffer. 0 = unset.
+  // It is set the first time bindBuffer() is called and cannot be changed.
+  GLenum initial_target_;
 
   // Usage of buffer.
   GLenum usage_;
@@ -203,10 +202,10 @@ class GPU_EXPORT Buffer : public base::RefCounted<Buffer> {
 //
 // NOTE: To support shared resources an instance of this class will need to be
 // shared by multiple GLES2Decoders.
-class GPU_EXPORT BufferManager {
+class GPU_EXPORT BufferManager : public base::trace_event::MemoryDumpProvider {
  public:
   BufferManager(MemoryTracker* memory_tracker, FeatureInfo* feature_info);
-  ~BufferManager();
+  ~BufferManager() override;
 
   // Must call before destruction.
   void Destroy(bool have_context);
@@ -235,6 +234,11 @@ class GPU_EXPORT BufferManager {
     ContextState* context_state, GLenum target, GLsizeiptr size,
     const GLvoid * data, GLenum usage);
 
+  // Validates a glGetBufferParameteri64v, and then calls GetBufferParameteri64v
+  // if validation was successful.
+  void ValidateAndDoGetBufferParameteri64v(
+    ContextState* context_state, GLenum target, GLenum pname, GLint64* params);
+
   // Validates a glGetBufferParameteriv, and then calls GetBufferParameteriv if
   // validation was successful.
   void ValidateAndDoGetBufferParameteriv(
@@ -252,7 +256,7 @@ class GPU_EXPORT BufferManager {
   }
 
   size_t mem_represented() const {
-    return memory_tracker_->GetMemRepresented();
+    return memory_type_tracker_->GetMemRepresented();
   }
 
   // Tells for a given usage if this would be a client side array.
@@ -263,6 +267,10 @@ class GPU_EXPORT BufferManager {
   bool UseNonZeroSizeForClientSideArrayBuffer();
 
   Buffer* GetBufferInfoForTarget(ContextState* state, GLenum target) const;
+
+  // base::trace_event::MemoryDumpProvider implementation.
+  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
+                    base::trace_event::ProcessMemoryDump* pmd) override;
 
  private:
   friend class Buffer;
@@ -277,6 +285,7 @@ class GPU_EXPORT BufferManager {
   void DoBufferSubData(
       ErrorState* error_state,
       Buffer* buffer,
+      GLenum target,
       GLintptr offset,
       GLsizeiptr size,
       const GLvoid* data);
@@ -286,16 +295,18 @@ class GPU_EXPORT BufferManager {
   void DoBufferData(
       ErrorState* error_state,
       Buffer* buffer,
+      GLenum target,
       GLsizeiptr size,
       GLenum usage,
       const GLvoid* data);
 
   // Sets the size, usage and initial data of a buffer.
   // If data is NULL buffer will be initialized to 0 if shadowed.
-  void SetInfo(
-      Buffer* buffer, GLsizeiptr size, GLenum usage, const GLvoid* data);
+  void SetInfo(Buffer* buffer, GLenum target, GLsizeiptr size, GLenum usage,
+               const GLvoid* data);
 
-  scoped_ptr<MemoryTypeTracker> memory_tracker_;
+  scoped_ptr<MemoryTypeTracker> memory_type_tracker_;
+  MemoryTracker* memory_tracker_;
   scoped_refptr<FeatureInfo> feature_info_;
 
   // Info for each buffer in the system.

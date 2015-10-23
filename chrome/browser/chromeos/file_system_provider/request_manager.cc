@@ -7,6 +7,12 @@
 #include "base/files/file.h"
 #include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
+#include "chrome/browser/extensions/window_controller_list.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "extensions/browser/app_window/app_window_registry.h"
+#include "extensions/common/constants.h"
 
 namespace chromeos {
 namespace file_system_provider {
@@ -18,52 +24,13 @@ const int kDefaultTimeout = 10;
 
 }  // namespace
 
-std::string RequestTypeToString(RequestType type) {
-  switch (type) {
-    case REQUEST_UNMOUNT:
-      return "REQUEST_UNMOUNT";
-    case GET_METADATA:
-      return "GET_METADATA";
-    case READ_DIRECTORY:
-      return "READ_DIRECTORY";
-    case OPEN_FILE:
-      return "OPEN_FILE";
-    case CLOSE_FILE:
-      return "CLOSE_FILE";
-    case READ_FILE:
-      return "READ_FILE";
-    case CREATE_DIRECTORY:
-      return "CREATE_DIRECTORY";
-    case DELETE_ENTRY:
-      return "DELETE_ENTRY";
-    case CREATE_FILE:
-      return "CREATE_FILE";
-    case COPY_ENTRY:
-      return "COPY_ENTRY";
-    case MOVE_ENTRY:
-      return "MOVE_ENTRY";
-    case TRUNCATE:
-      return "TRUNCATE";
-    case WRITE_FILE:
-      return "WRITE_FILE";
-    case ABORT:
-      return "ABORT";
-    case ADD_WATCHER:
-      return "ADD_WATCHER";
-    case REMOVE_WATCHER:
-      return "REMOVE_WATCHER";
-    case CONFIGURE:
-      return "CONFIGURE";
-    case TESTING:
-      return "TESTING";
-  }
-  NOTREACHED();
-  return "";
-}
-
 RequestManager::RequestManager(
+    Profile* profile,
+    const std::string& extension_id,
     NotificationManagerInterface* notification_manager)
-    : notification_manager_(notification_manager),
+    : profile_(profile),
+      extension_id_(extension_id),
+      notification_manager_(notification_manager),
       next_id_(1),
       timeout_(base::TimeDelta::FromSeconds(kDefaultTimeout)),
       weak_ptr_factory_(this) {
@@ -205,11 +172,14 @@ void RequestManager::OnRequestTimeout(int request_id) {
     return;
   }
 
-  notification_manager_->ShowUnresponsiveNotification(
-      request_id,
-      base::Bind(&RequestManager::OnUnresponsiveNotificationResult,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 request_id));
+  if (!IsInteractingWithUser()) {
+    notification_manager_->ShowUnresponsiveNotification(
+        request_id,
+        base::Bind(&RequestManager::OnUnresponsiveNotificationResult,
+                   weak_ptr_factory_.GetWeakPtr(), request_id));
+  } else {
+    ResetTimer(request_id);
+  }
 }
 
 void RequestManager::OnUnresponsiveNotificationResult(
@@ -240,6 +210,40 @@ void RequestManager::ResetTimer(int request_id) {
       base::Bind(&RequestManager::OnRequestTimeout,
                  weak_ptr_factory_.GetWeakPtr(),
                  request_id));
+}
+
+bool RequestManager::IsInteractingWithUser() const {
+  // First try for app windows. If not found, then fall back to browser windows
+  // and tabs.
+
+  const extensions::AppWindowRegistry* const registry =
+      extensions::AppWindowRegistry::Get(profile_);
+  DCHECK(registry);
+  if (registry->GetCurrentAppWindowForApp(extension_id_))
+    return true;
+
+  // This loop is heavy, but it's not called often. Only when a request timeouts
+  // which is at most once every 10 seconds per request (except tests).
+  const extensions::WindowControllerList::ControllerList& windows =
+      extensions::WindowControllerList::GetInstance()->windows();
+  for (const auto& window : windows) {
+    const Browser* const browser = window->GetBrowser();
+    if (!browser)
+      continue;
+    const TabStripModel* const tabs = browser->tab_strip_model();
+    DCHECK(tabs);
+    for (int i = 0; i < tabs->count(); ++i) {
+      const content::WebContents* const web_contents =
+          tabs->GetWebContentsAt(i);
+      const GURL& url = web_contents->GetURL();
+      if (url.scheme() == extensions::kExtensionScheme &&
+          url.host() == extension_id_) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 void RequestManager::DestroyRequest(int request_id) {

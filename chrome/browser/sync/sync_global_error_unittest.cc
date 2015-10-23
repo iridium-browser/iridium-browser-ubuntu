@@ -4,15 +4,16 @@
 
 #include "chrome/browser/sync/sync_global_error.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/browser/sync/sync_error_controller.h"
 #include "chrome/browser/sync/sync_global_error_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/sync_driver/sync_error_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
@@ -47,8 +48,9 @@ class FakeLoginUI : public LoginUIService::LoginUI {
   int focus_ui_call_count_;
 };
 
-KeyedService* BuildMockLoginUIService(content::BrowserContext* profile) {
-  return new FakeLoginUIService();
+scoped_ptr<KeyedService> BuildMockLoginUIService(
+    content::BrowserContext* profile) {
+  return make_scoped_ptr(new FakeLoginUIService());
 }
 
 // Same as BrowserWithTestWindowTest, but uses MockBrowser to test calls to

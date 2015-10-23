@@ -47,14 +47,23 @@ class WebMessagePortChannelImpl
       blink::WebMessagePortChannel** channel2);
 
   // Extracts port IDs for passing on to the browser process, and queues any
-  // received messages. Takes ownership of the passed array (and deletes it).
+  // received messages.
   static std::vector<TransferredMessagePort> ExtractMessagePortIDs(
-      blink::WebMessagePortChannelArray* channels);
+      scoped_ptr<blink::WebMessagePortChannelArray> channels);
 
   // Extracts port IDs for passing on to the browser process, and queues any
   // received messages.
   static std::vector<TransferredMessagePort> ExtractMessagePortIDs(
       const blink::WebMessagePortChannelArray& channels);
+
+  // Extracts port IDs for passing on to the browser process, but doesn't
+  // send a separate IPC to the browser to initiate queueing messages. Instead
+  // calling code is responsible for initiating the queueing in the browser
+  // process. This is useful when transfering ports over an IPC channel that
+  // does not share ordering guarentees with regular IPC.
+  static std::vector<TransferredMessagePort>
+  ExtractMessagePortIDsWithoutQueueing(
+      scoped_ptr<blink::WebMessagePortChannelArray> channels);
 
   // Creates WebMessagePortChannelImpl instances for port IDs passed in from the
   // browser process.
@@ -77,7 +86,7 @@ class WebMessagePortChannelImpl
   virtual void setClient(blink::WebMessagePortChannelClient* client);
   virtual void destroy();
   virtual void postMessage(const blink::WebString& message,
-                           blink::WebMessagePortChannelArray* channels);
+                           blink::WebMessagePortChannelArray* channels_ptr);
   virtual bool tryGetMessage(blink::WebString* message,
                              blink::WebMessagePortChannelArray& channels);
 
@@ -85,7 +94,7 @@ class WebMessagePortChannelImpl
   void Entangle(scoped_refptr<WebMessagePortChannelImpl> channel);
   void Send(IPC::Message* message);
   void PostMessage(const MessagePortMessage& message,
-                   blink::WebMessagePortChannelArray* channels);
+                   scoped_ptr<blink::WebMessagePortChannelArray> channels);
 
   // IPC::Listener implementation.
   bool OnMessageReceived(const IPC::Message& message) override;

@@ -172,10 +172,12 @@ base::File::Error Service::MountFileSystemInternal(
   //   supports_notify_tag = false
   //   mount_path = /provided/b33f1337-hello_world-5aa5
   //   configurable = true
+  //   watchable = true
   //   source = SOURCE_FILE
   ProvidedFileSystemInfo file_system_info(
       extension_id, options, mount_path,
       provider_info.capabilities.configurable(),
+      provider_info.capabilities.watchable(),
       provider_info.capabilities.source());
 
   ProvidedFileSystemInterface* file_system =
@@ -279,6 +281,7 @@ bool Service::RequestMount(const std::string& extension_id) {
   event_router->DispatchEventToExtension(
       extension_id,
       make_scoped_ptr(new extensions::Event(
+          extensions::events::FILE_SYSTEM_PROVIDER_ON_MOUNT_REQUESTED,
           extensions::api::file_system_provider::OnMountRequested::kEventName,
           scoped_ptr<base::ListValue>(new base::ListValue()))));
 

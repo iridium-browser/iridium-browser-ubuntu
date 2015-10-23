@@ -17,7 +17,16 @@
 
 namespace gpu {
 
+// A mailbox is an unguessable name that references texture image data.
+// This name can be passed across processes permitting one context to share
+// texture image data with another. The mailbox name consists of a random
+// set of bytes, optionally with a checksum (in debug mode) to verify the
+// name is valid.
+// See src/gpu/GLES2/extensions/CHROMIUM/CHROMIUM_texture_mailbox.txt for more
+// details.
 struct GPU_EXPORT Mailbox {
+  using Name = int8_t[GL_MAILBOX_SIZE_CHROMIUM];
+
   Mailbox();
   bool IsZero() const;
   void SetZero();
@@ -31,7 +40,8 @@ struct GPU_EXPORT Mailbox {
   // check, only to catch bugs where clients forgot to call Mailbox::Generate.
   bool Verify() const;
 
-  int8_t name[GL_MAILBOX_SIZE_CHROMIUM];
+  Name name;
+
   bool operator<(const Mailbox& other) const {
     return memcmp(this, &other, sizeof other) < 0;
   }

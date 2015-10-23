@@ -24,7 +24,6 @@
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/google_update_constants.h"
-#include "chrome/installer/util/google_update_experiment_util.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/product.h"
@@ -182,6 +181,7 @@ bool GetChromeChannelInternal(bool system_install,
   return true;
 }
 
+#if defined(GOOGLE_CHROME_BUILD)
 // Populates |update_policy| with the UpdatePolicy enum value corresponding to a
 // DWORD read from the registry and returns true if |value| is within range.
 // If |value| is out of range, returns false without modifying |update_policy|.
@@ -200,6 +200,7 @@ bool GetUpdatePolicyFromDword(
   }
   return false;
 }
+#endif  // defined(GOOGLE_CHROME_BUILD)
 
 // Convenience routine: GoogleUpdateSettings::UpdateDidRunStateForApp()
 // specialized for Chrome Binaries.
@@ -929,6 +930,10 @@ bool GoogleUpdateSettings::SetExperimentLabels(
         system_install ? dist->GetStateMediumKey() : dist->GetStateKey());
     RegKey client_state(
         reg_root, client_state_path.c_str(), KEY_SET_VALUE | KEY_WOW64_32KEY);
+    // It is possible that the registry keys do not yet exist or have not yet
+    // been ACLed by Google Update to be user writable.
+    if (!client_state.Valid())
+      return false;
     if (experiment_labels.empty()) {
       success = client_state.DeleteValue(google_update::kExperimentLabels)
           == ERROR_SUCCESS;

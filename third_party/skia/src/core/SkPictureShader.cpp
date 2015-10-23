@@ -17,6 +17,7 @@
 
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
+#include "GrCaps.h"
 #endif
 
 namespace {
@@ -74,6 +75,8 @@ struct BitmapShaderRec : public SkResourceCache::Rec {
     size_t bytesUsed() const override {
         return sizeof(fKey) + sizeof(SkShader) + fBitmapBytes;
     }
+    const char* getCategory() const override { return "bitmap-shader"; }
+    SkDiscardableMemory* diagnostic_only_getDiscardable() const override { return nullptr; }
 
     static bool Visitor(const SkResourceCache::Rec& baseRec, void* contextShader) {
         const BitmapShaderRec& rec = static_cast<const BitmapShaderRec&>(baseRec);
@@ -82,12 +85,14 @@ struct BitmapShaderRec : public SkResourceCache::Rec {
         result->reset(SkRef(rec.fShader.get()));
 
         SkBitmap tile;
-        rec.fShader.get()->asABitmap(&tile, NULL, NULL);
-        // FIXME: this doesn't protect the pixels from being discarded as soon as we unlock.
-        // Should be handled via a pixel ref generator instead
-        // (https://code.google.com/p/skia/issues/detail?id=3220).
-        SkAutoLockPixels alp(tile, true);
-        return tile.getPixels() != NULL;
+        if (rec.fShader.get()->isABitmap(&tile, NULL, NULL)) {
+            // FIXME: this doesn't protect the pixels from being discarded as soon as we unlock.
+            // Should be handled via a pixel ref generator instead
+            // (https://code.google.com/p/skia/issues/detail?id=3220).
+            SkAutoLockPixels alp(tile, true);
+            return tile.getPixels() != NULL;
+        }
+        return false;
     }
 };
 
@@ -114,15 +119,13 @@ SkPictureShader::~SkPictureShader() {
     fPicture->unref();
 }
 
-SkPictureShader* SkPictureShader::Create(const SkPicture* picture, TileMode tmx, TileMode tmy,
+SkShader* SkPictureShader::Create(const SkPicture* picture, TileMode tmx, TileMode tmy,
                                          const SkMatrix* localMatrix, const SkRect* tile) {
     if (!picture || picture->cullRect().isEmpty() || (tile && tile->isEmpty())) {
-        return NULL;
+        return SkShader::CreateEmptyShader();
     }
     return SkNEW_ARGS(SkPictureShader, (picture, tmx, tmy, localMatrix, tile));
 }
-
-// TODO: rename SK_DISALLOW_CROSSPROCESS_PICTUREIMAGEFILTERS to SK_DISALLOW_CROSSPROCESS_PICTURES
 
 SkFlattenable* SkPictureShader::CreateProc(SkReadBuffer& buffer) {
     SkMatrix lm;
@@ -133,8 +136,8 @@ SkFlattenable* SkPictureShader::CreateProc(SkReadBuffer& buffer) {
     buffer.readRect(&tile);
 
     SkAutoTUnref<SkPicture> picture;
-#ifdef SK_DISALLOW_CROSSPROCESS_PICTUREIMAGEFILTERS
-    if (buffer.isCrossProcess()) {
+
+    if (buffer.isCrossProcess() && SkPicture::PictureIOSecurityPrecautionsEnabled()) {
         if (buffer.isVersionLT(SkReadBuffer::kPictureShaderHasPictureBool_Version)) {
             // Older code blindly serialized pictures.  We don't trust them.
             buffer.validate(false);
@@ -143,9 +146,7 @@ SkFlattenable* SkPictureShader::CreateProc(SkReadBuffer& buffer) {
         // Newer code won't serialize pictures in disallow-cross-process-picture mode.
         // Assert that they didn't serialize anything except a false here.
         buffer.validate(!buffer.readBool());
-    } else
-#endif
-    {
+    } else {
         // Old code always serialized the picture.  New code writes a 'true' first if it did.
         if (buffer.isVersionLT(SkReadBuffer::kPictureShaderHasPictureBool_Version) ||
             buffer.readBool()) {
@@ -161,14 +162,11 @@ void SkPictureShader::flatten(SkWriteBuffer& buffer) const {
     buffer.write32(fTmy);
     buffer.writeRect(fTile);
 
-#ifdef SK_DISALLOW_CROSSPROCESS_PICTUREIMAGEFILTERS
     // The deserialization code won't trust that our serialized picture is safe to deserialize.
     // So write a 'false' telling it that we're not serializing a picture.
-    if (buffer.isCrossProcess()) {
+    if (buffer.isCrossProcess() && SkPicture::PictureIOSecurityPrecautionsEnabled()) {
         buffer.writeBool(false);
-    } else
-#endif
-    {
+    } else {
         buffer.writeBool(true);
         fPicture->flatten(buffer);
     }
@@ -218,7 +216,7 @@ SkShader* SkPictureShader::refBitmapShader(const SkMatrix& matrix, const SkMatri
 
     SkISize tileSize = scaledSize.toRound();
     if (tileSize.isEmpty()) {
-        return NULL;
+        return SkShader::CreateEmptyShader();
     }
 
     // The actual scale, compensating for rounding & clamping.
@@ -237,7 +235,7 @@ SkShader* SkPictureShader::refBitmapShader(const SkMatrix& matrix, const SkMatri
         SkBitmap bm;
         bm.setInfo(SkImageInfo::MakeN32Premul(tileSize));
         if (!cache_try_alloc_pixels(&bm)) {
-            return NULL;
+            return SkShader::CreateEmptyShader();
         }
         bm.eraseColor(SK_ColorTRANSPARENT);
 
@@ -342,20 +340,22 @@ void SkPictureShader::toString(SkString* str) const {
 bool SkPictureShader::asFragmentProcessor(GrContext* context, const SkPaint& paint,
                                           const SkMatrix& viewM, const SkMatrix* localMatrix,
                                           GrColor* paintColor,
+                                          GrProcessorDataManager* procDataManager,
                                           GrFragmentProcessor** fp) const {
     int maxTextureSize = 0;
     if (context) {
-        maxTextureSize = context->getMaxTextureSize();
+        maxTextureSize = context->caps()->maxTextureSize();
     }
     SkAutoTUnref<SkShader> bitmapShader(this->refBitmapShader(viewM, localMatrix, maxTextureSize));
     if (!bitmapShader) {
         return false;
     }
-    return bitmapShader->asFragmentProcessor(context, paint, viewM, NULL, paintColor, fp);
+    return bitmapShader->asFragmentProcessor(context, paint, viewM, NULL, paintColor,
+                                             procDataManager, fp);
 }
 #else
 bool SkPictureShader::asFragmentProcessor(GrContext*, const SkPaint&, const SkMatrix&,
-                                          const SkMatrix*, GrColor*,
+                                          const SkMatrix*, GrColor*, GrProcessorDataManager*,
                                           GrFragmentProcessor**) const {
     SkDEBUGFAIL("Should not call in GPU-less build");
     return false;

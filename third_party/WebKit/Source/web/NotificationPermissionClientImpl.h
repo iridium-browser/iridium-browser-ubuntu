@@ -6,6 +6,7 @@
 #define NotificationPermissionClientImpl_h
 
 #include "modules/notifications/NotificationPermissionClient.h"
+#include "platform/heap/Handle.h"
 
 namespace blink {
 
@@ -14,10 +15,10 @@ class NotificationPermissionClientImpl : public NoBaseWillBeGarbageCollectedFina
 public:
     static PassOwnPtrWillBeRawPtr<NotificationPermissionClientImpl> create();
 
-    virtual ~NotificationPermissionClientImpl();
+    ~NotificationPermissionClientImpl() override;
 
     // NotificationPermissionClient implementation.
-    virtual void requestPermission(ExecutionContext*, NotificationPermissionCallback*) override;
+    ScriptPromise requestPermission(ScriptState*, NotificationPermissionCallback*) override;
 
     // NoBaseWillBeGarbageCollectedFinalized implementation.
     DEFINE_INLINE_VIRTUAL_TRACE() { NotificationPermissionClient::trace(visitor); }

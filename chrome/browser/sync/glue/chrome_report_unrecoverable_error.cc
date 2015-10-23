@@ -6,16 +6,17 @@
 
 #include "base/debug/dump_without_crashing.h"
 #include "base/rand_util.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_version_info.h"
+#include "components/version_info/version_info.h"
 
 namespace browser_sync {
 
 void ChromeReportUnrecoverableError() {
   // Only upload on canary/dev builds to avoid overwhelming crash server.
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  if (channel != chrome::VersionInfo::CHANNEL_CANARY &&
-      channel != chrome::VersionInfo::CHANNEL_DEV) {
+  version_info::Channel channel = chrome::GetChannel();
+  if (channel != version_info::Channel::CANARY &&
+      channel != version_info::Channel::DEV) {
     return;
   }
 

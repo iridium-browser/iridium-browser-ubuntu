@@ -8,15 +8,16 @@
 // specific to the D3D9 renderer.
 
 #include "libANGLE/renderer/d3d/d3d9/renderer9_utils.h"
-#include "libANGLE/renderer/d3d/d3d9/formatutils9.h"
-#include "libANGLE/renderer/d3d/FramebufferD3D.h"
-#include "libANGLE/renderer/Workarounds.h"
-#include "libANGLE/formatutils.h"
-#include "libANGLE/Framebuffer.h"
-#include "libANGLE/renderer/d3d/d3d9/RenderTarget9.h"
 
 #include "common/mathutil.h"
 #include "common/debug.h"
+
+#include "libANGLE/formatutils.h"
+#include "libANGLE/Framebuffer.h"
+#include "libANGLE/renderer/d3d/d3d9/formatutils9.h"
+#include "libANGLE/renderer/d3d/d3d9/RenderTarget9.h"
+#include "libANGLE/renderer/d3d/FramebufferD3D.h"
+#include "libANGLE/renderer/d3d/WorkaroundsD3D.h"
 
 #include "third_party/systeminfo/SystemInfo.h"
 
@@ -208,7 +209,8 @@ D3DTEXTUREFILTERTYPE ConvertMagFilter(GLenum magFilter, float maxAnisotropy)
     return d3dMagFilter;
 }
 
-void ConvertMinFilter(GLenum minFilter, D3DTEXTUREFILTERTYPE *d3dMinFilter, D3DTEXTUREFILTERTYPE *d3dMipFilter, float maxAnisotropy)
+void ConvertMinFilter(GLenum minFilter, D3DTEXTUREFILTERTYPE *d3dMinFilter, D3DTEXTUREFILTERTYPE *d3dMipFilter,
+                      float *d3dLodBias, float maxAnisotropy, size_t baseLevel)
 {
     switch (minFilter)
     {
@@ -240,6 +242,20 @@ void ConvertMinFilter(GLenum minFilter, D3DTEXTUREFILTERTYPE *d3dMinFilter, D3DT
         *d3dMinFilter = D3DTEXF_POINT;
         *d3dMipFilter = D3DTEXF_NONE;
         UNREACHABLE();
+    }
+
+    // Disabling mipmapping will always sample from level 0 of the texture. It is possible to work
+    // around this by modifying D3DSAMP_MAXMIPLEVEL to force a specific mip level to become the
+    // lowest sampled mip level and using a large negative value for D3DSAMP_MIPMAPLODBIAS to
+    // ensure that only the base mip level is sampled.
+    if (baseLevel > 0 && *d3dMipFilter == D3DTEXF_NONE)
+    {
+        *d3dMipFilter = D3DTEXF_POINT;
+        *d3dLodBias = -static_cast<float>(gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS);
+    }
+    else
+    {
+        *d3dLodBias = 0.0f;
     }
 
     if (maxAnisotropy > 1.0f)
@@ -303,7 +319,7 @@ static gl::TextureCaps GenerateTextureFormatCaps(GLenum internalFormat, IDirect3
         }
 
         textureCaps.sampleCounts.insert(1);
-        for (size_t i = D3DMULTISAMPLE_2_SAMPLES; i <= D3DMULTISAMPLE_16_SAMPLES; i++)
+        for (unsigned int i = D3DMULTISAMPLE_2_SAMPLES; i <= D3DMULTISAMPLE_16_SAMPLES; i++)
         {
             D3DMULTISAMPLE_TYPE multisampleType = D3DMULTISAMPLE_TYPE(i);
 
@@ -478,7 +494,6 @@ void GenerateCaps(IDirect3D9 *d3d9, IDirect3DDevice9 *device, D3DDEVTYPE deviceT
     // GL extension support
     extensions->setTextureExtensionSupport(*textureCapsMap);
     extensions->elementIndexUint = deviceCaps.MaxVertexIndex >= (1 << 16);
-    extensions->packedDepthStencil = true;
     extensions->getProgramBinary = true;
     extensions->rgb8rgba8 = true;
     extensions->readFormatBGRA = true;
@@ -489,7 +504,7 @@ void GenerateCaps(IDirect3D9 *d3d9, IDirect3DDevice9 *device, D3DDEVTYPE deviceT
     // textureRG is emulated and not performant.
     extensions->textureRG = false;
 
-    D3DADAPTER_IDENTIFIER9 adapterId = { 0 };
+    D3DADAPTER_IDENTIFIER9 adapterId = {};
     if (SUCCEEDED(d3d9->GetAdapterIdentifier(adapter, 0, &adapterId)))
     {
         // ATI cards on XP have problems with non-power-of-two textures.
@@ -539,7 +554,9 @@ void GenerateCaps(IDirect3D9 *d3d9, IDirect3DDevice9 *device, D3DDEVTYPE deviceT
     extensions->textureUsage = true;
     extensions->translatedShaderSource = true;
     extensions->fboRenderMipmap = false;
+    extensions->discardFramebuffer = false; // It would be valid to set this to true, since glDiscardFramebufferEXT is just a hint
     extensions->colorBufferFloat = false;
+    extensions->debugMarker = true;
 }
 
 }
@@ -574,9 +591,9 @@ void MakeValidSize(bool isImage, D3DFORMAT format, GLsizei *requestWidth, GLsize
     *levelOffset = upsampleCount;
 }
 
-Workarounds GenerateWorkarounds()
+WorkaroundsD3D GenerateWorkarounds()
 {
-    Workarounds workarounds;
+    WorkaroundsD3D workarounds;
     workarounds.mrtPerfWorkaround = true;
     workarounds.setDataFasterThanImageUpload = false;
     workarounds.useInstancedPointSpriteEmulation = false;

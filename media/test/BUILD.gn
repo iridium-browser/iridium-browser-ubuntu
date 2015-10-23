@@ -97,18 +97,16 @@ if (!is_component_build) {
         "//media/audio:test_support",
         "//media/base:test_support",
         "//media/mojo/interfaces",
-        "//media/mojo/services:media",
-        "//media/mojo/services:renderer_proxy",
+        "//media/mojo/services:proxy",
         "//media/mojo/services:renderer_service",
-        "//mojo/application",
-        "//mojo/application:test_support",
+        "//mojo/application/public/cpp:test_support",
         "//testing/gtest",
         "//ui/gfx/geometry",
         "//ui/gfx:test_support",
 
         # TODO(dalecurtis): Required since the gmock header is included in the
-        # header for pipeline_integration_test_base.h.  This should be moved into
-        # the .cc file to avoid the extra dependency here.
+        # header for pipeline_integration_test_base.h.  This should be moved
+        # into the .cc file to avoid the extra dependency here.
         "//testing/gmock",
       ]
     }

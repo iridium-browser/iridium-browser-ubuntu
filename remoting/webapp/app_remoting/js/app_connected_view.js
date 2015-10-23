@@ -28,30 +28,32 @@ var DRIVE_ACCESS_TOKEN_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 
 /**
  * @param {HTMLElement} containerElement
+ * @param {remoting.WindowShape} windowShape
  * @param {remoting.ConnectionInfo} connectionInfo
+ * @param {base.WindowMessageDispatcher} windowMessageDispatcher
  *
  * @constructor
  * @implements {base.Disposable}
  * @implements {remoting.ProtocolExtension}
  */
-remoting.AppConnectedView = function(containerElement, connectionInfo) {
+remoting.AppConnectedView = function(containerElement, windowShape,
+                                     connectionInfo, windowMessageDispatcher) {
   /** @private */
   this.plugin_ = connectionInfo.plugin();
 
   /** @private */
   this.host_ = connectionInfo.host();
 
-  /** @private {remoting.ContextMenuAdapter} */
   var menuAdapter = new remoting.ContextMenuChrome();
 
   // Initialize the context menus.
   if (!remoting.platformIsChromeOS()) {
-    menuAdapter =
-        new remoting.ContextMenuDom(document.getElementById('context-menu'));
+    menuAdapter = new remoting.ContextMenuDom(
+        document.getElementById('context-menu'), windowShape);
   }
 
   this.contextMenu_ = new remoting.ApplicationContextMenu(
-      menuAdapter, this.plugin_, connectionInfo.session());
+      menuAdapter, this.plugin_, connectionInfo.session(), windowShape);
   this.contextMenu_.setHostId(connectionInfo.host().hostId);
 
   /** @private */
@@ -67,7 +69,7 @@ remoting.AppConnectedView = function(containerElement, connectionInfo) {
   var windowShapeHook = new base.EventHook(
       this.plugin_.hostDesktop(),
       remoting.HostDesktop.Events.shapeChanged,
-      remoting.windowShape.setDesktopRects.bind(remoting.windowShape));
+      windowShape.setDesktopRects.bind(windowShape));
 
   var desktopSizeHook = new base.EventHook(
       this.plugin_.hostDesktop(),
@@ -75,8 +77,9 @@ remoting.AppConnectedView = function(containerElement, connectionInfo) {
       this.onDesktopSizeChanged_.bind(this));
 
   /** @private */
-  this.disposables_ = new base.Disposables(
-      baseView, windowShapeHook, desktopSizeHook, this.contextMenu_);
+  this.disposables_ =
+      new base.Disposables(baseView, windowShapeHook, desktopSizeHook,
+                           this.contextMenu_, menuAdapter);
 
   /** @private */
   this.supportsGoogleDrive_ = this.plugin_.hasCapability(
@@ -84,6 +87,13 @@ remoting.AppConnectedView = function(containerElement, connectionInfo) {
 
   this.resizeHostToClientArea_();
   this.plugin_.extensions().register(this);
+
+  /** @private {remoting.CloudPrintDialogContainer} */
+  this.cloudPrintDialogContainer_ = new remoting.CloudPrintDialogContainer(
+      /** @type {!Webview} */ (document.getElementById('cloud-print-webview')),
+      windowShape, windowMessageDispatcher, baseView);
+
+  this.disposables_.add(this.cloudPrintDialogContainer_);
 };
 
 /**
@@ -175,13 +185,13 @@ remoting.AppConnectedView.prototype.startExtension = function(
 };
 
 /**
- * @param {string} type The message type.
+ * @param {string} command The message command.
  * @param {Object} message The parsed extension message data.
  * @override {remoting.ProtocolExtension}
  */
 remoting.AppConnectedView.prototype.onExtensionMessage =
-    function(type, message) {
-  switch (type) {
+    function(command, message) {
+  switch (command) {
     case 'openURL':
       // URL requests from the hosted app are untrusted, so disallow anything
       // other than HTTP or HTTPS.
@@ -221,6 +231,18 @@ remoting.AppConnectedView.prototype.onExtensionMessage =
       var now = new Date().getTime();
       this.contextMenu_.updateConnectionRTT(now - then);
       return true;
+
+    case 'printDocument':
+      var title = base.getStringAttr(message, 'title');
+      var type = base.getStringAttr(message, 'type');
+      var data = base.getStringAttr(message, 'data');
+      if (type == '' || data == '') {
+        console.error('"type" and "data" cannot be empty.');
+        return true;
+      }
+
+      this.cloudPrintDialogContainer_.printDocument(title, type, data);
+      return true;
   }
 
   return false;
@@ -239,7 +261,8 @@ remoting.AppConnectedView.prototype.sendGoogleDriveAccessToken_ =
   ];
   remoting.identity.getNewToken(googleDriveScopes).then(
     function(/** string */ token){
-      base.debug.assert(token !== previousToken_);
+      console.assert(token !== previousToken_,
+                     'getNewToken() returned the same token.');
       previousToken_ = token;
       sendExtensionMessage('accessToken', token);
   }).catch(remoting.Error.handler(function(/** remoting.Error */ error) {

@@ -96,6 +96,7 @@ struct NaClChromeMainArgs *NaClChromeMainArgsCreate(void) {
       getenv("NACL_DANGEROUS_SKIP_QUALIFICATION_TEST") != NULL;
   args->initial_nexe_max_code_bytes = 0;  /* No limit */
 #if NACL_LINUX || NACL_OSX
+  args->debug_stub_pipe_fd = NACL_INVALID_HANDLE;
   args->debug_stub_server_bound_socket_fd = NACL_INVALID_SOCKET;
 #endif
 #if NACL_WINDOWS
@@ -349,8 +350,13 @@ static int LoadApp(struct NaClApp *nap, struct NaClChromeMainArgs *args) {
   }
 
   if (args->enable_debug_stub) {
+    if (args->debug_stub_pipe_fd != NACL_INVALID_HANDLE) {
+      NaClDebugStubSetPipe(args->debug_stub_pipe_fd);
+    }
+
 #if NACL_LINUX || NACL_OSX
-    if (args->debug_stub_server_bound_socket_fd != NACL_INVALID_SOCKET) {
+    if (args->debug_stub_pipe_fd == NACL_INVALID_HANDLE &&
+        args->debug_stub_server_bound_socket_fd != NACL_INVALID_SOCKET) {
       NaClDebugSetBoundSocket(args->debug_stub_server_bound_socket_fd);
     }
 #endif
@@ -358,8 +364,10 @@ static int LoadApp(struct NaClApp *nap, struct NaClChromeMainArgs *args) {
       goto done;
     }
 #if NACL_WINDOWS
-    if (NULL != args->debug_stub_server_port_selected_handler_func) {
-      args->debug_stub_server_port_selected_handler_func(nap->debug_stub_port);
+    if (args->debug_stub_pipe_fd == NACL_INVALID_HANDLE &&
+        NULL != args->debug_stub_server_port_selected_handler_func) {
+      args->debug_stub_server_port_selected_handler_func(
+          NaClDebugGetBoundPort());
     }
 #endif
   }
@@ -424,7 +432,7 @@ static int StartApp(struct NaClApp *nap, struct NaClChromeMainArgs *args) {
 
   NACL_FI_FATAL("BeforeEnvCleanserCtor");
 
-  NaClEnvCleanserCtor(&env_cleanser, 1);
+  NaClEnvCleanserCtor(&env_cleanser, 1, 0);
   if (!NaClEnvCleanserInit(&env_cleanser, NaClGetEnviron(), NULL)) {
     NaClLog(LOG_FATAL, "Failed to initialise env cleanser\n");
   }

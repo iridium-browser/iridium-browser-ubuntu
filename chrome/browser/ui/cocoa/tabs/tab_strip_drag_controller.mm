@@ -10,11 +10,11 @@
 #import "base/mac/sdk_forward_declarations.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller_target.h"
+#import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
-#import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
-#include "ui/gfx/mac/scoped_ns_disable_screen_updates.h"
+#include "ui/gfx/mac/scoped_cocoa_disable_screen_updates.h"
 
 const CGFloat kTearDistance = 36.0;
 const NSTimeInterval kTearDuration = 0.333;
@@ -29,6 +29,8 @@ static BOOL PointIsInsideView(NSPoint screenPoint, NSView* view) {
 }
 
 @interface TabStripDragController (Private)
+- (NSArray*)selectedTabViews;
+- (BOOL)canDragSelectedTabs;
 - (void)resetDragControllers;
 - (NSArray*)dropTargetsForController:(TabWindowController*)dragController;
 - (void)setWindowBackgroundVisibility:(BOOL)shouldBeVisible;
@@ -54,18 +56,6 @@ static BOOL PointIsInsideView(NSPoint screenPoint, NSView* view) {
   [super dealloc];
 }
 
-- (BOOL)tabCanBeDragged:(TabController*)tab {
-  if ([[tab tabView] isClosing])
-    return NO;
-  NSWindowController* controller = [sourceWindow_ windowController];
-  if ([controller isKindOfClass:[TabWindowController class]]) {
-    TabWindowController* realController =
-        static_cast<TabWindowController*>(controller);
-    return [realController isTabDraggable:[tab tabView]];
-  }
-  return YES;
-}
-
 - (void)maybeStartDrag:(NSEvent*)theEvent forTab:(TabController*)tab {
   [self resetDragControllers];
 
@@ -84,16 +74,8 @@ static BOOL PointIsInsideView(NSPoint screenPoint, NSView* view) {
   draggingWithinTabStrip_ = YES;
   chromeIsVisible_ = NO;
 
-  // If there's more than one potential window to be a drop target, we want to
-  // treat a drag of a tab just like dragging around a tab that's already
-  // detached. Note that unit tests might have |-numberOfTabs| reporting zero
-  // since the model won't be fully hooked up. We need to be prepared for that
-  // and not send them into the "magnetic" codepath.
-  NSArray* targets = [self dropTargetsForController:sourceController_];
-  moveWindowOnDrag_ =
-      ([sourceController_ numberOfTabs] < 2 && ![targets count]) ||
-      ![self tabCanBeDragged:tab] ||
-      ![sourceController_ tabDraggingAllowed];
+  moveWindowOnDrag_ = ![self canDragSelectedTabs] ||
+                      ![sourceController_ tabDraggingAllowed];
   // If we are dragging a tab, a window with a single tab should immediately
   // snap off and not drag within the tab strip.
   if (!moveWindowOnDrag_)
@@ -120,7 +102,7 @@ static BOOL PointIsInsideView(NSPoint screenPoint, NSView* view) {
 
     // Ensure that any window changes that happen while handling this event
     // appear atomically.
-    gfx::ScopedNSDisableScreenUpdates disabler;
+    gfx::ScopedCocoaDisableScreenUpdates disabler;
 
     NSEventType type = [theEvent type];
     if (type == NSKeyUp) {
@@ -245,8 +227,7 @@ static BOOL PointIsInsideView(NSPoint screenPoint, NSView* view) {
     // go away (it's been autoreleased) so we need to ensure we don't reference
     // it any more. In that case the new controller becomes our source
     // controller.
-    NSArray* tabs = [draggedTab_ selected] ? [tabStrip_ selectedViews]
-                                           : @[ [draggedTab_ tabView] ];
+    NSArray* tabs = [self selectedTabViews];
     draggedController_ =
         [sourceController_ detachTabsToNewWindow:tabs
                                       draggedTab:[draggedTab_ tabView]];
@@ -445,6 +426,40 @@ static BOOL PointIsInsideView(NSPoint screenPoint, NSView* view) {
 }
 
 // Private /////////////////////////////////////////////////////////////////////
+
+- (NSArray*)selectedTabViews {
+  return [draggedTab_ selected] ? [tabStrip_ selectedViews]
+                                : @[ [draggedTab_ tabView] ];
+}
+
+- (BOOL)canDragSelectedTabs {
+  NSArray* tabs = [self selectedTabViews];
+
+  // If there's more than one potential window to be a drop target, we want to
+  // treat a drag of a tab just like dragging around a tab that's already
+  // detached. Note that unit tests might have |-numberOfTabs| reporting zero
+  // since the model won't be fully hooked up. We need to be prepared for that
+  // and not send them into the "magnetic" codepath.
+  NSArray* targets = [self dropTargetsForController:sourceController_];
+  if (![targets count] && [sourceController_ numberOfTabs] - [tabs count] == 0)
+    return NO;  // I.e. ignore dragging *all* tabs in the last Browser window.
+
+  for (TabView* tabView in tabs) {
+    if ([tabView isClosing])
+      return NO;
+  }
+
+  NSWindowController* controller = [sourceWindow_ windowController];
+  if ([controller isKindOfClass:[TabWindowController class]]) {
+    TabWindowController* realController =
+        static_cast<TabWindowController*>(controller);
+    for (TabView* tabView in tabs) {
+      if (![realController isTabDraggable:tabView])
+        return NO;
+    }
+  }
+  return YES;
+}
 
 // Call to clear out transient weak references we hold during drags.
 - (void)resetDragControllers {

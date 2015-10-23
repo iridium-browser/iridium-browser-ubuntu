@@ -34,6 +34,7 @@
 #include "core/events/EventTarget.h"
 #include "platform/AsyncMethodRunner.h"
 #include "platform/RefCountedSupplement.h"
+#include "wtf/Allocator.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/Vector.h"
@@ -63,12 +64,12 @@ class FontFaceSet final : public EventTargetWithInlineData, public HeapSupplemen
     typedef HeapSupplement<Document> SupplementType;
 #else
 class FontFaceSet final : public EventTargetWithInlineData, public RefCountedSupplement<Document, FontFaceSet>, public ActiveDOMObject {
-    DEFINE_EVENT_TARGET_REFCOUNTING(RefCounted<FontFaceSet>);
+    REFCOUNTED_EVENT_TARGET(FontFaceSet);
     typedef RefCountedSupplement<Document, FontFaceSet> SupplementType;
 #endif
     DEFINE_WRAPPERTYPEINFO();
 public:
-    virtual ~FontFaceSet();
+    ~FontFaceSet() override;
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(loading);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(loadingdone);
@@ -88,8 +89,8 @@ public:
     unsigned long size() const;
     AtomicString status() const;
 
-    virtual ExecutionContext* executionContext() const override;
-    virtual const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override;
+    const AtomicString& interfaceName() const override;
 
     Document* document() const;
 
@@ -99,9 +100,9 @@ public:
     void loadError(FontFace*);
 
     // ActiveDOMObject
-    virtual void suspend() override;
-    virtual void resume() override;
-    virtual void stop() override;
+    void suspend() override;
+    void resume() override;
+    void stop() override;
 
     static PassRefPtrWillBeRawPtr<FontFaceSet> from(Document&);
     static void didLayout(Document&);
@@ -117,6 +118,7 @@ private:
     }
 
     class FontLoadHistogram {
+        DISALLOW_ALLOCATION();
     public:
         enum Status { NoWebFonts, HadBlankText, DidNotHaveBlankText, Reported };
         FontLoadHistogram() : m_status(NoWebFonts), m_count(0), m_recorded(false) { }
@@ -132,8 +134,6 @@ private:
 
     FontFaceSet(Document&);
 
-    bool hasLoadedFonts() const { return !m_loadedFonts.isEmpty() || !m_failedFonts.isEmpty(); }
-
     bool inActiveDocumentContext() const;
     void forEachInternal(FontFaceSetForEachCallback*, const ScriptValue* thisArg) const;
     void addToLoadingFonts(PassRefPtrWillBeRawPtr<FontFace>);
@@ -148,7 +148,8 @@ private:
 
     WillBeHeapHashSet<RefPtrWillBeMember<FontFace>> m_loadingFonts;
     bool m_shouldFireLoadingEvent;
-    WillBeHeapVector<OwnPtrWillBeMember<FontsReadyPromiseResolver>> m_readyResolvers;
+    bool m_isLoading;
+    PersistentHeapVectorWillBeHeapVector<Member<FontsReadyPromiseResolver>> m_readyResolvers;
     FontFaceArray m_loadedFonts;
     FontFaceArray m_failedFonts;
     WillBeHeapListHashSet<RefPtrWillBeMember<FontFace>> m_nonCSSConnectedFaces;

@@ -11,6 +11,7 @@
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
+#include "chrome/browser/tracing/background_tracing_field_trial.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/variations/variations_util.h"
 #include "components/variations/variations_associated_data.h"
@@ -40,12 +41,33 @@ void SetupLightSpeedTrials() {
   }
 }
 
+void SetupStunProbeTrial() {
+#if defined(ENABLE_WEBRTC)
+  std::map<std::string, std::string> params;
+  if (!variations::GetVariationParams("StunProbeTrial", &params))
+    return;
+
+  // The parameter, used by StartStunFieldTrial, should have the following
+  // format: "request_per_ip/interval/sharedsocket/server1:port/server2:port/
+  // server3:port/"
+  std::string cmd_param = params["request_per_ip"] + "/" + params["interval"] +
+                          "/" + params["sharedsocket"] + "/" +
+                          params["server1"] + "/" + params["server2"] + "/" +
+                          params["server3"] + "/";
+
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kWebRtcStunProbeTrialParameter, cmd_param);
+#endif
+}
+
 }  // namespace
 
 void SetupDesktopFieldTrials(const base::CommandLine& parsed_command_line) {
   prerender::ConfigurePrerender(parsed_command_line);
   AutoLaunchChromeFieldTrial();
   SetupLightSpeedTrials();
+  tracing::SetupBackgroundTracingFieldTrial();
+  SetupStunProbeTrial();
 }
 
 }  // namespace chrome

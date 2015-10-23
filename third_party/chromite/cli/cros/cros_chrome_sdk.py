@@ -23,6 +23,7 @@ from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import path_util
 from chromite.lib import stats
+from chromite.cbuildbot import config_lib
 from chromite.cbuildbot import constants
 
 
@@ -71,7 +72,8 @@ class SDKFetcher(object):
   TARGET_TOOLCHAIN_KEY = 'target_toolchain'
 
   def __init__(self, cache_dir, board, clear_cache=False, chrome_src=None,
-               sdk_path=None, toolchain_path=None, silent=False):
+               sdk_path=None, toolchain_path=None, silent=False,
+               use_external_config=None):
     """Initialize the class.
 
     Args:
@@ -85,9 +87,11 @@ class SDKFetcher(object):
       toolchain_path: The path (whether a local directory or a gs:// path) to
         fetch toolchain components from.
       silent: If set, the fetcher prints less output.
+      use_external_config: When identifying the configuration for a board,
+        force usage of the external configuration if both external and internal
+        are available.
     """
-    # Delay this import because it is super slow.  http://crbug.com/404575
-    from chromite.cbuildbot import cbuildbot_config
+    site_config = config_lib.LoadConfigFromFile()
 
     self.cache_base = os.path.join(cache_dir, COMMAND_NAME)
     if clear_cache:
@@ -98,7 +102,8 @@ class SDKFetcher(object):
     self.misc_cache = cache.DiskCache(
         os.path.join(self.cache_base, self.MISC_CACHE))
     self.board = board
-    self.config = cbuildbot_config.FindCanonicalConfigForBoard(board)
+    self.config = site_config.FindCanonicalConfigForBoard(
+        board, allow_internal=not use_external_config)
     self.gs_base = '%s/%s' % (constants.DEFAULT_ARCHIVE_BUCKET,
                               self.config['name'])
     self.clear_cache = clear_cache
@@ -458,31 +463,43 @@ class ChromeSDKCommand(command.CliCommand):
     parser.add_argument(
         '--board', required=True, help='The board SDK to use.')
     parser.add_argument(
-        '--bashrc', type=osutils.ExpandPath,
+        '--bashrc', type='path',
         default=constants.CHROME_SDK_BASHRC,
         help='A bashrc file used to set up the SDK shell environment. '
              'Defaults to %s.' % constants.CHROME_SDK_BASHRC)
     parser.add_argument(
-        '--chroot', type=osutils.ExpandPath,
+        '--chroot', type='path',
         help='Path to a ChromeOS chroot to use.  If set, '
              '<chroot>/build/<board> will be used as the sysroot that Chrome '
              'is built against.  The version shown in the SDK shell prompt '
              'will then have an asterisk prepended to it.')
     parser.add_argument(
-        '--chrome-src', type=osutils.ExpandPath,
+        '--chrome-src', type='path',
         help='Specifies the location of a Chrome src/ directory.  Required if '
              'running with --clang if not running from a Chrome checkout.')
     parser.add_argument(
         '--clang', action='store_true', default=False,
         help='Sets up the environment for building with clang.')
     parser.add_argument(
-        '--cwd', type=osutils.ExpandPath,
+        '--cwd', type='path',
         help='Specifies a directory to switch to after setting up the SDK '
              'shell.  Defaults to the current directory.')
     parser.add_argument(
         '--internal', action='store_true', default=False,
         help='Sets up SDK for building official (internal) Chrome '
              'Chrome, rather than Chromium.')
+    parser.add_argument(
+        '--component', action='store_true', default=False,
+        help='Sets up SDK for building a componentized build of Chrome '
+             '(component=shared_library in GYP).')
+    parser.add_argument(
+        '--fastbuild', action='store_true', default=False,
+        help='Turn off debugging information for a faster build '
+             '(fastbuild=1 in GYP).')
+    parser.add_argument(
+        '--use-external-config', action='store_true', default=False,
+        help='Use the external configuration for the specified board, even if '
+             'an internal configuration is avalable.')
     parser.add_argument(
         '--sdk-path', type='local_or_gs_path',
         help='Provides a path, whether a local directory or a gs:// path, to '
@@ -494,6 +511,9 @@ class ChromeSDKCommand(command.CliCommand):
     parser.add_argument(
         '--nogoma', action='store_false', default=True, dest='goma',
         help="Disables Goma in the shell by removing it from the PATH.")
+    parser.add_argument(
+        '--gomadir', type='path',
+        help="Use the goma installation at the specified PATH.")
     parser.add_argument(
         '--version', default=None, type=cls.ValidateVersion,
         help="Specify version of SDK to use, in the format '3912.0.0'.  "
@@ -596,9 +616,10 @@ class ChromeSDKCommand(command.CliCommand):
     env['CC_host'] = os.path.join(clang_path, 'clang')
     env['CXX_host'] = os.path.join(clang_path, 'clang++')
 
-    # Enable debug fission.
-    env['CFLAGS'] = env.get('CFLAGS', '') +  ' -gsplit-dwarf'
-    env['CXXFLAGS'] = env.get('CXXFLAGS', '') + ' -gsplit-dwarf'
+    if not options.fastbuild:
+      # Enable debug fission.
+      env['CFLAGS'] = env.get('CFLAGS', '') +  ' -gsplit-dwarf'
+      env['CXXFLAGS'] = env.get('CXXFLAGS', '') + ' -gsplit-dwarf'
 
   def _SetupEnvironment(self, board, sdk_ctx, options, goma_dir=None,
                         goma_port=None):
@@ -643,6 +664,7 @@ class ChromeSDKCommand(command.CliCommand):
     gyp_dict = chrome_util.ProcessGypDefines(env['GYP_DEFINES'])
     gyp_dict['sysroot'] = sysroot
     gyp_dict.pop('order_text_section', None)
+    gyp_dict.pop('pkg-config', None)
     gyp_dict['host_clang'] = 1
     if options.clang:
       gyp_dict['clang'] = 1
@@ -653,6 +675,11 @@ class ChromeSDKCommand(command.CliCommand):
       gyp_dict.pop('branding', None)
       gyp_dict.pop('buildtype', None)
       gyp_dict.pop('internal_gles2_conform_tests', None)
+    if options.component:
+      gyp_dict['component'] = 'shared_library'
+    if options.fastbuild:
+      gyp_dict['fastbuild'] = 1
+      gyp_dict.pop('release_extra_cflags', None)
 
     # Enable goma if requested.
     if goma_dir:
@@ -766,27 +793,29 @@ class ChromeSDKCommand(command.CliCommand):
     common_path = os.path.join(self.options.cache_dir, constants.COMMON_CACHE)
     common_cache = cache.DiskCache(common_path)
 
-    ref = common_cache.Lookup(('goma', '2'))
-    if not ref.Exists():
-      Log('Installing Goma.', silent=self.silent)
-      with osutils.TempDir() as tempdir:
-        goma_dir = os.path.join(tempdir, 'goma')
-        os.mkdir(goma_dir)
-        result = cros_build_lib.DebugRunCommand(
-            self.FETCH_GOMA_CMD, cwd=goma_dir, error_code_ok=True)
-        if result.returncode:
-          raise GomaError('Failed to fetch Goma')
-       # Update to latest version of goma. We choose the outside-chroot version
-       # ('goobuntu') over the chroot version ('chromeos') by supplying
-       # input='1' to the following prompt:
-       #
-       # What is your platform?
-       #  1. Goobuntu  2. Precise (32bit)  3. Lucid (32bit)  4. Debian
-       #  5. Chrome OS  6. MacOS ? -->
-        cros_build_lib.DebugRunCommand(
-            ['python2', 'goma_ctl.py', 'update'], cwd=goma_dir, input='1\n')
-        ref.SetDefault(goma_dir)
-    goma_dir = ref.path
+    goma_dir = self.options.gomadir
+    if not goma_dir:
+      ref = common_cache.Lookup(('goma', '2'))
+      if not ref.Exists():
+        Log('Installing Goma.', silent=self.silent)
+        with osutils.TempDir() as tempdir:
+          goma_dir = os.path.join(tempdir, 'goma')
+          os.mkdir(goma_dir)
+          result = cros_build_lib.DebugRunCommand(
+              self.FETCH_GOMA_CMD, cwd=goma_dir, error_code_ok=True)
+          if result.returncode:
+            raise GomaError('Failed to fetch Goma')
+         # Update to latest version of goma. We choose the outside-chroot
+         # version ('goobuntu') over the chroot version ('chromeos') by
+         # supplying input='1' to the following prompt:
+         #
+         # What is your platform?
+         #  1. Goobuntu  2. Precise (32bit)  3. Lucid (32bit)  4. Debian
+         #  5. Chrome OS  6. MacOS ? -->
+          cros_build_lib.DebugRunCommand(
+              ['python2', 'goma_ctl.py', 'update'], cwd=goma_dir, input='1\n')
+          ref.SetDefault(goma_dir)
+      goma_dir = ref.path
 
     Log('Starting Goma.', silent=self.silent)
     cros_build_lib.DebugRunCommand(
@@ -823,7 +852,8 @@ class ChromeSDKCommand(command.CliCommand):
                           chrome_src=self.options.chrome_src,
                           sdk_path=self.options.sdk_path,
                           toolchain_path=self.options.toolchain_path,
-                          silent=self.silent)
+                          silent=self.silent,
+                          use_external_config=self.options.use_external_config)
 
     prepare_version = self.options.version
     if not prepare_version and not self.options.sdk_path:

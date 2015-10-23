@@ -7,12 +7,14 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "third_party/WebKit/public/platform/WebURLLoader.h"
 
 namespace blink {
 class WebData;
 struct WebURLError;
 class WebURLLoaderClient;
+class WebURLLoaderTestDelegate;
 class WebURLRequest;
 class WebURLResponse;
 }
@@ -31,7 +33,8 @@ class WebURLLoaderMock : public blink::WebURLLoader {
   virtual ~WebURLLoaderMock();
 
   // Simulates the asynchronous request being served.
-  void ServeAsynchronousRequest(const blink::WebURLResponse& response,
+  void ServeAsynchronousRequest(blink::WebURLLoaderTestDelegate* delegate,
+                                const blink::WebURLResponse& response,
                                 const blink::WebData& data,
                                 const blink::WebURLError& error);
 
@@ -57,7 +60,8 @@ class WebURLLoaderMock : public blink::WebURLLoader {
   scoped_ptr<blink::WebURLLoader> default_loader_;
   bool using_default_loader_;
   bool is_deferred_;
-  bool* this_deleted_;
+
+  base::WeakPtrFactory<WebURLLoaderMock> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebURLLoaderMock);
 };

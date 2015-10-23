@@ -26,6 +26,8 @@ namespace syncer {
 class SyncableService;
 }
 
+class PasswordStoreProxyMac;
+
 namespace password_manager {
 
 class AffiliatedMatchHelper;
@@ -89,14 +91,24 @@ class PasswordStore : protected PasswordStoreSync,
   virtual void AddLogin(const autofill::PasswordForm& form);
 
   // Updates the matching PasswordForm in the secure password store (async).
+  // If any of the primary key fields (signon_realm, origin, username_element,
+  // username_value, password_element) are updated, then the second version of
+  // the method must be used that takes |old_primary_key|, i.e., the old values
+  // for the primary key fields (the rest of the fields are ignored).
   virtual void UpdateLogin(const autofill::PasswordForm& form);
+  virtual void UpdateLoginWithPrimaryKey(
+      const autofill::PasswordForm& new_form,
+      const autofill::PasswordForm& old_primary_key);
 
   // Removes the matching PasswordForm from the secure password store (async).
   virtual void RemoveLogin(const autofill::PasswordForm& form);
 
-  // Removes all logins created in the given date range.
+  // Removes all logins created in the given date range. If |completion| is not
+  // null, it will be posted to the |main_thread_runner_| after deletions have
+  // be completed and notification have been sent out.
   virtual void RemoveLoginsCreatedBetween(base::Time delete_begin,
-                                          base::Time delete_end);
+                                          base::Time delete_end,
+                                          const base::Closure& completion);
 
   // Removes all logins synced in the given date range.
   virtual void RemoveLoginsSyncedBetween(base::Time delete_begin,
@@ -113,6 +125,9 @@ class PasswordStore : protected PasswordStoreSync,
   // platforms that support prompting the user for access (such as Mac OS).
   // NOTE: This means that this method can return different results depending
   // on the value of |prompt_policy|.
+  // TODO(engedy): Currently, this will not return federated logins saved from
+  // Android applications that are affiliated with the realm of |form|. Need to
+  // decide if this is the desired behavior. See: https://crbug.com/539844.
   virtual void GetLogins(const autofill::PasswordForm& form,
                          AuthorizationPromptPolicy prompt_policy,
                          PasswordStoreConsumer* consumer);
@@ -187,7 +202,7 @@ class PasswordStore : protected PasswordStoreSync,
     // See GetLogins(). Logins older than this will be removed from the reply.
     base::Time ignore_logins_cutoff_;
 
-    scoped_refptr<base::MessageLoopProxy> origin_loop_;
+    scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner_;
     base::WeakPtr<PasswordStoreConsumer> consumer_weak_;
 
     DISALLOW_COPY_AND_ASSIGN(GetLoginsRequest);
@@ -245,13 +260,6 @@ class PasswordStore : protected PasswordStoreSync,
       const autofill::PasswordForm& form,
       AuthorizationPromptPolicy prompt_policy) = 0;
 
-  // Finds all non-blacklist PasswordForms, and notifies the consumer.
-  virtual void GetAutofillableLoginsImpl(
-      scoped_ptr<GetLoginsRequest> request) = 0;
-
-  // Finds all blacklist PasswordForms, and notifies the consumer.
-  virtual void GetBlacklistLoginsImpl(scoped_ptr<GetLoginsRequest> request) = 0;
-
   // Synchronous implementation for manipulating with statistics.
   virtual void AddSiteStatsImpl(const InteractionsStats& stats) = 0;
   virtual void RemoveSiteStatsImpl(const GURL& origin_domain) = 0;
@@ -290,6 +298,8 @@ class PasswordStore : protected PasswordStoreSync,
   FRIEND_TEST_ALL_PREFIXES(PasswordStoreTest, GetLoginImpl);
   FRIEND_TEST_ALL_PREFIXES(PasswordStoreTest,
                            UpdatePasswordsStoredForAffiliatedWebsites);
+  // TODO(vasilii): remove this together with PasswordStoreProxyMac.
+  friend class ::PasswordStoreProxyMac;
 
   // Schedule the given |func| to be run in the PasswordStore's own thread with
   // responses delivered to |consumer| on the current thread.
@@ -307,10 +317,20 @@ class PasswordStore : protected PasswordStoreSync,
   void AddLoginInternal(const autofill::PasswordForm& form);
   void UpdateLoginInternal(const autofill::PasswordForm& form);
   void RemoveLoginInternal(const autofill::PasswordForm& form);
+  void UpdateLoginWithPrimaryKeyInternal(
+      const autofill::PasswordForm& new_form,
+      const autofill::PasswordForm& old_primary_key);
   void RemoveLoginsCreatedBetweenInternal(base::Time delete_begin,
-                                          base::Time delete_end);
+                                          base::Time delete_end,
+                                          const base::Closure& completion);
   void RemoveLoginsSyncedBetweenInternal(base::Time delete_begin,
                                          base::Time delete_end);
+
+  // Finds all non-blacklist PasswordForms, and notifies the consumer.
+  void GetAutofillableLoginsImpl(scoped_ptr<GetLoginsRequest> request);
+
+  // Finds all blacklist PasswordForms, and notifies the consumer.
+  void GetBlacklistLoginsImpl(scoped_ptr<GetLoginsRequest> request);
 
   // Notifies |request| about the stats for |origin_domain|.
   void NotifySiteStats(const GURL& origin_domain,
@@ -376,7 +396,7 @@ class PasswordStore : protected PasswordStoreSync,
   void DestroySyncableService();
 
   // The observers.
-  scoped_refptr<ObserverListThreadSafe<Observer>> observers_;
+  scoped_refptr<base::ObserverListThreadSafe<Observer>> observers_;
 
   scoped_ptr<PasswordSyncableService> syncable_service_;
   scoped_ptr<AffiliatedMatchHelper> affiliated_match_helper_;

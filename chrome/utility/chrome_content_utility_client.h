@@ -58,11 +58,6 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
                        const base::FileDescriptor& dest_fd);
 #endif  // defined(OS_CHROMEOS)
 
-#if defined(OS_ANDROID) && defined(USE_SECCOMP_BPF)
-  void OnDetectSeccompSupport();
-#endif
-
-  void OnParseJSON(const std::string& json);
   void OnPatchFileBsdiff(const base::FilePath& input_file,
                          const base::FilePath& patch_file,
                          const base::FilePath& output_file);
@@ -74,6 +69,10 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
   void OnAnalyzeZipFileForDownloadProtection(
       const IPC::PlatformFileForTransit& zip_file,
       const IPC::PlatformFileForTransit& temp_file);
+#if defined(OS_MACOSX)
+  void OnAnalyzeDmgFileForDownloadProtection(
+      const IPC::PlatformFileForTransit& dmg_file);
+#endif
 #endif
 #if defined(ENABLE_EXTENSIONS)
   void OnParseMediaMetadata(const std::string& mime_type,

@@ -8,10 +8,12 @@
 
 #include "base/bind.h"
 #include "base/json/json_reader.h"
+#include "base/location.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop/message_loop.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/local_discovery/privet_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -303,10 +305,7 @@ void PrivetURLFetcher::OnURLFetchCompleteParseData(
   }
 
   base::JSONReader json_reader(base::JSON_ALLOW_TRAILING_COMMAS);
-  scoped_ptr<base::Value> value;
-
-  value.reset(json_reader.ReadToValue(response_str));
-
+  scoped_ptr<base::Value> value = json_reader.ReadToValue(response_str);
   if (!value) {
     delegate_->OnError(this, JSON_PARSE_ERROR);
     return;
@@ -352,9 +351,8 @@ void PrivetURLFetcher::ScheduleRetry(int timeout_seconds) {
   timeout_seconds_randomized =
       std::max(timeout_seconds_randomized, kPrivetMinimumTimeout);
 
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&PrivetURLFetcher::Try, weak_factory_.GetWeakPtr()),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&PrivetURLFetcher::Try, weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(timeout_seconds_randomized));
 }
 

@@ -10,6 +10,9 @@ namespace content {
 
 ServiceRegistryImpl::ServiceRegistryImpl()
     : binding_(this), weak_factory_(this) {
+  binding_.set_connection_error_handler(
+      base::Bind(&ServiceRegistryImpl::OnConnectionError,
+                 base::Unretained(this)));
 }
 
 ServiceRegistryImpl::~ServiceRegistryImpl() {
@@ -54,8 +57,12 @@ void ServiceRegistryImpl::ConnectToRemoteService(
         std::make_pair(service_name.as_string(), handle.release()));
     return;
   }
-  remote_provider_->ConnectToService(mojo::String::From(service_name),
-                                     handle.Pass());
+  remote_provider_->ConnectToService(
+      mojo::String::From(service_name.as_string()), handle.Pass());
+}
+
+bool ServiceRegistryImpl::IsBound() const {
+  return binding_.is_bound();
 }
 
 base::WeakPtr<ServiceRegistry> ServiceRegistryImpl::GetWeakPtr() {
@@ -72,6 +79,10 @@ void ServiceRegistryImpl::ConnectToService(
     return;
 
   it->second.Run(client_handle.Pass());
+}
+
+void ServiceRegistryImpl::OnConnectionError() {
+  binding_.Close();
 }
 
 }  // namespace content

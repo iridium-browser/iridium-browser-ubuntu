@@ -10,6 +10,7 @@
 #include "SkBase64.h"
 #include "SkBitmap.h"
 #include "SkChecksum.h"
+#include "SkClipStack.h"
 #include "SkData.h"
 #include "SkDraw.h"
 #include "SkImageEncoder.h"
@@ -41,7 +42,7 @@ static const char* cap_map[]  = {
     "round", // kRound_Cap
     "square" // kSquare_Cap
 };
-SK_COMPILE_ASSERT(SK_ARRAY_COUNT(cap_map) == SkPaint::kCapCount, missing_cap_map_entry);
+static_assert(SK_ARRAY_COUNT(cap_map) == SkPaint::kCapCount, "missing_cap_map_entry");
 
 static const char* svg_cap(SkPaint::Cap cap) {
     SkASSERT(cap < SK_ARRAY_COUNT(cap_map));
@@ -54,7 +55,7 @@ static const char* join_map[] = {
     "round", // kRound_Join
     "bevel"  // kBevel_Join
 };
-SK_COMPILE_ASSERT(SK_ARRAY_COUNT(join_map) == SkPaint::kJoinCount, missing_join_map_entry);
+static_assert(SK_ARRAY_COUNT(join_map) == SkPaint::kJoinCount, "missing_join_map_entry");
 
 static const char* svg_join(SkPaint::Join join) {
     SkASSERT(join < SK_ARRAY_COUNT(join_map));
@@ -67,8 +68,8 @@ static const char* text_align_map[] = {
     "middle", // kCenter_Align
     "end"     // kRight_Align
 };
-SK_COMPILE_ASSERT(SK_ARRAY_COUNT(text_align_map) == SkPaint::kAlignCount,
-                  missing_text_align_map_entry);
+static_assert(SK_ARRAY_COUNT(text_align_map) == SkPaint::kAlignCount,
+              "missing_text_align_map_entry");
 static const char* svg_text_align(SkPaint::Align align) {
     SkASSERT(align < SK_ARRAY_COUNT(text_align_map));
     return text_align_map[align];
@@ -569,7 +570,8 @@ SkBaseDevice* SkSVGDevice::Create(const SkISize& size, SkXMLWriter* writer) {
 }
 
 SkSVGDevice::SkSVGDevice(const SkISize& size, SkXMLWriter* writer)
-    : fWriter(writer)
+    : INHERITED(SkSurfaceProps(0, kUnknown_SkPixelGeometry))
+    , fWriter(writer)
     , fResourceBucket(SkNEW(ResourceBucket)) {
     SkASSERT(writer);
 
@@ -715,7 +717,7 @@ void SkSVGDevice::drawSprite(const SkDraw& draw, const SkBitmap& bitmap,
 
 void SkSVGDevice::drawBitmapRect(const SkDraw& draw, const SkBitmap& bm, const SkRect* srcOrNull,
                                  const SkRect& dst, const SkPaint& paint,
-                                 SkCanvas::DrawBitmapRectFlags) {
+                                 SkCanvas::SrcRectConstraint) {
     SkMatrix adjustedMatrix;
     adjustedMatrix.setRectToRect(srcOrNull ? *srcOrNull : SkRect::Make(bm.bounds()),
                                  dst,

@@ -17,6 +17,7 @@ from chromite.lib import cros_import
 from chromite.lib import cros_logging as logging
 from chromite.lib import cros_test_lib
 from chromite.lib import partial_mock
+from chromite.lib import workspace_lib
 
 
 # pylint:disable=protected-access
@@ -69,16 +70,6 @@ class TestCommandTest(cros_test_lib.MockTestCase):
     parser.parse_args(['device'])
     with self.assertRaises(SystemExit):
       parser.parse_args(['--device', 'device'])
-
-  def testBrilloAddDeviceArgument(self):
-    """Tests CliCommand.AddDeviceArgument() for `brillo`."""
-    self.PatchObject(command, 'GetToolset', return_value='brillo')
-    parser = argparse.ArgumentParser()
-    command.CliCommand.AddDeviceArgument(parser)
-    # brillo should have an optional device argument.
-    with self.assertRaises(SystemExit):
-      parser.parse_args(['device'])
-    parser.parse_args(['--device', 'device'])
 
 
 class MockCommand(partial_mock.PartialMock):
@@ -144,21 +135,6 @@ class CommandTest(cros_test_lib.MockTestCase):
     self.assertIn('chrome-sdk', cros_commands)
     self.assertIn('flash', cros_commands)
 
-  def testListBrilloCommands(self):
-    """Tests we get a sane `brillo` list back.
-
-    Needs to be separate from testListCrosCommands() because calling
-    ListCommands() twice with both 'brillo' and 'cros' produces a superset
-    rather than two independent sets.
-    """
-    brillo_commands = command.ListCommands('brillo')
-    # Pick some commands that should be in `cros` but not `brillo`.
-    self.assertNotIn('chrome-sdk', brillo_commands)
-    self.assertNotIn('stage', brillo_commands)
-    # Pick some commands that should be in `brillo`.
-    self.assertIn('debug', brillo_commands)
-    self.assertIn('devices', brillo_commands)
-
 
 class FileLoggerSetupTest(cros_test_lib.WorkspaceTestCase):
   """Test that logging to file works correctly."""
@@ -174,7 +150,8 @@ class FileLoggerSetupTest(cros_test_lib.WorkspaceTestCase):
 
     # Test that the filename is correct.
     patch_handler.assert_called_with(
-        os.path.join(self.workspace_path, 'build/logs', 'foo.log'), mode='w')
+        os.path.join(self.workspace_path, workspace_lib.WORKSPACE_LOGS_DIR,
+                     'foo.log'), mode='w')
 
   def testSetupFileLoggerNoFilename(self):
     """Test that the filename and path are correct with no arguments."""
@@ -184,7 +161,8 @@ class FileLoggerSetupTest(cros_test_lib.WorkspaceTestCase):
 
     # Test that the filename is correct.
     patch_handler.assert_called_with(
-        os.path.join(self.workspace_path, 'build/logs', 'brillo.log'), mode='w')
+        os.path.join(self.workspace_path, workspace_lib.WORKSPACE_LOGS_DIR,
+                     'brillo.log'), mode='w')
 
   def testSetupFileLoggerLogLevels(self):
     """Test that the logger operates at the right level."""
@@ -196,7 +174,8 @@ class FileLoggerSetupTest(cros_test_lib.WorkspaceTestCase):
 
     # Test that the logs are correct.
     logs = open(
-        os.path.join(self.workspace_path, 'build/logs', 'foo.log'), 'r').read()
+        os.path.join(self.workspace_path, workspace_lib.WORKSPACE_LOGS_DIR,
+                     'foo.log'), 'r').read()
     self.assertNotIn('debug', logs)
     self.assertIn('info', logs)
     self.assertIn('notice', logs)

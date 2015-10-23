@@ -17,8 +17,9 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/file_system_provider/notification_manager_interface.h"
-#include "chrome/browser/chromeos/file_system_provider/provided_file_system_info.h"
 #include "chrome/browser/chromeos/file_system_provider/request_value.h"
+
+class Profile;
 
 namespace chromeos {
 namespace file_system_provider {
@@ -27,6 +28,8 @@ namespace file_system_provider {
 enum RequestType {
   REQUEST_UNMOUNT,
   GET_METADATA,
+  GET_ACTIONS,
+  EXECUTE_ACTION,
   READ_DIRECTORY,
   OPEN_FILE,
   CLOSE_FILE,
@@ -44,9 +47,6 @@ enum RequestType {
   CONFIGURE,
   TESTING
 };
-
-// Converts a request type to human-readable format.
-std::string RequestTypeToString(RequestType type);
 
 // Manages requests between the service, async utils and the providing
 // extensions.
@@ -105,7 +105,11 @@ class RequestManager {
     virtual void OnRequestTimeouted(int request_id) = 0;
   };
 
-  explicit RequestManager(NotificationManagerInterface* notification_manager);
+  // Creates a request manager for |profile| and |extension_id|. Note, that
+  // there may be multiple instances of request managers per extension.
+  RequestManager(Profile* profile,
+                 const std::string& extension_id,
+                 NotificationManagerInterface* notification_manager);
   virtual ~RequestManager();
 
   // Creates a request and returns its request id (greater than 0). Returns 0 in
@@ -171,11 +175,17 @@ class RequestManager {
   // Resets the timeout timer for the specified request.
   void ResetTimer(int request_id);
 
+  // Checks whether there is an ongoing interaction between the providing
+  // extension and user.
+  bool IsInteractingWithUser() const;
+
+  Profile* profile_;  // Not owned.
+  std::string extension_id_;
   RequestMap requests_;
   NotificationManagerInterface* notification_manager_;  // Not owned.
   int next_id_;
   base::TimeDelta timeout_;
-  ObserverList<Observer> observers_;
+  base::ObserverList<Observer> observers_;
   base::WeakPtrFactory<RequestManager> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RequestManager);

@@ -7,8 +7,8 @@ package org.chromium.chrome.browser.omnibox;
 import android.os.Bundle;
 import android.text.TextUtils;
 
-import org.chromium.base.CalledByNative;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.omnibox.VoiceSuggestionProvider.VoiceResult;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.content_public.browser.WebContents;
@@ -119,7 +119,10 @@ public class AutocompleteController {
      *         be null if the input is invalid.
      */
     public OmniboxSuggestion classify(String text) {
-        return nativeClassify(mNativeAutocompleteControllerAndroid, text);
+        if (mNativeAutocompleteControllerAndroid != 0) {
+            return nativeClassify(mNativeAutocompleteControllerAndroid, text);
+        }
+        return null;
     }
 
     /**

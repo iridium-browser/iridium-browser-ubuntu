@@ -11,16 +11,16 @@
 
 namespace blink {
 
-class CORE_EXPORT VideoTrack final : public NoBaseWillBeGarbageCollectedFinalized<VideoTrack>, public TrackBase, public ScriptWrappable {
+class CORE_EXPORT VideoTrack final : public GarbageCollectedFinalized<VideoTrack>, public TrackBase, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(VideoTrack);
+    USING_GARBAGE_COLLECTED_MIXIN(VideoTrack);
 public:
-    static PassRefPtrWillBeRawPtr<VideoTrack> create(const String& id, const AtomicString& kind, const AtomicString& label, const AtomicString& language, bool selected)
+    static VideoTrack* create(const String& id, const AtomicString& kind, const AtomicString& label, const AtomicString& language, bool selected)
     {
-        return adoptRefWillBeNoop(new VideoTrack(id, kind, label, language, selected));
+        return new VideoTrack(id, kind, label, language, selected);
     }
 
-    virtual ~VideoTrack();
+    ~VideoTrack() override;
     DECLARE_VIRTUAL_TRACE();
 
     bool selected() const { return m_selected; }
@@ -44,8 +44,8 @@ private:
     VideoTrack(const String& id, const AtomicString& kind, const AtomicString& label, const AtomicString& language, bool selected);
 
     // TrackBase
-    virtual bool isValidKind(const AtomicString& kind) const override { return isValidKindKeyword(kind); }
-    virtual AtomicString defaultKind() const override;
+    bool isValidKind(const AtomicString& kind) const override { return isValidKindKeyword(kind); }
+    AtomicString defaultKind() const override;
 
     bool m_selected;
 };

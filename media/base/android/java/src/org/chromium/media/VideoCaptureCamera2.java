@@ -20,15 +20,14 @@ import android.media.ImageReader;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
-import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
 
-import org.chromium.base.JNINamespace;
+import org.chromium.base.Log;
+import org.chromium.base.annotations.JNINamespace;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -103,8 +102,8 @@ public class VideoCaptureCamera2 extends VideoCapture {
                 if (image == null) return;
                 if (image.getFormat() != ImageFormat.YUV_420_888
                         || image.getPlanes().length != 3) {
-                    Log.e(TAG, "Unexpected image format: " + image.getFormat()
-                            + " or #planes: " + image.getPlanes().length);
+                    Log.e(TAG, "Unexpected image format: %d or #planes: %d",
+                            image.getFormat(), image.getPlanes().length);
                     return;
                 }
 
@@ -140,7 +139,7 @@ public class VideoCaptureCamera2 extends VideoCapture {
     private ImageReader mImageReader = null;
 
     private static final double kNanoSecondsToFps = 1.0E-9;
-    private static final String TAG = "VideoCaptureCamera2";
+    private static final String TAG = "cr.media";
 
     // Service function to grab CameraCharacteristics and handle exceptions.
     private static CameraCharacteristics getCameraCharacteristics(Context appContext, int id) {
@@ -333,7 +332,7 @@ public class VideoCaptureCamera2 extends VideoCapture {
                 + ((facing == CameraCharacteristics.LENS_FACING_FRONT) ? "front" : "back");
     }
 
-    static VideoCapture.CaptureFormat[] getDeviceSupportedFormats(Context appContext, int id) {
+    static VideoCaptureFormat[] getDeviceSupportedFormats(Context appContext, int id) {
         final CameraCharacteristics cameraCharacteristics =
                 getCameraCharacteristics(appContext, id);
         if (cameraCharacteristics == null) return null;
@@ -342,11 +341,16 @@ public class VideoCaptureCamera2 extends VideoCapture {
                 CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
         // Per-format frame rate via getOutputMinFrameDuration() is only available if the
         // property REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR is set.
-        final boolean minFrameDurationAvailable = Arrays.asList(capabilities).contains(
-                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR);
+        boolean minFrameDurationAvailable = false;
+        for (int cap : capabilities) {
+            if (cap == CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) {
+                minFrameDurationAvailable = true;
+                break;
+            }
+        }
 
-        ArrayList<VideoCapture.CaptureFormat> formatList =
-                new ArrayList<VideoCapture.CaptureFormat>();
+        ArrayList<VideoCaptureFormat> formatList =
+                new ArrayList<VideoCaptureFormat>();
         final StreamConfigurationMap streamMap =
                 cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
         final int[] formats = streamMap.getOutputFormats();
@@ -365,13 +369,13 @@ public class VideoCaptureCamera2 extends VideoCapture {
                     // Hint: perhaps using SCALER_AVAILABLE_PROCESSED_MIN_DURATIONS.
                     minFrameRate = 0.0;
                 }
-                formatList.add(new VideoCapture.CaptureFormat(size.getWidth(),
+                formatList.add(new VideoCaptureFormat(size.getWidth(),
                                                               size.getHeight(),
                                                               (int) minFrameRate,
                                                               0));
             }
         }
-        return formatList.toArray(new VideoCapture.CaptureFormat[formatList.size()]);
+        return formatList.toArray(new VideoCaptureFormat[formatList.size()]);
     }
 
     VideoCaptureCamera2(Context context,
@@ -382,13 +386,13 @@ public class VideoCaptureCamera2 extends VideoCapture {
 
     @Override
     public boolean allocate(int width, int height, int frameRate) {
-        Log.d(TAG, "allocate: requested (" + width + "x" + height + ")@" + frameRate + "fps");
+        Log.d(TAG, "allocate: requested (%d x %d) @%dfps", width, height, frameRate);
         if (mOpeningCamera || mConfiguringCamera) {
             Log.e(TAG, "allocate() invoked while Camera is busy opening/configuring.");
             return false;
         }
         // |mCaptureFormat| is also used to configure the ImageReader.
-        mCaptureFormat = new CaptureFormat(width, height, frameRate, ImageFormat.YUV_420_888);
+        mCaptureFormat = new VideoCaptureFormat(width, height, frameRate, ImageFormat.YUV_420_888);
         int expectedFrameSize = mCaptureFormat.mWidth * mCaptureFormat.mHeight
                 * ImageFormat.getBitsPerPixel(mCaptureFormat.mPixelFormat) / 8;
         mCapturedData = new byte[expectedFrameSize];
@@ -437,10 +441,7 @@ public class VideoCaptureCamera2 extends VideoCapture {
         } catch (CameraAccessException ex) {
             Log.e(TAG, "abortCaptures: " + ex);
             return false;
-        } catch (IllegalArgumentException ex) {
-            Log.e(TAG, "abortCaptures: " + ex);
-            return false;
-        } catch (SecurityException ex) {
+        } catch (IllegalStateException ex) {
             Log.e(TAG, "abortCaptures: " + ex);
             return false;
         }

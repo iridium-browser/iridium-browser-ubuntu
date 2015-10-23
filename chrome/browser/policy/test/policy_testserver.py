@@ -47,7 +47,7 @@ Example:
     "secret123456"
   ],
   "current_key_index": 0,
-  "robot_api_auth_code": "fake_auth_code",
+  "robot_api_auth_code": "",
   "invalidation_source": 1025,
   "invalidation_name": "UENUPOL"
 }
@@ -60,6 +60,7 @@ import cgi
 import glob
 import google.protobuf.text_format
 import hashlib
+import json
 import logging
 import os
 import random
@@ -70,16 +71,9 @@ import tlslite
 import tlslite.api
 import tlslite.utils
 import tlslite.utils.cryptomath
+import urllib
+import urllib2
 import urlparse
-
-# The name and availability of the json module varies in python versions.
-try:
-  import simplejson as json
-except ImportError:
-  try:
-    import json
-  except ImportError:
-    json = None
 
 import asn1der
 import testserver_base
@@ -382,17 +376,17 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       return (403, 'No authorization')
 
     policy = self.server.GetPolicies()
+    username = self.server.ResolveUser(auth)
     if ('*' not in policy['managed_users'] and
-        auth not in policy['managed_users']):
+        username not in policy['managed_users']):
       return (403, 'Unmanaged')
 
     device_id = self.GetUniqueParam('deviceid')
     if not device_id:
       return (400, 'Missing device identifier')
 
-    token_info = self.server.RegisterDevice(device_id,
-                                             msg.machine_id,
-                                             msg.type)
+    token_info = self.server.RegisterDevice(
+        device_id, msg.machine_id, msg.type, username)
 
     # Send back the reply.
     response = dm.DeviceManagementResponse()
@@ -414,11 +408,12 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     """
     policy = self.server.GetPolicies()
 
-    # Return the auth code from the config file if it's defined,
-    # else return a descriptive default value.
+    # Return the auth code from the config file if it's defined. Default to an
+    # empty auth code, which will instruct the enrollment flow to skip robot
+    # auth setup.
     response = dm.DeviceManagementResponse()
     response.service_api_access_response.auth_code = policy.get(
-        'robot_api_auth_code', 'policy_testserver.py-auth_code')
+        'robot_api_auth_code', '')
 
     return (200, response)
 
@@ -469,12 +464,18 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.server.UpdateStateKeys(token_info['device_token'],
                                   key_update_request.server_backed_state_key)
 
-    # If this is a |publicaccount| request, get the |username| now and use
-    # it in every PolicyFetchResponse produced. This is required to validate
-    # policy for extensions in device-local accounts.
-    # Unfortunately, the |username| can't be obtained from |msg| because that
-    # requires interacting with GAIA.
-    username = None
+    # See whether the |username| for the client is known. During policy
+    # validation, the client verifies that the policy blob is bound to the
+    # appropriate user by comparing against this value. In case the server is
+    # configured to resolve the actual user name from the access token via the
+    # token info endpoint, the resolved |username| has been stored in
+    # |token_info| when the client registered. If not, pass None as the
+    # |username| in which case a value from the configuration file will be used.
+    username = token_info.get('username')
+
+    # If this is a |publicaccount| request, use the |settings_entity_id| from
+    # the request as the |username|. This is required to validate policy for
+    # extensions in device-local accounts.
     for request in msg.policy_request.request:
       if request.policy_type == 'google/chromeos/publicaccount':
         username = request.settings_entity_id
@@ -747,13 +748,13 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         if payload is None:
           self.GatherUserPolicySettings(settings, policy.get(policy_key, {}))
           payload = settings.SerializeToString()
-      elif dp is not None and msg.policy_type == 'google/chromeos/device':
+      elif msg.policy_type == 'google/chromeos/device':
         settings = dp.ChromeDeviceSettingsProto()
         payload = self.server.ReadPolicyFromDataDir(policy_key, settings)
         if payload is None:
           self.GatherDevicePolicySettings(settings, policy.get(policy_key, {}))
           payload = settings.SerializeToString()
-      elif ep is not None and msg.policy_type == 'google/chrome/extension':
+      elif msg.policy_type == 'google/chrome/extension':
         settings = ep.ExternalPolicyData()
         payload = self.server.ReadPolicyFromDataDir(policy_key, settings)
         if payload is None:
@@ -807,12 +808,20 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     if username:
       policy_data.username = username
     else:
-      # For regular user/device policy, there is no way for the testserver to
-      # know the user name belonging to the GAIA auth token we received (short
-      # of actually talking to GAIA). To address this, we read the username from
-      # the policy configuration dictionary, or use a default.
+      # If the correct |username| is unknown, rely on a manually-configured
+      # username from the configuration file or use a default.
       policy_data.username = policy.get('policy_user', 'user@example.com')
     policy_data.device_id = token_info['device_id']
+
+    # Set affiliation IDs so that user was managed on the device.
+    device_affiliation_ids = policy.get('device_affiliation_ids')
+    if device_affiliation_ids:
+      policy_data.device_affiliation_ids.extend(device_affiliation_ids)
+
+    user_affiliation_ids = policy.get('user_affiliation_ids')
+    if user_affiliation_ids:
+      policy_data.user_affiliation_ids.extend(user_affiliation_ids)
+
     signed_data = policy_data.SerializeToString()
 
     response.policy_data = signed_data
@@ -986,15 +995,34 @@ class PolicyTestServer(testserver_base.BrokenPipeHandlerMixIn,
     """
     policy = {}
     if json is None:
-      print 'No JSON module, cannot parse policy information'
+      logging.error('No JSON module, cannot parse policy information')
     else :
       try:
         policy = json.loads(open(self.policy_path).read(), strict=False)
       except IOError:
-        print 'Failed to load policy from %s' % self.policy_path
+        logging.error('Failed to load policies from %s' % self.policy_path)
     return policy
 
-  def RegisterDevice(self, device_id, machine_id, type):
+  def ResolveUser(self, auth_token):
+    """Tries to resolve an auth token to the corresponding user name.
+
+    If enabled, this makes a request to the token info endpoint to determine the
+    user ID corresponding to the token. If token resolution is disabled or the
+    request fails, this will return the policy_user config parameter.
+    """
+    config = self.GetPolicies()
+    token_info_url = config.get('token_info_url')
+    if token_info_url is not None:
+      try:
+        token_info = urllib2.urlopen(token_info_url + '?' +
+            urllib.urlencode({'access_token': auth_token})).read()
+        return json.loads(token_info)['email']
+      except Exception as e:
+        logging.info('Failed to resolve user: %s', e)
+
+    return config.get('policy_user')
+
+  def RegisterDevice(self, device_id, machine_id, type, username):
     """Registers a device or user and generates a DM token for it.
 
     Args:
@@ -1041,6 +1069,7 @@ class PolicyTestServer(testserver_base.BrokenPipeHandlerMixIn,
       'machine_name': 'chromeos-' + machine_id,
       'machine_id': machine_id,
       'enrollment_mode': enrollment_mode,
+      'username': username,
     }
     self.WriteClientState()
     return self._registered_tokens[dmtoken]

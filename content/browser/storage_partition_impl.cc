@@ -7,7 +7,9 @@
 #include <set>
 #include <vector>
 
+#include "base/location.h"
 #include "base/sequenced_task_runner.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/fileapi/browser_file_system_helper.h"
@@ -15,7 +17,6 @@
 #include "content/browser/gpu/shader_disk_cache.h"
 #include "content/browser/host_zoom_map_impl.h"
 #include "content/browser/navigator_connect/navigator_connect_context_impl.h"
-#include "content/browser/navigator_connect/navigator_connect_service_worker_service_factory.h"
 #include "content/browser/notifications/platform_notification_context_impl.h"
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "content/public/browser/browser_context.h"
@@ -198,36 +199,6 @@ void ClearSessionStorageOnUIThread(
 }
 
 }  // namespace
-
-// static
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::REMOVE_DATA_MASK_APPCACHE;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::REMOVE_DATA_MASK_COOKIES;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::REMOVE_DATA_MASK_FILE_SYSTEMS;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::REMOVE_DATA_MASK_INDEXEDDB;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::REMOVE_DATA_MASK_LOCAL_STORAGE;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::REMOVE_DATA_MASK_SERVICE_WORKERS;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::REMOVE_DATA_MASK_SHADER_CACHE;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::REMOVE_DATA_MASK_WEBSQL;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::REMOVE_DATA_MASK_WEBRTC_IDENTITY;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::REMOVE_DATA_MASK_ALL;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::QUOTA_MANAGED_STORAGE_MASK_TEMPORARY;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::QUOTA_MANAGED_STORAGE_MASK_PERSISTENT;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::QUOTA_MANAGED_STORAGE_MASK_SYNCABLE;
-STATIC_CONST_MEMBER_DEFINITION const uint32
-    StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL;
 
 // Static.
 int StoragePartitionImpl::GenerateQuotaClientMask(uint32 remove_mask) {
@@ -479,8 +450,10 @@ StoragePartitionImpl* StoragePartitionImpl::Create(
   base::SequencedTaskRunner* idb_task_runner =
       BrowserThread::CurrentlyOn(BrowserThread::UI) &&
               BrowserMainLoop::GetInstance()
-          ? BrowserMainLoop::GetInstance()->indexed_db_thread()
-                ->message_loop_proxy().get()
+          ? BrowserMainLoop::GetInstance()
+                ->indexed_db_thread()
+                ->task_runner()
+                .get()
           : NULL;
   scoped_refptr<IndexedDBContextImpl> indexed_db_context =
       new IndexedDBContextImpl(path,
@@ -516,9 +489,7 @@ StoragePartitionImpl* StoragePartitionImpl::Create(
           context->CreateZoomLevelDelegate(partition_path)));
 
   scoped_refptr<NavigatorConnectContextImpl> navigator_connect_context =
-      new NavigatorConnectContextImpl();
-  navigator_connect_context->AddFactory(make_scoped_ptr(
-      new NavigatorConnectServiceWorkerServiceFactory(service_worker_context)));
+      new NavigatorConnectContextImpl(service_worker_context);
 
   scoped_refptr<PlatformNotificationContextImpl> platform_notification_context =
       new PlatformNotificationContextImpl(path, context,

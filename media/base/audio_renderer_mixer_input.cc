@@ -5,6 +5,7 @@
 #include "media/base/audio_renderer_mixer_input.h"
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "media/base/audio_renderer_mixer.h"
 
@@ -92,6 +93,11 @@ void AudioRendererMixerInput::Pause() {
 bool AudioRendererMixerInput::SetVolume(double volume) {
   volume_ = volume;
   return true;
+}
+
+OutputDevice* AudioRendererMixerInput::GetOutputDevice() {
+  DVLOG(1) << __FUNCTION__;
+  return mixer_->GetOutputDevice();
 }
 
 double AudioRendererMixerInput::ProvideInput(AudioBus* audio_bus,

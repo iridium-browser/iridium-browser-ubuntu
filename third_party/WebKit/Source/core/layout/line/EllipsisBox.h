@@ -20,7 +20,7 @@
 #ifndef EllipsisBox_h
 #define EllipsisBox_h
 
-#include "core/layout/line/FloatToLayoutUnit.h"
+#include "core/layout/api/SelectionState.h"
 #include "core/layout/line/InlineBox.h"
 
 namespace blink {
@@ -32,30 +32,30 @@ class EllipsisBox final : public InlineBox {
 public:
     EllipsisBox(LayoutObject& obj, const AtomicString& ellipsisStr, InlineFlowBox* parent,
         int width, int height, int x, int y, bool firstLine, bool isVertical)
-        : InlineBox(obj, FloatPointWillBeLayoutPoint(x, y), width, firstLine, true, false, false, isVertical, 0, 0, parent)
+        : InlineBox(obj, LayoutPoint(x, y), width, firstLine, true, false, false, isVertical, 0, 0, parent)
         , m_height(height)
         , m_str(ellipsisStr)
-        , m_selectionState(LayoutObject::SelectionNone)
+        , m_selectionState(SelectionNone)
     {
         setHasVirtualLogicalHeight();
     }
 
-    virtual void paint(const PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) override;
-    virtual bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) override;
-    void setSelectionState(LayoutObject::SelectionState s) { m_selectionState = s; }
+    void paint(const PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) override;
+    bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) override;
+    void setSelectionState(SelectionState s) { m_selectionState = s; }
     IntRect selectionRect();
 
-    virtual FloatWillBeLayoutUnit virtualLogicalHeight() const override { return m_height; }
-    virtual LayoutObject::SelectionState selectionState() const override { return m_selectionState; }
+    LayoutUnit virtualLogicalHeight() const override { return m_height; }
+    SelectionState selectionState() const override { return m_selectionState; }
     const AtomicString& ellipsisStr() { return m_str; }
 
-    virtual const char* boxName() const override;
+    const char* boxName() const override;
 
 private:
 
     int m_height;
     AtomicString m_str;
-    LayoutObject::SelectionState m_selectionState;
+    SelectionState m_selectionState;
 };
 
 } // namespace blink

@@ -14,12 +14,14 @@ namespace blink {
 class PropertyHandle;
 
 class CORE_EXPORT Interpolation : public RefCountedWillBeGarbageCollectedFinalized<Interpolation> {
+    WTF_MAKE_NONCOPYABLE(Interpolation);
 public:
     virtual ~Interpolation();
 
-    void interpolate(int iteration, double fraction) const;
+    virtual void interpolate(int iteration, double fraction);
 
     virtual bool isStyleInterpolation() const { return false; }
+    virtual bool isInvalidatableStyleInterpolation() const { return false; }
     virtual bool isLegacyStyleInterpolation() const { return false; }
     virtual bool isSVGInterpolation() const { return false; }
 

@@ -124,11 +124,12 @@ bool LayoutReplaced::shouldPaint(const PaintInfo& paintInfo, const LayoutPoint& 
     if (style()->visibility() != VISIBLE)
         return false;
 
-    LayoutPoint adjustedPaintOffset = paintOffset + location();
+    LayoutRect paintRect(visualOverflowRect());
+    paintRect.moveBy(paintOffset + location());
 
     // Early exit if the element touches the edges.
-    LayoutUnit top = adjustedPaintOffset.y() + visualOverflowRect().y();
-    LayoutUnit bottom = adjustedPaintOffset.y() + visualOverflowRect().maxY();
+    LayoutUnit top = paintRect.y();
+    LayoutUnit bottom = paintRect.maxY();
     if (isSelected() && inlineBoxWrapper()) {
         LayoutUnit selTop = paintOffset.y() + inlineBoxWrapper()->root().selectionTop();
         LayoutUnit selBottom = paintOffset.y() + selTop + inlineBoxWrapper()->root().selectionHeight();
@@ -136,7 +137,7 @@ bool LayoutReplaced::shouldPaint(const PaintInfo& paintInfo, const LayoutPoint& 
         bottom = std::max(selBottom, bottom);
     }
 
-    if (adjustedPaintOffset.x() + visualOverflowRect().x() >= paintInfo.rect.maxX() || adjustedPaintOffset.x() + visualOverflowRect().maxX() <= paintInfo.rect.x())
+    if (paintRect.x() >= paintInfo.rect.maxX() || paintRect.maxX() <= paintInfo.rect.x())
         return false;
 
     if (top >= paintInfo.rect.maxY() || bottom <= paintInfo.rect.y())
@@ -419,15 +420,15 @@ PositionWithAffinity LayoutReplaced::positionForPoint(const LayoutPoint& point)
     LayoutUnit lineDirectionPosition = isHorizontalWritingMode() ? point.x() + location().x() : point.y() + location().y();
 
     if (blockDirectionPosition < top)
-        return createPositionWithAffinity(caretMinOffset(), DOWNSTREAM); // coordinates are above
+        return createPositionWithAffinity(caretMinOffset()); // coordinates are above
 
     if (blockDirectionPosition >= bottom)
-        return createPositionWithAffinity(caretMaxOffset(), DOWNSTREAM); // coordinates are below
+        return createPositionWithAffinity(caretMaxOffset()); // coordinates are below
 
     if (node()) {
         if (lineDirectionPosition <= logicalLeft() + (logicalWidth() / 2))
-            return createPositionWithAffinity(0, DOWNSTREAM);
-        return createPositionWithAffinity(1, DOWNSTREAM);
+            return createPositionWithAffinity(0);
+        return createPositionWithAffinity(1);
     }
 
     return LayoutBox::positionForPoint(point);

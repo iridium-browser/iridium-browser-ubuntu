@@ -55,8 +55,8 @@ scoped_ptr<base::Value> DecodeJsonStringAndDropUnknownBySchema(
     const std::string& json_string,
     const std::string& policy_name) {
   std::string error;
-  base::Value* root(base::JSONReader::ReadAndReturnError(
-      json_string, base::JSON_ALLOW_TRAILING_COMMAS, NULL, &error));
+  scoped_ptr<base::Value> root = base::JSONReader::ReadAndReturnError(
+      json_string, base::JSON_ALLOW_TRAILING_COMMAS, NULL, &error);
 
   if (!root) {
     LOG(WARNING) << "Invalid JSON string: " << error << ", ignoring.";
@@ -72,8 +72,8 @@ scoped_ptr<base::Value> DecodeJsonStringAndDropUnknownBySchema(
     std::string error_path;
     bool changed = false;
 
-    if (!schema.Normalize(
-            root, SCHEMA_ALLOW_UNKNOWN, &error_path, &error, &changed)) {
+    if (!schema.Normalize(root.get(), SCHEMA_ALLOW_UNKNOWN, &error_path, &error,
+                          &changed)) {
       LOG(WARNING) << "Invalid policy value for " << policy_name << ": "
                    << error << " at " << error_path << ".";
       return scoped_ptr<base::Value>();
@@ -89,7 +89,7 @@ scoped_ptr<base::Value> DecodeJsonStringAndDropUnknownBySchema(
     return scoped_ptr<base::Value>();
   }
 
-  return scoped_ptr<base::Value>(root);
+  return root;
 }
 
 base::Value* DecodeConnectionType(int value) {
@@ -289,30 +289,6 @@ void DecodeLoginPolicies(const em::ChromeDeviceSettingsProto& policy,
 
 void DecodeNetworkPolicies(const em::ChromeDeviceSettingsProto& policy,
                            PolicyMap* policies) {
-  // TODO(bartfab): Once the retail mode removal CL lands, remove this policy
-  // completely since it was only used from retail mode.
-  // http://crbug.com/442466
-  if (policy.has_device_proxy_settings()) {
-    const em::DeviceProxySettingsProto& container(
-        policy.device_proxy_settings());
-    scoped_ptr<base::DictionaryValue> proxy_settings(new base::DictionaryValue);
-    if (container.has_proxy_mode())
-      proxy_settings->SetString(key::kProxyMode, container.proxy_mode());
-    if (container.has_proxy_server())
-      proxy_settings->SetString(key::kProxyServer, container.proxy_server());
-    if (container.has_proxy_pac_url())
-      proxy_settings->SetString(key::kProxyPacUrl, container.proxy_pac_url());
-    if (container.has_proxy_bypass_list()) {
-      proxy_settings->SetString(key::kProxyBypassList,
-                                container.proxy_bypass_list());
-    }
-
-    if (!proxy_settings->empty()) {
-      policies->Set(key::kProxySettings, POLICY_LEVEL_RECOMMENDED,
-                    POLICY_SCOPE_MACHINE, proxy_settings.release(), nullptr);
-    }
-  }
-
   if (policy.has_data_roaming_enabled()) {
     const em::DataRoamingEnabledProto& container(policy.data_roaming_enabled());
     if (container.has_data_roaming_enabled()) {
@@ -432,6 +408,16 @@ void DecodeReportingPolicies(const em::ChromeDeviceSettingsProto& policy,
                     DecodeIntegerValue(
                         container.heartbeat_frequency()).release(),
                     NULL);
+    }
+  }
+
+  if (policy.has_device_log_upload_settings()) {
+    const em::DeviceLogUploadSettingsProto& container(
+        policy.device_log_upload_settings());
+    if (container.has_log_upload_enabled()) {
+      policies->Set(
+          key::kLogUploadEnabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
+          new base::FundamentalValue(container.log_upload_enabled()), NULL);
     }
   }
 }
@@ -774,9 +760,6 @@ void DecodeGenericPolicies(const em::ChromeDeviceSettingsProto& policy,
 
 void DecodeDevicePolicy(const em::ChromeDeviceSettingsProto& policy,
                         PolicyMap* policies) {
-  // TODO(achuith): Remove this once crbug.com/263527 is resolved.
-  VLOG(2) << "DecodeDevicePolicy " << policy.SerializeAsString();
-
   // Decode the various groups of policies.
   DecodeLoginPolicies(policy, policies);
   DecodeNetworkPolicies(policy, policies);

@@ -18,7 +18,6 @@
 
 namespace media {
 
-
 class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
  public:
   enum MediaLogLevel {
@@ -82,34 +81,45 @@ class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
   DISALLOW_COPY_AND_ASSIGN(MediaLog);
 };
 
-// Indicates a string should be added to the log.
-// First parameter - The log level for the string.
-// Second parameter - The string to add to the log.
-typedef base::Callback<void(MediaLog::MediaLogLevel, const std::string&)> LogCB;
-
-// Helper class to make it easier to use log_cb like DVLOG().
-class LogHelper {
+// Helper class to make it easier to use MediaLog like DVLOG().
+class MEDIA_EXPORT LogHelper {
  public:
-  LogHelper(MediaLog::MediaLogLevel level, const LogCB& log_cb);
+  LogHelper(MediaLog::MediaLogLevel level,
+            const scoped_refptr<MediaLog>& media_log);
   ~LogHelper();
 
   std::ostream& stream() { return stream_; }
 
  private:
   MediaLog::MediaLogLevel level_;
-  LogCB log_cb_;
+  const scoped_refptr<MediaLog> media_log_;
   std::stringstream stream_;
 };
 
 // Provides a stringstream to collect a log entry to pass to the provided
-// LogCB at the requested level.
-#define MEDIA_LOG(level, log_cb) \
-  LogHelper((MediaLog::MEDIALOG_##level), (log_cb)).stream()
+// MediaLog at the requested level.
+#define MEDIA_LOG(level, media_log) \
+  LogHelper((MediaLog::MEDIALOG_##level), (media_log)).stream()
 
-// Logs only while count < max. Increments count for each log. Use LAZY_STREAM
-// to avoid wasteful evaluation of subsequent stream arguments.
-#define LIMITED_MEDIA_LOG(level, log_cb, count, max) \
-  LAZY_STREAM(MEDIA_LOG(level, log_cb), (count) < (max) && ((count)++ || true))
+// Logs only while |count| < |max|, increments |count| for each log, and warns
+// in the log if |count| has just reached |max|.
+// Multiple short-circuit evaluations are involved in this macro:
+// 1) LAZY_STREAM avoids wasteful MEDIA_LOG and evaluation of subsequent stream
+//    arguments if |count| is >= |max|, and
+// 2) the |condition| given to LAZY_STREAM itself short-circuits to prevent
+//    incrementing |count| beyond |max|.
+// Note that LAZY_STREAM guarantees exactly one evaluation of |condition|, so
+// |count| will be incremented at most once each time this macro runs.
+// The "|| true" portion of |condition| lets logging occur correctly when
+// |count| < |max| and |count|++ is 0.
+// TODO(wolenetz,chcunningham): Consider using a helper class instead of a macro
+// to improve readability.
+#define LIMITED_MEDIA_LOG(level, media_log, count, max)                       \
+  LAZY_STREAM(MEDIA_LOG(level, media_log),                                    \
+              (count) < (max) && ((count)++ || true))                         \
+      << (((count) == (max)) ? "(Log limit reached. Further similar entries " \
+                               "may be suppressed): "                         \
+                             : "")
 
 }  // namespace media
 

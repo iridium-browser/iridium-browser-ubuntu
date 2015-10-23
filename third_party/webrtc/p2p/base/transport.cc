@@ -35,6 +35,7 @@ enum {
   MSG_ROLECONFLICT,
   MSG_COMPLETED,
   MSG_FAILED,
+  MSG_RECEIVINGSTATE,
 };
 
 struct ChannelParams : public rtc::MessageData {
@@ -120,20 +121,22 @@ Transport::Transport(rtc::Thread* signaling_thread,
                      const std::string& content_name,
                      const std::string& type,
                      PortAllocator* allocator)
-  : signaling_thread_(signaling_thread),
-    worker_thread_(worker_thread),
-    content_name_(content_name),
-    type_(type),
-    allocator_(allocator),
-    destroyed_(false),
-    readable_(TRANSPORT_STATE_NONE),
-    writable_(TRANSPORT_STATE_NONE),
-    was_writable_(false),
-    connect_requested_(false),
-    ice_role_(ICEROLE_UNKNOWN),
-    tiebreaker_(0),
-    protocol_(ICEPROTO_HYBRID),
-    remote_ice_mode_(ICEMODE_FULL) {
+    : signaling_thread_(signaling_thread),
+      worker_thread_(worker_thread),
+      content_name_(content_name),
+      type_(type),
+      allocator_(allocator),
+      destroyed_(false),
+      readable_(TRANSPORT_STATE_NONE),
+      writable_(TRANSPORT_STATE_NONE),
+      receiving_(TRANSPORT_STATE_NONE),
+      was_writable_(false),
+      connect_requested_(false),
+      ice_role_(ICEROLE_UNKNOWN),
+      tiebreaker_(0),
+      protocol_(ICEPROTO_HYBRID),
+      remote_ice_mode_(ICEMODE_FULL),
+      channel_receiving_timeout_(-1) {
 }
 
 Transport::~Transport() {
@@ -170,6 +173,19 @@ bool Transport::GetRemoteCertificate_w(rtc::SSLCertificate** cert) {
 
   ChannelMap::iterator iter = channels_.begin();
   return iter->second->GetRemoteCertificate(cert);
+}
+
+void Transport::SetChannelReceivingTimeout(int timeout_ms) {
+  worker_thread_->Invoke<void>(
+      Bind(&Transport::SetChannelReceivingTimeout_w, this, timeout_ms));
+}
+
+void Transport::SetChannelReceivingTimeout_w(int timeout_ms) {
+  ASSERT(worker_thread()->IsCurrent());
+  channel_receiving_timeout_ = timeout_ms;
+  for (const auto& kv : channels_) {
+    kv.second->SetReceivingTimeout(timeout_ms);
+  }
 }
 
 bool Transport::SetLocalTransportDescription(
@@ -231,6 +247,7 @@ TransportChannelImpl* Transport::CreateChannel_w(int component) {
   // Push down our transport state to the new channel.
   impl->SetIceRole(ice_role_);
   impl->SetIceTiebreaker(tiebreaker_);
+  impl->SetReceivingTimeout(channel_receiving_timeout_);
   // TODO(ronghuawu): Change CreateChannel_w to be able to return error since
   // below Apply**Description_w calls can fail.
   if (local_description_)
@@ -242,6 +259,7 @@ TransportChannelImpl* Transport::CreateChannel_w(int component) {
 
   impl->SignalReadableState.connect(this, &Transport::OnChannelReadableState);
   impl->SignalWritableState.connect(this, &Transport::OnChannelWritableState);
+  impl->SignalReceivingState.connect(this, &Transport::OnChannelReceivingState);
   impl->SignalRequestSignaling.connect(
       this, &Transport::OnChannelRequestSignaling);
   impl->SignalCandidateReady.connect(this, &Transport::OnChannelCandidateReady);
@@ -458,6 +476,11 @@ bool Transport::GetSslRole(rtc::SSLRole* ssl_role) const {
       &Transport::GetSslRole_w, this, ssl_role));
 }
 
+bool Transport::SetSslMaxProtocolVersion(rtc::SSLProtocolVersion version) {
+  return worker_thread_->Invoke<bool>(Bind(
+      &Transport::SetSslMaxProtocolVersion_w, this, version));
+}
+
 void Transport::OnRemoteCandidates(const std::vector<Candidate>& candidates) {
   for (std::vector<Candidate>::const_iterator iter = candidates.begin();
        iter != candidates.end();
@@ -496,7 +519,7 @@ void Transport::OnChannelReadableState(TransportChannel* channel) {
 
 void Transport::OnChannelReadableState_s() {
   ASSERT(signaling_thread()->IsCurrent());
-  TransportState readable = GetTransportState_s(true);
+  TransportState readable = GetTransportState_s(TRANSPORT_READABLE_STATE);
   if (readable_ != readable) {
     readable_ = readable;
     SignalReadableState(this);
@@ -512,7 +535,7 @@ void Transport::OnChannelWritableState(TransportChannel* channel) {
 
 void Transport::OnChannelWritableState_s() {
   ASSERT(signaling_thread()->IsCurrent());
-  TransportState writable = GetTransportState_s(false);
+  TransportState writable = GetTransportState_s(TRANSPORT_WRITABLE_STATE);
   if (writable_ != writable) {
     was_writable_ = (writable_ == TRANSPORT_STATE_ALL);
     writable_ = writable;
@@ -520,15 +543,41 @@ void Transport::OnChannelWritableState_s() {
   }
 }
 
-TransportState Transport::GetTransportState_s(bool read) {
+void Transport::OnChannelReceivingState(TransportChannel* channel) {
+  ASSERT(worker_thread()->IsCurrent());
+  signaling_thread()->Post(this, MSG_RECEIVINGSTATE);
+}
+
+void Transport::OnChannelReceivingState_s() {
+  ASSERT(signaling_thread()->IsCurrent());
+  TransportState receiving = GetTransportState_s(TRANSPORT_RECEIVING_STATE);
+  if (receiving_ != receiving) {
+    receiving_ = receiving;
+    SignalReceivingState(this);
+  }
+}
+
+TransportState Transport::GetTransportState_s(TransportStateType state_type) {
   ASSERT(signaling_thread()->IsCurrent());
 
   rtc::CritScope cs(&crit_);
   bool any = false;
   bool all = !channels_.empty();
   for (const auto iter : channels_) {
-    bool b = (read ? iter.second->readable() :
-                     iter.second->writable());
+    bool b = false;
+    switch (state_type) {
+      case TRANSPORT_READABLE_STATE:
+        b = iter.second->readable();
+        break;
+      case TRANSPORT_WRITABLE_STATE:
+        b = iter.second->writable();
+        break;
+      case TRANSPORT_RECEIVING_STATE:
+        b = iter.second->receiving();
+        break;
+      default:
+        ASSERT(false);
+    }
     any |= b;
     all &=  b;
   }
@@ -894,6 +943,9 @@ void Transport::OnMessage(rtc::Message* msg) {
       break;
     case MSG_WRITESTATE:
       OnChannelWritableState_s();
+      break;
+    case MSG_RECEIVINGSTATE:
+      OnChannelReceivingState_s();
       break;
     case MSG_REQUESTSIGNALING:
       OnChannelRequestSignaling_s();

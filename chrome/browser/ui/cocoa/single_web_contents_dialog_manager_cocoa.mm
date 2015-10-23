@@ -7,7 +7,7 @@
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_sheet.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_mac.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet_controller.h"
-#include "chrome/browser/ui/tab_dialogs.h"
+#include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/web_contents.h"
 
@@ -18,9 +18,10 @@ SingleWebContentsDialogManagerCocoa::SingleWebContentsDialogManagerCocoa(
     : client_(client),
       sheet_([sheet retain]),
       delegate_(delegate),
+      host_(nullptr),
       shown_(false) {
-  if (client)
-    client->set_manager(this);
+  DCHECK(client);
+  client->set_manager(this);
 }
 
 SingleWebContentsDialogManagerCocoa::~SingleWebContentsDialogManagerCocoa() {
@@ -30,14 +31,21 @@ void SingleWebContentsDialogManagerCocoa::Show() {
   if (shown_)
     return;
 
-  content::WebContents* web_contents = delegate_->GetWebContents();
-  NSWindow* parent_window = web_contents->GetTopLevelNativeWindow();
-  TabDialogs* tab_dialogs = TabDialogs::FromWebContents(web_contents);
-  // |tab_dialogs| is null when |web_contents| is inside a packaged app window.
-  NSView* parent_view = tab_dialogs ? tab_dialogs->GetDialogParentView()
-                                    : web_contents->GetNativeView();
-  if (!parent_window || !parent_view)
+  // If a dialog is initially shown on a hidden/background WebContents, the
+  // |delegate_| will defer the Show() until the WebContents is shown. If the
+  // defer happens during tab closure or tab dragging, a suspected data race or
+  // ObserverList ordering may result in |host_| being null here. If the tab is
+  // closing anyway, it doesn't matter. For tab dragging, avoid a crash, but the
+  // user may have to switch tabs again to see the dialog. See
+  // http://crbug.com/514826 for details.
+  if (!host_)
     return;
+
+  NSView* parent_view = host_->GetHostView();
+  // Note that simply [parent_view window] for an inactive tab is nil. However,
+  // the following should always be non-nil for all WebContents containers.
+  NSWindow* parent_window =
+      delegate_->GetWebContents()->GetTopLevelNativeWindow();
 
   shown_ = true;
   [[ConstrainedWindowSheetController controllerForParentWindow:parent_window]
@@ -50,12 +58,9 @@ void SingleWebContentsDialogManagerCocoa::Hide() {
 void SingleWebContentsDialogManagerCocoa::Close() {
   [[ConstrainedWindowSheetController controllerForSheet:sheet_]
       closeSheet:sheet_];
-  if (client_) {
-    client_->set_manager(nullptr);
-    client_->OnDialogClosing();  // |client_| might delete itself here.
-    client_ = nullptr;
-  }
-  delegate_->WillClose(dialog());
+  client_->set_manager(nullptr);
+  client_->OnDialogClosing();      // |client_| might delete itself here.
+  delegate_->WillClose(dialog());  // Deletes |this|.
 }
 
 void SingleWebContentsDialogManagerCocoa::Focus() {
@@ -68,6 +73,12 @@ void SingleWebContentsDialogManagerCocoa::Pulse() {
 
 void SingleWebContentsDialogManagerCocoa::HostChanged(
     web_modal::WebContentsModalDialogHost* new_host) {
+  // No need to observe the host. For Cocoa, the constrained window controller
+  // will reposition the dialog when necessary. The host can also never change.
+  // Tabs showing a dialog can not be dragged off a Cocoa browser window.
+  // However, closing a tab with a dialog open will set the host back to null.
+  DCHECK_NE(!!host_, !!new_host);
+  host_ = new_host;
 }
 
 gfx::NativeWindow SingleWebContentsDialogManagerCocoa::dialog() {

@@ -779,6 +779,24 @@ TEST_F(GLES2ImplementationTest, GetBooleanv) {
   EXPECT_EQ(static_cast<ResultType>(1), result);
 }
 
+TEST_F(GLES2ImplementationTest, GetBufferParameteri64v) {
+  struct Cmds {
+    cmds::GetBufferParameteri64v cmd;
+  };
+  typedef cmds::GetBufferParameteri64v::Result::Type ResultType;
+  ResultType result = 0;
+  Cmds expected;
+  ExpectedMemoryInfo result1 =
+      GetExpectedResultMemory(sizeof(uint32_t) + sizeof(ResultType));
+  expected.cmd.Init(123, GL_BUFFER_SIZE, result1.id, result1.offset);
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .WillOnce(SetMemory(result1.ptr, SizedResultHelper<ResultType>(1)))
+      .RetiresOnSaturation();
+  gl_->GetBufferParameteri64v(123, GL_BUFFER_SIZE, &result);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+  EXPECT_EQ(static_cast<ResultType>(1), result);
+}
+
 TEST_F(GLES2ImplementationTest, GetBufferParameteriv) {
   struct Cmds {
     cmds::GetBufferParameteriv cmd;
@@ -909,25 +927,7 @@ TEST_F(GLES2ImplementationTest, GetIntegerv) {
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
   EXPECT_EQ(static_cast<ResultType>(1), result);
 }
-
-TEST_F(GLES2ImplementationTest, GetInternalformativ) {
-  struct Cmds {
-    cmds::GetInternalformativ cmd;
-  };
-  typedef cmds::GetInternalformativ::Result::Type ResultType;
-  ResultType result = 0;
-  Cmds expected;
-  ExpectedMemoryInfo result1 =
-      GetExpectedResultMemory(sizeof(uint32_t) + sizeof(ResultType));
-  expected.cmd.Init(123, GL_RGBA4, GL_NUM_SAMPLE_COUNTS, 4, result1.id,
-                    result1.offset);
-  EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, SizedResultHelper<ResultType>(1)))
-      .RetiresOnSaturation();
-  gl_->GetInternalformativ(123, GL_RGBA4, GL_NUM_SAMPLE_COUNTS, 4, &result);
-  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
-  EXPECT_EQ(static_cast<ResultType>(1), result);
-}
+// TODO(zmo): Implement unit test for GetInternalformativ
 
 TEST_F(GLES2ImplementationTest, GetProgramiv) {
   struct Cmds {
@@ -1438,9 +1438,9 @@ TEST_F(GLES2ImplementationTest, ReadBuffer) {
     cmds::ReadBuffer cmd;
   };
   Cmds expected;
-  expected.cmd.Init(1);
+  expected.cmd.Init(GL_NONE);
 
-  gl_->ReadBuffer(1);
+  gl_->ReadBuffer(GL_NONE);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
@@ -2742,6 +2742,7 @@ TEST_F(GLES2ImplementationTest, DeleteQueriesEXT) {
   gl_->DeleteQueriesEXT(arraysize(ids), &ids[0]);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
+// TODO(zmo): Implement unit test for QueryCounterEXT
 // TODO(zmo): Implement unit test for BeginQueryEXT
 
 TEST_F(GLES2ImplementationTest, BeginTransformFeedback) {
@@ -2863,9 +2864,10 @@ TEST_F(GLES2ImplementationTest, CopyTextureCHROMIUM) {
     cmds::CopyTextureCHROMIUM cmd;
   };
   Cmds expected;
-  expected.cmd.Init(1, 2, 3, GL_ALPHA, GL_UNSIGNED_BYTE);
+  expected.cmd.Init(1, 2, 3, GL_ALPHA, GL_UNSIGNED_BYTE, true, true, true);
 
-  gl_->CopyTextureCHROMIUM(1, 2, 3, GL_ALPHA, GL_UNSIGNED_BYTE);
+  gl_->CopyTextureCHROMIUM(1, 2, 3, GL_ALPHA, GL_UNSIGNED_BYTE, true, true,
+                           true);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
@@ -2874,9 +2876,31 @@ TEST_F(GLES2ImplementationTest, CopySubTextureCHROMIUM) {
     cmds::CopySubTextureCHROMIUM cmd;
   };
   Cmds expected;
-  expected.cmd.Init(1, 2, 3, 4, 5);
+  expected.cmd.Init(1, 2, 3, 4, 5, 6, 7, 8, 9, true, true, true);
 
-  gl_->CopySubTextureCHROMIUM(1, 2, 3, 4, 5);
+  gl_->CopySubTextureCHROMIUM(1, 2, 3, 4, 5, 6, 7, 8, 9, true, true, true);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, CompressedCopyTextureCHROMIUM) {
+  struct Cmds {
+    cmds::CompressedCopyTextureCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, 2, 3);
+
+  gl_->CompressedCopyTextureCHROMIUM(1, 2, 3);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, CompressedCopySubTextureCHROMIUM) {
+  struct Cmds {
+    cmds::CompressedCopySubTextureCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, 2, 3, 4, 5, 6, 7, 8, 9);
+
+  gl_->CompressedCopySubTextureCHROMIUM(1, 2, 3, 4, 5, 6, 7, 8, 9);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
@@ -3099,6 +3123,17 @@ TEST_F(GLES2ImplementationTest, DiscardBackbufferCHROMIUM) {
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
+TEST_F(GLES2ImplementationTest, FlushDriverCachesCHROMIUM) {
+  struct Cmds {
+    cmds::FlushDriverCachesCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init();
+
+  gl_->FlushDriverCachesCHROMIUM();
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
 TEST_F(GLES2ImplementationTest, MatrixLoadfCHROMIUM) {
   GLfloat data[16] = {0};
   struct Cmds {
@@ -3123,6 +3158,138 @@ TEST_F(GLES2ImplementationTest, MatrixLoadIdentityCHROMIUM) {
   expected.cmd.Init(GL_PATH_PROJECTION_CHROMIUM);
 
   gl_->MatrixLoadIdentityCHROMIUM(GL_PATH_PROJECTION_CHROMIUM);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+// TODO(zmo): Implement unit test for GenPathsCHROMIUM
+
+TEST_F(GLES2ImplementationTest, DeletePathsCHROMIUM) {
+  struct Cmds {
+    cmds::DeletePathsCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, 2);
+
+  gl_->DeletePathsCHROMIUM(1, 2);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, IsPathCHROMIUM) {
+  struct Cmds {
+    cmds::IsPathCHROMIUM cmd;
+  };
+
+  Cmds expected;
+  ExpectedMemoryInfo result1 =
+      GetExpectedResultMemory(sizeof(cmds::IsPathCHROMIUM::Result));
+  expected.cmd.Init(1, result1.id, result1.offset);
+
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .WillOnce(SetMemory(result1.ptr, uint32_t(GL_TRUE)))
+      .RetiresOnSaturation();
+
+  GLboolean result = gl_->IsPathCHROMIUM(1);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+  EXPECT_TRUE(result);
+}
+// TODO(zmo): Implement unit test for PathCommandsCHROMIUM
+
+TEST_F(GLES2ImplementationTest, PathParameterfCHROMIUM) {
+  struct Cmds {
+    cmds::PathParameterfCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, GL_PATH_STROKE_WIDTH_CHROMIUM, 3);
+
+  gl_->PathParameterfCHROMIUM(1, GL_PATH_STROKE_WIDTH_CHROMIUM, 3);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, PathParameteriCHROMIUM) {
+  struct Cmds {
+    cmds::PathParameteriCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, GL_PATH_STROKE_WIDTH_CHROMIUM, 3);
+
+  gl_->PathParameteriCHROMIUM(1, GL_PATH_STROKE_WIDTH_CHROMIUM, 3);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, PathStencilFuncCHROMIUM) {
+  struct Cmds {
+    cmds::PathStencilFuncCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(GL_NEVER, 2, 3);
+
+  gl_->PathStencilFuncCHROMIUM(GL_NEVER, 2, 3);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, StencilFillPathCHROMIUM) {
+  struct Cmds {
+    cmds::StencilFillPathCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, GL_INVERT, 3);
+
+  gl_->StencilFillPathCHROMIUM(1, GL_INVERT, 3);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, StencilStrokePathCHROMIUM) {
+  struct Cmds {
+    cmds::StencilStrokePathCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, 2, 3);
+
+  gl_->StencilStrokePathCHROMIUM(1, 2, 3);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, CoverFillPathCHROMIUM) {
+  struct Cmds {
+    cmds::CoverFillPathCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, GL_CONVEX_HULL_CHROMIUM);
+
+  gl_->CoverFillPathCHROMIUM(1, GL_CONVEX_HULL_CHROMIUM);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, CoverStrokePathCHROMIUM) {
+  struct Cmds {
+    cmds::CoverStrokePathCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, GL_CONVEX_HULL_CHROMIUM);
+
+  gl_->CoverStrokePathCHROMIUM(1, GL_CONVEX_HULL_CHROMIUM);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, StencilThenCoverFillPathCHROMIUM) {
+  struct Cmds {
+    cmds::StencilThenCoverFillPathCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, GL_INVERT, 3, GL_CONVEX_HULL_CHROMIUM);
+
+  gl_->StencilThenCoverFillPathCHROMIUM(1, GL_INVERT, 3,
+                                        GL_CONVEX_HULL_CHROMIUM);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, StencilThenCoverStrokePathCHROMIUM) {
+  struct Cmds {
+    cmds::StencilThenCoverStrokePathCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, 2, 3, GL_CONVEX_HULL_CHROMIUM);
+
+  gl_->StencilThenCoverStrokePathCHROMIUM(1, 2, 3, GL_CONVEX_HULL_CHROMIUM);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_UNITTEST_AUTOGEN_H_

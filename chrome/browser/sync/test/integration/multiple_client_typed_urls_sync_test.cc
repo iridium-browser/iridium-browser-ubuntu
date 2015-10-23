@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/i18n/number_formatting.h"
-#include "base/memory/scoped_vector.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
@@ -12,7 +11,7 @@
 #include "components/history/core/browser/history_types.h"
 
 using typed_urls_helper::AddUrlToHistory;
-using typed_urls_helper::AwaitCheckAllProfilesHaveSameURLsAsVerifier;
+using typed_urls_helper::AwaitCheckAllProfilesHaveSameURLs;
 using typed_urls_helper::GetTypedUrlsFromClient;
 
 class MultipleClientTypedUrlsSyncTest : public SyncTest {
@@ -40,7 +39,7 @@ IN_PROC_BROWSER_TEST_F(MultipleClientTypedUrlsSyncTest, AddToOne) {
   ASSERT_EQ(new_url, urls[0].url());
 
   // All clients should have this URL.
-  ASSERT_TRUE(AwaitCheckAllProfilesHaveSameURLsAsVerifier());
+  ASSERT_TRUE(AwaitCheckAllProfilesHaveSameURLs());
 }
 
 IN_PROC_BROWSER_TEST_F(MultipleClientTypedUrlsSyncTest, AddToAll) {
@@ -63,5 +62,5 @@ IN_PROC_BROWSER_TEST_F(MultipleClientTypedUrlsSyncTest, AddToAll) {
   }
 
   // Verify that all clients have all urls.
-  ASSERT_TRUE(AwaitCheckAllProfilesHaveSameURLsAsVerifier());
+  ASSERT_TRUE(AwaitCheckAllProfilesHaveSameURLs());
 }

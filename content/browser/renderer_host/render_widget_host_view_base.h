@@ -5,10 +5,6 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_BASE_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_BASE_H_
 
-#if defined(OS_MACOSX)
-#include <OpenGL/OpenGL.h>
-#endif
-
 #include <string>
 #include <vector>
 
@@ -23,7 +19,7 @@
 #include "content/public/browser/readback_types.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "ipc/ipc_listener.h"
-#include "third_party/WebKit/public/platform/WebScreenOrientationType.h"
+#include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationType.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
 #include "third_party/WebKit/public/web/WebTextDirection.h"
 #include "ui/base/ime/text_input_mode.h"
@@ -38,6 +34,7 @@ class SkBitmap;
 
 struct AccessibilityHostMsg_EventParams;
 struct ViewHostMsg_SelectionBounds_Params;
+struct ViewHostMsg_TextInputState_Params;
 
 namespace media {
 class VideoFrame;
@@ -181,6 +178,14 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // enabled.
   virtual uint32_t GetSurfaceIdNamespace();
 
+  // When there are multiple RenderWidgetHostViews for a single page, input
+  // events need to be targeted to the correct one for handling. The following
+  // methods are invoked on the RenderWidgetHostView that should be able to
+  // properly handle the event (i.e. it has focus for keyboard events, or has
+  // been identified by hit testing mouse, touch or gesture events).
+  virtual uint32_t SurfaceIdNamespaceAtPoint(const gfx::Point& point,
+                                             gfx::Point* transformed_point);
+
   //----------------------------------------------------------------------------
   // The following static methods are implemented by each platform.
 
@@ -211,11 +216,9 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // Indicates whether the page has finished loading.
   virtual void SetIsLoading(bool is_loading) = 0;
 
-  // Updates the type of the input method attached to the view.
-  virtual void TextInputTypeChanged(ui::TextInputType type,
-                                    ui::TextInputMode mode,
-                                    bool can_compose_inline,
-                                    int flags) = 0;
+  // Updates the state of the input method attached to the view.
+  virtual void TextInputStateChanged(
+      const ViewHostMsg_TextInputState_Params& params) = 0;
 
   // Cancel the ongoing composition of the input method attached to the view.
   virtual void ImeCancelComposition() = 0;

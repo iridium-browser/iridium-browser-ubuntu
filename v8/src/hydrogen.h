@@ -5,8 +5,6 @@
 #ifndef V8_HYDROGEN_H_
 #define V8_HYDROGEN_H_
 
-#include "src/v8.h"
-
 #include "src/accessors.h"
 #include "src/allocation.h"
 #include "src/ast.h"
@@ -331,6 +329,7 @@ class HGraph final : public ZoneObject {
   HConstant* GetConstantMinus1();
   HConstant* GetConstantTrue();
   HConstant* GetConstantFalse();
+  HConstant* GetConstantBool(bool value);
   HConstant* GetConstantHole();
   HConstant* GetConstantNull();
   HConstant* GetInvalidContext();
@@ -757,8 +756,8 @@ class AstContext {
   virtual void ReturnContinuation(HIfContinuation* continuation,
                                   BailoutId ast_id) = 0;
 
-  void set_for_typeof(bool for_typeof) { for_typeof_ = for_typeof; }
-  bool is_for_typeof() { return for_typeof_; }
+  void set_typeof_mode(TypeofMode typeof_mode) { typeof_mode_ = typeof_mode; }
+  TypeofMode typeof_mode() { return typeof_mode_; }
 
  protected:
   AstContext(HOptimizedGraphBuilder* owner, Expression::Context kind);
@@ -778,7 +777,7 @@ class AstContext {
   HOptimizedGraphBuilder* owner_;
   Expression::Context kind_;
   AstContext* outer_;
-  bool for_typeof_;
+  TypeofMode typeof_mode_;
 };
 
 
@@ -1328,6 +1327,7 @@ class HGraphBuilder {
                                    bool is_jsarray);
 
   HValue* BuildNumberToString(HValue* object, Type* type);
+  HValue* BuildToObject(HValue* receiver);
 
   void BuildJSObjectCheck(HValue* receiver,
                           int bit_field_mask);
@@ -1352,9 +1352,9 @@ class HGraphBuilder {
                                     HValue* key);
 
   HValue* BuildUncheckedDictionaryElementLoad(HValue* receiver,
-                                              HValue* elements,
-                                              HValue* key,
-                                              HValue* hash);
+                                              HValue* elements, HValue* key,
+                                              HValue* hash,
+                                              LanguageMode language_mode);
 
   HValue* BuildRegExpConstructResult(HValue* length,
                                      HValue* index,
@@ -1429,15 +1429,12 @@ class HGraphBuilder {
                         HValue** operand,
                         HValue** shift_amount);
 
-  HValue* BuildBinaryOperation(Token::Value op,
-                               HValue* left,
-                               HValue* right,
-                               Type* left_type,
-                               Type* right_type,
-                               Type* result_type,
-                               Maybe<int> fixed_right_arg,
+  HValue* BuildBinaryOperation(Token::Value op, HValue* left, HValue* right,
+                               Type* left_type, Type* right_type,
+                               Type* result_type, Maybe<int> fixed_right_arg,
                                HAllocationMode allocation_mode,
-                               LanguageMode language_mode);
+                               Strength strength,
+                               BailoutId opt_id = BailoutId::None());
 
   HLoadNamedField* AddLoadFixedArrayLength(HValue *object,
                                            HValue *dependency = NULL);
@@ -1598,6 +1595,7 @@ class HGraphBuilder {
     void Then();
     void Else();
     void End();
+    void EndUnreachable();
 
     void Deopt(Deoptimizer::DeoptReason reason);
     void ThenDeopt(Deoptimizer::DeoptReason reason) {
@@ -1862,6 +1860,10 @@ class HGraphBuilder {
   HInstruction* BuildGetNativeContext(HValue* closure);
   HInstruction* BuildGetNativeContext();
   HInstruction* BuildGetScriptContext(int context_index);
+  // Builds a loop version if |depth| is specified or unrolls the loop to
+  // |depth_value| iterations otherwise.
+  HValue* BuildGetParentContext(HValue* depth, int depth_value);
+
   HInstruction* BuildGetArrayFunction();
   HValue* BuildArrayBufferViewFieldAccessor(HValue* object,
                                             HValue* checked_object,
@@ -2175,6 +2177,7 @@ class HOptimizedGraphBuilder : public HGraphBuilder, public AstVisitor {
 #define FOR_EACH_HYDROGEN_INTRINSIC(F) \
   F(IsSmi)                             \
   F(IsArray)                           \
+  F(IsTypedArray)                      \
   F(IsRegExp)                          \
   F(IsJSProxy)                         \
   F(IsConstructCall)                   \
@@ -2183,15 +2186,17 @@ class HOptimizedGraphBuilder : public HGraphBuilder, public AstVisitor {
   F(Arguments)                         \
   F(ValueOf)                           \
   F(SetValueOf)                        \
+  F(IsDate)                            \
   F(DateField)                         \
+  F(ThrowNotDateError)                 \
   F(StringCharFromCode)                \
   F(StringCharAt)                      \
   F(OneByteSeqStringSetChar)           \
   F(TwoByteSeqStringSetChar)           \
   F(ObjectEquals)                      \
   F(IsObject)                          \
+  F(ToObject)                          \
   F(IsFunction)                        \
-  F(IsUndetectableObject)              \
   F(IsSpecObject)                      \
   F(MathPow)                           \
   F(IsMinusZero)                       \
@@ -2205,7 +2210,6 @@ class HOptimizedGraphBuilder : public HGraphBuilder, public AstVisitor {
   F(StringCompare)                     \
   F(RegExpExec)                        \
   F(RegExpConstructResult)             \
-  F(GetFromCache)                      \
   F(NumberToString)                    \
   F(DebugIsActive)                     \
   F(Likely)                            \
@@ -2447,29 +2451,26 @@ class HOptimizedGraphBuilder : public HGraphBuilder, public AstVisitor {
                    Handle<JSFunction> caller,
                    const char* failure_reason);
 
-  void HandleGlobalVariableAssignment(Variable* var,
-                                      HValue* value,
+  void HandleGlobalVariableAssignment(Variable* var, HValue* value,
+                                      FeedbackVectorICSlot ic_slot,
                                       BailoutId ast_id);
 
   void HandlePropertyAssignment(Assignment* expr);
   void HandleCompoundAssignment(Assignment* expr);
-  void HandlePolymorphicNamedFieldAccess(PropertyAccessType access_type,
-                                         Expression* expr,
-                                         BailoutId ast_id,
-                                         BailoutId return_id,
-                                         HValue* object,
-                                         HValue* value,
-                                         SmallMapList* types,
-                                         Handle<String> name);
+  void HandlePolymorphicNamedFieldAccess(
+      PropertyAccessType access_type, Expression* expr,
+      FeedbackVectorICSlot slot, BailoutId ast_id, BailoutId return_id,
+      HValue* object, HValue* value, SmallMapList* types, Handle<String> name);
 
   HValue* BuildAllocateExternalElements(
       ExternalArrayType array_type,
       bool is_zero_byte_offset,
       HValue* buffer, HValue* byte_offset, HValue* length);
-  HValue* BuildAllocateFixedTypedArray(
-      ExternalArrayType array_type, size_t element_size,
-      ElementsKind fixed_elements_kind,
-      HValue* byte_length, HValue* length);
+  HValue* BuildAllocateFixedTypedArray(ExternalArrayType array_type,
+                                       size_t element_size,
+                                       ElementsKind fixed_elements_kind,
+                                       HValue* byte_length, HValue* length,
+                                       bool initialize);
 
   // TODO(adamk): Move all OrderedHashTable functions to their own class.
   HValue* BuildOrderedHashTableHashToBucket(HValue* hash, HValue* num_buckets);
@@ -2635,7 +2636,7 @@ class HOptimizedGraphBuilder : public HGraphBuilder, public AstVisitor {
              lookup_type_ == TRANSITION_TYPE);
       DCHECK(number_ < map->NumberOfOwnDescriptors());
       int field_index = map->instance_descriptors()->GetFieldIndex(number_);
-      return field_index - map->inobject_properties();
+      return field_index - map->GetInObjectProperties();
     }
 
     void LookupDescriptor(Map* map, Name* name) {
@@ -2708,7 +2709,8 @@ class HOptimizedGraphBuilder : public HGraphBuilder, public AstVisitor {
 
   HValue* BuildNamedAccess(PropertyAccessType access, BailoutId ast_id,
                            BailoutId reutrn_id, Expression* expr,
-                           HValue* object, Handle<String> name, HValue* value,
+                           FeedbackVectorICSlot slot, HValue* object,
+                           Handle<String> name, HValue* value,
                            bool is_uninitialized = false);
 
   void HandlePolymorphicCallNamed(Call* expr,
@@ -2744,10 +2746,8 @@ class HOptimizedGraphBuilder : public HGraphBuilder, public AstVisitor {
   HInstruction* BuildIncrement(bool returns_original_input,
                                CountOperation* expr);
   HInstruction* BuildKeyedGeneric(PropertyAccessType access_type,
-                                  Expression* expr,
-                                  HValue* object,
-                                  HValue* key,
-                                  HValue* value);
+                                  Expression* expr, FeedbackVectorICSlot slot,
+                                  HValue* object, HValue* key, HValue* value);
 
   HInstruction* TryBuildConsolidatedElementLoad(HValue* object,
                                                 HValue* key,
@@ -2764,24 +2764,21 @@ class HOptimizedGraphBuilder : public HGraphBuilder, public AstVisitor {
                                               PropertyAccessType access_type,
                                               KeyedAccessStoreMode store_mode);
 
-  HValue* HandlePolymorphicElementAccess(Expression* expr,
-                                         HValue* object,
-                                         HValue* key,
-                                         HValue* val,
-                                         SmallMapList* maps,
-                                         PropertyAccessType access_type,
-                                         KeyedAccessStoreMode store_mode,
-                                         bool* has_side_effects);
+  HValue* HandlePolymorphicElementAccess(
+      Expression* expr, FeedbackVectorICSlot slot, HValue* object, HValue* key,
+      HValue* val, SmallMapList* maps, PropertyAccessType access_type,
+      KeyedAccessStoreMode store_mode, bool* has_side_effects);
 
   HValue* HandleKeyedElementAccess(HValue* obj, HValue* key, HValue* val,
-                                   Expression* expr, BailoutId ast_id,
-                                   BailoutId return_id,
+                                   Expression* expr, FeedbackVectorICSlot slot,
+                                   BailoutId ast_id, BailoutId return_id,
                                    PropertyAccessType access_type,
                                    bool* has_side_effects);
 
   HInstruction* BuildNamedGeneric(PropertyAccessType access, Expression* expr,
-                                  HValue* object, Handle<String> name,
-                                  HValue* value, bool is_uninitialized = false);
+                                  FeedbackVectorICSlot slot, HValue* object,
+                                  Handle<Name> name, HValue* value,
+                                  bool is_uninitialized = false);
 
   HCheckMaps* AddCheckMap(HValue* object, Handle<Map> map);
 
@@ -2791,19 +2788,14 @@ class HOptimizedGraphBuilder : public HGraphBuilder, public AstVisitor {
                 HValue* object,
                 HValue* key);
 
-  void BuildStoreForEffect(Expression* expression,
-                           Property* prop,
-                           BailoutId ast_id,
-                           BailoutId return_id,
-                           HValue* object,
-                           HValue* key,
+  void BuildStoreForEffect(Expression* expression, Property* prop,
+                           FeedbackVectorICSlot slot, BailoutId ast_id,
+                           BailoutId return_id, HValue* object, HValue* key,
                            HValue* value);
 
-  void BuildStore(Expression* expression,
-                  Property* prop,
-                  BailoutId ast_id,
-                  BailoutId return_id,
-                  bool is_uninitialized = false);
+  void BuildStore(Expression* expression, Property* prop,
+                  FeedbackVectorICSlot slot, BailoutId ast_id,
+                  BailoutId return_id, bool is_uninitialized = false);
 
   HInstruction* BuildLoadNamedField(PropertyAccessInfo* info,
                                     HValue* checked_object);

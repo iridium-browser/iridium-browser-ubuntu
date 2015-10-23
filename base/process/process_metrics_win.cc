@@ -6,14 +6,31 @@
 
 #include <windows.h>
 #include <psapi.h>
+#include <winternl.h>
 
 #include "base/logging.h"
 #include "base/sys_info.h"
 
 namespace base {
+namespace {
 
 // System pagesize. This value remains constant on x86/64 architectures.
 const int PAGESIZE_KB = 4;
+
+typedef NTSTATUS(WINAPI* NTQUERYSYSTEMINFORMATION)(
+    SYSTEM_INFORMATION_CLASS SystemInformationClass,
+    PVOID SystemInformation,
+    ULONG SystemInformationLength,
+    PULONG ReturnLength);
+
+}  // namespace
+
+SystemMemoryInfoKB::SystemMemoryInfoKB() {
+  total = 0;
+  free = 0;
+  swap_total = 0;
+  swap_free = 0;
+}
 
 ProcessMetrics::~ProcessMetrics() { }
 
@@ -225,14 +242,11 @@ double ProcessMetrics::GetCPUUsage() {
   if (time_delta == 0)
     return 0;
 
-  // We add time_delta / 2 so the result is rounded.
-  int cpu = static_cast<int>((system_time_delta * 100 + time_delta / 2) /
-                             time_delta);
 
   last_system_time_ = system_time;
   last_cpu_time_ = time;
 
-  return cpu;
+  return static_cast<double>(system_time_delta * 100.0) / time_delta;
 }
 
 bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) const {
@@ -263,7 +277,7 @@ static BOOL InternalGetPerformanceInfo(
           GetProcAddress(psapi_dll, "GetPerformanceInfo"));
 
     if (!GetPerformanceInfo_func) {
-      // The function could be loaded!
+      // The function could not be loaded!
       memset(pPerformanceInformation, 0, cb);
       return FALSE;
     }
@@ -286,6 +300,26 @@ size_t GetSystemCommitCharge() {
 
 size_t GetPageSize() {
   return PAGESIZE_KB * 1024;
+}
+
+// This function uses the following mapping between MEMORYSTATUSEX and
+// SystemMemoryInfoKB:
+//   ullTotalPhys ==> total
+//   ullAvailPhys ==> free
+//   ullTotalPageFile ==> swap_total
+//   ullAvailPageFile ==> swap_free
+bool GetSystemMemoryInfo(SystemMemoryInfoKB* meminfo) {
+  MEMORYSTATUSEX mem_status;
+  mem_status.dwLength = sizeof(mem_status);
+  if (!::GlobalMemoryStatusEx(&mem_status))
+    return false;
+
+  meminfo->total = mem_status.ullTotalPhys / 1024;
+  meminfo->free = mem_status.ullAvailPhys / 1024;
+  meminfo->swap_total = mem_status.ullTotalPageFile / 1024;
+  meminfo->swap_free = mem_status.ullAvailPageFile / 1024;
+
+  return true;
 }
 
 }  // namespace base

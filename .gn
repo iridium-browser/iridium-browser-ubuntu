@@ -24,6 +24,7 @@ check_targets = [
   "//cc/*",
 
   #"//chrome/*",  # Epic number of errors.
+  "//chrome/installer/*",
   "//chromecast/*",
 
   # TODO(brettw): Fix http://crbug.com/460828 and uncomment the following
@@ -32,12 +33,37 @@ check_targets = [
   "//cloud_print/*",
 
   #"//components/*",  # Lots of errors.
+  "//components/app_modal/*",
+  "//components/autofill/*",
+  "//components/bookmarks/*",
+  "//components/google/*",
+  "//components/history/*",
+  "//components/html_viewer/*",
+  "//components/omnibox/*",
+  "//components/os_crypt/*",
+  "//components/pref_registry/*",
+  "//components/undo/*",
+  "//components/update_client/*",
+  "//components/url_formatter/*",
+  "//components/url_matcher/*",
+  "//components/user_manager/*",
+  "//components/user_prefs/*",
+  "//components/variations/*",
+  "//components/view_manager/*",
+  "//components/wallpaper/*",
+  "//components/web_cache/*",
+  "//components/webcrypto/*",
+  "//components/web_modal/*",
+  "//components/webdata/*",
+  "//components/webdata_services/*",
+
   #"//content/*",  # A whole lot of errors.
   "//courgette/*",
   "//crypto/*",
   "//data/*",
   "//dbus/*",
-  "//device/*",
+
+  #"//device/*",  # Ran into http://crbug.com/500761 adding dbus dependency
 
   #"//extensions/*",  # Lots of errors.
   #"//gin/*",  # Easy.
@@ -51,8 +77,11 @@ check_targets = [
   "//ipc/*",
 
   #"//jingle/*",
+  "//mandoline/*",
+
   #"//media/*",  # Lots of errors.
-  #"//mojo/*",
+  "mojo/*",
+
   #"//native_client/*",
   #"//net/*",  # Needs GN binary changes to work on Android.
 
@@ -99,10 +128,12 @@ exec_script_whitelist = [
   "//build/toolchain/gcc_toolchain.gni",
   "//build/toolchain/mac/BUILD.gn",
   "//build/toolchain/win/BUILD.gn",
+  "//build/util/version.gni",
   "//chrome/android/BUILD.gn",
   "//chrome/browser/BUILD.gn",
   "//chrome/browser/chromeos/BUILD.gn",
   "//chrome/browser/extensions/BUILD.gn",
+  "//chrome/browser/resources/chromeos/chromevox/BUILD.gn",
   "//chrome/browser/media/router/BUILD.gn",
   "//chrome/browser/ui/BUILD.gn",
   "//chrome/chrome_tests.gni",
@@ -116,11 +147,10 @@ exec_script_whitelist = [
   # TODO(dgn): Layer violation but breaks the build otherwise, see
   # https://crbug.com/474506
   "//clank/java/BUILD.gn",
-  "//clank/native/framework/BUILD.gn",
+  "//clank/native/BUILD.gn",
 
   "//components/domain_reliability/BUILD.gn",
   "//components/scheduler/scheduler.gni",
-  "//components/webui_generator/generator/wug.gni",
   "//content/browser/browser.gni",
   "//content/child/child.gni",
   "//content/common/common.gni",
@@ -128,6 +158,7 @@ exec_script_whitelist = [
   "//content/public/android/BUILD.gn",
   "//content/renderer/renderer.gni",
   "//content/test/BUILD.gn",
+  "//content/utility/utility.gni",
   "//extensions/common/api/schemas.gni",
   "//extensions/extensions.gni",
   "//extensions/shell/app_shell.gni",
@@ -158,6 +189,7 @@ exec_script_whitelist = [
   "//third_party/android_platform/BUILD.gn",
   "//third_party/angle/BUILD.gn",
   "//third_party/boringssl/BUILD.gn",
+  "//third_party/catapult/tracing/BUILD.gn",
   "//third_party/cld_2/BUILD.gn",
   "//third_party/cython/rules.gni",
   "//third_party/google_input_tools/inputview.gni",
@@ -188,5 +220,6 @@ exec_script_whitelist = [
   "//tools/gn/misc/emacs/gn.el",
   "//tools/gn/misc/vim/syntax/gn.vim",
   "//tools/gn/setup.cc",
+  "//ui/accessibility/BUILD.gn",
   "//ui/views/BUILD.gn",
 ]

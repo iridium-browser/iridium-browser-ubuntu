@@ -7,17 +7,25 @@
 import json
 import logging
 import os
-import sys
+import re
+import shutil
+import string
 import tempfile
 import time
 import zipfile
 
-from pylib import constants
+
+from pylib.base import base_test_result
 from pylib.base import test_run
 from pylib.remote.device import appurify_constants
 from pylib.remote.device import appurify_sanitized
 from pylib.remote.device import remote_device_helper
 from pylib.utils import zip_utils
+
+_DEVICE_OFFLINE_RE = re.compile('error: device not found')
+_LONG_MSG_RE = re.compile('longMsg=')
+_SHORT_MSG_RE = re.compile('shortMsg=')
+
 
 class RemoteDeviceTestRun(test_run.TestRun):
   """Run tests on a remote device."""
@@ -43,6 +51,7 @@ class RemoteDeviceTestRun(test_run.TestRun):
     self._test_id = ''
     self._results = ''
     self._test_run_id = ''
+    self._results_temp_dir = None
 
   #override
   def SetUp(self):
@@ -129,6 +138,8 @@ class RemoteDeviceTestRun(test_run.TestRun):
             self._env.token, self._test_run_id, reason='Test runner exiting.')
       remote_device_helper.TestHttpResponse(test_abort_res,
                                             'Unable to abort test.')
+    if self._results_temp_dir:
+      shutil.rmtree(self._results_temp_dir)
 
   def __enter__(self):
     """Set up the test run when used as a context manager."""
@@ -172,17 +183,29 @@ class RemoteDeviceTestRun(test_run.TestRun):
   def _DownloadTestResults(self, results_path):
     """Download the test results from remote device service.
 
+    Downloads results in temporary location, and then copys results
+    to results_path if results_path is not set to None.
+
     Args:
       results_path: Path to download appurify results zipfile.
+
+    Returns:
+      Path to downloaded file.
     """
-    if results_path:
-      logging.info('Downloading results to %s.' % results_path)
-      if not os.path.exists(os.path.dirname(results_path)):
-        os.makedirs(os.path.dirname(results_path))
+
+    if self._results_temp_dir is None:
+      self._results_temp_dir = tempfile.mkdtemp()
+      logging.info('Downloading results to %s.' % self._results_temp_dir)
       with appurify_sanitized.SanitizeLogging(self._env.verbose_count,
                                               logging.WARNING):
         appurify_sanitized.utils.wget(self._results['results']['url'],
-                                      results_path)
+                                      self._results_temp_dir + '/results')
+    if results_path:
+      logging.info('Copying results to %s', results_path)
+      if not os.path.exists(os.path.dirname(results_path)):
+        os.makedirs(os.path.dirname(results_path))
+      shutil.copy(self._results_temp_dir + '/results', results_path)
+    return self._results_temp_dir + '/results'
 
   def _GetTestStatus(self, test_run_id):
     """Checks the state of the test, and sets self._results
@@ -306,3 +329,61 @@ class RemoteDeviceTestRun(test_run.TestRun):
             self._env.token, config, self._test_id)
       remote_device_helper.TestHttpResponse(
           config_response, 'Unable to upload test config.')
+
+  def _LogLogcat(self, level=logging.CRITICAL):
+    """Prints out logcat downloaded from remote service.
+    Args:
+      level: logging level to print at.
+
+    Raises:
+      KeyError: If appurify_results/logcat.txt file cannot be found in
+                downloaded zip.
+    """
+    zip_file = self._DownloadTestResults(None)
+    with zipfile.ZipFile(zip_file) as z:
+      try:
+        logcat = z.read('appurify_results/logcat.txt')
+        printable_logcat = ''.join(c for c in logcat if c in string.printable)
+        for line in printable_logcat.splitlines():
+          logging.log(level, line)
+      except KeyError:
+        logging.error('No logcat found.')
+
+  def _LogAdbTraceLog(self):
+    zip_file = self._DownloadTestResults(None)
+    with zipfile.ZipFile(zip_file) as z:
+      adb_trace_log = z.read('adb_trace.log')
+      for line in adb_trace_log.splitlines():
+        logging.critical(line)
+
+  def _DidDeviceGoOffline(self):
+    zip_file = self._DownloadTestResults(None)
+    with zipfile.ZipFile(zip_file) as z:
+      adb_trace_log = z.read('adb_trace.log')
+      if any(_DEVICE_OFFLINE_RE.search(l) for l in adb_trace_log.splitlines()):
+        return True
+    return False
+
+  def _DetectPlatformErrors(self, results):
+    if not self._results['results']['pass']:
+      if any(_SHORT_MSG_RE.search(l)
+          for l in self._results['results']['output'].splitlines()):
+        self._LogLogcat()
+        for line in self._results['results']['output'].splitlines():
+          if _LONG_MSG_RE.search(line):
+            results.AddResult(base_test_result.BaseTestResult(
+                line.split('=')[1], base_test_result.ResultType.CRASH))
+            break
+        else:
+          results.AddResult(base_test_result.BaseTestResult(
+              'Unknown platform error detected.',
+              base_test_result.ResultType.UNKNOWN))
+      elif self._DidDeviceGoOffline():
+        self._LogLogcat()
+        self._LogAdbTraceLog()
+        raise remote_device_helper.RemoteDeviceError(
+            'Remote service unable to reach device.', is_infra_error=True)
+      else:
+        results.AddResult(base_test_result.BaseTestResult(
+            'Remote Service detected error.',
+            base_test_result.ResultType.UNKNOWN))

@@ -5,7 +5,7 @@
 #include "remoting/protocol/channel_dispatcher_base.h"
 
 #include "base/bind.h"
-#include "net/socket/stream_socket.h"
+#include "remoting/protocol/p2p_stream_socket.h"
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/session_config.h"
 #include "remoting/protocol/stream_channel_factory.h"
@@ -20,7 +20,6 @@ ChannelDispatcherBase::ChannelDispatcherBase(const char* channel_name)
 }
 
 ChannelDispatcherBase::~ChannelDispatcherBase() {
-  writer()->Close();
   if (channel_factory_)
     channel_factory_->CancelChannelCreation(channel_name_);
 }
@@ -32,6 +31,10 @@ void ChannelDispatcherBase::Init(Session* session,
   switch (config.transport) {
     case ChannelConfig::TRANSPORT_MUX_STREAM:
       channel_factory_ = session->GetMultiplexedChannelFactory();
+      break;
+
+    case ChannelConfig::TRANSPORT_QUIC_STREAM:
+      channel_factory_ = session->GetQuicChannelFactory();
       break;
 
     case ChannelConfig::TRANSPORT_STREAM:
@@ -49,7 +52,7 @@ void ChannelDispatcherBase::Init(Session* session,
 }
 
 void ChannelDispatcherBase::OnChannelReady(
-    scoped_ptr<net::StreamSocket> socket) {
+    scoped_ptr<P2PStreamSocket> socket) {
   if (!socket.get()) {
     event_handler_->OnChannelError(this, CHANNEL_CONNECTION_ERROR);
     return;
@@ -57,9 +60,10 @@ void ChannelDispatcherBase::OnChannelReady(
 
   channel_factory_ = nullptr;
   channel_ = socket.Pass();
-  writer_.Init(channel_.get(),
-               base::Bind(&ChannelDispatcherBase::OnReadWriteFailed,
-                          base::Unretained(this)));
+  writer_.Init(
+      base::Bind(&P2PStreamSocket::Write, base::Unretained(channel_.get())),
+      base::Bind(&ChannelDispatcherBase::OnReadWriteFailed,
+                 base::Unretained(this)));
   reader_.StartReading(channel_.get(),
                        base::Bind(&ChannelDispatcherBase::OnReadWriteFailed,
                                   base::Unretained(this)));

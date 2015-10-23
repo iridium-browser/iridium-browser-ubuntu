@@ -5,19 +5,20 @@
 #include "gpu/command_buffer/service/feature_info.h"
 
 #include <set>
+#include <vector>
 
 #include "base/command_line.h"
-#include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/command_buffer/service/texture_definition.h"
 #include "gpu/config/gpu_switches.h"
+#include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_fence.h"
 #include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_switches.h"
+#include "ui/gl/gl_version_info.h"
 
 #if !defined(OS_MACOSX)
 #include "ui/gl/gl_fence_egl.h"
@@ -56,8 +57,8 @@ class StringSet {
   }
 
   void Init(const std::string& str) {
-    std::vector<std::string> tokens;
-    Tokenize(str, " ", &tokens);
+    std::vector<std::string> tokens = base::SplitString(
+        str, " ", base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
     string_set_.insert(tokens.begin(), tokens.end());
   }
 
@@ -82,11 +83,11 @@ class StringSet {
 void StringToWorkarounds(
     const std::string& types, FeatureInfo::Workarounds* workarounds) {
   DCHECK(workarounds);
-  std::vector<std::string> pieces;
-  base::SplitString(types, ',', &pieces);
-  for (size_t i = 0; i < pieces.size(); ++i) {
+  for (const base::StringPiece& piece :
+       base::SplitStringPiece(
+           types, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
     int number = 0;
-    bool succeed = base::StringToInt(pieces[i], &number);
+    bool succeed = base::StringToInt(piece, &number);
     DCHECK(succeed);
     switch (number) {
 #define GPU_OP(type, name)    \
@@ -114,6 +115,9 @@ void StringToWorkarounds(
     workarounds->max_varying_vectors = 16;
   if (workarounds->max_vertex_uniform_vectors_256)
     workarounds->max_vertex_uniform_vectors = 256;
+
+  if (workarounds->max_copy_texture_chromium_size_262144)
+    workarounds->max_copy_texture_chromium_size = 262144;
 }
 
 }  // anonymous namespace.
@@ -163,9 +167,10 @@ FeatureInfo::FeatureFlags::FeatureFlags()
       blend_equation_advanced(false),
       blend_equation_advanced_coherent(false),
       ext_texture_rg(false),
+      chromium_image_ycbcr_422(false),
       enable_subscribe_uniform(false),
-      emulate_primitive_restart_fixed_index(false) {
-}
+      emulate_primitive_restart_fixed_index(false),
+      ext_render_buffer_format_bgra8888(false) {}
 
 FeatureInfo::Workarounds::Workarounds() :
 #define GPU_OP(type, name) name(false),
@@ -175,68 +180,45 @@ FeatureInfo::Workarounds::Workarounds() :
     max_cube_map_texture_size(0),
     max_fragment_uniform_vectors(0),
     max_varying_vectors(0),
-    max_vertex_uniform_vectors(0) {
+    max_vertex_uniform_vectors(0),
+    max_copy_texture_chromium_size(0) {
 }
 
 FeatureInfo::FeatureInfo() {
-  InitializeBasicState(*base::CommandLine::ForCurrentProcess());
+  InitializeBasicState(base::CommandLine::InitializedForCurrentProcess()
+                           ? base::CommandLine::ForCurrentProcess()
+                           : nullptr);
 }
 
 FeatureInfo::FeatureInfo(const base::CommandLine& command_line) {
-  InitializeBasicState(command_line);
+  InitializeBasicState(&command_line);
 }
 
-void FeatureInfo::InitializeBasicState(const base::CommandLine& command_line) {
-  if (command_line.HasSwitch(switches::kGpuDriverBugWorkarounds)) {
-    std::string types = command_line.GetSwitchValueASCII(
+void FeatureInfo::InitializeBasicState(const base::CommandLine* command_line) {
+  if (!command_line)
+    return;
+
+  if (command_line->HasSwitch(switches::kGpuDriverBugWorkarounds)) {
+    std::string types = command_line->GetSwitchValueASCII(
         switches::kGpuDriverBugWorkarounds);
     StringToWorkarounds(types, &workarounds_);
   }
   feature_flags_.enable_shader_name_hashing =
-      !command_line.HasSwitch(switches::kDisableShaderNameHashing);
+      !command_line->HasSwitch(switches::kDisableShaderNameHashing);
 
   feature_flags_.is_swiftshader =
-      (command_line.GetSwitchValueASCII(switches::kUseGL) == "swiftshader");
+      (command_line->GetSwitchValueASCII(switches::kUseGL) == "swiftshader");
 
   feature_flags_.enable_subscribe_uniform =
-      command_line.HasSwitch(switches::kEnableSubscribeUniformExtension);
+      command_line->HasSwitch(switches::kEnableSubscribeUniformExtension);
 
-  unsafe_es3_apis_enabled_ =
-      command_line.HasSwitch(switches::kEnableUnsafeES3APIs);
+  enable_unsafe_es3_apis_switch_ =
+      command_line->HasSwitch(switches::kEnableUnsafeES3APIs);
 
-  static const GLenum kAlphaTypes[] = {
-      GL_UNSIGNED_BYTE,
-  };
-  static const GLenum kRGBTypes[] = {
-      GL_UNSIGNED_BYTE,
-      GL_UNSIGNED_SHORT_5_6_5,
-  };
-  static const GLenum kRGBATypes[] = {
-      GL_UNSIGNED_BYTE,
-      GL_UNSIGNED_SHORT_4_4_4_4,
-      GL_UNSIGNED_SHORT_5_5_5_1,
-  };
-  static const GLenum kLuminanceTypes[] = {
-      GL_UNSIGNED_BYTE,
-  };
-  static const GLenum kLuminanceAlphaTypes[] = {
-      GL_UNSIGNED_BYTE,
-  };
-  static const FormatInfo kFormatTypes[] = {
-    { GL_ALPHA, kAlphaTypes, arraysize(kAlphaTypes), },
-    { GL_RGB, kRGBTypes, arraysize(kRGBTypes), },
-    { GL_RGBA, kRGBATypes, arraysize(kRGBATypes), },
-    { GL_LUMINANCE, kLuminanceTypes, arraysize(kLuminanceTypes), },
-    { GL_LUMINANCE_ALPHA, kLuminanceAlphaTypes,
-      arraysize(kLuminanceAlphaTypes), } ,
-  };
-  for (size_t ii = 0; ii < arraysize(kFormatTypes); ++ii) {
-    const FormatInfo& info = kFormatTypes[ii];
-    ValueValidator<GLenum>& validator = texture_format_validators_[info.format];
-    for (size_t jj = 0; jj < info.count; ++jj) {
-      validator.AddValue(info.types[jj]);
-    }
-  }
+  enable_gl_path_rendering_switch_ =
+      command_line->HasSwitch(switches::kEnableGLPathRendering);
+
+  unsafe_es3_apis_enabled_ = false;
 }
 
 bool FeatureInfo::Initialize() {
@@ -286,30 +268,10 @@ bool IsGL_REDSupportedOnFBOs() {
 
 void FeatureInfo::InitializeFeatures() {
   // Figure out what extensions to turn on.
-  StringSet extensions;
-  // We need to figure out how to query the extension string before we
-  // have a GLVersionInfo available.
+  StringSet extensions(gfx::GetGLExtensionsFromCurrentContext());
+
   const char* version_str =
       reinterpret_cast<const char*>(glGetString(GL_VERSION));
-  unsigned major_version, minor_version;
-  bool is_es, is_es3;
-  gfx::GLVersionInfo::ParseVersionString(
-      version_str, &major_version, &minor_version, &is_es, &is_es3);
-  if (!is_es && major_version >= 3) {
-    std::vector<std::string> exts;
-    GLint num_extensions = 0;
-    glGetIntegerv(GL_NUM_EXTENSIONS, &num_extensions);
-    for (GLint i = 0; i < num_extensions; ++i) {
-      const char* extension = reinterpret_cast<const char*>(
-          glGetStringi(GL_EXTENSIONS, i));
-      DCHECK(extension != NULL);
-      exts.push_back(extension);
-    }
-    extensions = exts;
-  } else {
-    extensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
-  }
-
   const char* renderer_str =
       reinterpret_cast<const char*>(glGetString(GL_RENDERER));
 
@@ -377,6 +339,11 @@ void FeatureInfo::InitializeFeatures() {
         GL_COMPRESSED_RGB_S3TC_DXT1_EXT);
     validators_.compressed_texture_format.AddValue(
         GL_COMPRESSED_RGBA_S3TC_DXT1_EXT);
+
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_RGB_S3TC_DXT1_EXT);
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_RGBA_S3TC_DXT1_EXT);
   }
 
   if (enable_dxt3) {
@@ -385,6 +352,8 @@ void FeatureInfo::InitializeFeatures() {
     // requires on the fly compression. The latter does not.
     AddExtensionString("GL_CHROMIUM_texture_compression_dxt3");
     validators_.compressed_texture_format.AddValue(
+        GL_COMPRESSED_RGBA_S3TC_DXT3_EXT);
+    validators_.texture_internal_format_storage.AddValue(
         GL_COMPRESSED_RGBA_S3TC_DXT3_EXT);
   }
 
@@ -397,6 +366,8 @@ void FeatureInfo::InitializeFeatures() {
     AddExtensionString("GL_CHROMIUM_texture_compression_dxt5");
     validators_.compressed_texture_format.AddValue(
         GL_COMPRESSED_RGBA_S3TC_DXT5_EXT);
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_RGBA_S3TC_DXT5_EXT);
   }
 
   bool have_atc = extensions.Contains("GL_AMD_compressed_ATC_texture") ||
@@ -407,6 +378,10 @@ void FeatureInfo::InitializeFeatures() {
     AddExtensionString("GL_AMD_compressed_ATC_texture");
     validators_.compressed_texture_format.AddValue(GL_ATC_RGB_AMD);
     validators_.compressed_texture_format.AddValue(
+        GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD);
+
+    validators_.texture_internal_format_storage.AddValue(GL_ATC_RGB_AMD);
+    validators_.texture_internal_format_storage.AddValue(
         GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD);
   }
 
@@ -446,8 +421,6 @@ void FeatureInfo::InitializeFeatures() {
   if (enable_depth_texture) {
     AddExtensionString("GL_CHROMIUM_depth_texture");
     AddExtensionString("GL_GOOGLE_depth_texture");
-    texture_format_validators_[GL_DEPTH_COMPONENT].AddValue(GL_UNSIGNED_SHORT);
-    texture_format_validators_[GL_DEPTH_COMPONENT].AddValue(GL_UNSIGNED_INT);
     validators_.texture_internal_format.AddValue(GL_DEPTH_COMPONENT);
     validators_.texture_format.AddValue(GL_DEPTH_COMPONENT);
     validators_.pixel_type.AddValue(GL_UNSIGNED_SHORT);
@@ -461,8 +434,6 @@ void FeatureInfo::InitializeFeatures() {
     AddExtensionString("GL_OES_packed_depth_stencil");
     feature_flags_.packed_depth24_stencil8 = true;
     if (enable_depth_texture) {
-      texture_format_validators_[GL_DEPTH_STENCIL]
-          .AddValue(GL_UNSIGNED_INT_24_8);
       validators_.texture_internal_format.AddValue(GL_DEPTH_STENCIL);
       validators_.texture_format.AddValue(GL_DEPTH_STENCIL);
       validators_.pixel_type.AddValue(GL_UNSIGNED_INT_24_8);
@@ -502,8 +473,6 @@ void FeatureInfo::InitializeFeatures() {
         extensions.Contains("GL_OES_rgb8_rgba8")) &&
       extensions.Contains("GL_EXT_sRGB")) || gfx::HasDesktopGLFeatures()) {
     AddExtensionString("GL_EXT_sRGB");
-    texture_format_validators_[GL_SRGB_EXT].AddValue(GL_UNSIGNED_BYTE);
-    texture_format_validators_[GL_SRGB_ALPHA_EXT].AddValue(GL_UNSIGNED_BYTE);
     validators_.texture_internal_format.AddValue(GL_SRGB_EXT);
     validators_.texture_internal_format.AddValue(GL_SRGB_ALPHA_EXT);
     validators_.texture_format.AddValue(GL_SRGB_EXT);
@@ -522,7 +491,7 @@ void FeatureInfo::InitializeFeatures() {
   // Check if we should allow GL_EXT_texture_format_BGRA8888
   if (extensions.Contains("GL_EXT_texture_format_BGRA8888") ||
       enable_immutable_texture_format_bgra_on_es3 ||
-      extensions.Contains("GL_EXT_bgra")) {
+      !gl_version_info_->is_es) {
     enable_texture_format_bgra8888 = true;
   }
 
@@ -540,7 +509,6 @@ void FeatureInfo::InitializeFeatures() {
   if (enable_texture_format_bgra8888) {
     feature_flags_.ext_texture_format_bgra8888 = true;
     AddExtensionString("GL_EXT_texture_format_BGRA8888");
-    texture_format_validators_[GL_BGRA_EXT].AddValue(GL_UNSIGNED_BYTE);
     validators_.texture_internal_format.AddValue(GL_BGRA_EXT);
     validators_.texture_format.AddValue(GL_BGRA_EXT);
   }
@@ -551,6 +519,7 @@ void FeatureInfo::InitializeFeatures() {
   }
 
   if (enable_render_buffer_bgra) {
+    feature_flags_.ext_render_buffer_format_bgra8888 = true;
     AddExtensionString("GL_CHROMIUM_renderbuffer_format_BGRA8888");
     validators_.render_buffer_format.AddValue(GL_BGRA8_EXT);
   }
@@ -562,10 +531,11 @@ void FeatureInfo::InitializeFeatures() {
   }
 
   // Check if we should allow GL_OES_texture_npot
-  if (gl_version_info_->is_es3 ||
-      gl_version_info_->is_desktop_core_profile ||
-      extensions.Contains("GL_ARB_texture_non_power_of_two") ||
-      extensions.Contains("GL_OES_texture_npot")) {
+  if (!disallowed_features_.npot_support &&
+      (gl_version_info_->is_es3 ||
+       gl_version_info_->is_desktop_core_profile ||
+       extensions.Contains("GL_ARB_texture_non_power_of_two") ||
+       extensions.Contains("GL_OES_texture_npot"))) {
     AddExtensionString("GL_OES_texture_npot");
     feature_flags_.npot_ok = true;
   }
@@ -615,11 +585,6 @@ void FeatureInfo::InitializeFeatures() {
   }
 
   if (enable_texture_float) {
-    texture_format_validators_[GL_ALPHA].AddValue(GL_FLOAT);
-    texture_format_validators_[GL_RGB].AddValue(GL_FLOAT);
-    texture_format_validators_[GL_RGBA].AddValue(GL_FLOAT);
-    texture_format_validators_[GL_LUMINANCE].AddValue(GL_FLOAT);
-    texture_format_validators_[GL_LUMINANCE_ALPHA].AddValue(GL_FLOAT);
     validators_.pixel_type.AddValue(GL_FLOAT);
     validators_.read_pixel_type.AddValue(GL_FLOAT);
     AddExtensionString("GL_OES_texture_float");
@@ -629,11 +594,6 @@ void FeatureInfo::InitializeFeatures() {
   }
 
   if (enable_texture_half_float) {
-    texture_format_validators_[GL_ALPHA].AddValue(GL_HALF_FLOAT_OES);
-    texture_format_validators_[GL_RGB].AddValue(GL_HALF_FLOAT_OES);
-    texture_format_validators_[GL_RGBA].AddValue(GL_HALF_FLOAT_OES);
-    texture_format_validators_[GL_LUMINANCE].AddValue(GL_HALF_FLOAT_OES);
-    texture_format_validators_[GL_LUMINANCE_ALPHA].AddValue(GL_HALF_FLOAT_OES);
     validators_.pixel_type.AddValue(GL_HALF_FLOAT_OES);
     validators_.read_pixel_type.AddValue(GL_HALF_FLOAT_OES);
     AddExtensionString("GL_OES_texture_half_float");
@@ -745,10 +705,9 @@ void FeatureInfo::InitializeFeatures() {
     validators_.render_buffer_format.AddValue(GL_DEPTH_COMPONENT24);
   }
 
-  if (!workarounds_.disable_oes_standard_derivatives &&
-      (gl_version_info_->is_es3 ||
-       extensions.Contains("GL_OES_standard_derivatives") ||
-       gfx::HasDesktopGLFeatures())) {
+  if (gl_version_info_->is_es3 ||
+      extensions.Contains("GL_OES_standard_derivatives") ||
+      gfx::HasDesktopGLFeatures()) {
     AddExtensionString("GL_OES_standard_derivatives");
     feature_flags_.oes_standard_derivatives = true;
     validators_.hint_target.AddValue(GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES);
@@ -768,6 +727,7 @@ void FeatureInfo::InitializeFeatures() {
     AddExtensionString("GL_OES_compressed_ETC1_RGB8_texture");
     feature_flags_.oes_compressed_etc1_rgb8_texture = true;
     validators_.compressed_texture_format.AddValue(GL_ETC1_RGB8_OES);
+    validators_.texture_internal_format_storage.AddValue(GL_ETC1_RGB8_OES);
   }
 
   if (extensions.Contains("GL_AMD_compressed_ATC_texture")) {
@@ -777,6 +737,13 @@ void FeatureInfo::InitializeFeatures() {
     validators_.compressed_texture_format.AddValue(
         GL_ATC_RGBA_EXPLICIT_ALPHA_AMD);
     validators_.compressed_texture_format.AddValue(
+        GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD);
+
+    validators_.texture_internal_format_storage.AddValue(
+        GL_ATC_RGB_AMD);
+    validators_.texture_internal_format_storage.AddValue(
+        GL_ATC_RGBA_EXPLICIT_ALPHA_AMD);
+    validators_.texture_internal_format_storage.AddValue(
         GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD);
   }
 
@@ -790,6 +757,15 @@ void FeatureInfo::InitializeFeatures() {
         GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG);
     validators_.compressed_texture_format.AddValue(
         GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG);
+
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG);
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG);
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG);
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG);
   }
 
   // Ideally we would only expose this extension on Mac OS X, to
@@ -801,12 +777,11 @@ void FeatureInfo::InitializeFeatures() {
       gl_version_info_->is_desktop_core_profile) {
     AddExtensionString("GL_ARB_texture_rectangle");
     feature_flags_.arb_texture_rectangle = true;
+    // Rectangle textures are used as samplers via glBindTexture, framebuffer
+    // textures via glFramebufferTexture2D, and copy destinations via
+    // glCopyPixels.
     validators_.texture_bind_target.AddValue(GL_TEXTURE_RECTANGLE_ARB);
-    // For the moment we don't add this enum to the texture_target
-    // validator. This implies that the only way to get image data into a
-    // rectangular texture is via glTexImageIOSurface2DCHROMIUM, which is
-    // just fine since again we don't want applications depending on this
-    // extension.
+    validators_.texture_target.AddValue(GL_TEXTURE_RECTANGLE_ARB);
     validators_.get_tex_param_target.AddValue(GL_TEXTURE_RECTANGLE_ARB);
     validators_.g_l_state.AddValue(GL_TEXTURE_BINDING_RECTANGLE_ARB);
   }
@@ -814,6 +789,11 @@ void FeatureInfo::InitializeFeatures() {
 #if defined(OS_MACOSX)
   AddExtensionString("GL_CHROMIUM_iosurface");
 #endif
+
+  if (extensions.Contains("GL_APPLE_ycbcr_422")) {
+    AddExtensionString("GL_CHROMIUM_ycbcr_422_image");
+    feature_flags_.chromium_image_ycbcr_422 = true;
+  }
 
   // TODO(gman): Add support for these extensions.
   //     GL_OES_depth32
@@ -882,10 +862,9 @@ void FeatureInfo::InitializeFeatures() {
   bool have_arb_occlusion_query =
       extensions.Contains("GL_ARB_occlusion_query");
 
-  if (!workarounds_.disable_ext_occlusion_query &&
-      (have_ext_occlusion_query_boolean ||
-       have_arb_occlusion_query2 ||
-       have_arb_occlusion_query)) {
+  if (have_ext_occlusion_query_boolean ||
+      have_arb_occlusion_query2 ||
+      have_arb_occlusion_query) {
     AddExtensionString("GL_EXT_occlusion_query_boolean");
     feature_flags_.occlusion_query_boolean = true;
     feature_flags_.use_arb_occlusion_query2_for_occlusion_query_boolean =
@@ -969,16 +948,6 @@ void FeatureInfo::InitializeFeatures() {
     feature_flags_.ext_shader_texture_lod = true;
   }
 
-#if !defined(OS_MACOSX)
-  if (workarounds_.disable_egl_khr_fence_sync) {
-    gfx::g_driver_egl.ext.b_EGL_KHR_fence_sync = false;
-  }
-  if (workarounds_.disable_egl_khr_wait_sync) {
-    gfx::g_driver_egl.ext.b_EGL_KHR_wait_sync = false;
-  }
-#endif
-  if (workarounds_.disable_arb_sync)
-    gfx::g_driver_gl.ext.b_GL_ARB_sync = false;
   bool ui_gl_fence_works = gfx::GLFence::IsSupported();
   UMA_HISTOGRAM_BOOLEAN("GPU.FenceSupport", ui_gl_fence_works);
 
@@ -1058,14 +1027,18 @@ void FeatureInfo::InitializeFeatures() {
     }
   }
 
-  if (extensions.Contains("GL_NV_path_rendering")) {
-    if (extensions.Contains("GL_EXT_direct_state_access") ||
-        gl_version_info_->is_es3) {
-      AddExtensionString("GL_CHROMIUM_path_rendering");
-      feature_flags_.chromium_path_rendering = true;
-      validators_.g_l_state.AddValue(GL_PATH_MODELVIEW_MATRIX_CHROMIUM);
-      validators_.g_l_state.AddValue(GL_PATH_PROJECTION_MATRIX_CHROMIUM);
-    }
+  if (enable_gl_path_rendering_switch_ &&
+      !workarounds_.disable_gl_path_rendering &&
+      extensions.Contains("GL_NV_path_rendering") &&
+      (extensions.Contains("GL_EXT_direct_state_access") ||
+       gl_version_info_->is_es3)) {
+    AddExtensionString("GL_CHROMIUM_path_rendering");
+    feature_flags_.chromium_path_rendering = true;
+    validators_.g_l_state.AddValue(GL_PATH_MODELVIEW_MATRIX_CHROMIUM);
+    validators_.g_l_state.AddValue(GL_PATH_PROJECTION_MATRIX_CHROMIUM);
+    validators_.g_l_state.AddValue(GL_PATH_STENCIL_FUNC_CHROMIUM);
+    validators_.g_l_state.AddValue(GL_PATH_STENCIL_REF_CHROMIUM);
+    validators_.g_l_state.AddValue(GL_PATH_STENCIL_VALUE_MASK_CHROMIUM);
   }
 
   if ((gl_version_info_->is_es3 || gl_version_info_->is_desktop_core_profile ||
@@ -1085,18 +1058,6 @@ void FeatureInfo::InitializeFeatures() {
     validators_.read_pixel_format.AddValue(GL_RG_EXT);
     validators_.render_buffer_format.AddValue(GL_R8_EXT);
     validators_.render_buffer_format.AddValue(GL_RG8_EXT);
-
-    texture_format_validators_[GL_RED_EXT].AddValue(GL_UNSIGNED_BYTE);
-    texture_format_validators_[GL_RG_EXT].AddValue(GL_UNSIGNED_BYTE);
-
-    if (enable_texture_float) {
-      texture_format_validators_[GL_RED_EXT].AddValue(GL_FLOAT);
-      texture_format_validators_[GL_RG_EXT].AddValue(GL_FLOAT);
-    }
-    if (enable_texture_half_float) {
-      texture_format_validators_[GL_RED_EXT].AddValue(GL_HALF_FLOAT_OES);
-      texture_format_validators_[GL_RG_EXT].AddValue(GL_HALF_FLOAT_OES);
-    }
   }
   UMA_HISTOGRAM_BOOLEAN("GPU.TextureRG", feature_flags_.ext_texture_rg);
 
@@ -1119,7 +1080,7 @@ void FeatureInfo::InitializeFeatures() {
 }
 
 bool FeatureInfo::IsES3Capable() const {
-  if (!unsafe_es3_apis_enabled_)
+  if (!enable_unsafe_es3_apis_switch_)
     return false;
   if (gl_version_info_)
     return gl_version_info_->IsES3Capable();
@@ -1183,6 +1144,8 @@ void FeatureInfo::EnableES3Validators() {
         kDrawBuffers + max_draw_buffers,
         kTotalDrawBufferEnums - max_draw_buffers);
   }
+
+  unsafe_es3_apis_enabled_ = true;
 }
 
 void FeatureInfo::AddExtensionString(const char* s) {

@@ -132,7 +132,7 @@ PluginURLFetcher::PluginURLFetcher(PluginStreamUrl* plugin_stream,
       if (!request_info.headers.empty())
         request_info.headers += "\r\n";
       request_info.headers += names[i] + ": " + values[i];
-      if (LowerCaseEqualsASCII(names[i], "content-type"))
+      if (base::LowerCaseEqualsASCII(names[i], "content-type"))
         content_type_found = true;
     }
 
@@ -250,7 +250,8 @@ void PluginURLFetcher::OnReceivedResponse(const ResourceResponseInfo& info) {
     if (response_code == 206) {
       blink::WebURLResponse response;
       response.initialize();
-      WebURLLoaderImpl::PopulateURLResponse(url_, info, &response);
+      WebURLLoaderImpl::PopulateURLResponse(url_, info, &response,
+                                            false /* report_security_info */);
 
       std::string multipart_boundary;
       if (MultipartResponseDelegate::ReadMultipartBoundary(
@@ -328,14 +329,16 @@ void PluginURLFetcher::OnDownloadedData(int len,
                                         int encoded_data_length) {
 }
 
-void PluginURLFetcher::OnReceivedData(const char* data,
-                                      int data_length,
-                                      int encoded_data_length) {
+void PluginURLFetcher::OnReceivedData(scoped_ptr<ReceivedData> data) {
+  const char* payload = data->payload();
+  int data_length = data->length();
+  int encoded_data_length = data->encoded_length();
   if (!plugin_stream_)
     return;
 
   if (multipart_delegate_) {
-    multipart_delegate_->OnReceivedData(data, data_length, encoded_data_length);
+    multipart_delegate_->OnReceivedData(payload, data_length,
+                                        encoded_data_length);
   } else {
     int64 offset = data_offset_;
     data_offset_ += data_length;
@@ -345,10 +348,10 @@ void PluginURLFetcher::OnReceivedData(const char* data,
       // ResourceDispatcher it's not mapped for write access in this process.
       // http://crbug.com/308466.
       scoped_ptr<char[]> data_copy(new char[data_length]);
-      memcpy(data_copy.get(), data, data_length);
+      memcpy(data_copy.get(), payload, data_length);
       plugin_stream_->DidReceiveData(data_copy.get(), data_length, offset);
     } else {
-      plugin_stream_->DidReceiveData(data, data_length, offset);
+      plugin_stream_->DidReceiveData(payload, data_length, offset);
     }
     // DANGER: this instance may be deleted at this point.
   }
@@ -378,9 +381,7 @@ void PluginURLFetcher::OnCompletedRequest(
 
 void PluginURLFetcher::OnReceivedCompletedResponse(
     const content::ResourceResponseInfo& info,
-    const char* data,
-    int data_length,
-    int encoded_data_length,
+    scoped_ptr<ReceivedData> data,
     int error_code,
     bool was_ignored_by_handler,
     bool stale_copy_in_cache,
@@ -394,8 +395,8 @@ void PluginURLFetcher::OnReceivedCompletedResponse(
 
   if (!weak_this)
     return;
-  if (data_length)
-    OnReceivedData(data, data_length, encoded_data_length);
+  if (data)
+    OnReceivedData(data.Pass());
 
   if (!weak_this)
     return;

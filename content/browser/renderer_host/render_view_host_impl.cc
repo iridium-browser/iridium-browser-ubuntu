@@ -214,6 +214,7 @@ RenderViewHostImpl::RenderViewHostImpl(
       waiting_for_drag_context_response_(false),
       enabled_bindings_(0),
       page_id_(-1),
+      nav_entry_id_(0),
       is_active_(!swapped_out),
       is_swapped_out_(swapped_out),
       main_frame_routing_id_(main_frame_routing_id),
@@ -227,6 +228,7 @@ RenderViewHostImpl::RenderViewHostImpl(
   DCHECK(instance_.get());
   CHECK(delegate_);  // http://crbug.com/82827
 
+  GetProcess()->AddObserver(this);
   GetProcess()->EnableSendQueue();
 
   if (ResourceDispatcherHostImpl::Get()) {
@@ -261,6 +263,7 @@ RenderViewHostImpl::~RenderViewHostImpl() {
   }
 
   delegate_->RenderViewDeleted(this);
+  GetProcess()->RemoveObserver(this);
 }
 
 RenderViewHostDelegate* RenderViewHostImpl::GetDelegate() const {
@@ -272,10 +275,10 @@ SiteInstanceImpl* RenderViewHostImpl::GetSiteInstance() const {
 }
 
 bool RenderViewHostImpl::CreateRenderView(
-    const base::string16& frame_name,
-    int opener_route_id,
+    int opener_frame_route_id,
     int proxy_route_id,
     int32 max_page_id,
+    const FrameReplicationState& replicated_frame_state,
     bool window_was_created_with_opener) {
   TRACE_EVENT0("renderer_host,navigation",
                "RenderViewHostImpl::CreateRenderView");
@@ -313,10 +316,10 @@ bool RenderViewHostImpl::CreateRenderView(
   params.surface_id = surface_id();
   params.session_storage_namespace_id =
       delegate_->GetSessionStorageNamespace(instance_.get())->id();
-  params.frame_name = frame_name;
   // Ensure the RenderView sets its opener correctly.
-  params.opener_route_id = opener_route_id;
+  params.opener_frame_route_id = opener_frame_route_id;
   params.swapped_out = !is_active_;
+  params.replicated_frame_state = replicated_frame_state;
   params.proxy_routing_id = proxy_route_id;
   params.hidden = is_hidden();
   params.never_visible = delegate_->IsNeverVisible();
@@ -326,11 +329,6 @@ bool RenderViewHostImpl::CreateRenderView(
   params.min_size = min_size_for_auto_resize();
   params.max_size = max_size_for_auto_resize();
   GetResizeParams(&params.initial_size);
-  if (!is_active_) {
-    params.replicated_frame_state =
-        static_cast<RenderFrameHostImpl*>(GetMainFrame())->frame_tree_node()
-            ->current_replication_state();
-  }
 
   if (!Send(new ViewMsg_New(params)))
     return false;
@@ -345,16 +343,18 @@ bool RenderViewHostImpl::CreateRenderView(
 
   // If it's enabled, tell the renderer to set up the Javascript bindings for
   // sending messages back to the browser.
-  if (GetProcess()->IsIsolatedGuest())
+  if (GetProcess()->IsForGuestsOnly())
     DCHECK_EQ(0, enabled_bindings_);
   Send(new ViewMsg_AllowBindings(GetRoutingID(), enabled_bindings_));
   // Let our delegate know that we created a RenderView.
   delegate_->RenderViewCreated(this);
 
-  // Since this method creates the main RenderFrame in the renderer process,
+  // Since this method can create the main RenderFrame in the renderer process,
   // set the proper state on its corresponding RenderFrameHost.
-  RenderFrameHostImpl::FromID(GetProcess()->GetID(), main_frame_routing_id_)
-      ->SetRenderFrameCreated(true);
+  if (main_frame_routing_id_ != MSG_ROUTING_NONE) {
+    RenderFrameHostImpl::FromID(GetProcess()->GetID(), main_frame_routing_id_)
+        ->SetRenderFrameCreated(true);
+  }
 
   return true;
 }
@@ -430,18 +430,11 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs() {
   prefs.accelerated_2d_canvas_msaa_sample_count =
       atoi(command_line.GetSwitchValueASCII(
       switches::kAcceleratedCanvas2dMSAASampleCount).c_str());
-  // Text blobs rely on impl-side painting for proper LCD handling.
-  prefs.text_blobs_enabled = command_line.HasSwitch(switches::kForceTextBlobs)
-      || (content::IsImplSidePaintingEnabled() &&
-          !command_line.HasSwitch(switches::kDisableTextBlobs));
-  prefs.region_based_columns_enabled =
-      command_line.HasSwitch(switches::kEnableRegionBasedColumns);
 
-  if (IsPinchVirtualViewportEnabled()) {
-    prefs.pinch_virtual_viewport_enabled = true;
-    prefs.pinch_overlay_scrollbar_thickness = 10;
-  }
+  prefs.pinch_overlay_scrollbar_thickness = 10;
   prefs.use_solid_color_scrollbars = ui::IsOverlayScrollbarEnabled();
+  prefs.invert_viewport_scroll_order =
+      command_line.HasSwitch(switches::kInvertViewportScrollOrder);
 
 #if defined(OS_ANDROID)
   // On Android, user gestures are normally required, unless that requirement
@@ -471,8 +464,15 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs() {
   prefs.touch_adjustment_enabled =
       !command_line.HasSwitch(switches::kDisableTouchAdjustment);
 
+  const std::string slimming_group =
+      base::FieldTrialList::FindFullName("SlimmingPaint");
   prefs.slimming_paint_enabled =
-      command_line.HasSwitch(switches::kEnableSlimmingPaint);
+      (command_line.HasSwitch(switches::kEnableSlimmingPaint) ||
+      !command_line.HasSwitch(switches::kDisableSlimmingPaint)) &&
+      (slimming_group != "DisableSlimmingPaint");
+  prefs.slimming_paint_v2_enabled =
+      prefs.slimming_paint_enabled &&
+      command_line.HasSwitch(switches::kEnableSlimmingPaintV2);
 
 #if defined(OS_MACOSX) || defined(OS_CHROMEOS)
   bool default_enable_scroll_animator = true;
@@ -510,10 +510,6 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs() {
   prefs.main_frame_resizes_are_orientation_changes =
       command_line.HasSwitch(switches::kMainFrameResizesAreOrientationChanges);
 
-  prefs.deferred_image_decoding_enabled =
-      command_line.HasSwitch(switches::kEnableDeferredImageDecoding) ||
-      content::IsImplSidePaintingEnabled();
-
   prefs.image_color_profiles_enabled =
       command_line.HasSwitch(switches::kEnableImageColorProfiles);
 
@@ -528,6 +524,16 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs() {
 
   prefs.strict_powerful_feature_restrictions = command_line.HasSwitch(
       switches::kEnableStrictPowerfulFeatureRestrictions);
+
+  const std::string blockable_mixed_content_group =
+      base::FieldTrialList::FindFullName("BlockableMixedContent");
+  prefs.strictly_block_blockable_mixed_content =
+      blockable_mixed_content_group == "StrictlyBlockBlockableMixedContent";
+
+  const std::string plugin_mixed_content_status =
+      base::FieldTrialList::FindFullName("PluginMixedContentStatus");
+  prefs.block_mixed_plugin_content =
+      plugin_mixed_content_status == "BlockableMixedContent";
 
   prefs.v8_cache_options = GetV8CacheOptions();
 
@@ -584,6 +590,16 @@ void RenderViewHostImpl::RequestFindMatchRects(int current_version) {
   Send(new ViewMsg_FindMatchRects(GetRoutingID(), current_version));
 }
 #endif
+
+void RenderViewHostImpl::RenderProcessExited(RenderProcessHost* host,
+                                             base::TerminationStatus status,
+                                             int exit_code) {
+  if (!renderer_initialized())
+    return;
+
+  RenderWidgetHostImpl::RendererExited(status, exit_code);
+  delegate_->RenderViewTerminated(this, status, exit_code);
+}
 
 void RenderViewHostImpl::DragTargetDragEnter(
     const DropData& drop_data,
@@ -723,7 +739,7 @@ RenderFrameHost* RenderViewHostImpl::GetMainFrame() {
 
 void RenderViewHostImpl::AllowBindings(int bindings_flags) {
   // Never grant any bindings to browser plugin guests.
-  if (GetProcess()->IsIsolatedGuest()) {
+  if (GetProcess()->IsForGuestsOnly()) {
     NOTREACHED() << "Never grant bindings to a guest process.";
     return;
   }
@@ -909,7 +925,6 @@ bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
                         OnRouteCloseEvent)
     IPC_MESSAGE_HANDLER(DragHostMsg_StartDragging, OnStartDragging)
     IPC_MESSAGE_HANDLER(DragHostMsg_UpdateDragCursor, OnUpdateDragCursor)
-    IPC_MESSAGE_HANDLER(DragHostMsg_TargetDrop_ACK, OnTargetDropACK)
     IPC_MESSAGE_HANDLER(ViewHostMsg_TakeFocus, OnTakeFocus)
     IPC_MESSAGE_HANDLER(ViewHostMsg_FocusedNodeChanged, OnFocusedNodeChanged)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ClosePage_ACK, OnClosePageACK)
@@ -981,9 +996,8 @@ void RenderViewHostImpl::CreateNewWindow(
   GetProcess()->FilterURL(false, &validated_params.opener_url);
   GetProcess()->FilterURL(true, &validated_params.opener_security_origin);
 
-  delegate_->CreateNewWindow(
-      GetProcess()->GetID(), route_id, main_frame_route_id, validated_params,
-      session_storage_namespace);
+  delegate_->CreateNewWindow(GetSiteInstance(), route_id, main_frame_route_id,
+                             validated_params, session_storage_namespace);
 }
 
 void RenderViewHostImpl::CreateNewWidget(int route_id,
@@ -999,10 +1013,8 @@ void RenderViewHostImpl::OnShowView(int route_id,
                                     WindowOpenDisposition disposition,
                                     const gfx::Rect& initial_rect,
                                     bool user_gesture) {
-  if (is_active_) {
-    delegate_->ShowCreatedWindow(
-        route_id, disposition, initial_rect, user_gesture);
-  }
+  delegate_->ShowCreatedWindow(route_id, disposition, initial_rect,
+                               user_gesture);
   Send(new ViewMsg_Move_ACK(route_id));
 }
 
@@ -1158,13 +1170,6 @@ void RenderViewHostImpl::OnUpdateDragCursor(WebDragOperation current_op) {
   RenderViewHostDelegateView* view = delegate_->GetDelegateView();
   if (view)
     view->UpdateDragCursor(current_op);
-}
-
-void RenderViewHostImpl::OnTargetDropACK() {
-  NotificationService::current()->Notify(
-      NOTIFICATION_RENDER_VIEW_HOST_DID_RECEIVE_DRAG_TARGET_DROP_ACK,
-      Source<RenderViewHost>(this),
-      NotificationService::NoDetails());
 }
 
 void RenderViewHostImpl::OnTakeFocus(bool reverse) {

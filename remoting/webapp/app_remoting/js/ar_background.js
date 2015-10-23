@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/** @type {AppWindow} */
+/** @type {chrome.app.window.AppWindow} */
 var mainWindow = null;
 
 /**
@@ -15,7 +15,7 @@ var mainWindow = null;
  */
 var contextMenuIds = {};
 
-/** @param {LaunchData=} opt_launchData */
+/** @param {chrome.app.runtime.LaunchData=} opt_launchData */
 function createWindow(opt_launchData) {
   // If there is already a window, give it focus.
   if (mainWindow) {
@@ -31,7 +31,9 @@ function createWindow(opt_launchData) {
     frame: remoting.platformIsMac() ? 'chrome' : 'none',
     bounds: {
       width: typed_screen.availWidth,
-      height: typed_screen.availHeight
+      height: typed_screen.availHeight,
+      left: undefined,
+      top: undefined
     }
   };
 
@@ -44,7 +46,7 @@ function createWindow(opt_launchData) {
     contextMenuIds = {};
   };
 
-  /** @param {AppWindow} appWindow */
+  /** @param {chrome.app.window.AppWindow} appWindow */
   function onCreate(appWindow) {
     // Set the global window.
     mainWindow = appWindow;
@@ -53,7 +55,10 @@ function createWindow(opt_launchData) {
     appWindow.onClosed.addListener(onClosed);
   };
 
-  chrome.app.window.create('main.html', windowAttributes, onCreate);
+  // TODO(garykac) Add code to switch between dev and prod shared modules.
+  chrome.app.window.create(
+      '_modules/koejkfhmphamcgafjmkellhnekdkopod/main.html',
+      windowAttributes, onCreate);
 };
 
 /** @param {Event} event */

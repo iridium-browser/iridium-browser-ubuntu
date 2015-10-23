@@ -5,6 +5,7 @@ add_subdirectory(pqueue)
 add_library(
   ssl
 
+  custom_extensions.c
   d1_both.c
   d1_clnt.c
   d1_lib.c
@@ -19,6 +20,7 @@ add_library(
   s3_meth.c
   s3_pkt.c
   s3_srvr.c
+  ssl_aead_ctx.c
   ssl_algs.c
   ssl_asn1.c
   ssl_cert.c
@@ -30,7 +32,6 @@ add_library(
   ssl_txt.c
   t1_enc.c
   t1_lib.c
-  t1_reneg.c
 
   $<TARGET_OBJECTS:pqueue>
 )
@@ -39,6 +40,8 @@ add_executable(
   ssl_test
 
   ssl_test.cc
+
+  $<TARGET_OBJECTS:test_support>
 )
 
 target_link_libraries(ssl_test ssl crypto)

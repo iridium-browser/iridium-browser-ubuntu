@@ -12,9 +12,9 @@ import android.security.KeyChainAliasCallback;
 import android.security.KeyChainException;
 import android.util.Log;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chrome.browser.smartcard.PKCS11AuthenticationManager;
 import org.chromium.net.AndroidPrivateKey;
 import org.chromium.net.DefaultAndroidKeyStore;
@@ -266,7 +266,7 @@ public class SSLClientCertificateRequest {
 
         final Context appContext = activity.getApplicationContext();
         final PKCS11AuthenticationManager smartCardAuthManager =
-                ((ChromiumApplication) appContext).getPKCS11AuthenticationManager();
+                ((ChromeApplication) appContext).getPKCS11AuthenticationManager();
         if (smartCardAuthManager.isPKCS11AuthEnabled()) {
             // Smart card support is available, prompt the user whether to use it or Android system
             // store.

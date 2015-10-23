@@ -10,6 +10,7 @@
 #include "core/animation/EffectModel.h"
 #include "core/animation/PropertyHandle.h"
 #include "core/animation/animatable/AnimatableValue.h"
+#include "wtf/Allocator.h"
 
 namespace blink {
 
@@ -20,6 +21,8 @@ class ComputedStyle;
 
 // FIXME: Make Keyframe immutable
 class CORE_EXPORT Keyframe : public RefCountedWillBeGarbageCollectedFinalized<Keyframe> {
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(Keyframe);
+    WTF_MAKE_NONCOPYABLE(Keyframe);
 public:
     virtual ~Keyframe() { }
 
@@ -53,11 +56,15 @@ public:
     DEFINE_INLINE_VIRTUAL_TRACE() { }
 
     class PropertySpecificKeyframe : public NoBaseWillBeGarbageCollectedFinalized<PropertySpecificKeyframe> {
+        WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(PropertySpecificKeyframe);
+        WTF_MAKE_NONCOPYABLE(PropertySpecificKeyframe);
     public:
         virtual ~PropertySpecificKeyframe() { }
         double offset() const { return m_offset; }
         TimingFunction& easing() const { return *m_easing; }
         EffectModel::CompositeOperation composite() const { return m_composite; }
+        double underlyingFraction() const { return m_composite == EffectModel::CompositeReplace ? 0 : 1; }
+        virtual bool isNeutral() const { ASSERT_NOT_REACHED(); return false; }
         virtual PassOwnPtrWillBeRawPtr<PropertySpecificKeyframe> cloneWithOffset(double offset) const = 0;
 
         // FIXME: Remove this once CompositorAnimations no longer depends on AnimatableValues

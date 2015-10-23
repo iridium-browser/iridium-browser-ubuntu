@@ -40,9 +40,9 @@
 namespace blink {
 
 class FloatQuad;
+class HTMLSelectElement;
 class IntSize;
 class LocalFrame;
-class PopupMenuClient;
 class WebExternalPopupMenu;
 class WebMouseEvent;
 class WebViewImpl;
@@ -52,35 +52,35 @@ struct WebPopupMenuInfo;
 // to the WebCore popup menu.
 class ExternalPopupMenu final : public PopupMenu, public WebExternalPopupMenuClient {
 public:
-    ExternalPopupMenu(LocalFrame&, PopupMenuClient*, WebViewImpl&);
-    virtual ~ExternalPopupMenu();
+    ExternalPopupMenu(LocalFrame&, HTMLSelectElement&, WebViewImpl&);
+    ~ExternalPopupMenu() override;
 
     // Fills |info| with the popup menu information contained in the
     // PopupMenuClient associated with this ExternalPopupMenu.
     // FIXME: public only for test access. Need to revert once gtest
     // helpers from chromium are available for blink.
-    static void getPopupMenuInfo(WebPopupMenuInfo&, PopupMenuClient&);
-    static int toPopupMenuItemIndex(int index, PopupMenuClient&);
-    static int toExternalPopupMenuItemIndex(int index, PopupMenuClient&);
+    static void getPopupMenuInfo(WebPopupMenuInfo&, HTMLSelectElement&);
+    static int toPopupMenuItemIndex(int index, HTMLSelectElement&);
+    static int toExternalPopupMenuItemIndex(int index, HTMLSelectElement&);
 
     DECLARE_VIRTUAL_TRACE();
 
 private:
     // PopupMenu methods:
-    virtual void show(const FloatQuad& controlPosition, const IntSize&, int index) override;
-    virtual void hide() override;
-    virtual void updateFromElement() override;
-    virtual void disconnectClient() override;
+    void show(const FloatQuad& controlPosition, const IntSize&, int index) override;
+    void hide() override;
+    void updateFromElement() override;
+    void disconnectClient() override;
 
     // WebExternalPopupClient methods:
-    virtual void didChangeSelection(int index) override;
-    virtual void didAcceptIndex(int index) override;
-    virtual void didAcceptIndices(const WebVector<int>& indices) override;
-    virtual void didCancel() override;
+    void didChangeSelection(int index) override;
+    void didAcceptIndex(int index) override;
+    void didAcceptIndices(const WebVector<int>& indices) override;
+    void didCancel() override;
 
     void dispatchEvent(Timer<ExternalPopupMenu>*);
 
-    PopupMenuClient* m_popupMenuClient;
+    RawPtrWillBeMember<HTMLSelectElement> m_ownerElement;
     RefPtrWillBeMember<LocalFrame> m_localFrame;
     WebViewImpl& m_webView;
     OwnPtr<WebMouseEvent> m_syntheticEvent;

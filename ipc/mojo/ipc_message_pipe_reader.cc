@@ -61,7 +61,10 @@ void MessagePipeReader::CloseWithErrorLater(MojoResult error) {
 bool MessagePipeReader::Send(scoped_ptr<Message> message) {
   DCHECK(IsValid());
 
-  message->TraceMessageBegin();
+  TRACE_EVENT_WITH_FLOW0(TRACE_DISABLED_BY_DEFAULT("ipc.flow"),
+                         "MessagePipeReader::Send",
+                         message->flags(),
+                         TRACE_EVENT_FLAG_FLOW_OUT);
   std::vector<MojoHandle> handles;
   MojoResult result = MOJO_RESULT_OK;
   result = ChannelMojo::ReadFromMessageAttachmentSet(message.get(), &handles);
@@ -100,7 +103,10 @@ void MessagePipeReader::OnMessageReceived() {
     return;
   }
 
-  message.TraceMessageEnd();
+  TRACE_EVENT_WITH_FLOW0(TRACE_DISABLED_BY_DEFAULT("ipc.flow"),
+                         "MessagePipeReader::OnMessageReceived",
+                         message.flags(),
+                         TRACE_EVENT_FLAG_FLOW_IN);
   delegate_->OnMessageReceived(message);
 }
 
@@ -152,14 +158,9 @@ void MessagePipeReader::ReadAvailableMessages() {
     if (read_result == MOJO_RESULT_SHOULD_WAIT)
       break;
     if (read_result != MOJO_RESULT_OK) {
-      // FAILED_PRECONDITION means that all the received messages
-      // got consumed and the peer is already closed.
-      if (read_result != MOJO_RESULT_FAILED_PRECONDITION) {
-        DLOG(WARNING)
-            << "Pipe got error from ReadMessage(). Closing: " << read_result;
-        OnPipeError(read_result);
-      }
-
+      DLOG(WARNING)
+          << "Pipe got error from ReadMessage(). Closing: " << read_result;
+      OnPipeError(read_result);
       Close();
       break;
     }

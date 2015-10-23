@@ -13,6 +13,7 @@
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/layout/box_layout.h"
+#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/view.h"
 
 using base::ASCIIToUTF16;
@@ -48,6 +49,11 @@ void ButtonExample::CreateExampleView(View* container) {
   label_button_ = new LabelButton(this, ASCIIToUTF16(kLabelButton));
   label_button_->SetFocusable(true);
   container->AddChildView(label_button_);
+
+  LabelButton* styled_button =
+      new LabelButton(this, ASCIIToUTF16("Styled Button"));
+  styled_button->SetStyle(Button::STYLE_BUTTON);
+  container->AddChildView(styled_button);
 
   LabelButton* disabled_button =
       new LabelButton(this, ASCIIToUTF16("Disabled Button"));

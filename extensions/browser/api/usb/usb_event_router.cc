@@ -7,11 +7,12 @@
 #include "device/core/device_client.h"
 #include "device/usb/usb_device.h"
 #include "extensions/browser/api/device_permissions_manager.h"
+#include "extensions/browser/api/usb/usb_guid_map.h"
 #include "extensions/common/api/usb.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/permissions/usb_device_permission.h"
 
-namespace usb = extensions::core_api::usb;
+namespace usb = extensions::api::usb;
 
 using content::BrowserThread;
 using device::UsbDevice;
@@ -26,7 +27,8 @@ namespace {
 bool WillDispatchDeviceEvent(scoped_refptr<UsbDevice> device,
                              content::BrowserContext* browser_context,
                              const Extension* extension,
-                             base::ListValue* event_args) {
+                             Event* event,
+                             const base::DictionaryValue* listener_filter) {
   // Check install-time and optional permissions.
   UsbDevicePermission::CheckParam param(
       device->vendor_id(), device->product_id(),
@@ -98,17 +100,17 @@ void UsbEventRouter::DispatchEvent(const std::string& event_name,
   EventRouter* event_router = EventRouter::Get(browser_context_);
   if (event_router) {
     usb::Device device_obj;
-    device_obj.device = device->unique_id();
-    device_obj.vendor_id = device->vendor_id();
-    device_obj.product_id = device->product_id();
+    UsbGuidMap::Get(browser_context_)->GetApiDevice(device, &device_obj);
 
     scoped_ptr<Event> event;
     if (event_name == usb::OnDeviceAdded::kEventName) {
-      event.reset(new Event(usb::OnDeviceAdded::kEventName,
+      event.reset(new Event(events::USB_ON_DEVICE_ADDED,
+                            usb::OnDeviceAdded::kEventName,
                             usb::OnDeviceAdded::Create(device_obj)));
     } else {
       DCHECK(event_name == usb::OnDeviceRemoved::kEventName);
-      event.reset(new Event(usb::OnDeviceRemoved::kEventName,
+      event.reset(new Event(events::USB_ON_DEVICE_REMOVED,
+                            usb::OnDeviceRemoved::kEventName,
                             usb::OnDeviceRemoved::Create(device_obj)));
     }
 
@@ -116,6 +118,13 @@ void UsbEventRouter::DispatchEvent(const std::string& event_name,
         base::Bind(&WillDispatchDeviceEvent, device);
     event_router->BroadcastEvent(event.Pass());
   }
+}
+
+template <>
+void BrowserContextKeyedAPIFactory<
+    UsbEventRouter>::DeclareFactoryDependencies() {
+  DependsOn(DevicePermissionsManagerFactory::GetInstance());
+  DependsOn(UsbGuidMap::GetFactoryInstance());
 }
 
 }  // extensions

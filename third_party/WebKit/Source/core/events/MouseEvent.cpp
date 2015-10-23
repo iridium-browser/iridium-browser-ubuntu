@@ -25,7 +25,6 @@
 
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/ScriptState.h"
-#include "core/clipboard/DataTransfer.h"
 #include "core/dom/Element.h"
 #include "core/events/EventDispatcher.h"
 #include "platform/PlatformMouseEvent.h"
@@ -34,7 +33,7 @@ namespace blink {
 
 PassRefPtrWillBeRawPtr<MouseEvent> MouseEvent::create(ScriptState* scriptState, const AtomicString& type, const MouseEventInit& initializer)
 {
-    if (scriptState->world().isIsolatedWorld())
+    if (scriptState && scriptState->world().isIsolatedWorld())
         UIEventWithKeyState::didCreateEventInIsolatedWorld(initializer.ctrlKey(), initializer.altKey(), initializer.shiftKey(), initializer.metaKey());
     return adoptRefWillBeNoop(new MouseEvent(type, initializer));
 }
@@ -53,29 +52,27 @@ PassRefPtrWillBeRawPtr<MouseEvent> MouseEvent::create(const AtomicString& eventT
         event.movementDelta().x(), event.movementDelta().y(),
         event.ctrlKey(), event.altKey(), event.shiftKey(), event.metaKey(), event.button(),
         platformModifiersToButtons(event.modifiers()),
-        relatedTarget, nullptr, false, event.syntheticEventType(), event.timestamp());
+        relatedTarget, false, event.syntheticEventType(), event.timestamp());
 }
 
 PassRefPtrWillBeRawPtr<MouseEvent> MouseEvent::create(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtrWillBeRawPtr<AbstractView> view,
     int detail, int screenX, int screenY, int windowX, int windowY,
     int movementX, int movementY,
     bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
-    unsigned short button, unsigned short buttons,
-    PassRefPtrWillBeRawPtr<EventTarget> relatedTarget, DataTransfer* dataTransfer, bool isSimulated, PlatformMouseEvent::SyntheticEventType syntheticEventType,
+    short button, unsigned short buttons,
+    PassRefPtrWillBeRawPtr<EventTarget> relatedTarget, bool isSimulated, PlatformMouseEvent::SyntheticEventType syntheticEventType,
     double uiCreateTime)
 {
     return adoptRefWillBeNoop(new MouseEvent(type, canBubble, cancelable, view,
         detail, screenX, screenY, windowX, windowY,
         movementX, movementY,
-        ctrlKey, altKey, shiftKey, metaKey, button, buttons, relatedTarget, dataTransfer, isSimulated, syntheticEventType, uiCreateTime));
+        ctrlKey, altKey, shiftKey, metaKey, button, buttons, relatedTarget, isSimulated, syntheticEventType, uiCreateTime));
 }
 
 MouseEvent::MouseEvent()
     : m_button(0)
     , m_buttons(0)
-    , m_buttonDown(false)
     , m_relatedTarget(nullptr)
-    , m_dataTransfer(nullptr)
     , m_syntheticEventType(PlatformMouseEvent::RealOrIndistinguishable)
 {
 }
@@ -84,18 +81,17 @@ MouseEvent::MouseEvent(const AtomicString& eventType, bool canBubble, bool cance
     int detail, int screenX, int screenY, int windowX, int windowY,
     int movementX, int movementY,
     bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
-    unsigned short button, unsigned short buttons, PassRefPtrWillBeRawPtr<EventTarget> relatedTarget,
-    DataTransfer* dataTransfer, bool isSimulated, PlatformMouseEvent::SyntheticEventType syntheticEventType,
+    short button, unsigned short buttons, PassRefPtrWillBeRawPtr<EventTarget> relatedTarget,
+    bool isSimulated, PlatformMouseEvent::SyntheticEventType syntheticEventType,
     double uiCreateTime)
     : MouseRelatedEvent(eventType, canBubble, cancelable, view, detail, IntPoint(screenX, screenY),
         IntPoint(windowX, windowY),
         IntPoint(movementX, movementY),
-        ctrlKey, altKey, shiftKey, metaKey, isSimulated)
-    , m_button(button == (unsigned short)-1 ? 0 : button)
+        ctrlKey, altKey, shiftKey, metaKey, isSimulated,
+        syntheticEventType == PlatformMouseEvent::FromTouch ? InputDeviceCapabilities::firesTouchEventsSourceCapabilities() : InputDeviceCapabilities::doesntFireTouchEventsSourceCapabilities())
+    , m_button(button)
     , m_buttons(buttons)
-    , m_buttonDown(button != (unsigned short)-1)
     , m_relatedTarget(relatedTarget)
-    , m_dataTransfer(dataTransfer)
     , m_syntheticEventType(syntheticEventType)
 {
     setUICreateTime(uiCreateTime);
@@ -105,12 +101,10 @@ MouseEvent::MouseEvent(const AtomicString& eventType, const MouseEventInit& init
     : MouseRelatedEvent(eventType, initializer.bubbles(), initializer.cancelable(), initializer.view(), initializer.detail(), IntPoint(initializer.screenX(), initializer.screenY()),
         IntPoint(0 /* pageX */, 0 /* pageY */),
         IntPoint(initializer.movementX(), initializer.movementY()),
-        initializer.ctrlKey(), initializer.altKey(), initializer.shiftKey(), initializer.metaKey(), false /* isSimulated */)
-    , m_button(initializer.button() == (unsigned short)-1 ? 0 : initializer.button())
+        initializer.ctrlKey(), initializer.altKey(), initializer.shiftKey(), initializer.metaKey(), false /* isSimulated */, initializer.sourceCapabilities())
+    , m_button(initializer.button())
     , m_buttons(initializer.buttons())
-    , m_buttonDown(initializer.button() != (unsigned short)-1)
     , m_relatedTarget(initializer.relatedTarget())
-    , m_dataTransfer(nullptr)
     , m_syntheticEventType(PlatformMouseEvent::RealOrIndistinguishable)
 {
     initCoordinates(IntPoint(initializer.clientX(), initializer.clientY()));
@@ -137,7 +131,14 @@ unsigned short MouseEvent::platformModifiersToButtons(unsigned modifiers)
 void MouseEvent::initMouseEvent(ScriptState* scriptState, const AtomicString& type, bool canBubble, bool cancelable, PassRefPtrWillBeRawPtr<AbstractView> view,
                                 int detail, int screenX, int screenY, int clientX, int clientY,
                                 bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
-                                unsigned short button, PassRefPtrWillBeRawPtr<EventTarget> relatedTarget, unsigned short buttons)
+                                short button, PassRefPtrWillBeRawPtr<EventTarget> relatedTarget, unsigned short buttons)
+{
+    initMouseEventInternal(scriptState, type, canBubble, cancelable, view, detail, screenX, screenY, clientX, clientY, ctrlKey, altKey, shiftKey, metaKey, button, relatedTarget, nullptr, buttons);
+}
+
+void MouseEvent::initMouseEventInternal(ScriptState* scriptState, const AtomicString& type, bool canBubble, bool cancelable, PassRefPtrWillBeRawPtr<AbstractView> view,
+    int detail, int screenX, int screenY, int clientX, int clientY, bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
+    short button, PassRefPtrWillBeRawPtr<EventTarget> relatedTarget, InputDeviceCapabilities* sourceCapabilities, unsigned short buttons)
 {
     if (dispatched())
         return;
@@ -145,22 +146,20 @@ void MouseEvent::initMouseEvent(ScriptState* scriptState, const AtomicString& ty
     if (scriptState && scriptState->world().isIsolatedWorld())
         UIEventWithKeyState::didCreateEventInIsolatedWorld(ctrlKey, altKey, shiftKey, metaKey);
 
-    initUIEvent(type, canBubble, cancelable, view, detail);
+    initUIEventInternal(type, canBubble, cancelable, view, detail, sourceCapabilities);
 
     m_screenLocation = IntPoint(screenX, screenY);
     m_ctrlKey = ctrlKey;
     m_altKey = altKey;
     m_shiftKey = shiftKey;
     m_metaKey = metaKey;
-    m_button = button == (unsigned short)-1 ? 0 : button;
+    m_button = button;
     m_buttons = buttons;
-    m_buttonDown = button != (unsigned short)-1;
     m_relatedTarget = relatedTarget;
 
     initCoordinates(IntPoint(clientX, clientY));
 
     // FIXME: m_isSimulated is not set to false here.
-    // FIXME: m_dataTransfer is not set to nullptr here.
 }
 
 const AtomicString& MouseEvent::interfaceName() const
@@ -173,20 +172,11 @@ bool MouseEvent::isMouseEvent() const
     return true;
 }
 
-bool MouseEvent::isDragEvent() const
-{
-    const AtomicString& t = type();
-    return t == EventTypeNames::dragenter || t == EventTypeNames::dragover || t == EventTypeNames::dragleave || t == EventTypeNames::drop
-               || t == EventTypeNames::dragstart|| t == EventTypeNames::drag || t == EventTypeNames::dragend;
-}
-
 int MouseEvent::which() const
 {
     // For the DOM, the return values for left, middle and right mouse buttons are 0, 1, 2, respectively.
     // For the Netscape "which" property, the return values for left, middle and right mouse buttons are 1, 2, 3, respectively.
     // So we must add 1.
-    if (!m_buttonDown)
-        return 0;
     return m_button + 1;
 }
 
@@ -211,23 +201,23 @@ Node* MouseEvent::fromElement() const
 DEFINE_TRACE(MouseEvent)
 {
     visitor->trace(m_relatedTarget);
-    visitor->trace(m_dataTransfer);
     MouseRelatedEvent::trace(visitor);
 }
 
-PassRefPtrWillBeRawPtr<SimulatedMouseEvent> SimulatedMouseEvent::create(const AtomicString& eventType, PassRefPtrWillBeRawPtr<AbstractView> view, PassRefPtrWillBeRawPtr<Event> underlyingEvent)
+PassRefPtrWillBeRawPtr<SimulatedMouseEvent> SimulatedMouseEvent::create(const AtomicString& eventType, PassRefPtrWillBeRawPtr<AbstractView> view, PassRefPtrWillBeRawPtr<Event> underlyingEvent, SimulatedClickCreationScope creationScope)
 {
-    return adoptRefWillBeNoop(new SimulatedMouseEvent(eventType, view, underlyingEvent));
+    return adoptRefWillBeNoop(new SimulatedMouseEvent(eventType, view, underlyingEvent, creationScope));
 }
 
 SimulatedMouseEvent::~SimulatedMouseEvent()
 {
 }
 
-SimulatedMouseEvent::SimulatedMouseEvent(const AtomicString& eventType, PassRefPtrWillBeRawPtr<AbstractView> view, PassRefPtrWillBeRawPtr<Event> underlyingEvent)
+SimulatedMouseEvent::SimulatedMouseEvent(const AtomicString& eventType, PassRefPtrWillBeRawPtr<AbstractView> view, PassRefPtrWillBeRawPtr<Event> underlyingEvent, SimulatedClickCreationScope creationScope)
     : MouseEvent(eventType, true, true, view, 0, 0, 0, 0, 0, 0, 0, false, false, false, false, 0, 0,
-        nullptr, nullptr, true, PlatformMouseEvent::RealOrIndistinguishable)
+        nullptr, true, PlatformMouseEvent::RealOrIndistinguishable)
 {
+    setTrusted(creationScope == SimulatedClickCreationScope::FromUserAgent);
     if (UIEventWithKeyState* keyStateEvent = findEventWithKeyState(underlyingEvent.get())) {
         m_ctrlKey = keyStateEvent->ctrlKey();
         m_altKey = keyStateEvent->altKey();
@@ -243,18 +233,23 @@ SimulatedMouseEvent::SimulatedMouseEvent(const AtomicString& eventType, PassRefP
     }
 }
 
+PassRefPtrWillBeRawPtr<EventDispatchMediator> MouseEvent::createMediator()
+{
+    return MouseEventDispatchMediator::create(this);
+}
+
 DEFINE_TRACE(SimulatedMouseEvent)
 {
     MouseEvent::trace(visitor);
 }
 
-PassRefPtrWillBeRawPtr<MouseEventDispatchMediator> MouseEventDispatchMediator::create(PassRefPtrWillBeRawPtr<MouseEvent> mouseEvent, MouseEventType mouseEventType)
+PassRefPtrWillBeRawPtr<MouseEventDispatchMediator> MouseEventDispatchMediator::create(PassRefPtrWillBeRawPtr<MouseEvent> mouseEvent)
 {
-    return adoptRefWillBeNoop(new MouseEventDispatchMediator(mouseEvent, mouseEventType));
+    return adoptRefWillBeNoop(new MouseEventDispatchMediator(mouseEvent));
 }
 
-MouseEventDispatchMediator::MouseEventDispatchMediator(PassRefPtrWillBeRawPtr<MouseEvent> mouseEvent, MouseEventType mouseEventType)
-    : EventDispatchMediator(mouseEvent), m_mouseEventType(mouseEventType)
+MouseEventDispatchMediator::MouseEventDispatchMediator(PassRefPtrWillBeRawPtr<MouseEvent> mouseEvent)
+    : EventDispatchMediator(mouseEvent)
 {
 }
 
@@ -265,7 +260,7 @@ MouseEvent& MouseEventDispatchMediator::event() const
 
 bool MouseEventDispatchMediator::dispatchEvent(EventDispatcher& dispatcher) const
 {
-    if (isSyntheticMouseEvent()) {
+    if (!event().isTrusted()) {
         event().eventPath().adjustForRelatedTarget(dispatcher.node(), event().relatedTarget());
         return dispatcher.dispatch();
     }
@@ -291,10 +286,13 @@ bool MouseEventDispatchMediator::dispatchEvent(EventDispatcher& dispatcher) cons
     // of the DOM specs, but is used for compatibility with the ondblclick="" attribute. This is treated
     // as a separate event in other DOM-compliant browsers like Firefox, and so we do the same.
     RefPtrWillBeRawPtr<MouseEvent> doubleClickEvent = MouseEvent::create();
-    doubleClickEvent->initMouseEvent(nullptr, EventTypeNames::dblclick, event().bubbles(), event().cancelable(), event().view(),
+    doubleClickEvent->initMouseEventInternal(nullptr, EventTypeNames::dblclick, event().bubbles(), event().cancelable(), event().view(),
         event().detail(), event().screenX(), event().screenY(), event().clientX(), event().clientY(),
         event().ctrlKey(), event().altKey(), event().shiftKey(), event().metaKey(),
-        event().button(), relatedTarget, event().buttons());
+        event().button(), relatedTarget, event().sourceCapabilities(), event().buttons());
+
+    // Inherit the trusted status from the original event.
+    doubleClickEvent->setTrusted(event().isTrusted());
     if (event().defaultHandled())
         doubleClickEvent->setDefaultHandled();
     EventDispatcher::dispatchEvent(dispatcher.node(), MouseEventDispatchMediator::create(doubleClickEvent));

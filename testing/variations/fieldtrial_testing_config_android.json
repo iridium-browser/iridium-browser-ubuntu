@@ -1,0 +1,249 @@
+{
+    "EnhancedBookmarks": [
+        {
+            "group_name": "EnableEnhancedBookmarks",
+            "params": {
+                "id": "Fake_id_to_trigger_experiment_code"
+            }
+        },
+        {
+            "group_name": "EnableEnhancedBookmarksGrid",
+            "params": {
+                "DefaultViewMode": "Grid",
+                "id": "Fake_id_to_trigger_experiment_code"
+            }
+        },
+        {
+            "group_name": "EnableEnhancedBookmarksList",
+            "params": {
+                "DefaultViewMode": "List",
+                "id": "Fake_id_to_trigger_experiment_code"
+            }
+        }
+    ],
+    "CustomTabs": [
+        {
+            "group_name": "Enabled"
+        },
+        {
+            "group_name": "DisablePrerender"
+        },
+        {
+            "group_name": "Disabled"
+        }
+    ],
+    "DataCompressionProxyLoFi": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "rtt_msec": "2000",
+                "hysteresis_period_seconds": "120"
+            }            
+        }
+    ],
+    "DataReductionProxyUseQuic": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "DataReductionProxyConfigService": [
+        {
+	    "group_name": "Enabled"
+	}
+    ],
+    "LimitSyncPassphrasePrompt": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "QUIC": [
+        {
+            "group_name": "Enabled",
+            "params": {
+              "alternate_protocol_probability_threshold": "0.01"
+            }
+        }
+    ],
+    "ReaderModeUIFeedback": [
+        {
+            "group_name": "Show"
+        },
+        {
+            "group_name": "DoNotShow"
+        }
+    ],
+    "ContextualSearch": [
+        {
+            "group_name": "OptOut",
+            "params": {
+                "enabled": "true",
+                "disable_for_cjk": "true",
+                "promo_opt_out": "true",
+                "promo_on_limited_taps": "true",
+                "tap_triggered_promo_limit": "50",
+                "tap_preload_limit_for_undecided": "20",
+                "tap_resolve_limit_for_undecided": "20",
+                "tap_preload_limit_for_decided": "50",
+                "tap_resolve_limit_for_decided": "50",
+                "contextual_search_side_search_provider_icon_enabled": "true",
+                "contextual_search_arrow_icon_enabled": "true",
+                "contextual_search_narrow_panel_supported": "true"
+            }
+        }
+    ],
+    "ReportCertificateErrors": [
+        {
+            "group_name": "ShowAndPossiblySend",
+            "params": {
+                "sendingThreshold": "1.0"
+            }
+        },
+        {
+            "group_name": "ShowAndPossiblySend",
+            "params": {
+                "sendingThreshold": "-1.0"
+            }
+        },
+        {
+            "group_name": "ShowAndPossiblySend",
+            "params": {
+                "sendingThreshold": "0.0"
+            }
+        },
+        {
+            "group_name": "ShowAndPossiblySend",
+            "params": {
+                "sendingThreshold": "abcdef"
+            }
+        },
+        {
+            "group_name": "DontShowAndDontSend"
+        }
+    ],
+    "BackgroundHtmlParserTokenLimits": [
+        {
+          "group_name": "Session_10",
+            "params": {
+              "backgroundHtmlParserOutstandingTokenLimit": "10",
+                "backgroundHtmlParserPendingTokenLimit": "10"
+            }
+        },
+        {
+            "group_name": "Session_50",
+            "params": {
+                "backgroundHtmlParserOutstandingTokenLimit": "50",
+                "backgroundHtmlParserPendingTokenLimit": "50"
+            }
+        },
+        {
+            "group_name": "Session_100",
+            "params": {
+                "backgroundHtmlParserOutstandingTokenLimit": "100",
+                "backgroundHtmlParserPendingTokenLimit": "100"
+            }
+        },
+        {
+            "group_name": "Session_300",
+            "params": {
+                "backgroundHtmlParserOutstandingTokenLimit": "300",
+                "backgroundHtmlParserPendingTokenLimit": "100"
+            }
+        },
+        {
+            "group_name": "Session_500",
+            "params": {
+                "backgroundHtmlParserOutstandingTokenLimit": "500",
+                "backgroundHtmlParserPendingTokenLimit": "100"
+            }
+        },
+        {
+            "group_name": "Session_1000",
+            "params": {
+                "backgroundHtmlParserOutstandingTokenLimit": "1000",
+                "backgroundHtmlParserPendingTokenLimit": "100"
+            }
+        },
+        {
+            "group_name": "Session_2500",
+            "params": {
+                "backgroundHtmlParserOutstandingTokenLimit": "2500",
+                "backgroundHtmlParserPendingTokenLimit": "100"
+            }
+        },
+        {
+            "group_name": "Session_5000",
+            "params": {
+                "backgroundHtmlParserOutstandingTokenLimit": "5000",
+                "backgroundHtmlParserPendingTokenLimit": "100"
+            }
+        },
+        {
+            "group_name": "Session_10000",
+            "params": {
+                "backgroundHtmlParserOutstandingTokenLimit": "10000",
+                "backgroundHtmlParserPendingTokenLimit": "100"
+            }
+        }
+    ],
+    "SpeculativeResourcePrefetching": [
+        {
+            "group_name": "v=1a:Prefetching=Enabled:Predictor=Url"
+        },
+        {
+            "group_name":
+                "v=1b:Prefetching=Enabled:Predictor=Url:Confidence=High"
+        },
+        {
+            "group_name":
+                "v=1c:Prefetching=Enabled:Predictor=Url:Confidence=Low"
+        },
+        {
+            "group_name": "v=1d:Prefetching=Enabled:Predictor=Host"
+        },
+        {
+            "group_name":
+                "v=1e:Prefetching=Enabled:Predictor=Host:Confidence=High"
+        },
+        {
+            "group_name":
+                "v=1f:Prefetching=Enabled:Predictor=Host:Confidence=Low"
+        },
+        {
+            "group_name": "v=1:Prefetching=Learning"
+        }
+    ],
+    "SdchPersistence": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "IconNTP": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "state": "enabled"
+            }
+        }
+    ],
+    "SyncHttpContentCompression": [
+        {
+            "group_name": "Enabled"
+        },
+        {
+            "group_name": "Disabled"
+        }
+    ],
+    "AutofillFieldMetadata": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "VarationsServiceControl": [
+        {
+            "group_name": "Interval_30min",
+            "params": {
+                "fetch_period_min": "30"
+            }
+        }
+    ]
+}

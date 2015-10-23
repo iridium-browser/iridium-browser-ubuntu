@@ -88,20 +88,19 @@ HttpRequestParser::ParseResult HttpRequestParser::ParseHeaders() {
   {
     const std::string header_line = ShiftLine();
     http_request_->all_headers += header_line + "\r\n";
-    std::vector<std::string> header_line_tokens;
-    base::SplitString(header_line, ' ', &header_line_tokens);
+    std::vector<std::string> header_line_tokens = base::SplitString(
+        header_line, " ", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     DCHECK_EQ(3u, header_line_tokens.size());
     // Method.
     http_request_->method_string = header_line_tokens[0];
-    http_request_->method = GetMethodType(base::StringToLowerASCII(
-        header_line_tokens[0]));
+    http_request_->method =
+        GetMethodType(base::ToLowerASCII(header_line_tokens[0]));
     // Address.
     // Don't build an absolute URL as the parser does not know (should not
     // know) anything about the server address.
     http_request_->relative_url = header_line_tokens[1];
     // Protocol.
-    const std::string protocol =
-        base::StringToLowerASCII(header_line_tokens[2]);
+    const std::string protocol = base::ToLowerASCII(header_line_tokens[2]);
     CHECK(protocol == "http/1.0" || protocol == "http/1.1") <<
         "Protocol not supported: " << protocol;
   }

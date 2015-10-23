@@ -25,172 +25,20 @@
     <link rel="stylesheet" href="foreground/css/file_status.css">
     <link rel="stylesheet" href="foreground/css/file_types.css">
     <link rel="stylesheet" href="foreground/css/common.css">
-
-    <link rel="import" href="chrome://resources/polymer/core-icon/core-icon.html">
-    <link rel="import" href="chrome://resources/polymer/core-icons/core-icons.html">
-    <link rel="import" href="chrome://resources/polymer/core-icons/image-icons.html">
-    <link rel="import" href="chrome://resources/polymer/core-icons/social-icons.html">
-    <link rel="import" href="chrome://resources/polymer/core-input/core-input.html">
-    <link rel="import" href="chrome://resources/polymer/paper-button/paper-button.html">
-    <link rel="import" href="chrome://resources/polymer/paper-input/paper-input-decorator.html">
-    <link rel="import" href="chrome://resources/polymer/paper-progress/paper-progress.html">
-    <link rel="import" href="chrome://resources/polymer/paper-ripple/paper-ripple.html">
-
     <link rel="stylesheet" href="chrome-extension://fbjakikfhfdajcamjleinfciajelkpek/cws_widget/cws_widget_container.css">
 
-    <!-- Don't load main_scripts.js when flattening is disabled. -->
-    <if expr="False"><!-- </if>
-      <script src="foreground/js/main_scripts.js"></script>
-    <if expr="False"> --></if>
-
-    <if expr="False">
-      <!-- This section is used when the file manager is loaded with
-           'filemgr-ext-path' command-line flag. -->
-      <!-- Keep the list in sync with js/main_scripts.js. -->
-
-      <!-- metrics.js initiates load performance tracking
-           so we want to parse it as early as possible -->
-      <script src="common/js/metrics_base.js"></script>
-      <script src="common/js/metrics_events.js"></script>
-      <script src="common/js/metrics.js"></script>
-      <script src="foreground/js/metrics_start.js"></script>
-
-      <!-- Loads the client of the image loader extension -->
-      <script src="common/js/lru_cache.js"></script>
-      <script src="chrome-extension://pmfjbimdmchhbnneeidfognadeopoehp/image_loader_client.js"></script>
-
-      <!-- Scripts for Chrome Webstore widget -->
-      <script src="chrome-extension://fbjakikfhfdajcamjleinfciajelkpek/cws_widget/app_installer.js"></script>
-      <script src="chrome-extension://fbjakikfhfdajcamjleinfciajelkpek/cws_widget/cws_webview_client.js"></script>
-      <script src="chrome-extension://fbjakikfhfdajcamjleinfciajelkpek/cws_widget/cws_widget_container.js"></script>
-      <script src="chrome-extension://fbjakikfhfdajcamjleinfciajelkpek/cws_widget/cws_widget_container_error_dialog.js"></script>
-
-      <script src="chrome://resources/js/load_time_data.js"></script>
-      <script src="chrome://resources/js/cr.js"></script>
-      <script src="chrome://resources/js/util.js"></script>
-      <script src="chrome://resources/js/i18n_template_no_process.js"></script>
-
-      <script src="chrome://resources/js/event_tracker.js"></script>
-      <script src="chrome://resources/js/cr/ui.js"></script>
-      <script src="chrome://resources/js/cr/event_target.js"></script>
-      <script src="chrome://resources/js/cr/ui/touch_handler.js"></script>
-      <script src="chrome://resources/js/cr/ui/array_data_model.js"></script>
-      <script src="chrome://resources/js/cr/ui/dialogs.js"></script>
-      <script src="chrome://resources/js/cr/ui/list_item.js"></script>
-      <script src="chrome://resources/js/cr/ui/list_selection_model.js"></script>
-      <script src="chrome://resources/js/cr/ui/list_single_selection_model.js"></script>
-      <script src="chrome://resources/js/cr/ui/list_selection_controller.js"></script>
-      <script src="chrome://resources/js/cr/ui/list.js"></script>
-      <script src="chrome://resources/js/cr/ui/tree.js"></script>
-      <script src="chrome://resources/js/cr/ui/autocomplete_list.js"></script>
-
-      <script src="chrome://resources/js/cr/ui/splitter.js"></script>
-      <script src="chrome://resources/js/cr/ui/table/table_splitter.js"></script>
-
-      <script src="chrome://resources/js/cr/ui/table/table_column.js"></script>
-      <script src="chrome://resources/js/cr/ui/table/table_column_model.js"></script>
-      <script src="chrome://resources/js/cr/ui/table/table_header.js"></script>
-      <script src="chrome://resources/js/cr/ui/table/table_list.js"></script>
-      <script src="chrome://resources/js/cr/ui/table.js"></script>
-
-      <script src="chrome://resources/js/cr/ui/grid.js"></script>
-
-      <script src="chrome://resources/js/cr/ui/command.js"></script>
-      <script src="chrome://resources/js/cr/ui/position_util.js"></script>
-      <script src="chrome://resources/js/cr/ui/menu_item.js"></script>
-      <script src="chrome://resources/js/cr/ui/menu.js"></script>
-      <script src="chrome://resources/js/cr/ui/menu_button.js"></script>
-      <script src="chrome://resources/js/cr/ui/context_menu_handler.js"></script>
-
-      <script src="chrome://resources/js/analytics.js"></script>
-
-      <!-- This script must be loaded before all other Files.app's scripts. -->
-      <script src="foreground/js/error_counter.js"></script>
-
-      <script src="common/js/async_util.js"></script>
-      <script src="common/js/file_type.js"></script>
-      <script src="common/js/volume_manager_common.js"></script>
-      <script src="common/js/importer_common.js"></script>
-      <script src="common/js/util.js"></script>
-      <script src="common/js/progress_center_common.js"></script>
-
-      <script src="foreground/js/ui/combobutton.js"></script>
-      <script src="foreground/js/ui/commandbutton.js"></script>
-      <script src="foreground/js/ui/file_manager_dialog_base.js"></script>
-      <script src="foreground/js/metadata/metadata_cache_set.js"></script>
-      <script src="foreground/js/metadata/new_metadata_provider.js"></script>
-      <script src="foreground/js/metadata/thumbnail_model.js"></script>
-
-      <script src="foreground/js/app_state_controller.js"></script>
-      <script src="foreground/js/column_visibility_controller.js"></script>
-      <script src="foreground/js/dialog_action_controller.js"></script>
-      <script src="foreground/js/dialog_type.js"></script>
-      <script src="foreground/js/directory_contents.js"></script>
-      <script src="foreground/js/directory_model.js"></script>
-      <script src="foreground/js/empty_folder_controller.js"></script>
-      <script src="foreground/js/file_manager.js"></script>
-      <script src="foreground/js/file_manager_commands.js"></script>
-      <script src="foreground/js/file_selection.js"></script>
-      <script src="foreground/js/file_tasks.js"></script>
-      <script src="foreground/js/file_transfer_controller.js"></script>
-      <script src="foreground/js/file_watcher.js"></script>
-      <script src="foreground/js/folder_shortcuts_data_model.js"></script>
-      <script src="foreground/js/sort_menu_controller.js"></script>
-      <script src="foreground/js/gear_menu_controller.js"></script>
-      <script src="foreground/js/import_controller.js"></script>
-      <script src="foreground/js/launch_param.js"></script>
-      <script src="foreground/js/metadata/content_metadata_provider.js"></script>
-      <script src="foreground/js/metadata/external_metadata_provider.js"></script>
-      <script src="foreground/js/metadata/file_system_metadata_provider.js"></script>
-      <script src="foreground/js/metadata/metadata_cache_item.js"></script>
-      <script src="foreground/js/metadata/metadata_item.js"></script>
-      <script src="foreground/js/metadata/metadata_model.js"></script>
-      <script src="foreground/js/metadata/multi_metadata_provider.js"></script>
-      <script src="foreground/js/metadata_update_controller.js"></script>
-      <script src="foreground/js/naming_controller.js"></script>
-      <script src="foreground/js/navigation_list_model.js"></script>
-      <script src="foreground/js/progress_center_item_group.js"></script>
-      <script src="foreground/js/scan_controller.js"></script>
-      <script src="foreground/js/search_controller.js"></script>
-      <script src="foreground/js/share_client.js"></script>
-      <script src="foreground/js/spinner_controller.js"></script>
-      <script src="foreground/js/task_controller.js"></script>
-      <script src="foreground/js/toolbar_controller.js"></script>
-      <script src="foreground/js/thumbnail_loader.js"></script>
-      <script src="foreground/js/list_thumbnail_loader.js"></script>
-      <script src="foreground/js/providers_model.js"></script>
-      <script src="foreground/js/ui/banners.js"></script>
-      <script src="foreground/js/ui/conflict_dialog.js"></script>
-      <script src="foreground/js/ui/default_action_dialog.js"></script>
-      <script src="foreground/js/ui/dialog_footer.js"></script>
-      <script src="foreground/js/ui/directory_tree.js"></script>
-      <script src="foreground/js/ui/drag_selector.js"></script>
-      <script src="foreground/js/ui/empty_folder.js"></script>
-      <script src="foreground/js/ui/error_dialog.js"></script>
-      <script src="foreground/js/ui/file_grid.js"></script>
-      <script src="foreground/js/ui/file_manager_ui.js"></script>
-      <script src="foreground/js/ui/file_list_selection_model.js"></script>
-      <script src="foreground/js/ui/file_table.js"></script>
-      <script src="foreground/js/ui/file_table_list.js"></script>
-      <script src="foreground/js/ui/gear_menu.js"></script>
-      <script src="foreground/js/ui/list_container.js"></script>
-      <script src="foreground/js/ui/location_line.js"></script>
-      <script src="foreground/js/ui/multi_profile_share_dialog.js"></script>
-      <script src="foreground/js/ui/progress_center_panel.js"></script>
-      <script src="foreground/js/ui/providers_menu.js"></script>
-      <script src="foreground/js/ui/scrollbar.js"></script>
-      <script src="foreground/js/ui/search_box.js"></script>
-      <script src="foreground/js/ui/share_dialog.js"></script>
-      <script src="foreground/js/ui/suggest_apps_dialog.js"></script>
-      <script src="foreground/js/main_window_component.js"></script>
-      <script src="foreground/js/volume_manager_wrapper.js"></script>
-
-      <!-- For accurate load performance tracking main.js should be
-           the last script to include. -->
-      <script src="foreground/js/main.js"></script>
-    </if>
-
+    <script src="chrome://resources/js/polymer_config.js"></script>
+    <link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
+    <link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/image-icons.html">
+    <link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/iron-icons.html">
+    <link rel="import" href="chrome://resources/polymer/v1_0/iron-input/iron-input.html">
+    <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
+    <link rel="import" href="chrome://resources/polymer/v1_0/paper-input/paper-input-container.html">
+    <link rel="import" href="chrome://resources/polymer/v1_0/paper-progress/paper-progress.html">
+    <link rel="import" href="chrome://resources/polymer/v1_0/paper-ripple/paper-ripple.html">
+    <link rel="import" href="foreground/elements/files_toggle_ripple.html">
   </head>
+
   <body tabindex="-1">
     <commands>
       <!-- We have to use U+XXXX notation here according to event.keyIdentifier
@@ -206,6 +54,8 @@
       <command id="rename" i18n-values="label:RENAME_BUTTON_LABEL"
                shortcut="Enter-Ctrl">
       <command id="delete" shortcut="U+007F">
+      <command id="refresh" i18n-values="label:REFRESH_BUTTON_LABEL"
+               shortcut="U+0042-Ctrl" hidden>
       <command id="create-folder-shortcut"
                i18n-values="label:CREATE_FOLDER_SHORTCUT_BUTTON_LABEL">
       <command id="remove-folder-shortcut"
@@ -248,6 +98,7 @@
                i18n-values="label:TOGGLE_HIDDEN_FILES_COMMAND_LABEL"
                shortcut="U+00BE-Ctrl" hide-shortcut-text>
 
+      <command id="default-action">
       <command id="open-with" i18n-values="label:OPEN_WITH_BUTTON_LABEL">
       <command id="zip-selection"
                i18n-values="label:ZIP_SELECTION_BUTTON_LABEL">
@@ -275,11 +126,11 @@
     </commands>
 
     <cr-menu id="file-context-menu" class="chrome-menu" showShortcuts>
-      <cr-menu-item id="default-action"
+      <cr-menu-item id="default-action-menu-item" command="#default-action"
                 visibleif="full-page" hidden></cr-menu-item>
       <cr-menu-item command="#open-with"
                 visibleif="full-page" hidden></cr-menu-item>
-      <hr id="default-action-separator" visibleif="full-page" hidden>
+      <hr id="action-items-separator" visibleif="full-page" hidden>
       <cr-menu-item command="#toggle-pinned" checkable></cr-menu-item>
       <cr-menu-item command="#share"></cr-menu-item>
       <cr-menu-item command="#create-folder-shortcut"></cr-menu-item>
@@ -306,6 +157,7 @@
 
     <cr-menu id="directory-tree-context-menu" class="chrome-menu" >
       <cr-menu-item command="#create-folder-shortcut"></cr-menu-item>
+      <cr-menu-item command="#delete" i18n-content="DELETE_BUTTON_LABEL"></cr-menu-item>
     </cr-menu>
 
     <cr-menu id="sort-menu" class="chrome-menu" menu-item-selector="cr-menu-item">
@@ -375,89 +227,113 @@
       <button id="tasks" class="combobutton" menu="#tasks-menu"
               tabindex="9" hidden
               i18n-values="aria-label:TASKS_BUTTON_LABEL">
-        <paper-ripple fit></paper-ripple>
       </button>
       <button id="share-button" class="icon-button" command="#share"
-              tabindex="10"
+              tabindex="10" hidden
               i18n-values="aria-label:SHARE_BUTTON_LABEL"
-              visibleif="full-page">
+              visibleif="full-page"
+              has-tooltip>
         <paper-ripple fit class="recenteringTouch"></paper-ripple>
+        <div class="icon"></div>
       </button>
-      <button id="delete-button" class="icon-button" tabindex="11"
+      <button id="delete-button" class="icon-button" tabindex="11" hidden
               i18n-values="aria-label:DELETE_BUTTON_LABEL"
-              visibleif="full-page">
+              visibleif="full-page"
+              has-tooltip>
         <paper-ripple fit class="recenteringTouch"></paper-ripple>
+        <div class="icon"></div>
       </button>
       <button id="search-button" class="icon-button" tabindex="12"
-              i18n-values="aria-label:SEARCH_TEXT_LABEL">
-        <paper-ripple fit class="recenteringTouch"></paper-ripple>
+              i18n-values="aria-label:SEARCH_TEXT_LABEL"
+              has-tooltip>
+        <files-toggle-ripple></files-toggle-ripple>
+        <div class="icon"></div>
       </button>
       <div id="search-box">
-        <paper-input-decorator i18n-values="label:SEARCH_TEXT_LABEL">
-          <input is="core-input" type="search" tabindex="13"
-                 i18n-values="aria-label:SEARCH_TEXT_LABEL">
+        <paper-input-container no-label-float>
+          <input is="iron-input" type="search" tabindex="13"
+                 i18n-values="aria-label:SEARCH_TEXT_LABEL;placeholder:SEARCH_TEXT_LABEL">
           <span class="clear"></span>
-        </paper-input-decorator>
+        </paper-input-container>
       </div>
-      <button id="cloud-import-button"
-              class="icon-button manual-display"
-              tabindex="14"
-              i18n-values="aria-label:CLOUD_IMPORT_COMMAND"
-              hidden>
-        <core-icon icon="cloud-queue"></core-icon>
+      <button id="refresh-button" class="icon-button" tabindex="14" hidden
+              i18n-values="aria-label:REFRESH_BUTTON_LABEL"
+              command="#refresh" has-tooltip>
         <paper-ripple fit class="recenteringTouch"></paper-ripple>
+        <div class="icon"></div>
       </button>
-      <button id="cloud-import-details-button"
-              class="icon-button manual-display"
-              tabindex="-1"
-              i18n-values="aria-label:CLOUD_IMPORT_SHOW_DETAILS"
-              hidden>
-        <core-icon icon="arrow-drop-down"></core-icon>
+      <div id="cloud-import-combo-button"
+           class="cloud-import-combo-button"
+           hidden>
+        <div class="buttons">
+          <button id="cloud-import-button"
+                  class="icon-button manual-display"
+                  tabindex="15"
+                  i18n-values="aria-label:CLOUD_IMPORT_COMMAND"
+                  has-tooltip>
+            <iron-icon icon="cloud-queue"></iron-icon>
+          </button>
+          <button id="cloud-import-details-button"
+                  class="icon-button manual-display"
+                  tabindex="-1"
+                  i18n-values="aria-label:CLOUD_IMPORT_SHOW_DETAILS"
+                  has-tooltip>
+            <iron-icon icon="arrow-drop-down"></iron-icon>
+          </button>
+        </div>
+        <div class="ripples">
+          <paper-ripple></paper-ripple>
+          <files-toggle-ripple></files-toggle-ripple>
+        </div>
+      </div>
+      <button id="view-button" class="icon-button" tabindex="16"
+              i18n-values="aria-label:CHANGE_TO_THUMBNAILVIEW_BUTTON_LABEL"
+              has-tooltip>
         <paper-ripple fit class="recenteringTouch"></paper-ripple>
+        <div class="icon"></div>
       </button>
-      <button id="view-button" class="icon-button" tabindex="15"
-              i18n-values="aria-label:CHANGE_TO_THUMBNAILVIEW_BUTTON_LABEL">
-        <paper-ripple fit class="recenteringTouch"></paper-ripple>
-      </button>
-      <button id="sort-button" class="icon-button" tabindex="16"
+      <button id="sort-button" class="icon-button" tabindex="17"
               menu="#sort-menu"
               i18n-values="aria-label:SORT_BUTTON_TOOLTIP"
-              aria-activedescendant="sort-menu">
-        <paper-ripple fit class="recenteringTouch"></paper-ripple>
+              aria-activedescendant="sort-menu"
+              has-tooltip>
+        <files-toggle-ripple></files-toggle-ripple>
+        <div class="icon"></div>
       </button>
-      <button id="gear-button" class="icon-button" tabindex="17"
+      <button id="gear-button" class="icon-button" tabindex="18"
               menu="#gear-menu"
               i18n-values="aria-label:GEAR_BUTTON_TOOLTIP"
-              aria-activedescendant="gear-menu">
-        <paper-ripple fit class="recenteringTouch"></paper-ripple>
+              aria-activedescendant="gear-menu"
+              has-tooltip>
+        <files-toggle-ripple></files-toggle-ripple>
+        <div class="icon"></div>
       </button>
     </div>
 
     <div id="cloud-import-details" class="hidden" hidden>
-      <paper-shadow z="2">
-        <div class="banner">
-          <div class="title" i18n-content="CLOUD_IMPORT_TITLE"></div>
-          <div class="description" i18n-content="CLOUD_IMPORT_DESCRIPTION"></div>
+      <div class="banner">
+        <div class="title" i18n-content="CLOUD_IMPORT_TITLE"></div>
+        <div class="description" i18n-content="CLOUD_IMPORT_DESCRIPTION"></div>
+      </div>
+      <div class="main">
+        <div class="status">
+          <iron-icon icon="cloud-queue"></iron-icon>
+          <div class="content"></div>
         </div>
-        <div class="main">
-          <div class="status">
-            <core-icon icon="cloud-queue"></core-icon>
-            <div class="content"></div>
-          </div>
-          <paper-button class="import" tabindex="-1">
-            <span i18n-content="CLOUD_IMPORT_COMMAND"></span>
-          </paper-button>
-          <paper-button class="cancel" tabindex="-1">
-            <span i18n-content="CLOUD_IMPORT_CANCEL_COMMAND"></span>
-          </paper-button>
-        </div>
-      </paper-shadow>
+        <div class="progress"><div class="value"></div></div>
+        <paper-button class="import" tabindex="-1">
+          <span i18n-content="CLOUD_IMPORT_COMMAND"></span>
+        </paper-button>
+        <paper-button class="cancel" tabindex="-1">
+          <span i18n-content="CLOUD_IMPORT_CANCEL_COMMAND"></span>
+        </paper-button>
+      </div>
     </div>
 
     <div class="dialog-container">
       <div class="dialog-navigation-list">
         <div class="dialog-navigation-list-contents">
-          <tree id="directory-tree" tabindex="18"></tree>
+          <tree id="directory-tree" tabindex="19"></tree>
         </div>
         <div class="dialog-navigation-list-footer">
           <div id="progress-center" hidden>
@@ -470,6 +346,7 @@
               </div>
               <div class="button-frame">
                 <button class="cancel" tabindex="-1"></button>
+                <button class="dismiss" tabindex="-1"></button>
                 <button class="open" tabindex="-1"></button>
               </div>
             </li>
@@ -485,8 +362,8 @@
           <div class="main-panel">
             <div class="filelist-panel">
               <div class="drive-welcome header"></div>
-              <div class="volume-warning" id="volume-space-warning" hidden></div>
-              <div class="volume-warning" id="drive-auth-failed-warning" hidden>
+              <div class="volume-warning banner-cloud-bg" id="volume-space-warning" hidden></div>
+              <div class="volume-warning banner-cloud-bg" id="drive-auth-failed-warning" hidden>
                 <div class="drive-icon"></div>
                 <div class="drive-text" id="drive-auth-failed-warning-text"></div>
               </div>
@@ -528,10 +405,11 @@
                 tabindex="3" disabled>
         </button>
         <div id="filename-input-box" visibleif="saveas-file">
-          <paper-input-decorator i18n-values="label:FILENAME_LABEL">
-            <input id="filename-input-textbox" is="core-input" tabindex="4"
-                   class="entry-name" type="text" spellcheck="false">
-          </paper-input-decorator>
+          <paper-input-container no-label-float>
+            <input id="filename-input-textbox" is="iron-input" tabindex="4"
+                   class="entry-name" type="text" spellcheck="false"
+                   i18n-values="placeholder:FILENAME_LABEL">
+          </paper-input-container>
         </div>
         <div class="preparing-label" i18n-content="PREPARING_LABEL"></div>
         <div class="progress-bar"><div class="progress-track"></div></div>
@@ -544,6 +422,11 @@
       </div>
     </div>
     <div id="drag-container"></div>
+    <div id="tooltip">
+      <div id="tooltip-label"></div>
+    <div>
     <iframe id="command-dispatcher" hidden aria-hidden="true"></iframe>
+
+    <script src="foreground/js/main_scripts.js"></script>
   </body>
 </html>

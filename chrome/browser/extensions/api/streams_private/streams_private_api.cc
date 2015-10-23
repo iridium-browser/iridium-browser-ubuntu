@@ -79,7 +79,7 @@ void StreamsPrivateAPI::ExecuteMimeTypeHandler(
   // If the mime handler uses MimeHandlerViewGuest, the MimeHandlerViewGuest
   // will take ownership of the stream. Otherwise, store the stream handle in
   // |streams_| and fire an event notifying the extension.
-  if (!handler->handler_url().empty()) {
+  if (handler->HasPlugin()) {
     GURL handler_url(Extension::GetBaseURLFromExtensionId(extension_id).spec() +
                      handler->handler_url());
     auto tab_id = ExtensionTabUtil::GetTabId(web_contents);
@@ -111,7 +111,8 @@ void StreamsPrivateAPI::ExecuteMimeTypeHandler(
                                   &info.response_headers.additional_properties);
 
   scoped_ptr<Event> event(
-      new Event(streams_private::OnExecuteMimeTypeHandler::kEventName,
+      new Event(events::STREAMS_PRIVATE_ON_EXECUTE_MIME_TYPE_HANDLER,
+                streams_private::OnExecuteMimeTypeHandler::kEventName,
                 streams_private::OnExecuteMimeTypeHandler::Create(info)));
 
   EventRouter::Get(browser_context_)

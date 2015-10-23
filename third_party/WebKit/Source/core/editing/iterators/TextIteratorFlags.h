@@ -38,7 +38,11 @@ enum TextIteratorBehavior {
     TextIteratorEmitsImageAltText = 1 << 5,
     TextIteratorEntersOpenShadowRoots = 1 << 6,
     TextIteratorEmitsObjectReplacementCharacter = 1 << 7,
-    TextIteratorDoesNotBreakAtReplacedElement = 1 << 8
+    TextIteratorDoesNotBreakAtReplacedElement = 1 << 8,
+    TextIteratorForInnerText = 1 << 9,
+    TextIteratorForSelectionToString = 1 << 10,
+    TextIteratorForWindowFind = 1 << 11,
+    TextIteratorExcludeAutofilledValue = 1 << 12,
 };
 typedef unsigned TextIteratorBehaviorFlags;
 

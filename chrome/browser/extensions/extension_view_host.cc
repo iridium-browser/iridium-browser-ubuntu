@@ -5,20 +5,23 @@
 #include "chrome/browser/extensions/extension_view_host.h"
 
 #include "base/strings/string_piece.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_view.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/platform_util.h"
+#include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "components/autofill/content/browser/content_autofill_driver_factory.h"
+#include "components/autofill/core/browser/autofill_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/runtime_data.h"
-#include "extensions/common/extension_messages.h"
 #include "grit/browser_resources.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -64,6 +67,16 @@ ExtensionViewHost::ExtensionViewHost(
   // Not used for panels, see PanelHost.
   DCHECK(host_type == VIEW_TYPE_EXTENSION_DIALOG ||
          host_type == VIEW_TYPE_EXTENSION_POPUP);
+
+  // Attach WebContents helpers. Extension tabs automatically get them attached
+  // in TabHelpers::AttachTabHelpers, but popups don't.
+  // TODO(kalman): How much of TabHelpers::AttachTabHelpers should be here?
+  autofill::ChromeAutofillClient::CreateForWebContents(host_contents());
+  autofill::ContentAutofillDriverFactory::CreateForWebContentsAndDelegate(
+      host_contents(),
+      autofill::ChromeAutofillClient::FromWebContents(host_contents()),
+      g_browser_process->GetApplicationLocale(),
+      autofill::AutofillManager::ENABLE_AUTOFILL_DOWNLOAD_MANAGER);
 }
 
 ExtensionViewHost::~ExtensionViewHost() {
@@ -117,9 +130,6 @@ void ExtensionViewHost::LoadInitialURL() {
     WebContentsModalDialogManager::CreateForWebContents(host_contents());
     WebContentsModalDialogManager::FromWebContents(
         host_contents())->SetDelegate(this);
-    if (!popup_manager_.get())
-      popup_manager_.reset(new web_modal::PopupManager(this));
-    popup_manager_->RegisterWith(host_contents());
   }
 
   ExtensionHost::LoadInitialURL();
@@ -217,24 +227,15 @@ void ExtensionViewHost::RunFileChooser(
 
 
 void ExtensionViewHost::ResizeDueToAutoResize(WebContents* source,
-                                          const gfx::Size& new_size) {
-  view_->ResizeDueToAutoResize(new_size);
+                                              const gfx::Size& new_size) {
+  view_->ResizeDueToAutoResize(source, new_size);
 }
 
 // content::WebContentsObserver overrides:
 
 void ExtensionViewHost::RenderViewCreated(RenderViewHost* render_view_host) {
   ExtensionHost::RenderViewCreated(render_view_host);
-
-  view_->RenderViewCreated();
-
-  // If the host is bound to a window, then extract its id. Extensions hosted
-  // in ExternalTabContainer objects may not have an associated window.
-  WindowController* window = GetExtensionWindowController();
-  if (window) {
-    render_view_host->Send(new ExtensionMsg_UpdateBrowserWindowId(
-        render_view_host->GetRoutingID(), window->GetWindowId()));
-  }
+  view_->RenderViewCreated(render_view_host);
 }
 
 // web_modal::WebContentsModalDialogManagerDelegate overrides:

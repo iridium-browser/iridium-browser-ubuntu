@@ -32,9 +32,9 @@
 
 #include "platform/graphics/ImageBufferSurface.h"
 
-#include "platform/graphics/BitmapImage.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/ImageBuffer.h"
+#include "platform/graphics/StaticBitmapImage.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkDevice.h"
 #include "third_party/skia/include/core/SkImage.h"
@@ -62,53 +62,40 @@ void ImageBufferSurface::clear()
     // required, but the canvas is currently filled with the magic transparency
     // color. Can we have another way to manage this?
     if (isValid()) {
-        if (m_opacityMode == Opaque)
-            canvas()->drawARGB(255, 0, 0, 0, SkXfermode::kSrc_Mode);
-        else
-            canvas()->drawARGB(0, 0, 0, 0, SkXfermode::kClear_Mode);
+        if (m_opacityMode == Opaque) {
+            canvas()->clear(SK_ColorBLACK);
+        } else {
+            canvas()->clear(SK_ColorTRANSPARENT);
+        }
+        didDraw(FloatRect(FloatPoint(0, 0), size()));
     }
 }
 
-const SkBitmap& ImageBufferSurface::bitmap()
+void ImageBufferSurface::draw(GraphicsContext* context, const FloatRect& destRect, const FloatRect& srcRect, SkXfermode::Mode op)
 {
-    ASSERT(canvas());
-    willAccessPixels();
-    return canvas()->getTopDevice()->accessBitmap(false);
+    RefPtr<SkImage> snapshot = newImageSnapshot();
+    if (!snapshot)
+        return;
+
+    RefPtr<Image> image = StaticBitmapImage::create(snapshot.release());
+    context->drawImage(image.get(), destRect, srcRect, op);
 }
 
-const SkBitmap& ImageBufferSurface::cachedBitmap() const
+const SkBitmap& ImageBufferSurface::deprecatedBitmapForOverwrite()
 {
-    DEFINE_STATIC_LOCAL(SkBitmap, nullBitmap, ());
-    return nullBitmap;
+    ASSERT_NOT_REACHED(); // should only be called on non-accelerated surface types, which have overrides
+    return canvas()->getDevice()->accessBitmap(false); // Because we have to return something for the code to compile, and it can't be a local (by address).
 }
 
-PassRefPtr<SkImage> ImageBufferSurface::newImageSnapshot() const
+
+void ImageBufferSurface::flush()
 {
-    return nullptr;
+    canvas()->flush();
 }
 
-static SkBitmap deepSkBitmapCopy(const SkBitmap& bitmap)
+bool ImageBufferSurface::writePixels(const SkImageInfo& origInfo, const void* pixels, size_t rowBytes, int x, int y)
 {
-    SkBitmap tmp;
-    if (!bitmap.deepCopyTo(&tmp))
-        bitmap.copyTo(&tmp, bitmap.colorType());
-
-    return tmp;
-}
-
-void ImageBufferSurface::draw(GraphicsContext* context, const FloatRect& destRect, const FloatRect& srcRect, SkXfermode::Mode op, bool needsCopy)
-{
-    SkBitmap bmp = bitmap();
-    // For ImageBufferSurface that enables cachedBitmap, Use the cached bitmap for CPU side usage
-    // if it is available, otherwise generate and use it.
-    if (!context->isAccelerated() && isAccelerated() && cachedBitmapEnabled() && isValid()) {
-        updateCachedBitmapIfNeeded();
-        bmp = cachedBitmap();
-    }
-
-    RefPtr<Image> image = BitmapImage::create(needsCopy ? deepSkBitmapCopy(bmp) : bmp);
-
-    context->drawImage(image.get(), destRect, srcRect, op, DoNotRespectImageOrientation);
+    return canvas()->writePixels(origInfo, pixels, rowBytes, x, y);
 }
 
 } // namespace blink

@@ -6,9 +6,11 @@
 
 #include "base/guid.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/prefs/pref_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
@@ -120,7 +122,7 @@ class DefaultDelegate : public ExtensionWelcomeNotification::Delegate {
 
   void PostTask(const tracked_objects::Location& from_here,
                 const base::Closure& task) override {
-    base::MessageLoop::current()->PostTask(from_here, task);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(from_here, task);
   }
 
  private:
@@ -258,12 +260,10 @@ void ExtensionWelcomeNotification::ShowWelcomeNotification(
             l10n_util::GetStringUTF16(IDS_NOTIFICATION_WELCOME_BODY),
             ui::ResourceBundle::GetSharedInstance().GetImageNamed(
                 IDR_NOTIFICATION_WELCOME_ICON),
-            display_source,
-            notifier_id_,
-            rich_notification_data,
-            new NotificationCallbacks(
-                profile_, notifier_id_, welcome_notification_id_,
-                delegate_.get())));
+            display_source, GURL(), notifier_id_, rich_notification_data,
+            new NotificationCallbacks(profile_, notifier_id_,
+                                      welcome_notification_id_,
+                                      delegate_.get())));
 
     if (pop_up_request == POP_UP_HIDDEN)
       message_center_notification->set_shown_as_popup(true);

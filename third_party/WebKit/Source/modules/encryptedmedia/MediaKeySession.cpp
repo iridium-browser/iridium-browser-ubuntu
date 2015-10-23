@@ -92,10 +92,10 @@ static String ConvertKeyStatusToString(const WebEncryptedMediaKeyInformation::Ke
         return "usable";
     case WebEncryptedMediaKeyInformation::KeyStatus::Expired:
         return "expired";
+    case WebEncryptedMediaKeyInformation::KeyStatus::OutputRestricted:
+        return "output-restricted";
     case WebEncryptedMediaKeyInformation::KeyStatus::OutputDownscaled:
         return "output-downscaled";
-    case WebEncryptedMediaKeyInformation::KeyStatus::OutputNotAllowed:
-        return "output-not-allowed";
     case WebEncryptedMediaKeyInformation::KeyStatus::StatusPending:
         return "status-pending";
     case WebEncryptedMediaKeyInformation::KeyStatus::InternalError:
@@ -225,12 +225,12 @@ public:
     {
     }
 
-    virtual ~NewSessionResultPromise()
+    ~NewSessionResultPromise() override
     {
     }
 
     // ContentDecryptionModuleResult implementation.
-    virtual void completeWithSession(WebContentDecryptionModuleResult::SessionStatus status) override
+    void completeWithSession(WebContentDecryptionModuleResult::SessionStatus status) override
     {
         if (status != WebContentDecryptionModuleResult::NewSession) {
             ASSERT_NOT_REACHED();
@@ -264,22 +264,22 @@ public:
     {
     }
 
-    virtual ~LoadSessionResultPromise()
+    ~LoadSessionResultPromise() override
     {
     }
 
     // ContentDecryptionModuleResult implementation.
-    virtual void completeWithSession(WebContentDecryptionModuleResult::SessionStatus status) override
+    void completeWithSession(WebContentDecryptionModuleResult::SessionStatus status) override
     {
-        bool result = false;
         switch (status) {
         case WebContentDecryptionModuleResult::NewSession:
-            result = true;
-            break;
+            m_session->finishLoad();
+            resolve(true);
+            return;
 
         case WebContentDecryptionModuleResult::SessionNotFound:
-            result = false;
-            break;
+            resolve(false);
+            return;
 
         case WebContentDecryptionModuleResult::SessionAlreadyExists:
             ASSERT_NOT_REACHED();
@@ -287,8 +287,7 @@ public:
             return;
         }
 
-        m_session->finishLoad();
-        resolve(result);
+        ASSERT_NOT_REACHED();
     }
 
     DEFINE_INLINE_TRACE()

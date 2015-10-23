@@ -11,10 +11,10 @@ var test = test || {};
  * Extract the information of the given element.
  * @param {Element} element Element to be extracted.
  * @param {Window} contentWindow Window to be tested.
- * @param {Array.<string>=} opt_styleNames List of CSS property name to be
+ * @param {Array<string>=} opt_styleNames List of CSS property name to be
  *     obtained.
- * @return {{attributes:Object.<string, string>, text:string,
- *                  styles:Object.<string, string>, hidden:boolean}} Element
+ * @return {{attributes:Object<string>, text:string,
+ *                  styles:Object<string>, hidden:boolean}} Element
  *     information that contains contentText, attribute names and
  *     values, hidden attribute, and style names and values.
  */
@@ -66,19 +66,20 @@ test.util.async = {};
 
 /**
  * List of extension ID of the testing extension.
- * @type {Array.<string>}
+ * @type {Array<string>}
  * @const
  */
 test.util.TESTING_EXTENSION_IDS = [
   'oobinhbdbiehknkpbpejbbpdbkdjmoco',  // File Manager test
   'ejhcmmdhhpdhhgmifplfmjobgegbibkn',  // Gallery test
   'ljoplibgfehghmibaoaepfagnmbbfiga',  // Video Player test
+  'ddabbgbggambiildohfagdkliahiecfl',  // Audio Player test
 ];
 
 /**
  * Obtains window information.
  *
- * @return {Object.<string, {innerWidth:number, innerHeight:number}>} Map window
+ * @return {Object<{innerWidth:number, innerHeight:number}>} Map window
  *     ID and window information.
  */
 test.util.sync.getWindows = function() {
@@ -160,15 +161,44 @@ test.util.sync.resizeWindow = function(contentWindow, width, height) {
 };
 
 /**
+ * Maximizes the window.
+ * @param {Window} contentWindow Window to be tested.
+ * @return {boolean} True for success.
+ */
+test.util.sync.maximizeWindow = function(contentWindow) {
+  window.background.appWindows[contentWindow.appID].maximize();
+  return true;
+};
+
+/**
+ * Restores the window state (maximized/minimized/etc...).
+ * @param {Window} contentWindow Window to be tested.
+ * @return {boolean} True for success.
+ */
+test.util.sync.restoreWindow = function(contentWindow) {
+  window.background.appWindows[contentWindow.appID].restore();
+  return true;
+};
+
+/**
+ * Returns whether the window is miximized or not.
+ * @param {Window} contentWindow Window to be tested.
+ * @return {boolean} True if the window is maximized now.
+ */
+test.util.sync.isWindowMaximized = function(contentWindow) {
+  return window.background.appWindows[contentWindow.appID].isMaximized();
+};
+
+/**
  * Queries all elements.
  *
  * @param {Window} contentWindow Window to be tested.
  * @param {string} targetQuery Query to specify the element.
  * @param {?string} iframeQuery Iframe selector or null if no iframe.
- * @param {Array.<string>=} opt_styleNames List of CSS property name to be
+ * @param {Array<string>=} opt_styleNames List of CSS property name to be
  *     obtained.
- * @return {Array.<{attributes:Object.<string, string>, text:string,
- *                  styles:Object.<string, string>, hidden:boolean}>} Element
+ * @return {Array<{attributes:Object<string>, text:string,
+ *                  styles:Object<string>, hidden:boolean}>} Element
  *     information that contains contentText, attribute names and
  *     values, hidden attribute, and style names and values.
  */
@@ -192,10 +222,10 @@ test.util.sync.queryAllElements = function(
  * @param {Window} contentWindow Window to be tested.
  * @param {string} targetQuery Query to specify the element.
  * @param {?string} iframeQuery Iframe selector or null if no iframe.
- * @param {Array.<string>=} opt_styleNames List of CSS property name to be
+ * @param {Array<string>=} opt_styleNames List of CSS property name to be
  *     obtained.
- * @return {?{attributes:Object.<string, string>, text:string,
- *                  styles:Object.<string, string>, hidden:boolean}} Element
+ * @return {?{attributes:Object<string>, text:string,
+ *                  styles:Object<string>, hidden:boolean}} Element
  *     information that contains contentText, attribute names and
  *     values, hidden attribute, and style names and values. If there is no
  *     active element, returns null.
@@ -402,7 +432,7 @@ test.util.sync.fakeMouseUp = function(
 
 /**
  * Obtains the list of notification ID.
- * @param {function(Object.<string, boolean>)} callback Callback function with
+ * @param {function(Object<boolean>)} callback Callback function with
  *     results returned by the script.
  */
 test.util.async.getNotificationIDs = function(callback) {
@@ -413,7 +443,7 @@ test.util.async.getNotificationIDs = function(callback) {
  * Gets file entries just under the volume.
  *
  * @param {VolumeManagerCommon.VolumeType} volumeType Volume type.
- * @param {Array.<string>} names File name list.
+ * @param {Array<string>} names File name list.
  * @param {function(*)} callback Callback function with results returned by the
  *     script.
  */

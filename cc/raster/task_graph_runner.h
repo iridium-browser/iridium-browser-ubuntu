@@ -53,11 +53,11 @@ struct CC_EXPORT TaskGraph {
 
     typedef std::vector<Node> Vector;
 
-    Node(Task* task, unsigned priority, size_t dependencies)
+    Node(Task* task, size_t priority, size_t dependencies)
         : task(task), priority(priority), dependencies(dependencies) {}
 
     Task* task;
-    unsigned priority;
+    size_t priority;
     size_t dependencies;
   };
 
@@ -137,15 +137,18 @@ class CC_EXPORT TaskGraphRunner {
   // Warning: if the TaskGraphRunner remains busy, it may never quit.
   void Shutdown();
 
+  // Wait for all the tasks to finish running on all the namespaces.
+  void FlushForTesting();
+
  private:
   struct PrioritizedTask {
     typedef std::vector<PrioritizedTask> Vector;
 
-    PrioritizedTask(Task* task, unsigned priority)
+    PrioritizedTask(Task* task, size_t priority)
         : task(task), priority(priority) {}
 
     Task* task;
-    unsigned priority;
+    size_t priority;
   };
 
   typedef std::vector<const Task*> TaskVector;

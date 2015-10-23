@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/policy/auto_enrollment_client.h"
 
+#include <stdint.h>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/message_loop/message_loop.h"
@@ -66,18 +68,15 @@ class AutoEnrollmentClientTest : public testing::Test {
                     int power_limit) {
     state_ = AUTO_ENROLLMENT_STATE_PENDING;
     service_.reset(new MockDeviceManagementService());
-    EXPECT_CALL(*service_, StartJob(_, _, _, _, _, _, _))
-        .WillRepeatedly(SaveArg<6>(&last_request_));
+    EXPECT_CALL(*service_, StartJob(_, _, _, _, _, _))
+        .WillRepeatedly(SaveArg<5>(&last_request_));
     client_.reset(new AutoEnrollmentClient(
         base::Bind(&AutoEnrollmentClientTest::ProgressCallback,
                    base::Unretained(this)),
-        service_.get(),
-        local_state_,
+        service_.get(), local_state_,
         new net::TestURLRequestContextGetter(
-            base::MessageLoop::current()->message_loop_proxy()),
-        state_key,
-        power_initial,
-        power_limit));
+            base::MessageLoop::current()->task_runner()),
+        state_key, power_initial, power_limit));
   }
 
   void ProgressCallback(AutoEnrollmentState state) {
@@ -388,7 +387,7 @@ TEST_F(AutoEnrollmentClientTest, NoBitsUploaded) {
 }
 
 TEST_F(AutoEnrollmentClientTest, ManyBitsUploaded) {
-  int64 bottom62 = GG_INT64_C(0x386e7244d097c3e6);
+  int64 bottom62 = INT64_C(0x386e7244d097c3e6);
   for (int i = 0; i <= 62; ++i) {
     CreateClient(kStateKey, i, i);
     ServerWillReply(-1, false, false);
@@ -396,8 +395,8 @@ TEST_F(AutoEnrollmentClientTest, ManyBitsUploaded) {
     EXPECT_EQ(AUTO_ENROLLMENT_STATE_NO_ENROLLMENT, state_);
     EXPECT_TRUE(auto_enrollment_request().has_remainder());
     EXPECT_TRUE(auto_enrollment_request().has_modulus());
-    EXPECT_EQ(GG_INT64_C(1) << i, auto_enrollment_request().modulus());
-    EXPECT_EQ(bottom62 % (GG_INT64_C(1) << i),
+    EXPECT_EQ(INT64_C(1) << i, auto_enrollment_request().modulus());
+    EXPECT_EQ(bottom62 % (INT64_C(1) << i),
               auto_enrollment_request().remainder());
     VerifyCachedResult(false, i);
     EXPECT_FALSE(HasServerBackedState());
@@ -407,7 +406,7 @@ TEST_F(AutoEnrollmentClientTest, ManyBitsUploaded) {
 TEST_F(AutoEnrollmentClientTest, MoreThan32BitsUploaded) {
   CreateClient(kStateKey, 10, 37);
   InSequence sequence;
-  ServerWillReply(GG_INT64_C(1) << 37, false, false);
+  ServerWillReply(INT64_C(1) << 37, false, false);
   ServerWillReply(-1, true, true);
   ServerWillSendState(
       "example.com",
@@ -599,16 +598,16 @@ TEST_F(AutoEnrollmentClientTest, NetworkFailureThenRequireUpdatedModulus) {
   InSequence sequence;
   // The default client uploads 4 bits. Make the server ask for 5.
   ServerWillReply(1 << 5, false, false);
-  EXPECT_CALL(*service_, StartJob(_, _, _, _, _, _, _));
+  EXPECT_CALL(*service_, StartJob(_, _, _, _, _, _));
   // Then reply with a valid response and include the hash.
   ServerWillReply(-1, true, true);
-  EXPECT_CALL(*service_, StartJob(_, _, _, _, _, _, _));
+  EXPECT_CALL(*service_, StartJob(_, _, _, _, _, _));
   // State download triggers.
   ServerWillSendState(
       "example.com",
       em::DeviceStateRetrievalResponse::RESTORE_MODE_REENROLLMENT_ENFORCED,
       kDisabledMessage);
-  EXPECT_CALL(*service_, StartJob(_, _, _, _, _, _, _));
+  EXPECT_CALL(*service_, StartJob(_, _, _, _, _, _));
 
   // Trigger a network change event.
   client_->OnNetworkChanged(net::NetworkChangeNotifier::CONNECTION_ETHERNET);

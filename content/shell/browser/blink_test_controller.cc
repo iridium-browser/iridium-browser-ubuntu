@@ -8,10 +8,12 @@
 
 #include "base/base64.h"
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/gpu_data_manager.h"
@@ -324,12 +326,6 @@ void BlinkTestController::RendererUnresponsive() {
   LOG(WARNING) << "renderer unresponsive";
 }
 
-void BlinkTestController::WorkerCrashed() {
-  DCHECK(CalledOnValidThread());
-  printer_->AddErrorMessage("#CRASHED - worker");
-  DiscardMainWindow();
-}
-
 void BlinkTestController::OverrideWebkitPrefs(WebPreferences* prefs) {
   if (should_override_prefs_) {
     *prefs = prefs_;
@@ -400,7 +396,7 @@ void BlinkTestController::PluginCrashed(const base::FilePath& plugin_path,
   DCHECK(CalledOnValidThread());
   printer_->AddErrorMessage(
       base::StringPrintf("#CRASHED - plugin (pid %d)", plugin_pid));
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(base::IgnoreResult(&BlinkTestController::DiscardMainWindow),
                  base::Unretained(this)));
@@ -481,8 +477,8 @@ void BlinkTestController::DiscardMainWindow() {
   WebContentsObserver::Observe(NULL);
   if (test_phase_ != BETWEEN_TESTS) {
     Shell::CloseAllWindows();
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::MessageLoop::QuitClosure());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::MessageLoop::QuitClosure());
     test_phase_ = CLEAN_UP;
   } else if (main_window_) {
     main_window_->Close();
@@ -515,7 +511,7 @@ void BlinkTestController::OnTestFinished() {
   RenderViewHost* render_view_host =
       main_window_->web_contents()->GetRenderViewHost();
   main_window_->web_contents()->ExitFullscreen();
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(base::IgnoreResult(&BlinkTestController::Send),
                  base::Unretained(this),
@@ -535,7 +531,9 @@ void BlinkTestController::OnImageDump(const std::string& actual_pixel_hash,
 
     bool discard_transparency = true;
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableOverlayFullscreenVideo))
+            switches::kEnableOverlayFullscreenVideo) ||
+        base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kForceOverlayFullscreenVideo))
       discard_transparency = false;
 
     std::vector<gfx::PNGCodec::Comment> comments;
@@ -680,15 +678,15 @@ void BlinkTestController::OnResetDone() {
     return;
   }
 
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::MessageLoop::QuitClosure());
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitClosure());
 }
 
 void BlinkTestController::OnLeakDetectionDone(
     const LeakDetectionResult& result) {
   if (!result.leaked) {
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::MessageLoop::QuitClosure());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::MessageLoop::QuitClosure());
     return;
   }
 

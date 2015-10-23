@@ -38,9 +38,8 @@ public:
 
 protected:
     SkData* onRefEncodedData() override;
-    Result onGetPixels(const SkImageInfo& info,
-                       void* pixels, size_t rowBytes, const Options&,
-                       SkPMColor ctable[], int* ctableCount) override;
+    bool onGetPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
+                     SkPMColor ctable[], int* ctableCount) override;
     bool onGetYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3],
                          SkYUVColorSpace* colorSpace) override;
 
@@ -144,23 +143,19 @@ SkData* DecodingImageGenerator::onRefEncodedData() {
     return SkSafeRef(fData);
 }
 
-SkImageGenerator::Result DecodingImageGenerator::onGetPixels(const SkImageInfo& info,
-        void* pixels, size_t rowBytes, const Options& options, SkPMColor ctableEntries[],
-        int* ctableCount) {
+bool DecodingImageGenerator::onGetPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
+                                         SkPMColor ctableEntries[], int* ctableCount) {
     if (fInfo != info) {
         // The caller has specified a different info.  This is an
         // error for this kind of SkImageGenerator.  Use the Options
         // to change the settings.
-        if (info.dimensions() != fInfo.dimensions()) {
-            return kInvalidScale;
-        }
-        return kInvalidConversion;
+        return false;
     }
 
     SkAssertResult(fStream->rewind());
     SkAutoTDelete<SkImageDecoder> decoder(SkImageDecoder::Factory(fStream));
     if (NULL == decoder.get()) {
-        return kInvalidInput;
+        return false;
     }
     decoder->setDitherImage(fDitherImage);
     decoder->setSampleSize(fSampleSize);
@@ -173,7 +168,7 @@ SkImageGenerator::Result DecodingImageGenerator::onGetPixels(const SkImageInfo& 
                                                                 SkImageDecoder::kDecodePixels_Mode);
     decoder->setAllocator(NULL);
     if (SkImageDecoder::kFailure == decodeResult) {
-        return kInvalidInput;
+        return false;
     }
     if (allocator.isReady()) {  // Did not use pixels!
         SkBitmap bm;
@@ -182,7 +177,7 @@ SkImageGenerator::Result DecodingImageGenerator::onGetPixels(const SkImageInfo& 
         if (!copySuccess || allocator.isReady()) {
             SkDEBUGFAIL("bitmap.copyTo(requestedConfig) failed.");
             // Earlier we checked canCopyto(); we expect consistency.
-            return kInvalidConversion;
+            return false;
         }
         SkASSERT(check_alpha(info.alphaType(), bm.alphaType()));
     } else {
@@ -192,20 +187,17 @@ SkImageGenerator::Result DecodingImageGenerator::onGetPixels(const SkImageInfo& 
     if (kIndex_8_SkColorType == info.colorType()) {
         if (kIndex_8_SkColorType != bitmap.colorType()) {
             // they asked for Index8, but we didn't receive that from decoder
-            return kInvalidConversion;
+            return false;
         }
         SkColorTable* ctable = bitmap.getColorTable();
         if (NULL == ctable) {
-            return kInvalidConversion;
+            return false;
         }
         const int count = ctable->count();
         memcpy(ctableEntries, ctable->readColors(), count * sizeof(SkPMColor));
         *ctableCount = count;
     }
-    if (SkImageDecoder::kPartialSuccess == decodeResult) {
-        return kIncompleteInput;
-    }
-    return kSuccess;
+    return true;
 }
 
 bool DecodingImageGenerator::onGetYUV8Planes(SkISize sizes[3], void* planes[3],

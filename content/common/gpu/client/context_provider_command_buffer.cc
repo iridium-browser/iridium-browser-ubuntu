@@ -105,9 +105,6 @@ bool ContextProviderCommandBuffer::BindToCurrentThread() {
   context3d_->traceBeginCHROMIUM("gpu_toplevel", unique_context_name.c_str());
 
   lost_context_callback_proxy_.reset(new LostContextCallbackProxy(this));
-  context3d_->GetCommandBufferProxy()->SetMemoryAllocationChangedCallback(
-      base::Bind(&ContextProviderCommandBuffer::OnMemoryAllocationChanged,
-                 base::Unretained(this)));
   return true;
 }
 
@@ -137,7 +134,8 @@ class GrContext* ContextProviderCommandBuffer::GrContext() {
   gr_context_.reset(new GrContextForWebGraphicsContext3D(context3d_.get()));
 
   // If GlContext is already lost, also abandon the new GrContext.
-  if (gr_context_->get() && IsContextLost())
+  if (gr_context_->get() &&
+      ContextGL()->GetGraphicsResetStatusKHR() != GL_NO_ERROR)
     gr_context_->get()->abandonContext();
 
   return gr_context_->get();
@@ -168,18 +166,11 @@ ContextProviderCommandBuffer::ContextCapabilities() {
   return capabilities_;
 }
 
-bool ContextProviderCommandBuffer::IsContextLost() {
-  DCHECK(lost_context_callback_proxy_);  // Is bound to thread.
-  DCHECK(context_thread_checker_.CalledOnValidThread());
-
-  return context3d_->isContextLost();
-}
-
 void ContextProviderCommandBuffer::VerifyContexts() {
   DCHECK(lost_context_callback_proxy_);  // Is bound to thread.
   DCHECK(context_thread_checker_.CalledOnValidThread());
 
-  if (context3d_->isContextLost())
+  if (ContextGL()->GetGraphicsResetStatusKHR() != GL_NO_ERROR)
     OnLostContext();
 }
 
@@ -247,6 +238,13 @@ void ContextProviderCommandBuffer::SetMemoryPolicyChangedCallback(
   DCHECK(memory_policy_changed_callback_.is_null() ||
          memory_policy_changed_callback.is_null());
   memory_policy_changed_callback_ = memory_policy_changed_callback;
+
+  if (!memory_policy_changed_callback_.is_null()) {
+    DCHECK(context3d_->GetCommandBufferProxy());
+    context3d_->GetCommandBufferProxy()->SetMemoryAllocationChangedCallback(
+        base::Bind(&ContextProviderCommandBuffer::OnMemoryAllocationChanged,
+                   base::Unretained(this)));
+  }
 }
 
 }  // namespace content

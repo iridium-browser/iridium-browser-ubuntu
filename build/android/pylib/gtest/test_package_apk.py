@@ -5,19 +5,21 @@
 """Defines TestPackageApk to help run APK-based native tests."""
 # pylint: disable=W0212
 
+import itertools
 import logging
 import os
+import posixpath
 import shlex
 import sys
 import tempfile
 import time
 
-from pylib import android_commands
 from pylib import constants
 from pylib import pexpect
 from pylib.device import device_errors
 from pylib.device import intent
 from pylib.gtest import gtest_test_instance
+from pylib.gtest import local_device_gtest_run
 from pylib.gtest.test_package import TestPackage
 
 
@@ -30,19 +32,20 @@ class TestPackageApk(TestPackage):
       suite_name: Name of the test suite (e.g. base_unittests).
     """
     TestPackage.__init__(self, suite_name)
+    self.suite_path = os.path.join(
+        constants.GetOutDirectory(), '%s_apk' % suite_name,
+        '%s-debug.apk' % suite_name)
     if suite_name == 'content_browsertests':
-      self.suite_path = os.path.join(
-          constants.GetOutDirectory(), 'apks', '%s.apk' % suite_name)
       self._package_info = constants.PACKAGE_INFO['content_browsertests']
     elif suite_name == 'components_browsertests':
-      self.suite_path = os.path.join(
-          constants.GetOutDirectory(), 'apks', '%s.apk' % suite_name)
       self._package_info = constants.PACKAGE_INFO['components_browsertests']
     else:
-      self.suite_path = os.path.join(
-          constants.GetOutDirectory(), '%s_apk' % suite_name,
-          '%s-debug.apk' % suite_name)
       self._package_info = constants.PACKAGE_INFO['gtest']
+
+    if suite_name == 'net_unittests':
+      self._extras = {'RunInSubThread': None}
+    else:
+      self._extras = []
 
   def _CreateCommandLineFileOnDevice(self, device, options):
     device.WriteFile(self._package_info.cmdline_file,
@@ -67,15 +70,15 @@ class TestPackageApk(TestPackage):
     else:
       raise device_errors.DeviceUnreachableError(
           'Unable to find fifo on device %s ' % self._GetFifo())
-    args = shlex.split(device.old_interface.Adb()._target_arg)
-    args += ['shell', 'cat', self._GetFifo()]
+    args = ['-s', device.adb.GetDeviceSerial(), 'shell', 'cat', self._GetFifo()]
     return pexpect.spawn('adb', args, timeout=timeout, logfile=logfile)
 
   def _StartActivity(self, device, force_stop=True):
     device.StartActivity(
         intent.Intent(package=self._package_info.package,
                       activity=self._package_info.activity,
-                      action='android.intent.action.MAIN'),
+                      action='android.intent.action.MAIN',
+                      extras=self._extras),
         # No wait since the runner waits for FIFO creation anyway.
         blocking=False,
         force_stop=force_stop)
@@ -138,10 +141,26 @@ class TestPackageApk(TestPackage):
       self._StartActivity(device, force_stop=False)
     finally:
       self.tool.CleanUpEnvironment()
-    logfile = android_commands.NewLineNormalizer(sys.stdout)
+    logfile = self._NewLineNormalizer(sys.stdout)
     return self._WatchFifo(device, timeout=10, logfile=logfile)
+
+  class _NewLineNormalizer(object):
+    def __init__(self, output):
+      self._output = output
+
+    def write(self, data):
+      data = data.replace('\r\r\n', '\n')
+      self._output.write(data)
+
+    def flush(self):
+      self._output.flush()
 
   #override
   def Install(self, device):
     self.tool.CopyFiles(device)
     device.Install(self.suite_path)
+
+  #override
+  def PullAppFiles(self, device, files, directory):
+    local_device_gtest_run.PullAppFilesImpl(
+        device, self._package_info.package, files, directory)

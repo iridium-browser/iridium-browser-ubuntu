@@ -36,18 +36,16 @@ class SVGFilter final : public Filter {
 public:
     static PassRefPtrWillBeRawPtr<SVGFilter> create(const IntRect&, const FloatRect&, const FloatRect&, bool);
 
-    virtual float applyHorizontalScale(float value) const override;
-    virtual float applyVerticalScale(float value) const override;
-    virtual FloatPoint3D resolve3dPoint(const FloatPoint3D&) const override;
+    float applyHorizontalScale(float value) const override;
+    float applyVerticalScale(float value) const override;
+    FloatPoint3D resolve3dPoint(const FloatPoint3D&) const override;
 
-    virtual IntRect sourceImageRect() const override { return m_absoluteSourceDrawingRegion; }
-    FloatRect targetBoundingBox() const { return m_targetBoundingBox; }
+    IntRect sourceImageRect() const override { return m_absoluteSourceDrawingRegion; }
 
 private:
     SVGFilter(const IntRect& absoluteSourceDrawingRegion, const FloatRect& targetBoundingBox, const FloatRect& filterRegion, bool effectBBoxMode);
 
     IntRect m_absoluteSourceDrawingRegion;
-    FloatRect m_targetBoundingBox;
     bool m_effectBBoxMode;
 };
 

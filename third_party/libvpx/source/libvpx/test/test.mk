@@ -66,6 +66,7 @@ LIBVPX_TEST_SRCS-$(CONFIG_DECODERS)    += ../tools_common.h
 LIBVPX_TEST_SRCS-$(CONFIG_DECODERS)    += ../webmdec.cc
 LIBVPX_TEST_SRCS-$(CONFIG_DECODERS)    += ../webmdec.h
 LIBVPX_TEST_SRCS-$(CONFIG_DECODERS)    += webm_video_source.h
+LIBVPX_TEST_SRCS-$(CONFIG_VP9_DECODER) += vp9_skip_loopfilter_test.cc
 endif
 
 LIBVPX_TEST_SRCS-$(CONFIG_DECODERS)    += decode_api_test.cc
@@ -90,6 +91,7 @@ endif
 ## shared library builds don't make these functions accessible.
 ##
 ifeq ($(CONFIG_SHARED),)
+LIBVPX_TEST_SRCS-$(CONFIG_VP9)         += lpf_8_test.cc
 
 ## VP8
 ifneq ($(CONFIG_VP8_ENCODER)$(CONFIG_VP8_DECODER),)
@@ -103,7 +105,6 @@ endif
 LIBVPX_TEST_SRCS-$(CONFIG_POSTPROC)    += pp_filter_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP8_DECODER) += vp8_decrypt_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP8_ENCODER) += set_roi.cc
-LIBVPX_TEST_SRCS-$(CONFIG_VP8_ENCODER) += subtract_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP8_ENCODER) += variance_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP8_ENCODER) += vp8_fdct4x4_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP8_ENCODER) += quantize_test.cc
@@ -142,7 +143,6 @@ LIBVPX_TEST_SRCS-$(CONFIG_VP9_ENCODER) += fdct4x4_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP9_ENCODER) += fdct8x8_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP9_ENCODER) += variance_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP9_ENCODER) += vp9_subtract_test.cc
-LIBVPX_TEST_SRCS-$(CONFIG_VP9_ENCODER) += lpf_8_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP9_ENCODER) += vp9_avg_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP9_ENCODER) += vp9_error_block_test.cc
 LIBVPX_TEST_SRCS-$(CONFIG_VP9_ENCODER) += vp9_quantize_test.cc
@@ -158,10 +158,14 @@ endif
 ifeq ($(CONFIG_VP9_ENCODER)$(CONFIG_VP9_TEMPORAL_DENOISING),yesyes)
 LIBVPX_TEST_SRCS-$(HAVE_SSE2) += vp9_denoiser_sse2_test.cc
 endif
+LIBVPX_TEST_SRCS-$(CONFIG_VP9_ENCODER) += vp9_arf_freq_test.cc
 
 endif # VP9
 
 LIBVPX_TEST_SRCS-$(CONFIG_ENCODERS)    += sad_test.cc
+
+TEST_INTRA_PRED_SPEED_SRCS-$(CONFIG_VP9) := test_intra_pred_speed.cc
+TEST_INTRA_PRED_SPEED_SRCS-$(CONFIG_VP9) += ../md5_utils.h ../md5_utils.c
 
 endif # CONFIG_SHARED
 

@@ -175,6 +175,11 @@ public class PeerConnectionTest {
       assertEquals(expectedIceConnectionChanges.removeFirst(), newState);
     }
 
+    @Override
+    public synchronized void onIceConnectionReceivingChange(boolean receiving) {
+      System.out.println(name + "Got an ice connection receiving change " + receiving);
+    }
+
     public synchronized void expectIceGatheringChange(
         IceGatheringState newState) {
       expectedIceGatheringChanges.add(newState);
@@ -256,6 +261,11 @@ public class PeerConnectionTest {
       DataChannel.Buffer expected = expectedBuffers.removeFirst();
       assertEquals(expected.binary, buffer.binary);
       assertTrue(expected.data.equals(buffer.data));
+    }
+
+    @Override
+    public synchronized void onBufferedAmountChange(long previousAmount) {
+      assertFalse(previousAmount == dataChannel.bufferedAmount());
     }
 
     @Override

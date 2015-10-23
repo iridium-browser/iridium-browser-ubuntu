@@ -151,16 +151,18 @@ class ExistingUserControllerTest : public policy::DevicePolicyCrosBrowserTest {
         new ExistingUserController(mock_login_display_host_.get()));
     ASSERT_EQ(existing_user_controller(), existing_user_controller_.get());
     existing_user_controller_->Init(user_manager::UserList());
+
+    chromeos::test::UserSessionManagerTestApi session_manager_test_api(
+        chromeos::UserSessionManager::GetInstance());
+    session_manager_test_api.SetShouldObtainTokenHandleInTests(false);
   }
 
   void TearDownOnMainThread() override {
-    // ExistingUserController must be deleted before the thread is cleaned up:
-    // If there is an outstanding login attempt when ExistingUserController is
-    // deleted, its LoginPerformer instance will be deleted, which in turn
-    // deletes its OnlineAttemptHost instance.  However, OnlineAttemptHost must
-    // be deleted on the UI thread.
-    existing_user_controller_.reset();
     DevicePolicyCrosBrowserTest::InProcessBrowserTest::TearDownOnMainThread();
+
+    // |existing_user_controller_| has data members that are CrosSettings
+    // observers. They need to be destructed before CrosSettings.
+    existing_user_controller_.reset();
 
     // Test case may be configured with the real user manager but empty user
     // list initially. So network OOBE screen is initialized.

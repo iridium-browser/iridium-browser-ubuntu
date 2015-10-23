@@ -4,6 +4,10 @@
 
 #include "net/quic/congestion_control/pacing_sender.h"
 
+#include "net/quic/quic_flags.h"
+
+using std::min;
+
 namespace net {
 
 PacingSender::PacingSender(SendAlgorithmInterface* sender,
@@ -25,11 +29,11 @@ void PacingSender::SetFromConfig(const QuicConfig& config,
   sender_->SetFromConfig(config, perspective);
 }
 
-bool PacingSender::ResumeConnectionState(
+void PacingSender::ResumeConnectionState(
     const CachedNetworkParameters& cached_network_params,
     bool max_bandwidth_resumption) {
-  return sender_->ResumeConnectionState(cached_network_params,
-                                        max_bandwidth_resumption);
+  sender_->ResumeConnectionState(cached_network_params,
+                                 max_bandwidth_resumption);
 }
 
 void PacingSender::SetNumEmulatedConnections(int num_connections) {
@@ -61,8 +65,16 @@ bool PacingSender::OnPacketSent(
     return in_flight;
   }
   if (bytes_in_flight == 0) {
-    // Add more burst tokens anytime the connection is leaving quiescence.
-    burst_tokens_ = initial_packet_burst_;
+    // Add more burst tokens anytime the connection is leaving quiescence, but
+    // limit it to the equivalent of a single bulk write, not exceeding the
+    // current CWND in packets.
+    if (FLAGS_quic_limit_pacing_burst) {
+      burst_tokens_ = min(
+          initial_packet_burst_,
+          static_cast<uint32>(sender_->GetCongestionWindow() / kDefaultTCPMSS));
+    } else {
+      burst_tokens_ = initial_packet_burst_;
+    }
   }
   if (burst_tokens_ > 0) {
     --burst_tokens_;
@@ -146,10 +158,6 @@ QuicBandwidth PacingSender::PacingRate() const {
 
 QuicBandwidth PacingSender::BandwidthEstimate() const {
   return sender_->BandwidthEstimate();
-}
-
-bool PacingSender::HasReliableBandwidthEstimate() const {
-  return sender_->HasReliableBandwidthEstimate();
 }
 
 QuicTime::Delta PacingSender::RetransmissionDelay() const {

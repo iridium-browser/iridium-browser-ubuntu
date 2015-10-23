@@ -49,7 +49,6 @@ WinWindow::WinWindow(PlatformWindowDelegate* delegate,
 }
 
 WinWindow::~WinWindow() {
-  Destroy();
 }
 
 void WinWindow::Destroy() {
@@ -108,6 +107,10 @@ void WinWindow::SetCursor(PlatformCursor cursor) {}
 void WinWindow::MoveCursorTo(const gfx::Point& location) {}
 
 void WinWindow::ConfineCursorToBounds(const gfx::Rect& bounds) {
+}
+
+PlatformImeController* WinWindow::GetPlatformImeController() {
+  return nullptr;
 }
 
 LRESULT WinWindow::OnMouseRange(UINT message, WPARAM w_param, LPARAM l_param) {
@@ -172,7 +175,8 @@ LRESULT WinWindow::OnCreate(CREATESTRUCT* create_struct) {
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION("440919 WinWindow::OnCreate"));
 
-  delegate_->OnAcceleratedWidgetAvailable(hwnd());
+  // TODO(sky): provide real scale factor.
+  delegate_->OnAcceleratedWidgetAvailable(hwnd(), 1.f);
   return 0;
 }
 

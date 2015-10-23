@@ -13,6 +13,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/top_sites_factory.h"
@@ -45,6 +46,9 @@
 using content::BrowserThread;
 
 namespace {
+
+// Delay jumplist updates to allow collapsing of redundant update requests.
+const int kDelayForJumplistUpdateInMS = 3500;
 
 // Append the common switches to each shell link.
 void AppendCommonSwitches(ShellLinkItem* shell_link) {
@@ -104,7 +108,8 @@ bool UpdateTaskCategory(
   if (incognito_availability != IncognitoModePrefs::FORCED) {
     scoped_refptr<ShellLinkItem> chrome = CreateShellLink();
     base::string16 chrome_title = l10n_util::GetStringUTF16(IDS_NEW_WINDOW);
-    ReplaceSubstringsAfterOffset(&chrome_title, 0, L"&", L"");
+    base::ReplaceSubstringsAfterOffset(
+        &chrome_title, 0, L"&", base::StringPiece16());
     chrome->set_title(chrome_title);
     chrome->set_icon(chrome_path.value(), 0);
     items.push_back(chrome);
@@ -118,7 +123,8 @@ bool UpdateTaskCategory(
     incognito->GetCommandLine()->AppendSwitch(switches::kIncognito);
     base::string16 incognito_title =
         l10n_util::GetStringUTF16(IDS_NEW_INCOGNITO_WINDOW);
-    ReplaceSubstringsAfterOffset(&incognito_title, 0, L"&", L"");
+    base::ReplaceSubstringsAfterOffset(
+        &incognito_title, 0, L"&", base::StringPiece16());
     incognito->set_title(incognito_title);
     incognito->set_icon(chrome_path.value(), 0);
     items.push_back(incognito);
@@ -440,6 +446,23 @@ void JumpList::OnIncognitoAvailabilityChanged() {
 }
 
 void JumpList::PostRunUpdate() {
+  TRACE_EVENT0("browser", "JumpList::PostRunUpdate");
+  // Initialize the one-shot timer to update the jumplists in a while.
+  // If there is already a request queued then cancel it and post the new
+  // request. This ensures that JumpListUpdates won't happen until there has
+  // been a brief quiet period, thus avoiding update storms.
+  if (timer_.IsRunning()) {
+    timer_.Reset();
+  } else {
+    timer_.Start(FROM_HERE,
+                 base::TimeDelta::FromMilliseconds(kDelayForJumplistUpdateInMS),
+                 this,
+                 &JumpList::DeferredRunUpdate);
+  }
+}
+
+void JumpList::DeferredRunUpdate() {
+  TRACE_EVENT0("browser", "JumpList::DeferredRunUpdate");
   // Check if incognito windows (or normal windows) are disabled by policy.
   IncognitoModePrefs::Availability incognito_availability =
       profile_ ? IncognitoModePrefs::GetAvailability(profile_->GetPrefs())
@@ -506,7 +529,8 @@ void JumpList::CreateIconFiles(const ShellLinkItemList& item_list) {
 void JumpList::TopSitesLoaded(history::TopSites* top_sites) {
 }
 
-void JumpList::TopSitesChanged(history::TopSites* top_sites) {
+void JumpList::TopSitesChanged(history::TopSites* top_sites,
+                               ChangeReason change_reason) {
   top_sites->GetMostVisitedURLs(
       base::Bind(&JumpList::OnMostVisitedURLsAvailable,
                  weak_ptr_factory_.GetWeakPtr()),

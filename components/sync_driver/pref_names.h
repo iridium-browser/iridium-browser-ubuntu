@@ -23,6 +23,7 @@ extern const char kSyncApps[];
 extern const char kSyncArticles[];
 extern const char kSyncAutofillProfile[];
 extern const char kSyncAutofillWallet[];
+extern const char kSyncAutofillWalletMetadata[];
 extern const char kSyncAutofill[];
 extern const char kSyncBookmarks[];
 extern const char kSyncDeviceInfo[];
@@ -51,7 +52,6 @@ extern const char kSyncWifiCredentials[];
 extern const char kSyncManaged[];
 extern const char kSyncSuppressStart[];
 
-extern const char kSyncUsingSecondaryPassphrase[];
 extern const char kSyncEncryptionBootstrapToken[];
 extern const char kSyncKeystoreEncryptionBootstrapToken[];
 
@@ -68,6 +68,10 @@ extern const char kSyncPassphrasePrompted[];
 
 extern const char kSyncMemoryPressureWarningCount[];
 extern const char kSyncShutdownCleanly[];
+
+extern const char kSyncInvalidationVersions[];
+
+extern const char kSyncLastRunVersion[];
 
 }  // namespace prefs
 

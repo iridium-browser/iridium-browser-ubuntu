@@ -18,6 +18,7 @@
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/download/notification/download_notification_manager.h"
 #include "chrome/browser/download/save_package_file_picker.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -395,7 +396,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnly) {
   loop_runner->Run();
   ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_FALSE(base::PathExists(dir));
   EXPECT_TRUE(base::ContentsEqual(test_dir_.Append(base::FilePath(
@@ -431,8 +431,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_SaveHTMLOnlyCancel) {
   // Currently it's ignored.
 
   persisted.WaitForPersisted();
-
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
 
   // TODO(benjhayden): Figure out how to safely wait for SavePackage's finished
   // notification, then expect the contents of the downloaded file.
@@ -523,8 +521,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveViewSourceHTMLOnly) {
   ASSERT_TRUE(VerifySavePackageExpectations(browser(), actual_page_url));
   persisted.WaitForPersisted();
 
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
-
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_FALSE(base::PathExists(dir));
   EXPECT_TRUE(base::ContentsEqual(
@@ -538,7 +534,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveViewSourceHTMLOnly) {
 #else
 #define MAYBE_SaveCompleteHTML SaveCompleteHTML
 #endif
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveCompleteHTML) {
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_SaveCompleteHTML) {
   GURL url = NavigateToMockURL("b");
 
   base::FilePath full_file_name, dir;
@@ -556,8 +552,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveCompleteHTML) {
   loop_runner->Run();
   ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
-
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
 
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_TRUE(base::PathExists(dir));
@@ -610,9 +604,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest,
   loop_runner->Run();
   ASSERT_TRUE(VerifySavePackageExpectations(incognito, url));
 
-  // Confirm download shelf is visible.
-  EXPECT_TRUE(incognito->window()->IsDownloadShelfVisible());
-
   // We can't check more than this because SavePackage is racing with
   // the page load.  If the page load won the race, then SavePackage
   // might have completed. If the page load lost the race, then
@@ -631,7 +622,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, NoSave) {
 #else
 #define MAYBE_FileNameFromPageTitle FileNameFromPageTitle
 #endif
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_FileNameFromPageTitle) {
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_FileNameFromPageTitle) {
   GURL url = NavigateToMockURL("b");
 
   base::FilePath full_file_name = save_dir_.path().AppendASCII(
@@ -652,8 +643,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_FileNameFromPageTitle) {
   loop_runner->Run();
   ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
-
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
 
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_TRUE(base::PathExists(dir));
@@ -693,8 +682,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_RemoveFromList) {
   loop_runner->Run();
   ASSERT_TRUE(VerifySavePackageExpectations(browser(), url));
   persisted.WaitForPersisted();
-
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
 
   DownloadManager* manager(GetDownloadManager());
   std::vector<DownloadItem*> downloads;

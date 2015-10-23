@@ -18,82 +18,6 @@ namespace content {
 static const unsigned long kDefaultScrollLinesPerWheelDelta = 3;
 static const unsigned long kDefaultScrollCharsPerWheelDelta = 1;
 
-static bool IsKeyDown(WPARAM wparam) {
-  return (GetKeyState(wparam) & 0x8000) != 0;
-}
-
-static int GetLocationModifier(WPARAM wparam, LPARAM lparam) {
-  int modifier = 0;
-  switch (wparam) {
-  case VK_RETURN:
-    if ((lparam >> 16) & KF_EXTENDED)
-      modifier = WebInputEvent::IsKeyPad;
-    break;
-  case VK_INSERT:
-  case VK_DELETE:
-  case VK_HOME:
-  case VK_END:
-  case VK_PRIOR:
-  case VK_NEXT:
-  case VK_UP:
-  case VK_DOWN:
-  case VK_LEFT:
-  case VK_RIGHT:
-    if (!((lparam >> 16) & KF_EXTENDED))
-      modifier = WebInputEvent::IsKeyPad;
-    break;
-  case VK_NUMLOCK:
-  case VK_NUMPAD0:
-  case VK_NUMPAD1:
-  case VK_NUMPAD2:
-  case VK_NUMPAD3:
-  case VK_NUMPAD4:
-  case VK_NUMPAD5:
-  case VK_NUMPAD6:
-  case VK_NUMPAD7:
-  case VK_NUMPAD8:
-  case VK_NUMPAD9:
-  case VK_DIVIDE:
-  case VK_MULTIPLY:
-  case VK_SUBTRACT:
-  case VK_ADD:
-  case VK_DECIMAL:
-  case VK_CLEAR:
-    modifier = WebInputEvent::IsKeyPad;
-    break;
-  case VK_SHIFT:
-    if (IsKeyDown(VK_LSHIFT))
-      modifier = WebInputEvent::IsLeft;
-    else if (IsKeyDown(VK_RSHIFT))
-      modifier = WebInputEvent::IsRight;
-    break;
-  case VK_CONTROL:
-    if (IsKeyDown(VK_LCONTROL))
-      modifier = WebInputEvent::IsLeft;
-    else if (IsKeyDown(VK_RCONTROL))
-      modifier = WebInputEvent::IsRight;
-    break;
-  case VK_MENU:
-    if (IsKeyDown(VK_LMENU))
-      modifier = WebInputEvent::IsLeft;
-    else if (IsKeyDown(VK_RMENU))
-      modifier = WebInputEvent::IsRight;
-    break;
-  case VK_LWIN:
-    modifier = WebInputEvent::IsLeft;
-    break;
-  case VK_RWIN:
-    modifier = WebInputEvent::IsRight;
-    break;
-  }
-
-  DCHECK(!modifier
-         || modifier == WebInputEvent::IsKeyPad
-         || modifier == WebInputEvent::IsLeft
-         || modifier == WebInputEvent::IsRight);
-  return modifier;
-}
-
 // Loads the state for toggle keys into the event.
 static void SetToggleKeyState(WebInputEvent* event) {
   // Low bit set from GetKeyState indicates "toggled".
@@ -110,7 +34,6 @@ WebKeyboardEvent WebKeyboardEventBuilder::Build(HWND hwnd,
                                                 DWORD time_ms) {
   WebKeyboardEvent result;
 
-  DCHECK(time_ms);
   result.timeStampSeconds = time_ms / 1000.0;
 
   result.windowsKeyCode = static_cast<int>(wparam);
@@ -167,8 +90,6 @@ WebKeyboardEvent WebKeyboardEventBuilder::Build(HWND hwnd,
   if ((result.type == WebInputEvent::RawKeyDown) && (lparam & 0x40000000))
     result.modifiers |= WebInputEvent::IsAutoRepeat;
 
-  result.modifiers |= GetLocationModifier(wparam, lparam);
-
   SetToggleKeyState(&result);
   return result;
 }
@@ -205,6 +126,7 @@ WebMouseEvent WebMouseEventBuilder::Build(HWND hwnd,
       result.button = WebMouseEvent::ButtonNone;
     break;
   case WM_MOUSELEAVE:
+  case WM_NCMOUSELEAVE:
     // TODO(rbyers): This should be MouseLeave but is disabled temporarily.
     // See http://crbug.com/450631
     result.type = WebInputEvent::MouseMove;
@@ -244,7 +166,6 @@ WebMouseEvent WebMouseEventBuilder::Build(HWND hwnd,
     NOTREACHED();
   }
 
-  DCHECK(time_ms);
   result.timeStampSeconds = time_ms / 1000.0;
 
   // set position fields:
@@ -331,7 +252,6 @@ WebMouseWheelEvent WebMouseWheelEventBuilder::Build(HWND hwnd,
 
   result.type = WebInputEvent::MouseWheel;
 
-  DCHECK(time_ms);
   result.timeStampSeconds = time_ms / 1000.0;
 
   result.button = WebMouseEvent::ButtonNone;

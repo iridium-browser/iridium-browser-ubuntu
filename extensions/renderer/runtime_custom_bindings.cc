@@ -9,17 +9,16 @@
 #include "base/values.h"
 #include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/render_frame.h"
-#include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
 #include "extensions/common/manifest.h"
 #include "extensions/renderer/api_activity_logger.h"
-#include "extensions/renderer/extension_helper.h"
+#include "extensions/renderer/extension_frame_helper.h"
 #include "extensions/renderer/script_context.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
 using content::V8ValueConverter;
@@ -89,10 +88,8 @@ void RuntimeCustomBindings::OpenChannelToNativeApp(
   if (!availability.is_available())
     return;
 
-  // Get the current RenderView so that we can send a routed IPC message from
-  // the correct source.
-  content::RenderView* renderview = context()->GetRenderView();
-  if (!renderview)
+  content::RenderFrame* render_frame = context()->GetRenderFrame();
+  if (!render_frame)
     return;
 
   // The Javascript code should validate/fill the arguments.
@@ -102,8 +99,8 @@ void RuntimeCustomBindings::OpenChannelToNativeApp(
   std::string native_app_name = *v8::String::Utf8Value(args[1]);
 
   int port_id = -1;
-  renderview->Send(new ExtensionHostMsg_OpenChannelToNativeApp(
-      renderview->GetRoutingID(), extension_id, native_app_name, &port_id));
+  render_frame->Send(new ExtensionHostMsg_OpenChannelToNativeApp(
+      render_frame->GetRoutingID(), extension_id, native_app_name, &port_id));
   args.GetReturnValue().Set(static_cast<int32_t>(port_id));
 }
 
@@ -128,8 +125,8 @@ void RuntimeCustomBindings::GetExtensionViews(
   // all views for the current extension.
   int browser_window_id = args[0]->Int32Value();
 
-  std::string view_type_string = *v8::String::Utf8Value(args[1]);
-  StringToUpperASCII(&view_type_string);
+  std::string view_type_string =
+      base::ToUpperASCII(*v8::String::Utf8Value(args[1]));
   // |view_type| == VIEW_TYPE_INVALID means getting any type of
   // views.
   ViewType view_type = VIEW_TYPE_INVALID;
@@ -155,13 +152,21 @@ void RuntimeCustomBindings::GetExtensionViews(
   if (extension_id.empty())
     return;
 
-  std::vector<content::RenderView*> views = ExtensionHelper::GetExtensionViews(
-      extension_id, browser_window_id, view_type);
+  std::vector<content::RenderFrame*> frames =
+      ExtensionFrameHelper::GetExtensionFrames(extension_id, browser_window_id,
+                                               view_type);
   v8::Local<v8::Array> v8_views = v8::Array::New(args.GetIsolate());
   int v8_index = 0;
-  for (size_t i = 0; i < views.size(); ++i) {
+  for (content::RenderFrame* frame : frames) {
+    // We filter out iframes here. GetExtensionViews should only return the
+    // main views, not any subframes. (Returning subframes can cause broken
+    // behavior by treating an app window's iframe as its main frame, and maybe
+    // other nastiness).
+    if (frame->GetWebFrame()->top() != frame->GetWebFrame())
+      continue;
+
     v8::Local<v8::Context> context =
-        views[i]->GetWebView()->mainFrame()->mainWorldScriptContext();
+        frame->GetWebFrame()->mainWorldScriptContext();
     if (!context.IsEmpty()) {
       v8::Local<v8::Value> window = context->Global();
       DCHECK(!window.IsEmpty());

@@ -6,8 +6,12 @@
 #define PresentationSession_h
 
 #include "core/events/EventTarget.h"
+#include "core/fileapi/Blob.h"
+#include "core/fileapi/FileError.h"
 #include "core/frame/DOMWindowProperty.h"
+#include "platform/heap/Handle.h"
 #include "public/platform/modules/presentation/WebPresentationSessionClient.h"
+#include "wtf/OwnPtr.h"
 #include "wtf/text/WTFString.h"
 
 namespace WTF {
@@ -18,33 +22,41 @@ namespace blink {
 
 class DOMArrayBuffer;
 class DOMArrayBufferView;
-class Presentation;
 class PresentationController;
+class PresentationRequest;
 
 class PresentationSession final
     : public RefCountedGarbageCollectedEventTargetWithInlineData<PresentationSession>
     , public DOMWindowProperty {
-    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<PresentationSession>);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(PresentationSession);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(PresentationSession);
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PresentationSession* take(WebPresentationSessionClient*, Presentation*);
-    static void dispose(WebPresentationSessionClient*);
-    virtual ~PresentationSession();
+    // For CallbackPromiseAdapter.
+    using WebType = OwnPtr<WebPresentationSessionClient>;
+
+    static PresentationSession* take(ScriptPromiseResolver*, PassOwnPtr<WebPresentationSessionClient>, PresentationRequest*);
+    static PresentationSession* take(PresentationController*, PassOwnPtr<WebPresentationSessionClient>, PresentationRequest*);
+    ~PresentationSession() override;
 
     // EventTarget implementation.
-    virtual const AtomicString& interfaceName() const override;
-    virtual ExecutionContext* executionContext() const override;
+    const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override;
+    bool addEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener>, bool capture) override;
 
     DECLARE_VIRTUAL_TRACE();
 
-    const String id() const { return m_id; }
+    const String& id() const { return m_id; }
     const WTF::AtomicString& state() const;
 
     void send(const String& message, ExceptionState&);
-    void send(PassRefPtr<DOMArrayBuffer> data, ExceptionState&);
-    void send(PassRefPtr<DOMArrayBufferView> data, ExceptionState&);
+    void send(PassRefPtr<DOMArrayBuffer>, ExceptionState&);
+    void send(PassRefPtr<DOMArrayBufferView>, ExceptionState&);
+    void send(Blob*, ExceptionState&);
     void close();
+
+    String binaryType() const;
+    void setBinaryType(const String&);
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(statechange);
@@ -55,23 +67,61 @@ public:
     // Notifies the session about its state change.
     void didChangeState(WebPresentationSessionState);
 
-    // Notifies the session about new text message.
+    // Notifies the session about new message.
     void didReceiveTextMessage(const String& message);
+    void didReceiveBinaryMessage(const uint8_t* data, size_t length);
 
 private:
+    class BlobLoader;
+
+    enum MessageType {
+        MessageTypeText,
+        MessageTypeArrayBuffer,
+        MessageTypeBlob,
+    };
+
+    enum BinaryType {
+        BinaryTypeBlob,
+        BinaryTypeArrayBuffer
+    };
+
+    struct Message {
+        Message(const String& text)
+            : type(MessageTypeText)
+            , text(text) { }
+
+        Message(PassRefPtr<DOMArrayBuffer> arrayBuffer)
+            : type(MessageTypeArrayBuffer)
+            , arrayBuffer(arrayBuffer) { }
+
+        Message(PassRefPtr<BlobDataHandle> blobDataHandle)
+            : type(MessageTypeBlob)
+            , blobDataHandle(blobDataHandle) { }
+
+        MessageType type;
+        String text;
+        RefPtr<DOMArrayBuffer> arrayBuffer;
+        RefPtr<BlobDataHandle> blobDataHandle;
+    };
+
     PresentationSession(LocalFrame*, const String& id, const String& url);
 
-    // Returns the |PresentationController| object associated with the frame
-    // |Presentation| corresponds to. Can return |nullptr| if the frame is
-    // detached from the document.
-    PresentationController* presentationController();
+    bool canSendMessage(ExceptionState&);
+    void handleMessageQueue();
 
-    // Common send method for both ArrayBufferView and ArrayBuffer.
-    void sendInternal(const uint8_t* data, size_t, ExceptionState&);
+    // Callbacks invoked from BlobLoader.
+    void didFinishLoadingBlob(PassRefPtr<DOMArrayBuffer>);
+    void didFailLoadingBlob(FileError::ErrorCode);
 
     String m_id;
     String m_url;
     WebPresentationSessionState m_state;
+
+    // For Blob data handling.
+    Member<BlobLoader> m_blobLoader;
+    Deque<OwnPtr<Message>> m_messages;
+
+    BinaryType m_binaryType;
 };
 
 } // namespace blink

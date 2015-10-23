@@ -15,6 +15,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/base/common.h"
 #include "webrtc/modules/bitrate_controller/include/bitrate_controller.h"
+#include "webrtc/modules/remote_bitrate_estimator/remote_bitrate_estimator_abs_send_time.h"
 #include "webrtc/modules/remote_bitrate_estimator/test/bwe_test_logging.h"
 #include "webrtc/modules/rtp_rtcp/interface/receive_statistics.h"
 
@@ -67,16 +68,16 @@ RembReceiver::RembReceiver(int flow_id, bool plot)
       clock_(0),
       recv_stats_(ReceiveStatistics::Create(&clock_)),
       latest_estimate_bps_(-1),
-      estimator_(AbsoluteSendTimeRemoteBitrateEstimatorFactory().Create(
+      last_feedback_ms_(-1),
+      estimator_(new RemoteBitrateEstimatorAbsSendTime(
           this,
           &clock_,
-          kAimdControl,
           kRemoteBitrateEstimatorMinBitrateBps)) {
   std::stringstream ss;
   ss << "Estimate_" << flow_id_ << "#1";
   estimate_log_prefix_ = ss.str();
   // Default RTT in RemoteRateControl is 200 ms ; 50 ms is more realistic.
-  estimator_->OnRttUpdate(50);
+  estimator_->OnRttUpdate(50, 50);
 }
 
 RembReceiver::~RembReceiver() {
@@ -96,9 +97,12 @@ void RembReceiver::ReceivePacket(int64_t arrival_time_ms,
     step_ms = std::max<int64_t>(estimator_->TimeUntilNextProcess(), 0);
   }
   estimator_->IncomingPacket(arrival_time_ms, media_packet.payload_size(),
-                             media_packet.header());
+                             media_packet.header(), true);
   clock_.AdvanceTimeMilliseconds(arrival_time_ms - clock_.TimeInMilliseconds());
   ASSERT_TRUE(arrival_time_ms == clock_.TimeInMilliseconds());
+
+  // Log received packet information.
+  BweReceiver::ReceivePacket(arrival_time_ms, media_packet);
 }
 
 FeedbackPacket* RembReceiver::GetFeedback(int64_t now_ms) {

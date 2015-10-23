@@ -210,28 +210,15 @@ SkGifCodec::SkGifCodec(const SkImageInfo& srcInfo, SkStream* stream,
     , fGif(gif)
 {}
 
-/*
- * Checks if the conversion between the input image and the requested output
- * image has been implemented
- */
-static bool conversion_possible(const SkImageInfo& dst,
-                                const SkImageInfo& src) {
-    // Ensure that the profile type is unchanged
-    if (dst.profileType() != src.profileType()) {
+bool SkGifCodec::onRewind() {
+    GifFileType* gifOut = NULL;
+    if (!ReadHeader(this->stream(), NULL, &gifOut)) {
         return false;
     }
 
-    // Check for supported color and alpha types
-    switch (dst.colorType()) {
-        case kN32_SkColorType:
-            return kPremul_SkAlphaType == dst.alphaType() ||
-                    kUnpremul_SkAlphaType == dst.alphaType();
-        case kIndex_8_SkColorType:
-            return kPremul_SkAlphaType == dst.alphaType() ||
-                    kUnpremul_SkAlphaType == dst.alphaType();
-        default:
-            return false;
-    }
+    SkASSERT(NULL != gifOut);
+    fGif.reset(gifOut);
+    return true;
 }
 
 /*
@@ -243,20 +230,15 @@ SkCodec::Result SkGifCodec::onGetPixels(const SkImageInfo& dstInfo,
                                         SkPMColor* inputColorPtr,
                                         int* inputColorCount) {
     // Rewind if necessary
-    SkCodec::RewindState rewindState = this->rewindIfNeeded();
-    if (rewindState == kCouldNotRewind_RewindState) {
+    if (!this->rewindIfNeeded()) {
         return kCouldNotRewind;
-    } else if (rewindState == kRewound_RewindState) {
-        GifFileType* gifOut = NULL;
-        if (!ReadHeader(this->stream(), NULL, &gifOut)) {
-            return kCouldNotRewind;
-        } else {
-            SkASSERT(NULL != gifOut);
-            fGif.reset(gifOut);
-        }
     }
 
     // Check for valid input parameters
+    if (opts.fSubset) {
+        // Subsets are not supported.
+        return kUnimplemented;
+    }
     if (dstInfo.dimensions() != this->getInfo().dimensions()) {
         return gif_error("Scaling not supported.\n", kInvalidScale);
     }
@@ -424,25 +406,26 @@ SkCodec::Result SkGifCodec::onGetPixels(const SkImageInfo& dstInfo,
                     //        animated gifs where we draw on top of the
                     //        previous frame.
                     if (!skipBackground) {
-                        SkSwizzler::Fill(dst, dstInfo, dstRowBytes, height, fillIndex, colorTable);
+                        SkSwizzler::Fill(dst, dstInfo, dstRowBytes, height,
+                                fillIndex, colorTable);
                     }
 
                     // Modify the dst pointer
                     const int32_t dstBytesPerPixel =
                             SkColorTypeBytesPerPixel(dstColorType);
-                    void* subsetDst = SkTAddOffset<void*>(dst,
+                    dst = SkTAddOffset<void*>(dst,
                             dstRowBytes * imageTop +
                             dstBytesPerPixel * imageLeft);
 
                     // Create the subset swizzler
                     swizzler.reset(SkSwizzler::CreateSwizzler(
                             SkSwizzler::kIndex, colorTable, subsetDstInfo,
-                            subsetDst, dstRowBytes, zeroInit));
+                            zeroInit, this->getInfo()));
                 } else {
                     // Create the fully dimensional swizzler
                     swizzler.reset(SkSwizzler::CreateSwizzler(
-                            SkSwizzler::kIndex, colorTable, dstInfo, dst,
-                            dstRowBytes, zeroInit));
+                            SkSwizzler::kIndex, colorTable, dstInfo, 
+                            zeroInit, this->getInfo()));
                 }
 
                 // Stores output from dgiflib and input to the swizzler
@@ -462,29 +445,35 @@ SkCodec::Result SkGifCodec::onGetPixels(const SkImageInfo& dstInfo,
                             if (!skipBackground) {
                                 memset(buffer.get(), fillIndex, innerWidth);
                                 for (; y < innerHeight; y++) {
-                                    swizzler->next(buffer.get(), iter.nextY());
+                                    void* dstRow = SkTAddOffset<void>(dst,
+                                            dstRowBytes * iter.nextY());
+                                    swizzler->swizzle(dstRow, buffer.get());
                                 }
                             }
                             return gif_error(SkStringPrintf(
                                     "Could not decode line %d of %d.\n",
                                     y, height - 1).c_str(), kIncompleteInput);
                         }
-                        swizzler->next(buffer.get(), iter.nextY());
+                        void* dstRow = SkTAddOffset<void>(
+                                dst, dstRowBytes * iter.nextY());
+                        swizzler->swizzle(dstRow, buffer.get());
                     }
                 } else {
                     // Standard mode
+                    void* dstRow = dst;
                     for (int32_t y = 0; y < innerHeight; y++) {
                         if (GIF_ERROR == DGifGetLine(fGif, buffer.get(),
                                 innerWidth)) {
                             if (!skipBackground) {
-                                SkSwizzler::Fill(swizzler->getDstRow(), dstInfo, dstRowBytes,
+                                SkSwizzler::Fill(dstRow, dstInfo, dstRowBytes,
                                         innerHeight - y, fillIndex, colorTable);
                             }
                             return gif_error(SkStringPrintf(
                                     "Could not decode line %d of %d.\n",
                                     y, height - 1).c_str(), kIncompleteInput);
                         }
-                        swizzler->next(buffer.get());
+                        swizzler->swizzle(dstRow, buffer.get());
+                        dstRow = SkTAddOffset<void>(dstRow, dstRowBytes);
                     }
                 }
 

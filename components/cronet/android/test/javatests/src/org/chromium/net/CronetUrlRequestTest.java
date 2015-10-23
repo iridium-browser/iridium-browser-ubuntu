@@ -4,6 +4,7 @@
 
 package org.chromium.net;
 
+import android.os.ConditionVariable;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.util.Pair;
 
@@ -16,6 +17,8 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -506,6 +509,23 @@ public class CronetUrlRequestTest extends CronetTestBase {
         assertEquals(0, listener.mRedirectCount);
         assertTrue(listener.mOnErrorCalled);
         assertEquals(listener.mResponseStep, ResponseStep.ON_RESPONSE_STARTED);
+    }
+
+    /**
+     * Tests that an SSL cert error will be reported via {@link UrlRequest#onFailed}.
+     */
+    @SmallTest
+    @Feature({"Cronet"})
+    public void testMockSSLCertificateError() throws Exception {
+        TestUrlRequestListener listener = startAndWaitForComplete(
+                MockUrlRequestJobFactory.getMockUrlForSSLCertificateError());
+        assertNull(listener.mResponseInfo);
+        assertNotNull(listener.mError);
+        assertTrue(listener.mOnErrorCalled);
+        assertEquals(-201, listener.mError.netError());
+        assertEquals("Exception in CronetUrlRequest: net::ERR_CERT_DATE_INVALID",
+                listener.mError.getMessage());
+        assertEquals(listener.mResponseStep, ResponseStep.NOTHING);
     }
 
     /**
@@ -1299,6 +1319,91 @@ public class CronetUrlRequestTest extends CronetTestBase {
         assertNotNull(listener.mResponseInfo);
         assertNull(listener.mError);
         assertFalse(listener.mOnErrorCalled);
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    public void testExecutorShutdown() {
+        TestUrlRequestListener listener = new TestUrlRequestListener();
+
+        listener.setAutoAdvance(false);
+        CronetUrlRequest urlRequest =
+                (CronetUrlRequest) mActivity.mUrlRequestContext.createRequest(
+                NativeTestServer.getEchoBodyURL(), listener, listener.getExecutor());
+        urlRequest.start();
+        listener.waitForNextStep();
+        assertFalse(listener.isDone());
+        assertFalse(urlRequest.isDone());
+
+        final ConditionVariable requestDestroyed = new ConditionVariable(false);
+        urlRequest.setOnDestroyedCallbackForTests(new Runnable() {
+            @Override
+            public void run() {
+                requestDestroyed.open();
+            }
+        });
+
+        // Shutdown the executor, so posting the task will throw an exception.
+        listener.shutdownExecutor();
+        ByteBuffer readBuffer = ByteBuffer.allocateDirect(5);
+        urlRequest.read(readBuffer);
+        // Listener will never be called again because executor is shutdown,
+        // but request will be destroyed from network thread.
+        requestDestroyed.block();
+
+        assertFalse(listener.isDone());
+        assertTrue(urlRequest.isDone());
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    public void testUploadExecutorShutdown() throws Exception {
+        class HangingUploadDataProvider implements UploadDataProvider {
+            UploadDataSink mUploadDataSink;
+            ByteBuffer mByteBuffer;
+            ConditionVariable mReadCalled = new ConditionVariable(false);
+
+            @Override
+            public long getLength() {
+                return 69;
+            }
+
+            @Override
+            public void read(final UploadDataSink uploadDataSink,
+                             final ByteBuffer byteBuffer) {
+                mUploadDataSink = uploadDataSink;
+                mByteBuffer = byteBuffer;
+                mReadCalled.open();
+            }
+
+            @Override
+            public void rewind(final UploadDataSink uploadDataSink) {
+            }
+        }
+
+        TestUrlRequestListener listener = new TestUrlRequestListener();
+        UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
+                NativeTestServer.getEchoBodyURL(), listener, listener.getExecutor());
+
+        ExecutorService uploadExecutor = Executors.newSingleThreadExecutor();
+        HangingUploadDataProvider dataProvider = new HangingUploadDataProvider();
+        urlRequest.setUploadDataProvider(dataProvider, uploadExecutor);
+        urlRequest.addHeader("Content-Type", "useless/string");
+        urlRequest.start();
+        // Wait for read to be called on executor.
+        dataProvider.mReadCalled.block();
+        // Shutdown the executor, so posting next task will throw an exception.
+        uploadExecutor.shutdown();
+        // Continue the upload.
+        dataProvider.mByteBuffer.putInt(42);
+        dataProvider.mUploadDataSink.onReadSucceeded(false);
+        // Listener.onFailed will be called on request executor even though upload
+        // executor is shutdown.
+        listener.blockForDone();
+        assertTrue(listener.isDone());
+        assertTrue(listener.mOnErrorCalled);
+        assertEquals("Exception received from UploadDataProvider", listener.mError.getMessage());
+        assertTrue(urlRequest.isDone());
     }
 
     // Returns the contents of byteBuffer, from its position() to its limit(),

@@ -23,17 +23,18 @@ class BookmarkEntity : public FakeServerEntity {
 
   // Factory function for BookmarkEntity. This factory should be used only for
   // the first time that a specific bookmark is seen by the server.
-  static FakeServerEntity* CreateNew(const sync_pb::SyncEntity& client_entity,
-                                     const std::string& parent_id,
-                                     const std::string& client_guid);
+  static scoped_ptr<FakeServerEntity> CreateNew(
+      const sync_pb::SyncEntity& client_entity,
+      const std::string& parent_id,
+      const std::string& client_guid);
 
   // Factory function for BookmarkEntity. The server's current entity for this
   // ID, |current_server_entity|, is passed here because the client does not
   // always send the complete entity over the wire. This requires copying of
   // some of the existing entity when creating a new entity.
-  static FakeServerEntity* CreateUpdatedVersion(
+  static scoped_ptr<FakeServerEntity> CreateUpdatedVersion(
       const sync_pb::SyncEntity& client_entity,
-      FakeServerEntity* current_server_entity,
+      const FakeServerEntity& current_server_entity,
       const std::string& parent_id);
 
   BookmarkEntity(const std::string& id,
@@ -48,10 +49,11 @@ class BookmarkEntity : public FakeServerEntity {
                  int64 creation_time,
                  int64 last_modified_time);
 
+  void SetParentId(std::string parent_id);
+
   // FakeServerEntity implementation.
   std::string GetParentId() const override;
-  void SerializeAsProto(sync_pb::SyncEntity* proto) override;
-  bool IsDeleted() const override;
+  void SerializeAsProto(sync_pb::SyncEntity* proto) const override;
   bool IsFolder() const override;
 
  private:
@@ -59,7 +61,6 @@ class BookmarkEntity : public FakeServerEntity {
   std::string originator_cache_guid_;
   std::string originator_client_item_id_;
   sync_pb::UniquePosition unique_position_;
-  sync_pb::EntitySpecifics specifics_;
   bool is_folder_;
   std::string parent_id_;
   int64 creation_time_;

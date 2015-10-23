@@ -22,8 +22,7 @@
 #ifndef PendingSelection_h
 #define PendingSelection_h
 
-#include "core/dom/Position.h"
-#include "core/editing/TextAffinity.h"
+#include "core/editing/Position.h"
 #include "core/editing/VisibleSelection.h"
 
 namespace blink {
@@ -50,10 +49,13 @@ public:
 private:
     PendingSelection();
 
-    Position m_start;
-    Position m_end;
-    Position m_extent;
-    EAffinity m_affinity;
+    template <typename Strategy>
+    bool isInDocumentAlgorithm(const Document&) const;
+
+    template <typename Strategy>
+    VisibleSelection calcVisibleSelectionAlgorithm() const;
+
+    VisibleSelection m_selection;
     bool m_hasPendingSelection : 1;
     bool m_shouldShowBlockCursor : 1;
 };

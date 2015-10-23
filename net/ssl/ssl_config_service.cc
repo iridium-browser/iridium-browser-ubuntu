@@ -11,7 +11,7 @@
 namespace net {
 
 SSLConfigService::SSLConfigService()
-    : observer_list_(ObserverList<Observer>::NOTIFY_EXISTING_ONLY) {
+    : observer_list_(base::ObserverList<Observer>::NOTIFY_EXISTING_ONLY) {
 }
 
 // GlobalSSLObject holds a reference to a global SSL object, such as the
@@ -75,10 +75,6 @@ void SSLConfigService::RemoveObserver(Observer* observer) {
 
 void SSLConfigService::NotifySSLConfigChange() {
   FOR_EACH_OBSERVER(Observer, observer_list_, OnSSLConfigChanged());
-}
-
-bool SSLConfigService::SupportsFastradioPadding(const GURL& url) {
-  return false;
 }
 
 SSLConfigService::~SSLConfigService() {

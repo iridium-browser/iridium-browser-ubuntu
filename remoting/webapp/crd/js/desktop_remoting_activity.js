@@ -28,7 +28,7 @@ remoting.DesktopRemotingActivity = function(parentActivity) {
   /** @private */
   this.sessionFactory_ = new remoting.ClientSessionFactory(
       document.querySelector('#client-container .client-plugin-container'),
-      remoting.app_capabilities());
+      [/* No special capabilities required. */]);
 
   /** @private {remoting.ClientSession} */
   this.session_ = null;
@@ -42,25 +42,27 @@ remoting.DesktopRemotingActivity = function(parentActivity) {
  *
  * @param {remoting.Host} host the Host to connect to.
  * @param {remoting.CredentialsProvider} credentialsProvider
- * @param {boolean=} opt_suppressOfflineError
+ * @param {remoting.SessionLogger} logger
  * @return {void} Nothing.
  */
 remoting.DesktopRemotingActivity.prototype.start =
-    function(host, credentialsProvider, opt_suppressOfflineError) {
+    function(host, credentialsProvider, logger) {
   var that = this;
-  this.sessionFactory_.createSession(this).then(
+  var useApiaryForLogging = host.loggingChannel === 'APIARY';
+  this.sessionFactory_.createSession(this, logger, useApiaryForLogging).then(
     function(/** remoting.ClientSession */ session) {
       that.session_ = session;
-      session.logHostOfflineErrors(!opt_suppressOfflineError);
-      session.getLogger().setHostVersion(host.hostVersion);
 
-      var mode = remoting.ServerLogEntry.VALUE_MODE_UNKNOWN;
+      // Update the host version and the Mode for the legacy XMPP logger.
+      // TODO(kelvinp): Remove this block of code when we have migrated away
+      // from XMPP-based logging (crbug.com/523423).
+      session.getLogger().setHostVersion(host.hostVersion);
+      var Mode = remoting.ChromotingEvent.Mode;
       if (that.parentActivity_ instanceof remoting.It2MeActivity) {
-          mode = remoting.ServerLogEntry.VALUE_MODE_IT2ME;
+        session.getLogger().setLogEntryMode(Mode.IT2ME);
       } else if (that.parentActivity_ instanceof remoting.Me2MeActivity) {
-          mode = remoting.ServerLogEntry.VALUE_MODE_ME2ME;
+        session.getLogger().setLogEntryMode(Mode.ME2ME);
       }
-      session.getLogger().setLogEntryMode(mode);
 
       session.connect(host, credentialsProvider);
   }).catch(remoting.Error.handler(
@@ -93,9 +95,9 @@ remoting.DesktopRemotingActivity.prototype.onConnected =
 
   // Apply the default or previously-specified keyboard remapping.
   var remapping = connectionInfo.host().options.remapKeys;
-  if (remapping === '' && remoting.platformIsChromeOS()) {
+  if (base.isEmptyObject(remapping) && remoting.platformIsChromeOS()) {
     // Under ChromeOS, remap the right Control key to the right Win/Cmd key.
-    remapping = '0x0700e4>0x0700e7';
+    remapping = {0x0700e4: 0x0700e7};
   }
   connectionInfo.plugin().setRemapKeys(remapping);
 

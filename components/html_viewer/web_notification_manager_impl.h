@@ -7,6 +7,10 @@
 
 #include "third_party/WebKit/public/platform/modules/notifications/WebNotificationManager.h"
 
+namespace blink {
+class WebSecurityOrigin;
+}
+
 namespace html_viewer {
 
 // TODO(erg): This class is currently a stub; blink expects this object to
@@ -17,10 +21,10 @@ class WebNotificationManagerImpl : public blink::WebNotificationManager {
   virtual ~WebNotificationManagerImpl();
 
   // blink::WebNotificationManager methods:
-  virtual void show(const blink::WebSerializedOrigin&,
+  virtual void show(const blink::WebSecurityOrigin&,
                     const blink::WebNotificationData&,
                     blink::WebNotificationDelegate*);
-  virtual void showPersistent(const blink::WebSerializedOrigin&,
+  virtual void showPersistent(const blink::WebSecurityOrigin&,
                               const blink::WebNotificationData&,
                               blink::WebServiceWorkerRegistration*,
                               blink::WebNotificationShowCallbacks*);
@@ -28,14 +32,15 @@ class WebNotificationManagerImpl : public blink::WebNotificationManager {
                                 blink::WebServiceWorkerRegistration*,
                                 blink::WebNotificationGetCallbacks*);
   virtual void close(blink::WebNotificationDelegate*);
-  virtual void closePersistent(const blink::WebSerializedOrigin&,
+  virtual void closePersistent(const blink::WebSecurityOrigin&,
                                int64_t persistentNotificationId);
   virtual void closePersistent(
-      const blink::WebSerializedOrigin&,
+      const blink::WebSecurityOrigin&,
       const blink::WebString& persistentNotificationId);
   virtual void notifyDelegateDestroyed(blink::WebNotificationDelegate*);
   virtual blink::WebNotificationPermission checkPermission(
-      const blink::WebSerializedOrigin&);
+      const blink::WebSecurityOrigin&);
+  virtual size_t maxActions();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebNotificationManagerImpl);

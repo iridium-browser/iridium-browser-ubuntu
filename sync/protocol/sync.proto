@@ -73,7 +73,7 @@ message EntitySpecifics {
 
   // To add new datatype-specific fields to the protocol, extend
   // EntitySpecifics.  First, pick a non-colliding tag number by
-  // picking a revision number of one of your past commits
+  // picking a Cr-Commit-Position of one of your past commits
   // to src.chromium.org.  Then, in a different protocol buffer
   // definition, define your message type, and add an optional field
   // to the list below using the unique tag value you selected.
@@ -133,6 +133,7 @@ message EntitySpecifics {
   optional AppListSpecifics app_list = 229170;
   optional WifiCredentialSpecifics wifi_credential = 218175;
   optional AutofillWalletSpecifics autofill_wallet = 306270;
+  optional WalletMetadataSpecifics wallet_metadata = 330441;
 }
 
 message SyncEntity {
@@ -664,10 +665,26 @@ message AuthenticateMessage {
   required string auth_token = 1;
 };
 
-message ClearUserDataMessage {
+// Message from a client asking the server to clear its data.
+//
+// A client makes a ClearServerData request when it transitions to passphrase
+// encryption to ensure the server deletes any plaintext data that may have been
+// synced previously.
+message ClearServerDataMessage {
+  // No arguments needed as the store birthday and user identifier are part of
+  // an enclosing message.
 };
 
-message ClearUserDataResponse {
+// Response to a ClearServerData request.
+message ClearServerDataResponse {
+  // No result fields necessary. Success/failure is indicated in
+  // ClientToServerResponse.
+};
+
+message DeprecatedMessage1 {
+};
+
+message DeprecatedMessage2 {
 };
 
 // The client must preserve, store, and resend the chip bag with
@@ -714,21 +731,25 @@ message DataTypeContext {
 
 message ClientToServerMessage {
   required string share = 1;
-  optional int32 protocol_version = 2 [default = 43];
+  optional int32 protocol_version = 2 [default = 45];
   enum Contents {
     COMMIT = 1;
     GET_UPDATES = 2;
     AUTHENTICATE = 3;
-    CLEAR_DATA = 4;
+    DEPRECATED_4 = 4;
+    CLEAR_SERVER_DATA = 5;
   }
 
+  // Each ClientToServerMessage contains one request defined by the
+  // message_contents. Each type has a corresponding message field that will be
+  // present iff the message is of that type. E.g. a commit message will have a
+  // message_contents of COMMIT and its commit field will be present.
   required Contents message_contents = 3;
   optional CommitMessage commit = 4;
   optional GetUpdatesMessage get_updates = 5;
   optional AuthenticateMessage authenticate = 6;
 
-  // Request to clear all Chromium data from the server.
-  optional ClearUserDataMessage clear_user_data = 9;
+  optional DeprecatedMessage1 deprecated_field_9 = 9 [deprecated = true];
 
   optional string store_birthday = 7; // Opaque store ID; if it changes, duck!
   // The client sets this if it detects a sync issue. The server will tell it
@@ -756,6 +777,10 @@ message ClientToServerMessage {
   // Sending the ID here allows the server to not send notifications of our own
   // changes to our invalidator.
   optional string invalidator_client_id = 14;
+
+  // Identifies this ClientToServerMessage as a clear server data request. This
+  // field is present when message_contents is CLEAR_SERVER_DATA.
+  optional ClearServerDataMessage clear_server_data = 15;
 };
 
 // This request allows the client to convert a specific crash identifier
@@ -950,7 +975,7 @@ message ClientToServerResponse {
 
   optional ClientCommand client_command = 7;
   optional ProfilingData profiling_data = 8;
-  optional ClearUserDataResponse clear_user_data = 9;
+  optional DeprecatedMessage2 deprecated_field_9 = 9 [deprecated = true];
   optional GetUpdatesMetadataResponse stream_metadata = 10;
   // If GetUpdatesStreamingResponse is contained in the ClientToServerResponse,
   // none of the other fields (error_code and etc) will be set.
@@ -978,6 +1003,10 @@ message ClientToServerResponse {
   // The new per-client state for this client. If set, should be persisted and
   // sent with any subsequent ClientToServerMessages.
   optional ChipBag new_bag_of_chips = 14;
+
+  // Present if this ClientToServerResponse is in response to a ClearServerData
+  // request.
+  optional ClearServerDataResponse clear_server_data = 15;
 };
 
 // A message to notify the server of certain sync events. Idempotent. Send these

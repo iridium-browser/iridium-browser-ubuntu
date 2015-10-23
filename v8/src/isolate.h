@@ -6,21 +6,26 @@
 #define V8_ISOLATE_H_
 
 #include <queue>
+#include <set>
+
 #include "include/v8-debug.h"
 #include "src/allocation.h"
 #include "src/assert-scope.h"
 #include "src/base/atomicops.h"
 #include "src/builtins.h"
+#include "src/cancelable-task.h"
 #include "src/contexts.h"
 #include "src/date.h"
 #include "src/execution.h"
 #include "src/frames.h"
+#include "src/futex-emulation.h"
 #include "src/global-handles.h"
 #include "src/handles.h"
 #include "src/hashmap.h"
 #include "src/heap/heap.h"
+#include "src/messages.h"
 #include "src/optimizing-compile-dispatcher.h"
-#include "src/regexp-stack.h"
+#include "src/regexp/regexp-stack.h"
 #include "src/runtime/runtime.h"
 #include "src/runtime-profiler.h"
 #include "src/zone.h"
@@ -59,10 +64,12 @@ class HStatistics;
 class HTracer;
 class InlineRuntimeFunctionsTable;
 class InnerPointerToCodeCache;
+class Logger;
 class MaterializedObjectStore;
 class CodeAgingHelper;
 class RegExpStack;
 class SaveContext;
+class StatsTable;
 class StringTracker;
 class StubCache;
 class SweeperThread;
@@ -79,18 +86,13 @@ typedef void* ExternalReferenceRedirectorPointer();
 
 
 class Debug;
-class Debugger;
 class PromiseOnStack;
-
-#if !defined(__arm__) && V8_TARGET_ARCH_ARM ||       \
-    !defined(__aarch64__) && V8_TARGET_ARCH_ARM64 || \
-    !defined(__PPC__) && V8_TARGET_ARCH_PPC ||       \
-    !defined(__mips__) && V8_TARGET_ARCH_MIPS ||     \
-    !defined(__mips__) && V8_TARGET_ARCH_MIPS64
 class Redirection;
 class Simulator;
-#endif
 
+namespace interpreter {
+class Interpreter;
+}
 
 // Static indirection table for handles to constants.  If a frame
 // element represents a constant, the data contains an index into
@@ -321,11 +323,7 @@ class ThreadLocalTop BASE_EMBEDDED {
 };
 
 
-#if V8_TARGET_ARCH_ARM && !defined(__arm__) ||       \
-    V8_TARGET_ARCH_ARM64 && !defined(__aarch64__) || \
-    V8_TARGET_ARCH_PPC && !defined(__PPC__) ||       \
-    V8_TARGET_ARCH_MIPS && !defined(__mips__) ||     \
-    V8_TARGET_ARCH_MIPS64 && !defined(__mips__)
+#if USE_SIMULATOR
 
 #define ISOLATE_INIT_SIMULATOR_LIST(V)                                         \
   V(bool, simulator_initialized, false)                                        \
@@ -389,7 +387,6 @@ typedef List<HeapObject*> DebugObjectCache;
   V(uint32_t, per_isolate_assert_data, 0xFFFFFFFFu)                            \
   V(PromiseRejectCallback, promise_reject_callback, NULL)                      \
   V(const v8::StartupData*, snapshot_blob, NULL)                               \
-  V(bool, creating_default_snapshot, false)                                    \
   ISOLATE_INIT_SIMULATOR_LIST(V)
 
 #define THREAD_LOCAL_TOP_ACCESSOR(type, name)                        \
@@ -418,11 +415,7 @@ class Isolate {
           thread_id_(thread_id),
           stack_limit_(0),
           thread_state_(NULL),
-#if !defined(__arm__) && V8_TARGET_ARCH_ARM ||       \
-    !defined(__aarch64__) && V8_TARGET_ARCH_ARM64 || \
-    !defined(__PPC__) && V8_TARGET_ARCH_PPC ||       \
-    !defined(__mips__) && V8_TARGET_ARCH_MIPS ||     \
-    !defined(__mips__) && V8_TARGET_ARCH_MIPS64
+#if USE_SIMULATOR
           simulator_(NULL),
 #endif
           next_(NULL),
@@ -434,11 +427,7 @@ class Isolate {
     FIELD_ACCESSOR(uintptr_t, stack_limit)
     FIELD_ACCESSOR(ThreadState*, thread_state)
 
-#if !defined(__arm__) && V8_TARGET_ARCH_ARM ||       \
-    !defined(__aarch64__) && V8_TARGET_ARCH_ARM64 || \
-    !defined(__PPC__) && V8_TARGET_ARCH_PPC ||       \
-    !defined(__mips__) && V8_TARGET_ARCH_MIPS ||     \
-    !defined(__mips__) && V8_TARGET_ARCH_MIPS64
+#if USE_SIMULATOR
     FIELD_ACCESSOR(Simulator*, simulator)
 #endif
 
@@ -452,11 +441,7 @@ class Isolate {
     uintptr_t stack_limit_;
     ThreadState* thread_state_;
 
-#if !defined(__arm__) && V8_TARGET_ARCH_ARM ||       \
-    !defined(__aarch64__) && V8_TARGET_ARCH_ARM64 || \
-    !defined(__PPC__) && V8_TARGET_ARCH_PPC ||       \
-    !defined(__mips__) && V8_TARGET_ARCH_MIPS ||     \
-    !defined(__mips__) && V8_TARGET_ARCH_MIPS64
+#if USE_SIMULATOR
     Simulator* simulator_;
 #endif
 
@@ -719,10 +704,8 @@ class Isolate {
                   PrintStackMode mode = kPrintStackVerbose);
   void PrintStack(FILE* out, PrintStackMode mode = kPrintStackVerbose);
   Handle<String> StackTraceString();
-  NO_INLINE(void PushStackTraceAndDie(unsigned int magic,
-                                      Object* object,
-                                      Map* map,
-                                      unsigned int magic2));
+  NO_INLINE(void PushStackTraceAndDie(unsigned int magic, void* ptr1,
+                                      void* ptr2, unsigned int magic2));
   Handle<JSArray> CaptureCurrentStackTrace(
       int frame_limit,
       StackTrace::StackTraceOptions options);
@@ -911,6 +894,7 @@ class Isolate {
     return handle_scope_implementer_;
   }
   Zone* runtime_zone() { return &runtime_zone_; }
+  Zone* interface_descriptor_zone() { return &interface_descriptor_zone_; }
 
   UnicodeCache* unicode_cache() {
     return unicode_cache_;
@@ -925,8 +909,6 @@ class Isolate {
   EternalHandles* eternal_handles() { return eternal_handles_; }
 
   ThreadManager* thread_manager() { return thread_manager_; }
-
-  StringTracker* string_tracker() { return string_tracker_; }
 
   unibrow::Mapping<unibrow::Ecma262UnCanonicalize>* jsregexp_uncanonicalize() {
     return &jsregexp_uncanonicalize_;
@@ -1015,7 +997,12 @@ class Isolate {
     date_cache_ = date_cache;
   }
 
-  Map* get_initial_js_array_map(ElementsKind kind);
+  ErrorToStringHelper* error_tostring_helper() {
+    return &error_tostring_helper_;
+  }
+
+  Map* get_initial_js_array_map(ElementsKind kind,
+                                Strength strength = Strength::WEAK);
 
   static const int kArrayProtectorValid = 1;
   static const int kArrayProtectorInvalid = 0;
@@ -1123,23 +1110,6 @@ class Isolate {
   int GetNextUniqueSharedFunctionInfoId() { return next_unique_sfi_id_++; }
 #endif
 
-  void set_store_buffer_hash_set_1_address(
-      uintptr_t* store_buffer_hash_set_1_address) {
-    store_buffer_hash_set_1_address_ = store_buffer_hash_set_1_address;
-  }
-
-  uintptr_t* store_buffer_hash_set_1_address() {
-    return store_buffer_hash_set_1_address_;
-  }
-
-  void set_store_buffer_hash_set_2_address(
-      uintptr_t* store_buffer_hash_set_2_address) {
-    store_buffer_hash_set_2_address_ = store_buffer_hash_set_2_address;
-  }
-
-  uintptr_t* store_buffer_hash_set_2_address() {
-    return store_buffer_hash_set_2_address_;
-  }
 
   void AddDetachedContext(Handle<Context> context);
   void CheckDetachedContextsAfterGC();
@@ -1153,12 +1123,21 @@ class Isolate {
     return array_buffer_allocator_;
   }
 
+  FutexWaitListNode* futex_wait_list_node() { return &futex_wait_list_node_; }
+
+  void RegisterCancelableTask(Cancelable* task);
+  void RemoveCancelableTask(Cancelable* task);
+
+  interpreter::Interpreter* interpreter() const { return interpreter_; }
+
  protected:
   explicit Isolate(bool enable_serializer);
 
  private:
   friend struct GlobalState;
   friend struct InitializeGlobalState;
+  Handle<JSObject> SetUpSubregistry(Handle<JSObject> registry, Handle<Map> map,
+                                    const char* name);
 
   // These fields are accessed through the API, offsets must be kept in sync
   // with v8::internal::Internals (in include/v8.h) constants. This is also
@@ -1293,6 +1272,7 @@ class Isolate {
   HandleScopeImplementer* handle_scope_implementer_;
   UnicodeCache* unicode_cache_;
   Zone runtime_zone_;
+  Zone interface_descriptor_zone_;
   InnerPointerToCodeCache* inner_pointer_to_code_cache_;
   GlobalHandles* global_handles_;
   EternalHandles* eternal_handles_;
@@ -1300,19 +1280,16 @@ class Isolate {
   RuntimeState runtime_state_;
   Builtins builtins_;
   bool has_installed_extensions_;
-  StringTracker* string_tracker_;
   unibrow::Mapping<unibrow::Ecma262UnCanonicalize> jsregexp_uncanonicalize_;
   unibrow::Mapping<unibrow::CanonicalizationRange> jsregexp_canonrange_;
   unibrow::Mapping<unibrow::Ecma262Canonicalize>
       regexp_macro_assembler_canonicalize_;
   RegExpStack* regexp_stack_;
   DateCache* date_cache_;
+  ErrorToStringHelper error_tostring_helper_;
   unibrow::Mapping<unibrow::Ecma262Canonicalize> interp_canonicalize_mapping_;
   CallInterfaceDescriptorData* call_descriptor_data_;
   base::RandomNumberGenerator* random_number_generator_;
-  // TODO(hpayer): Remove the following store buffer addresses.
-  uintptr_t* store_buffer_hash_set_1_address_;
-  uintptr_t* store_buffer_hash_set_2_address_;
 
   // Whether the isolate has been created for snapshotting.
   bool serializer_enabled_;
@@ -1336,6 +1313,8 @@ class Isolate {
   CpuProfiler* cpu_profiler_;
   HeapProfiler* heap_profiler_;
   FunctionEntryHook function_entry_hook_;
+
+  interpreter::Interpreter* interpreter_;
 
   typedef std::pair<InterruptCallback, void*> InterruptEntry;
   std::queue<InterruptEntry> api_interrupts_queue_;
@@ -1382,6 +1361,10 @@ class Isolate {
   List<Object*> partial_snapshot_cache_;
 
   v8::ArrayBuffer::Allocator* array_buffer_allocator_;
+
+  FutexWaitListNode futex_wait_list_node_;
+
+  std::set<Cancelable*> cancelable_tasks_;
 
   friend class ExecutionAccess;
   friend class HandleScopeImplementer;
@@ -1501,7 +1484,7 @@ class StackLimitCheck BASE_EMBEDDED {
   }
 
   // Use this to check for stack-overflow when entering runtime from JS code.
-  bool JsHasOverflowed() const;
+  bool JsHasOverflowed(uintptr_t gap = 0) const;
 
  private:
   Isolate* isolate_;

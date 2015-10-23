@@ -11,69 +11,6 @@
 #include "SkTypeface.h"
 #include "SkTypes.h"
 
-static const char* gFaces[] = {
-    "Times Roman",
-    "Hiragino Maru Gothic Pro",
-    "Papyrus",
-    "Helvetica",
-    "Courier New"
-};
-
-class TypefaceGM : public skiagm::GM {
-public:
-    TypefaceGM() {
-        fFaces = new SkTypeface*[SK_ARRAY_COUNT(gFaces)];
-        for (size_t i = 0; i < SK_ARRAY_COUNT(gFaces); i++) {
-            fFaces[i] = sk_tool_utils::create_portable_typeface(gFaces[i], SkTypeface::kNormal);
-        }
-    }
-
-    virtual ~TypefaceGM() {
-        for (size_t i = 0; i < SK_ARRAY_COUNT(gFaces); i++) {
-            SkSafeUnref(fFaces[i]);
-        }
-        delete [] fFaces;
-    }
-
-protected:
-    SkString onShortName() override {
-        return SkString("typeface");
-    }
-
-    SkISize onISize() override {
-        return SkISize::Make(640, 480);
-    }
-
-    void onDraw(SkCanvas* canvas) override {
-        SkString text("Typefaces are fun!");
-        SkScalar y = 0;
-
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        for (int i = 0; i < (int)SK_ARRAY_COUNT(gFaces); i++) {
-            this->drawWithFace(text, i, y, paint, canvas);
-        }
-        // Now go backwards
-        for (int i = SK_ARRAY_COUNT(gFaces) - 1; i >= 0; i--) {
-            this->drawWithFace(text, i, y, paint, canvas);
-        }
-    }
-
-private:
-    void drawWithFace(const SkString& text, int i, SkScalar& y, SkPaint& paint,
-                      SkCanvas* canvas) {
-        paint.setTypeface(fFaces[i]);
-        y += paint.getFontMetrics(NULL);
-        canvas->drawText(text.c_str(), text.size(), 0, y, paint);
-    }
-
-    SkTypeface** fFaces;
-
-    typedef skiagm::GM INHERITED;
-};
-
-///////////////////////////////////////////////////////////////////////////////
-
 static void getGlyphPositions(const SkPaint& paint, const uint16_t glyphs[],
                              int count, SkScalar x, SkScalar y, SkPoint pos[]) {
     SkASSERT(SkPaint::kGlyphID_TextEncoding == paint.getTextEncoding());
@@ -157,11 +94,9 @@ class TypefaceStylesGM : public skiagm::GM {
     bool fApplyKerning;
 
 public:
-    TypefaceStylesGM(bool applyKerning) : fApplyKerning(applyKerning) {
-        for (int i = 0; i < gFaceStylesCount; i++) {
-            fFaces[i] = sk_tool_utils::create_portable_typeface(gFaceStyles[i].fName,
-                                                         gFaceStyles[i].fStyle);
-        }
+    TypefaceStylesGM(bool applyKerning)
+        : fApplyKerning(applyKerning) {
+        memset(fFaces, 0, sizeof(fFaces));
     }
 
     virtual ~TypefaceStylesGM() {
@@ -171,11 +106,19 @@ public:
     }
 
 protected:
+    void onOnceBeforeDraw() override {
+        for (int i = 0; i < gFaceStylesCount; i++) {
+            fFaces[i] = SkTypeface::CreateFromName(
+                    sk_tool_utils::platform_font_name(gFaceStyles[i].fName), gFaceStyles[i].fStyle);
+        }
+    }
+
     SkString onShortName() override {
         SkString name("typefacestyles");
         if (fApplyKerning) {
             name.append("_kerning");
         }
+        name.append(sk_tool_utils::major_platform_os_name());
         return name;
     }
 
@@ -216,6 +159,5 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 
-DEF_GM( return new TypefaceGM; )
 DEF_GM( return new TypefaceStylesGM(false); )
 DEF_GM( return new TypefaceStylesGM(true); )

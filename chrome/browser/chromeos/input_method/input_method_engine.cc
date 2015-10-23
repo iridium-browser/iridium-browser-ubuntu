@@ -22,7 +22,7 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/candidate_window.h"
 #include "ui/base/ime/chromeos/component_extension_ime_manager.h"
-#include "ui/base/ime/chromeos/composition_text.h"
+#include "ui/base/ime/chromeos/composition_text_chromeos.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/ime_keymap.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -71,13 +71,13 @@ size_t GetUtf8StringLength(const char* s) {
 
 std::string GetKeyFromEvent(const ui::KeyEvent& event) {
   const std::string code = event.GetCodeString();
-  if (StartsWithASCII(code, "Control", true))
+  if (base::StartsWith(code, "Control", base::CompareCase::SENSITIVE))
     return "Ctrl";
-  if (StartsWithASCII(code, "Shift", true))
+  if (base::StartsWith(code, "Shift", base::CompareCase::SENSITIVE))
     return "Shift";
-  if (StartsWithASCII(code, "Alt", true))
+  if (base::StartsWith(code, "Alt", base::CompareCase::SENSITIVE))
     return "Alt";
-  if (StartsWithASCII(code, "Arrow", true))
+  if (base::StartsWith(code, "Arrow", base::CompareCase::SENSITIVE))
     return code.substr(5);
   if (code == "Escape")
     return "Esc";
@@ -275,6 +275,7 @@ bool InputMethodEngine::CommitText(int context_id, const char* text,
     size_t len = GetUtf8StringLength(text);
     UMA_HISTOGRAM_CUSTOM_COUNTS("InputMethod.CommitLength",
                                 len, 1, 25, 25);
+    composition_text_.reset(new CompositionText());
   }
   return true;
 }
@@ -599,6 +600,8 @@ void InputMethodEngine::Disable() {
   if (!CheckProfile())
     return;
   active_component_id_.clear();
+  IMEBridge::Get()->GetInputContextHandler()->CommitText(
+      base::UTF16ToUTF8(composition_text_->text()));
   observer_->OnDeactivated(active_component_id_);
 }
 
@@ -611,6 +614,7 @@ void InputMethodEngine::PropertyActivate(const std::string& property_name) {
 void InputMethodEngine::Reset() {
   if (!CheckProfile())
     return;
+  composition_text_.reset(new CompositionText());
   observer_->OnReset(active_component_id_);
 }
 
@@ -657,13 +661,13 @@ void InputMethodEngine::CandidateClicked(uint32 index) {
 
 void InputMethodEngine::SetSurroundingText(const std::string& text,
                                            uint32 cursor_pos,
-                                           uint32 anchor_pos) {
+                                           uint32 anchor_pos,
+                                           uint32 offset_pos) {
   if (!CheckProfile())
     return;
-  observer_->OnSurroundingTextChanged(active_component_id_,
-                                      text,
-                                      static_cast<int>(cursor_pos),
-                                      static_cast<int>(anchor_pos));
+  observer_->OnSurroundingTextChanged(
+      active_component_id_, text, static_cast<int>(cursor_pos),
+      static_cast<int>(anchor_pos), static_cast<int>(offset_pos));
 }
 
 bool InputMethodEngine::CheckProfile() const {

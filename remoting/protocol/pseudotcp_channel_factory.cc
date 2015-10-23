@@ -5,11 +5,11 @@
 #include "remoting/protocol/pseudotcp_channel_factory.h"
 
 #include "base/bind.h"
-#include "jingle/glue/pseudotcp_adapter.h"
 #include "net/base/net_errors.h"
-#include "net/socket/stream_socket.h"
 #include "remoting/base/constants.h"
 #include "remoting/protocol/datagram_channel_factory.h"
+#include "remoting/protocol/p2p_datagram_socket.h"
+#include "remoting/protocol/pseudotcp_adapter.h"
 
 namespace remoting {
 namespace protocol {
@@ -59,9 +59,8 @@ void PseudoTcpChannelFactory::CancelChannelCreation(const std::string& name) {
 void PseudoTcpChannelFactory::OnDatagramChannelCreated(
     const std::string& name,
     const ChannelCreatedCallback& callback,
-    scoped_ptr<net::Socket> datagram_socket) {
-  jingle_glue::PseudoTcpAdapter* adapter =
-      new jingle_glue::PseudoTcpAdapter(datagram_socket.release());
+    scoped_ptr<P2PDatagramSocket> datagram_socket) {
+  PseudoTcpAdapter* adapter = new PseudoTcpAdapter(datagram_socket.Pass());
   pending_sockets_[name] = adapter;
 
   adapter->SetSendBufferSize(kTcpSendBufferSize);
@@ -87,7 +86,7 @@ void PseudoTcpChannelFactory::OnPseudoTcpConnected(
     int result) {
   PendingSocketsMap::iterator it = pending_sockets_.find(name);
   DCHECK(it != pending_sockets_.end());
-  scoped_ptr<net::StreamSocket> socket(it->second);
+  scoped_ptr<P2PStreamSocket> socket(it->second);
   pending_sockets_.erase(it);
 
   if (result != net::OK)

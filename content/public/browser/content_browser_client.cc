@@ -6,6 +6,7 @@
 
 #include "base/files/file_path.h"
 #include "content/public/browser/client_certificate_delegate.h"
+#include "content/public/common/sandbox_type.h"
 #include "ui/gfx/image/image_skia.h"
 #include "url/gurl.h"
 
@@ -62,6 +63,12 @@ bool ContentBrowserClient::IsHandledURL(const GURL& url) {
 bool ContentBrowserClient::CanCommitURL(RenderProcessHost* process_host,
                                         const GURL& site_url) {
   return true;
+}
+
+bool ContentBrowserClient::IsIllegalOrigin(ResourceContext* resource_context,
+                                           int child_process_id,
+                                           const GURL& origin) {
+  return false;
 }
 
 bool ContentBrowserClient::ShouldAllowOpenURL(SiteInstance* site_instance,
@@ -181,6 +188,14 @@ bool ContentBrowserClient::AllowWorkerIndexedDB(
   return true;
 }
 
+#if defined(ENABLE_WEBRTC)
+bool ContentBrowserClient::AllowWebRTCIdentityCache(const GURL& url,
+                                                    const GURL& first_party_url,
+                                                    ResourceContext* context) {
+  return true;
+}
+#endif  // defined(ENABLE_WEBRTC)
+
 QuotaPermissionContext* ContentBrowserClient::CreateQuotaPermissionContext() {
   return nullptr;
 }
@@ -244,7 +259,8 @@ bool ContentBrowserClient::CanCreateWindow(
     bool opener_suppressed,
     ResourceContext* context,
     int render_process_id,
-    int opener_id,
+    int opener_render_view_id,
+    int opener_render_frame_id,
     bool* no_javascript_access) {
   *no_javascript_access = false;
   return true;
@@ -273,6 +289,10 @@ base::FilePath ContentBrowserClient::GetDefaultDownloadDirectory() {
 
 std::string ContentBrowserClient::GetDefaultDownloadName() {
   return std::string();
+}
+
+base::FilePath ContentBrowserClient::GetShaderDiskCacheDirectory() {
+  return base::FilePath();
 }
 
 BrowserPpapiHost*
@@ -305,6 +325,10 @@ TracingDelegate* ContentBrowserClient::GetTracingDelegate() {
   return nullptr;
 }
 
+bool ContentBrowserClient::IsNPAPIEnabled() {
+  return false;
+}
+
 bool ContentBrowserClient::IsPluginAllowedToCallRequestOSFileHandle(
     BrowserContext* browser_context,
     const GURL& url) {
@@ -334,12 +358,23 @@ void ContentBrowserClient::OpenURL(
 const wchar_t* ContentBrowserClient::GetResourceDllName() {
   return nullptr;
 }
+
+base::string16 ContentBrowserClient::GetAppContainerSidForSandboxType(
+    int sandbox_type) const {
+  // Embedders should override this method and return different SIDs for each
+  // sandbox type. Note: All content level tests will run child processes in the
+  // same AppContainer.
+  return base::string16(
+      L"S-1-15-2-3251537155-1984446955-2931258699-841473695-1938553385-"
+      L"924012148-129201922");
+}
 #endif
 
 #if defined(VIDEO_HOLE)
 ExternalVideoSurfaceContainer*
 ContentBrowserClient::OverrideCreateExternalVideoSurfaceContainer(
     WebContents* web_contents) {
+  NOTREACHED() << "Hole-punching is not supported. See crbug.com/469348.";
   return nullptr;
 }
 #endif

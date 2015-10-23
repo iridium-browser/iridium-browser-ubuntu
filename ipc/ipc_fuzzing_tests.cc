@@ -44,7 +44,7 @@ TEST(IPCMessageIntegrity, ReadBeyondBufferStr) {
   EXPECT_TRUE(m.WriteInt(v1));
   EXPECT_TRUE(m.WriteInt(v2));
 
-  PickleIterator iter(m);
+  base::PickleIterator iter(m);
   std::string vs;
   EXPECT_FALSE(iter.ReadString(&vs));
 }
@@ -57,7 +57,7 @@ TEST(IPCMessageIntegrity, ReadBeyondBufferStr16) {
   EXPECT_TRUE(m.WriteInt(v1));
   EXPECT_TRUE(m.WriteInt(v2));
 
-  PickleIterator iter(m);
+  base::PickleIterator iter(m);
   base::string16 vs;
   EXPECT_FALSE(iter.ReadString16(&vs));
 }
@@ -68,7 +68,7 @@ TEST(IPCMessageIntegrity, ReadBytesBadIterator) {
   EXPECT_TRUE(m.WriteInt(1));
   EXPECT_TRUE(m.WriteInt(2));
 
-  PickleIterator iter(m);
+  base::PickleIterator iter(m);
   const char* data = NULL;
   EXPECT_TRUE(iter.ReadBytes(&data, sizeof(int)));
 }
@@ -84,11 +84,16 @@ TEST(IPCMessageIntegrity, ReadVectorNegativeSize) {
   EXPECT_TRUE(m.WriteInt(3));
 
   std::vector<double> vec;
-  PickleIterator iter(m);
+  base::PickleIterator iter(m);
   EXPECT_FALSE(ReadParam(&m, &iter, &vec));
 }
 
-TEST(IPCMessageIntegrity, ReadVectorTooLarge1) {
+#if defined(OS_ANDROID)
+#define MAYBE_ReadVectorTooLarge1 DISABLED_ReadVectorTooLarge1
+#else
+#define MAYBE_ReadVectorTooLarge1 ReadVectorTooLarge1
+#endif
+TEST(IPCMessageIntegrity, MAYBE_ReadVectorTooLarge1) {
   // This was BUG 1006367. This is the large but positive length case. Again
   // we try to hit the non-specialized case vector<P>.
   IPC::Message m(0, 1, IPC::Message::PRIORITY_NORMAL);
@@ -97,7 +102,7 @@ TEST(IPCMessageIntegrity, ReadVectorTooLarge1) {
   EXPECT_TRUE(m.WriteInt64(2));
 
   std::vector<int64> vec;
-  PickleIterator iter(m);
+  base::PickleIterator iter(m);
   EXPECT_FALSE(ReadParam(&m, &iter, &vec));
 }
 
@@ -111,7 +116,7 @@ TEST(IPCMessageIntegrity, ReadVectorTooLarge2) {
   EXPECT_TRUE(m.WriteInt64(2));
 
   std::vector<int64> vec;
-  PickleIterator iter(m);
+  base::PickleIterator iter(m);
   EXPECT_FALSE(ReadParam(&m, &iter, &vec));
 }
 
@@ -213,7 +218,7 @@ class FuzzerClientListener : public SimpleListener {
       return false;
     int msg_value1 = 0;
     int msg_value2 = 0;
-    PickleIterator iter(*last_msg_);
+    base::PickleIterator iter(*last_msg_);
     if (!iter.ReadInt(&msg_value1))
       return false;
     if (!iter.ReadInt(&msg_value2))
@@ -251,8 +256,7 @@ MULTIPROCESS_IPC_TEST_CLIENT_MAIN(FuzzServerClient) {
   base::MessageLoopForIO main_message_loop;
   FuzzerServerListener listener;
   scoped_ptr<IPC::Channel> channel(IPC::Channel::CreateClient(
-      IPCTestBase::GetChannelName("FuzzServerClient"),
-      &listener));
+      IPCTestBase::GetChannelName("FuzzServerClient"), &listener, nullptr));
   CHECK(channel->Connect());
   listener.Init(channel.get());
   base::MessageLoop::current()->Run();
@@ -262,9 +266,14 @@ MULTIPROCESS_IPC_TEST_CLIENT_MAIN(FuzzServerClient) {
 class IPCFuzzingTest : public IPCTestBase {
 };
 
+#if defined(OS_ANDROID)
+#define MAYBE_SanityTest DISABLED_SanityTest
+#else
+#define MAYBE_SanityTest SanityTest
+#endif
 // This test makes sure that the FuzzerClientListener and FuzzerServerListener
 // are working properly by generating two well formed IPC calls.
-TEST_F(IPCFuzzingTest, SanityTest) {
+TEST_F(IPCFuzzingTest, MAYBE_SanityTest) {
   Init("FuzzServerClient");
 
   FuzzerClientListener listener;
@@ -287,12 +296,17 @@ TEST_F(IPCFuzzingTest, SanityTest) {
   DestroyChannel();
 }
 
+#if defined(OS_ANDROID)
+#define MAYBE_MsgBadPayloadShort DISABLED_MsgBadPayloadShort
+#else
+#define MAYBE_MsgBadPayloadShort MsgBadPayloadShort
+#endif
 // This test uses a payload that is smaller than expected. This generates an
 // error while unpacking the IPC buffer which in debug trigger an assertion and
 // in release is ignored (!). Right after we generate another valid IPC to make
 // sure framing is working properly.
 #if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
-TEST_F(IPCFuzzingTest, MsgBadPayloadShort) {
+TEST_F(IPCFuzzingTest, MAYBE_MsgBadPayloadShort) {
   Init("FuzzServerClient");
 
   FuzzerClientListener listener;
@@ -316,11 +330,16 @@ TEST_F(IPCFuzzingTest, MsgBadPayloadShort) {
 }
 #endif
 
+#if defined(OS_ANDROID)
+#define MAYBE_MsgBadPayloadArgs DISABLED_MsgBadPayloadArgs
+#else
+#define MAYBE_MsgBadPayloadArgs MsgBadPayloadArgs
+#endif
 // This test uses a payload that has too many arguments, but so the payload size
 // is big enough so the unpacking routine does not generate an error as in the
 // case of MsgBadPayloadShort test. This test does not pinpoint a flaw (per se)
 // as by design we don't carry type information on the IPC message.
-TEST_F(IPCFuzzingTest, MsgBadPayloadArgs) {
+TEST_F(IPCFuzzingTest, MAYBE_MsgBadPayloadArgs) {
   Init("FuzzServerClient");
 
   FuzzerClientListener listener;

@@ -5,10 +5,10 @@
 import sys
 import unittest
 
-from telemetry.core import browser_options
+from telemetry.internal.browser import browser_options
+from telemetry.internal.results import page_test_results
 from telemetry.internal import story_runner
-from telemetry.results import page_test_results
-from telemetry.unittest_util import simple_mock
+from telemetry.testing import simple_mock
 
 from measurements import page_cycler
 from metrics import keychain_metric
@@ -93,6 +93,18 @@ class FakeBrowser(object):
       def UrlOf(self, url_path):
         return 'http://fakeserver:99999/%s' % url_path
     return FakeHttpServer()
+
+  @property
+  def supports_cpu_metrics(self):
+    return True
+
+  @property
+  def supports_memory_metrics(self):
+    return True
+
+  @property
+  def supports_power_metrics(self):
+    return True
 
 
 class FakePlatform(object):

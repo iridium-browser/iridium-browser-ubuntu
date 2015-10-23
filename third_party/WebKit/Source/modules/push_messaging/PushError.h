@@ -17,9 +17,8 @@ class PushError {
     WTF_MAKE_NONCOPYABLE(PushError);
 public:
     // For CallbackPromiseAdapter.
-    typedef WebPushError WebType;
-    static DOMException* take(ScriptPromiseResolver*, WebType* webErrorRaw);
-    static void dispose(WebType* webErrorRaw);
+    using WebType = const WebPushError&;
+    static DOMException* take(ScriptPromiseResolver*, const WebPushError& webError);
 
 private:
     PushError() = delete;

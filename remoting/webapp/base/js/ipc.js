@@ -48,10 +48,12 @@ var base = base || {};
  * @private
  */
 base.Ipc = function() {
-  base.debug.assert(instance_ === null);
+  console.assert(instance_ === null, 'Duplicate base.Ipc constructor.');
   /** @private {!Object<Function>} */
   this.handlers_ = {};
-  this.onMessageHandler_ = this.onMessage_.bind(this);
+  this.onMessageHandler_ =
+      /** @type {function(*, MessageSender, function (*))} */ (
+          this.onMessage_.bind(this));
   chrome.runtime.onMessage.addListener(this.onMessageHandler_);
 };
 
@@ -109,7 +111,7 @@ base.Ipc.prototype.unregister = function(methodName) {
 
 /**
  * @param {base.Ipc.Request_} message
- * @param {chrome.runtime.MessageSender} sender
+ * @param {!MessageSender} sender
  * @param {function(*): void} sendResponse
  */
 base.Ipc.prototype.onMessage_ = function(message, sender, sendResponse) {
@@ -144,6 +146,7 @@ base.Ipc.prototype.onMessage_ = function(message, sender, sendResponse) {
  * @param {...} var_args
  * @return {Promise} A Promise that would resolve to the return value of the
  *   handler or reject if the handler throws an exception.
+ * @suppress {reportUnknownTypes}
  */
 base.Ipc.invoke = function(methodName, var_args) {
   var params = Array.prototype.slice.call(arguments, 1);

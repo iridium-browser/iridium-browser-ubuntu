@@ -34,6 +34,7 @@
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/paint/DeprecatedPaintLayer.h"
+#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/ThemePainter.h"
 #include "platform/PlatformKeyboardEvent.h"
@@ -74,6 +75,9 @@ void LayoutTextControlSingleLine::paint(const PaintInfo& paintInfo, const Layout
     LayoutTextControl::paint(paintInfo, paintOffset);
 
     if (paintInfo.phase == PaintPhaseBlockBackground && m_shouldDrawCapsLockIndicator) {
+        if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(*paintInfo.context, *this, paintInfo.phase))
+            return;
+
         LayoutRect contentsRect = contentBoxRect();
 
         // Center in the block progression direction.
@@ -84,7 +88,9 @@ void LayoutTextControlSingleLine::paint(const PaintInfo& paintInfo, const Layout
 
         // Convert the rect into the coords used for painting the content
         contentsRect.moveBy(paintOffset + location());
-        LayoutTheme::theme().painter().paintCapsLockIndicator(this, paintInfo, pixelSnappedIntRect(contentsRect));
+        IntRect snappedRect = pixelSnappedIntRect(contentsRect);
+        LayoutObjectDrawingRecorder recorder(*paintInfo.context, *this, paintInfo.phase, snappedRect);
+        LayoutTheme::theme().painter().paintCapsLockIndicator(this, paintInfo, snappedRect);
     }
 }
 
@@ -291,13 +297,13 @@ LayoutRect LayoutTextControlSingleLine::controlClipRect(const LayoutPoint& addit
     return clipRect;
 }
 
-float LayoutTextControlSingleLine::getAvgCharWidth(AtomicString family)
+float LayoutTextControlSingleLine::getAvgCharWidth(const AtomicString& family) const
 {
-    // Since Lucida Grande is the default font, we want this to match the width
-    // of MS Shell Dlg, the default font for textareas in Firefox, Safari Win and
-    // IE for some encodings (in IE, the default font is encoding specific).
-    // 901 is the avgCharWidth value in the OS/2 table for MS Shell Dlg.
-    if (family == "Lucida Grande")
+    // Match the default system font to the width of MS Shell Dlg, the default
+    // font for textareas in Firefox, Safari Win and IE for some encodings (in
+    // IE, the default font is encoding specific). 901 is the avgCharWidth value
+    // in the OS/2 table for MS Shell Dlg.
+    if (LayoutTheme::theme().needsHackForTextControlWithFontFamily(family))
         return scaleEmToUnits(901);
 
     return LayoutTextControl::getAvgCharWidth(family);
@@ -314,11 +320,11 @@ LayoutUnit LayoutTextControlSingleLine::preferredContentLogicalWidth(float charW
 
     float maxCharWidth = 0.f;
     AtomicString family = styleRef().font().fontDescription().family().family();
-    // Since Lucida Grande is the default font, we want this to match the width
-    // of MS Shell Dlg, the default font for textareas in Firefox, Safari Win and
-    // IE for some encodings (in IE, the default font is encoding specific).
-    // 4027 is the (xMax - xMin) value in the "head" font table for MS Shell Dlg.
-    if (family == "Lucida Grande")
+    // Match the default system font to the width of MS Shell Dlg, the default
+    // font for textareas in Firefox, Safari Win and IE for some encodings (in
+    // IE, the default font is encoding specific). 4027 is the (xMax - xMin)
+    // value in the "head" font table for MS Shell Dlg.
+    if (LayoutTheme::theme().needsHackForTextControlWithFontFamily(family))
         maxCharWidth = scaleEmToUnits(4027);
     else if (hasValidAvgCharWidth(family))
         maxCharWidth = roundf(styleRef().font().primaryFont()->maxCharWidth());

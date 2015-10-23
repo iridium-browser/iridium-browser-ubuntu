@@ -132,6 +132,14 @@ void CueTimeline::updateActiveCues(double movieTime)
 
     HTMLMediaElement& mediaElement = this->mediaElement();
 
+#if !ENABLE(OILPAN)
+    // Don't run the "time marches on" algorithm if the document has been
+    // detached. This primarily guards against dispatch of events w/
+    // HTMLTrackElement targets.
+    if (mediaElement.document().isDetached())
+        return;
+#endif
+
     // https://html.spec.whatwg.org/#time-marches-on
 
     // 1 - Let current cues be a list of cues, initialized to contain all the
@@ -239,10 +247,10 @@ void CueTimeline::updateActiveCues(double movieTime)
     // 8 - Let events be a list of tasks, initially empty. Each task in this
     // list will be associated with a text track, a text track cue, and a time,
     // which are used to sort the list before the tasks are queued.
-    WillBeHeapVector<std::pair<double, RawPtrWillBeMember<TextTrackCue>>> eventTasks;
+    HeapVector<std::pair<double, Member<TextTrackCue>>> eventTasks;
 
     // 8 - Let affected tracks be a list of text tracks, initially empty.
-    WillBeHeapVector<RawPtrWillBeMember<TextTrack>> affectedTracks;
+    HeapVector<Member<TextTrack>> affectedTracks;
 
     for (size_t i = 0; i < missedCuesSize; ++i) {
         // 9 - For each text track cue in missed cues, prepare an event named enter
@@ -293,12 +301,12 @@ void CueTimeline::updateActiveCues(double movieTime)
         // correctly identifies the type of the event, if the startTime is
         // less than the endTime in the cue.
         if (eventTasks[i].second->startTime() >= eventTasks[i].second->endTime()) {
-            mediaElement.scheduleEvent(createEventWithTarget(EventTypeNames::enter, eventTasks[i].second));
-            mediaElement.scheduleEvent(createEventWithTarget(EventTypeNames::exit, eventTasks[i].second));
+            mediaElement.scheduleEvent(createEventWithTarget(EventTypeNames::enter, eventTasks[i].second.get()));
+            mediaElement.scheduleEvent(createEventWithTarget(EventTypeNames::exit, eventTasks[i].second.get()));
         } else {
             bool isEnterEvent = eventTasks[i].first == eventTasks[i].second->startTime();
             AtomicString eventName = isEnterEvent ? EventTypeNames::enter : EventTypeNames::exit;
-            mediaElement.scheduleEvent(createEventWithTarget(eventName, eventTasks[i].second));
+            mediaElement.scheduleEvent(createEventWithTarget(eventName, eventTasks[i].second.get()));
         }
     }
 
@@ -309,7 +317,7 @@ void CueTimeline::updateActiveCues(double movieTime)
     // 15 - For each text track in affected tracks, in the list order, queue a
     // task to fire a simple event named cuechange at the TextTrack object, and, ...
     for (size_t i = 0; i < affectedTracks.size(); ++i) {
-        mediaElement.scheduleEvent(createEventWithTarget(EventTypeNames::cuechange, affectedTracks[i]));
+        mediaElement.scheduleEvent(createEventWithTarget(EventTypeNames::cuechange, affectedTracks[i].get()));
 
         // ... if the text track has a corresponding track element, to then fire a
         // simple event named cuechange at the track element as well.
@@ -348,7 +356,7 @@ void CueTimeline::endIgnoringUpdateRequests()
 {
     ASSERT(m_ignoreUpdate);
     --m_ignoreUpdate;
-    if (!m_ignoreUpdate && mediaElement().inActiveDocument())
+    if (!m_ignoreUpdate)
         updateActiveCues(mediaElement().currentTime());
 }
 

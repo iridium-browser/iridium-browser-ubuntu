@@ -23,7 +23,7 @@
 #include "net/http/http_byte_range.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
-#include "third_party/WebKit/public/platform/WebServiceWorkerResponseType.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerResponseType.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -44,6 +44,7 @@ class ServiceWorkerFetchDispatcher;
 class ServiceWorkerProviderHost;
 class ServiceWorkerVersion;
 class Stream;
+struct ResourceResponseInfo;
 
 class CONTENT_EXPORT ServiceWorkerURLRequestJob
     : public net::URLRequestJob,
@@ -59,6 +60,7 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
       const ResourceContext* resource_context,
       FetchRequestMode request_mode,
       FetchCredentialsMode credentials_mode,
+      FetchRedirectMode redirect_mode,
       bool is_main_resource_load,
       RequestContextType request_context_type,
       RequestContextFrameType frame_type,
@@ -110,14 +112,14 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
   // StreamRegisterObserver override:
   void OnStreamRegistered(Stream* stream) override;
 
-  void GetExtraResponseInfo(
-      bool* was_fetched_via_service_worker,
-      bool* was_fallback_required_by_service_worker,
-      GURL* original_url_via_service_worker,
-      blink::WebServiceWorkerResponseType* response_type_via_service_worker,
-      base::TimeTicks* fetch_start_time,
-      base::TimeTicks* fetch_ready_time,
-      base::TimeTicks* fetch_end_time) const;
+  void GetExtraResponseInfo(ResourceResponseInfo* response_info) const;
+
+  const base::TimeTicks& worker_start_time() const {
+    return worker_start_time_;
+  }
+  const base::TimeTicks& worker_ready_time() const {
+    return worker_ready_time_;
+  }
 
  protected:
   ~ServiceWorkerURLRequestJob() override;
@@ -171,6 +173,8 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
   void SetResponseBodyType(ResponseBodyType type);
   bool ShouldRecordResult();
   void RecordResult(ServiceWorkerMetrics::URLRequestJobResult result);
+  void RecordStatusZeroResponseError(
+      blink::WebServiceWorkerResponseError error);
 
   // Releases the resources for streaming.
   void ClearStream();
@@ -181,9 +185,8 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
 
   // Timing info to show on the popup in Devtools' Network tab.
   net::LoadTimingInfo load_timing_info_;
-  base::TimeTicks fetch_start_time_;
-  base::TimeTicks fetch_ready_time_;
-  base::TimeTicks fetch_end_time_;
+  base::TimeTicks worker_start_time_;
+  base::TimeTicks worker_ready_time_;
   base::Time response_time_;
 
   ResponseType response_type_;
@@ -209,6 +212,7 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
 
   FetchRequestMode request_mode_;
   FetchCredentialsMode credentials_mode_;
+  FetchRedirectMode redirect_mode_;
   const bool is_main_resource_load_;
   RequestContextType request_context_type_;
   RequestContextFrameType frame_type_;

@@ -21,9 +21,7 @@ namespace mandoline {
 // OmniboxImpl, public:
 
 OmniboxImpl::OmniboxImpl()
-    : app_impl_(nullptr),
-      edit_(nullptr) {
-}
+    : app_impl_(nullptr), root_(nullptr), edit_(nullptr) {}
 OmniboxImpl::~OmniboxImpl() {}
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -39,6 +37,7 @@ bool OmniboxImpl::ConfigureIncomingConnection(
     mojo::ApplicationConnection* connection) {
   connection->AddService<Omnibox>(this);
   connection->AddService(view_manager_client_factory_.get());
+  connection->ConnectToService(&view_embedder_);
   return true;
 }
 
@@ -50,13 +49,14 @@ bool OmniboxImpl::ConfigureOutgoingConnection(
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxImpl, mojo::ViewManagerDelegate implementation:
 
-void OmniboxImpl::OnEmbed(mojo::View* root,
-    mojo::InterfaceRequest<mojo::ServiceProvider> services,
-    mojo::ServiceProviderPtr exposed_services) {
+void OmniboxImpl::OnEmbed(mojo::View* root) {
+  root_ = root;
+
   if (!aura_init_.get()) {
-    aura_init_.reset(new AuraInit);
+    aura_init_.reset(new AuraInit(root, app_impl_->shell()));
     edit_ = new views::Textfield;
     edit_->set_controller(this);
+    edit_->SetTextInputType(ui::TEXT_INPUT_TYPE_URL);
   }
 
   const int kOpacity = 0xC0;
@@ -81,13 +81,16 @@ void OmniboxImpl::OnEmbed(mojo::View* root,
   widget->Show();
   widget->GetCompositor()->SetBackgroundColor(
       SkColorSetA(SK_ColorBLACK, kOpacity));
-  root->SetFocus();
   edit_->SetText(url_.To<base::string16>());
   edit_->SelectAll(false);
   edit_->RequestFocus();
+
+  ShowWindow();
 }
 
-void OmniboxImpl::OnViewManagerDisconnected(mojo::ViewManager* view_manager) {}
+void OmniboxImpl::OnViewManagerDestroyed(mojo::ViewManager* view_manager) {
+  root_ = nullptr;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxImpl, views::LayoutManager implementation:
@@ -111,7 +114,10 @@ bool OmniboxImpl::HandleKeyEvent(views::Textfield* sender,
                                  const ui::KeyEvent& key_event) {
   if (key_event.key_code() == ui::VKEY_RETURN) {
     // TODO(beng): call back to browser.
-    client_->OpenURL(mojo::String::From<base::string16>(sender->text()));
+    mojo::URLRequestPtr request(mojo::URLRequest::New());
+    request->url = mojo::String::From<base::string16>(sender->text());
+    view_embedder_->Embed(request.Pass());
+    HideWindow();
     return true;
   }
   return false;
@@ -122,19 +128,38 @@ bool OmniboxImpl::HandleKeyEvent(views::Textfield* sender,
 
 void OmniboxImpl::Create(mojo::ApplicationConnection* connection,
                          mojo::InterfaceRequest<Omnibox> request) {
+  // TODO(beng): methinks this doesn't work well across multiple browser
+  //             windows...
   bindings_.AddBinding(this, request.Pass());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxImpl, Omnibox implementation:
 
-void OmniboxImpl::SetClient(OmniboxClientPtr client) {
-  client_ = client.Pass();
-}
-
 void OmniboxImpl::ShowForURL(const mojo::String& url) {
   url_ = url;
-  // TODO: get embedding working.
+  if (root_) {
+    ShowWindow();
+  } else {
+    mojo::URLRequestPtr request(mojo::URLRequest::New());
+    request->url = mojo::String::From("mojo:omnibox");
+    view_embedder_->Embed(request.Pass());
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// OmniboxImpl, private:
+
+void OmniboxImpl::ShowWindow() {
+  DCHECK(root_);
+  root_->SetVisible(true);
+  root_->SetFocus();
+  root_->MoveToFront();
+}
+
+void OmniboxImpl::HideWindow() {
+  DCHECK(root_);
+  root_->SetVisible(false);
 }
 
 }  // namespace mandoline

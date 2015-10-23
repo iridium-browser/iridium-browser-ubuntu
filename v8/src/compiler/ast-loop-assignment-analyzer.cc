@@ -21,7 +21,7 @@ ALAA::AstLoopAssignmentAnalyzer(Zone* zone, CompilationInfo* info)
 LoopAssignmentAnalysis* ALAA::Analyze() {
   LoopAssignmentAnalysis* a = new (zone()) LoopAssignmentAnalysis(zone());
   result_ = a;
-  VisitStatements(info()->function()->body());
+  VisitStatements(info()->literal()->body());
   result_ = NULL;
   return a;
 }
@@ -67,7 +67,8 @@ void ALAA::VisitVariableProxy(VariableProxy* leaf) {}
 void ALAA::VisitLiteral(Literal* leaf) {}
 void ALAA::VisitRegExpLiteral(RegExpLiteral* leaf) {}
 void ALAA::VisitThisFunction(ThisFunction* leaf) {}
-void ALAA::VisitSuperReference(SuperReference* leaf) {}
+void ALAA::VisitSuperPropertyReference(SuperPropertyReference* leaf) {}
+void ALAA::VisitSuperCallReference(SuperCallReference* leaf) {}
 
 
 // ---------------------------------------------------------------------------
@@ -292,6 +293,6 @@ int LoopAssignmentAnalysis::GetAssignmentCountForTesting(Scope* scope,
   }
   return count;
 }
-}
-}
-}  // namespace v8::internal::compiler
+}  // namespace compiler
+}  // namespace internal
+}  // namespace v8

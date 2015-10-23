@@ -7,7 +7,6 @@ package org.chromium.android_webview.test;
 import android.app.Instrumentation;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.test.ActivityInstrumentationTestCase2;
 import android.util.Log;
 
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
@@ -19,6 +18,7 @@ import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.util.GraphicsTestUtils;
 import org.chromium.android_webview.test.util.JSUtils;
+import org.chromium.base.test.BaseActivityInstrumentationTestCase;
 import org.chromium.base.test.util.InMemorySharedPreferences;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * A base class for android_webview tests.
  */
 public class AwTestBase
-        extends ActivityInstrumentationTestCase2<AwTestRunnerActivity> {
+        extends BaseActivityInstrumentationTestCase<AwTestRunnerActivity> {
     public static final long WAIT_TIMEOUT_MS = scaleTimeout(15000);
     public static final int CHECK_INTERVAL = 100;
     private static final String TAG = "AwTestBase";
@@ -251,8 +251,8 @@ public class AwTestBase
         runTestOnUiThread(new Runnable() {
             @Override
             public void run() {
-                awContents.loadUrl(LoadUrlParams.createLoadDataParamsWithBaseUrl(
-                        data, mimeType, isBase64Encoded, baseUrl, historyUrl));
+                awContents.loadDataWithBaseURL(
+                        baseUrl, data, mimeType, isBase64Encoded ? "base64" : null, historyUrl);
             }
         });
     }
@@ -588,7 +588,7 @@ public class AwTestBase
         TestAwContentsClient.OnCreateWindowHelper onCreateWindowHelper =
                 parentAwContentsClient.getOnCreateWindowHelper();
         int currentCallCount = onCreateWindowHelper.getCallCount();
-        parentAwContents.evaluateJavaScript(triggerScript, null);
+        parentAwContents.evaluateJavaScriptForTests(triggerScript, null);
         onCreateWindowHelper.waitForCallback(
                 currentCallCount, 1, WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }

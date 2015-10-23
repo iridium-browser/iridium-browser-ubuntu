@@ -25,6 +25,55 @@ function waitAndAcceptDialog(windowId) {
 }
 
 /**
+ * Obtains visible tree items.
+ *
+ * @param {string} windowId Window ID.
+ * @return {!Promise<!Array<string>>} List of visible item names.
+ */
+function getTreeItems(windowId) {
+  return remoteCall.callRemoteTestUtil('getTreeItems', windowId, []);
+};
+
+/**
+ * Waits until the directory item appears.
+ *
+ * @param {string} windowId Window ID.
+ * @param {string} name Name of item.
+ * @return {!Promise}
+ */
+function waitForDirectoryItem(windowId, name) {
+  return repeatUntil(function() {
+    return getTreeItems(windowId).then(function(items) {
+      if (items.indexOf(name) !== -1) {
+        return true;
+      } else {
+        return pending('Tree item %s is not found.', name);
+      }
+    });
+  });
+}
+
+/**
+ * Waits until the directory item disappears.
+ *
+ * @param {string} windowId Window ID.
+ * @param {string} name Name of item.
+ * @return {!Promise}
+ */
+function waitForDirectoryItemLost(windowId, name) {
+  return repeatUntil(function() {
+    return getTreeItems(windowId).then(function(items) {
+      console.log(items);
+      if (items.indexOf(name) === -1) {
+        return true;
+      } else {
+        return pending('Tree item %s is still exists.', name);
+      }
+    });
+  });
+}
+
+/**
  * Tests copying a file to the same directory and waits until the file lists
  * changes.
  *
@@ -38,17 +87,17 @@ function keyboardCopy(path, callback) {
   var expectedFilesAfter =
       expectedFilesBefore.concat([['world (1).ogv', '59 KB', 'OGG video']]);
 
-  var appId, fileListBefore;
+  var appId;
   StepsRunner.run([
     // Set up File Manager.
     function() {
       setupAndWaitUntilReady(null, path, this.next);
     },
     // Copy the file.
-    function(inAppId, inFileListBefore) {
-      appId = inAppId;
-      fileListBefore = inFileListBefore;
-      chrome.test.assertEq(expectedFilesBefore, inFileListBefore);
+    function(results) {
+      appId = results.windowId;
+      var fileListBefore = results.fileList;
+      chrome.test.assertEq(expectedFilesBefore, fileListBefore);
       remoteCall.callRemoteTestUtil('copyFile', appId, [filename], this.next);
     },
     // Wait for a file list change.
@@ -68,8 +117,9 @@ function keyboardCopy(path, callback) {
 /**
  * Tests deleting a file and and waits until the file lists changes.
  * @param {string} path Directory path to be tested.
+ * @param {string} treeItem The Downloads or Drive tree item selector.
  */
-function keyboardDelete(path) {
+function keyboardDelete(path, treeItem) {
   // Returns true if |fileList| contains |filename|.
   var isFilePresent = function(filename, fileList) {
     for (var i = 0; i < fileList.length; i++) {
@@ -88,10 +138,19 @@ function keyboardDelete(path) {
       setupAndWaitUntilReady(null, path, this.next);
     },
     // Delete the file.
-    function(inAppId, inFileListBefore) {
-      appId = inAppId;
-      fileListBefore = inFileListBefore;
+    function(results) {
+      appId = results.windowId;
+      fileListBefore = results.fileList;
       chrome.test.assertTrue(isFilePresent(filename, fileListBefore));
+      this.next();
+    },
+    function() {
+      expandRoot(appId, treeItem).then(this.next);
+    },
+    function(){
+      remoteCall.waitForElement(appId, '#detail-table').then(this.next);
+    },
+    function(){
       remoteCall.callRemoteTestUtil(
           'deleteFile', appId, [filename], this.next);
     },
@@ -99,6 +158,10 @@ function keyboardDelete(path) {
     function(result) {
       chrome.test.assertTrue(result);
       waitAndAcceptDialog(appId).then(this.next);
+    },
+    function() {
+      // Check that the directory appears in the LHS tree
+      waitForDirectoryItem(appId, directoryName).then(this.next);
     },
     // Wait for a file list change.
     function() {
@@ -126,6 +189,13 @@ function keyboardDelete(path) {
     // Verify the result.
     function(fileList) {
       chrome.test.assertFalse(isFilePresent(directoryName, fileList));
+      this.next();
+    },
+    function() {
+      // Check that the directory is removed from the LHS tree
+      waitForDirectoryItemLost(appId, directoryName).then(this.next);
+    },
+    function() {
       checkIfNoErrorsOccured(this.next);
     }
   ]);
@@ -159,7 +229,7 @@ function renameFile(windowId, oldName, newName) {
 /**
  * Test for renaming a new directory.
  * @param {string} path Initial path.
- * @param {Array.<TestEntryInfo>} initialEntrySet Initial set of entries.
+ * @param {Array<TestEntryInfo>} initialEntrySet Initial set of entries.
  * @param {string} pathInBreadcrumb Initial path which is shown in breadcrumb.
  * @return {Promise} Promise to be fulfilled on success.
  */
@@ -168,10 +238,11 @@ function testRenameNewDirectory(path, initialEntrySet, pathInBreadcrumb) {
 
   return new Promise(function(resolve) {
     setupAndWaitUntilReady(null, path, resolve);
-  }).then(function(windowId) {
+  }).then(function(results) {
+    var windowId = results.windowId;
     return remoteCall.waitForFiles(windowId, expectedRows).then(function() {
-      return remoteCall.fakeKeyDown(windowId, '#list-container', 'U+0045',
-          true);
+      return remoteCall.fakeKeyDown(
+          windowId, '#list-container', 'U+0045', true);
     }).then(function() {
       // Wait for rename text field.
       return remoteCall.waitForElement(windowId, 'input.rename');
@@ -209,7 +280,7 @@ function testRenameNewDirectory(path, initialEntrySet, pathInBreadcrumb) {
 /**
  * Test for renaming a file.
  * @param {string} path Initial path.
- * @param {Array.<TestEntryInfo>} initialEntrySet Initial set of entries.
+ * @param {Array<TestEntryInfo>} initialEntrySet Initial set of entries.
  * @return {Promise} Promise to be fulfilled on success.
  */
 function testRenameFile(path, initialEntrySet) {
@@ -230,8 +301,8 @@ function testRenameFile(path, initialEntrySet) {
   // Open a window.
   return new Promise(function(callback) {
     setupAndWaitUntilReady(null, path, callback);
-  }).then(function(inWindowId) {
-    windowId = inWindowId;
+  }).then(function(results) {
+    windowId = results.windowId;
     return remoteCall.waitForFiles(windowId, initialExpectedEntryRows);
   }).then(function(){
     return renameFile(windowId, 'hello.txt', 'New File Name.txt');
@@ -261,7 +332,7 @@ testcase.keyboardCopyDownloads = function() {
 };
 
 testcase.keyboardDeleteDownloads = function() {
-  keyboardDelete(RootPath.DOWNLOADS);
+  keyboardDelete(RootPath.DOWNLOADS, TREEITEM_DOWNLOADS);
 };
 
 testcase.keyboardCopyDrive = function() {
@@ -269,10 +340,7 @@ testcase.keyboardCopyDrive = function() {
 };
 
 testcase.keyboardDeleteDrive = function() {
-  keyboardDelete(RootPath.DRIVE);
-};
-
-testcase.createNewFolderAndCheckFocus = function() {
+  keyboardDelete(RootPath.DRIVE, TREEITEM_DRIVE);
 };
 
 testcase.renameFileDownloads = function() {

@@ -107,9 +107,9 @@
 #include "ash/ash_switches.h"
 #include "ash/desktop_background/user_wallpaper_delegate.h"
 #include "ash/shell.h"
+#include "ash/system/chromeos/devicetype_utils.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
-#include "chrome/browser/chromeos/chromeos_utils.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/net/wake_on_wifi_manager.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
@@ -205,9 +205,8 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
   DCHECK(values);
 
 #if defined(OS_CHROMEOS)
-  const int device_type_resource_id = chromeos::GetChromeDeviceTypeResourceId();
+  const int device_type_resource_id = ash::GetChromeOSDeviceTypeResourceId();
 #else
-  // TODO(isherman): Set an appropriate device name for non-ChromeOS devices.
   const int device_type_resource_id = IDS_EASY_UNLOCK_GENERIC_DEVICE_TYPE;
 #endif  // defined(OS_CHROMEOS)
 
@@ -299,8 +298,13 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
     { "improveBrowsingExperience", IDS_OPTIONS_IMPROVE_BROWSING_EXPERIENCE },
     { "languageAndSpellCheckSettingsButton",
       IDS_OPTIONS_SETTINGS_LANGUAGE_AND_INPUT_SETTINGS },
+#if defined(OS_CHROMEOS)
+    { "languageSectionLabel", IDS_OPTIONS_ADVANCED_LANGUAGE_LABEL,
+      IDS_SHORT_PRODUCT_OS_NAME },
+#else
     { "languageSectionLabel", IDS_OPTIONS_ADVANCED_LANGUAGE_LABEL,
       IDS_SHORT_PRODUCT_NAME },
+#endif
     { "linkDoctorPref", IDS_OPTIONS_LINKDOCTOR_PREF },
     { "manageAutofillSettings", IDS_OPTIONS_MANAGE_AUTOFILL_SETTINGS_LINK },
     { "manageLanguages", IDS_OPTIONS_TRANSLATE_MANAGE_LANGUAGES },
@@ -328,8 +332,6 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
     { "profilesManage", IDS_PROFILES_MANAGE_BUTTON_LABEL },
     { "profilesSingleUser", IDS_PROFILES_SINGLE_USER_MESSAGE,
       IDS_PRODUCT_NAME },
-    { "profilesSupervisedDashboardTip",
-      IDS_PROFILES_SUPERVISED_USER_DASHBOARD_TIP },
     { "proxiesLabelExtension", IDS_OPTIONS_EXTENSION_PROXIES_LABEL },
     { "proxiesLabelSystem", IDS_OPTIONS_SYSTEM_PROXIES_LABEL,
       IDS_PRODUCT_NAME },
@@ -360,7 +362,7 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
     { "startupShowNewTab", IDS_OPTIONS_STARTUP_SHOW_NEWTAB },
     { "startupShowPages", IDS_OPTIONS_STARTUP_SHOW_PAGES },
     { "suggestPref", IDS_OPTIONS_SUGGEST_PREF },
-    { "supervisedUserLabel", IDS_PROFILES_LIST_SUPERVISED_USER_LABEL },
+    { "supervisedUserLabel", IDS_PROFILES_LIST_LEGACY_SUPERVISED_USER_LABEL },
     { "syncButtonTextInProgress", IDS_SYNC_NTP_SETUP_IN_PROGRESS },
     { "syncButtonTextSignIn", IDS_SYNC_START_SYNC_BUTTON_LABEL,
       IDS_SHORT_PRODUCT_NAME },
@@ -389,6 +391,8 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_LARGE_CURSOR_DESCRIPTION },
     { "accessibilityScreenMagnifier",
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_SCREEN_MAGNIFIER_DESCRIPTION },
+    { "accessibilityScreenMagnifierCenterFocus",
+      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_SCREEN_MAGNIFIER_CENTER_FOCUS },
     { "accessibilityScreenMagnifierFull",
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_SCREEN_MAGNIFIER_FULL },
     { "accessibilityScreenMagnifierOff",
@@ -415,7 +419,6 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DELAY_VERY_LONG },
     { "autoclickDelayVeryShort",
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DELAY_VERY_SHORT },
-    { "batteryButton", IDS_OPTIONS_SETTINGS_BATTERY_DESCRIPTION},
     { "changePicture", IDS_OPTIONS_CHANGE_PICTURE },
     { "changePictureCaption", IDS_OPTIONS_CHANGE_PICTURE_CAPTION },
     { "consumerManagementDescription",
@@ -457,7 +460,6 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
       IDS_OPTIONS_RESOLVE_TIMEZONE_BY_GEOLOCATION_DESCRIPTION },
     { "sectionTitleDevice", IDS_OPTIONS_DEVICE_GROUP_NAME },
     { "sectionTitleInternet", IDS_OPTIONS_INTERNET_OPTIONS_GROUP_LABEL },
-    { "storageButton", IDS_OPTIONS_SETTINGS_STORAGE_DESCRIPTION},
     { "syncButtonTextStart", IDS_SYNC_SETUP_BUTTON_LABEL },
     { "thirdPartyImeConfirmDisable", IDS_CANCEL },
     { "thirdPartyImeConfirmEnable", IDS_OK },
@@ -539,6 +541,12 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
                 IDS_HOTWORD_CONFIRM_BUBBLE_TITLE);
   values->SetString("hotwordManageAudioHistoryURL",
                     chrome::kManageAudioHistoryURL);
+  base::string16 supervised_user_dashboard =
+      base::ASCIIToUTF16(chrome::kLegacySupervisedUserManagementURL);
+  values->SetString("profilesSupervisedDashboardTip",
+      l10n_util::GetStringFUTF16(
+          IDS_PROFILES_LEGACY_SUPERVISED_USER_DASHBOARD_TIP,
+          supervised_user_dashboard));
 
 #if defined(OS_CHROMEOS)
   Profile* profile = Profile::FromWebUI(web_ui());
@@ -664,10 +672,6 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
   values->SetBoolean("showSetDefault", ShouldShowSetDefaultBrowser());
 
   values->SetBoolean("allowAdvancedSettings", ShouldAllowAdvancedSettings());
-
-  values->SetBoolean("websiteSettingsManagerEnabled",
-                     base::CommandLine::ForCurrentProcess()->HasSwitch(
-                         switches::kEnableWebsiteSettingsManager));
 
   values->SetBoolean("usingNewProfilesUI", switches::IsNewAvatarMenu());
 
@@ -1132,8 +1136,8 @@ void BrowserOptionsHandler::BecomeDefaultBrowser(const base::ListValue* args) {
   default_browser_worker_->StartSetAsDefault();
   // Callback takes care of updating UI.
 
-  // If the user attempted to make Chrome the default browser, then he/she
-  // arguably wants to be notified when that changes.
+  // If the user attempted to make Chrome the default browser, notify
+  // them when this changes.
   PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
   prefs->SetBoolean(prefs::kCheckDefaultBrowser, true);
 }

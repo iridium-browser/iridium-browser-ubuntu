@@ -12,12 +12,9 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/drive/drive_api_util.h"
-#include "content/public/browser/browser_thread.h"
+#include "components/drive/drive_api_util.h"
+#include "components/drive/file_system_core_util.h"
 #include "net/base/escape.h"
-
-using content::BrowserThread;
 
 namespace drive {
 namespace internal {
@@ -265,7 +262,6 @@ void SearchMetadata(
     const SearchMetadataPredicate& predicate,
     size_t at_most_num_matches,
     const SearchMetadataCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   const base::TimeTicks start_time = base::TimeTicks::Now();
@@ -296,7 +292,7 @@ bool MatchesType(int options, const ResourceEntry& entry) {
   if (options & SEARCH_METADATA_OFFLINE) {
     if (entry.file_specific_info().is_hosted_document()) {
       // Not all hosted documents are cached by Drive offline app.
-      // http://support.google.com/drive/bin/answer.py?hl=en&answer=1628467
+      // https://support.google.com/drive/answer/2375012
       std::string mime_type = entry.file_specific_info().content_mime_type();
       return mime_type == drive::util::kGoogleDocumentMimeType ||
              mime_type == drive::util::kGoogleSpreadsheetMimeType ||

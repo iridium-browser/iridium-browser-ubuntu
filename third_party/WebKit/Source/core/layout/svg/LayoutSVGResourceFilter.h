@@ -28,8 +28,6 @@
 #include "core/svg/SVGFilterElement.h"
 #include "core/svg/graphics/filters/SVGFilter.h"
 #include "core/svg/graphics/filters/SVGFilterBuilder.h"
-#include "platform/graphics/GraphicsContext.h"
-#include "platform/graphics/paint/DisplayItemList.h"
 
 namespace blink {
 
@@ -63,8 +61,6 @@ public:
 
     RefPtrWillBeMember<SVGFilter> filter;
     RefPtrWillBeMember<SVGFilterBuilder> builder;
-    OwnPtr<DisplayItemList> m_displayItemList;
-    OwnPtr<GraphicsContext> m_context;
     FilterDataState m_state;
 
 private:
@@ -74,17 +70,15 @@ private:
 class LayoutSVGResourceFilter final : public LayoutSVGResourceContainer {
 public:
     explicit LayoutSVGResourceFilter(SVGFilterElement*);
+    ~LayoutSVGResourceFilter() override;
 
-    virtual ~LayoutSVGResourceFilter();
-    virtual void destroy() override;
+    bool isChildAllowed(LayoutObject*, const ComputedStyle&) const override;
 
-    virtual bool isChildAllowed(LayoutObject*, const ComputedStyle&) const override;
+    const char* name() const override { return "LayoutSVGResourceFilter"; }
+    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectSVGResourceFilter || LayoutSVGResourceContainer::isOfType(type); }
 
-    virtual const char* name() const override { return "LayoutSVGResourceFilter"; }
-    virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectSVGResourceFilter || LayoutSVGResourceContainer::isOfType(type); }
-
-    virtual void removeAllClientsFromCache(bool markForInvalidation = true) override;
-    virtual void removeClientFromCache(LayoutObject*, bool markForInvalidation = true) override;
+    void removeAllClientsFromCache(bool markForInvalidation = true) override;
+    void removeClientFromCache(LayoutObject*, bool markForInvalidation = true) override;
 
     FloatRect resourceBoundingBox(const LayoutObject*);
 
@@ -96,10 +90,13 @@ public:
     void primitiveAttributeChanged(LayoutObject*, const QualifiedName&);
 
     static const LayoutSVGResourceType s_resourceType = FilterResourceType;
-    virtual LayoutSVGResourceType resourceType() const override { return s_resourceType; }
+    LayoutSVGResourceType resourceType() const override { return s_resourceType; }
 
     FilterData* getFilterDataForLayoutObject(LayoutObject* object) { return m_filter.get(object); }
     void setFilterDataForLayoutObject(LayoutObject* object, PassOwnPtrWillBeRawPtr<FilterData> filterData) { m_filter.set(object, filterData); }
+
+protected:
+    void willBeDestroyed() override;
 
 private:
     void disposeFilterMap();

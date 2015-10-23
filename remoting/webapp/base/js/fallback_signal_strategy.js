@@ -73,8 +73,11 @@ remoting.FallbackSignalStrategy = function(primary,
   /** @private {number} */
   this.primaryConnectTimerId_ = 0;
 
-  /** @private {remoting.LogToServer} */
-  this.logToServer_ = null;
+  /** @private {remoting.Logger} */
+  this.logger_ = new remoting.SessionLogger(
+      remoting.ChromotingEvent.Role.CLIENT,
+      remoting.TelemetryEventWriter.Client.write
+  );
 
   /**
    * @type {Array<{strategyType: remoting.SignalStrategy.Type,
@@ -132,8 +135,10 @@ remoting.FallbackSignalStrategy.prototype.setIncomingStanzaCallback =
  */
 remoting.FallbackSignalStrategy.prototype.connect =
     function(server, username, authToken) {
-  base.debug.assert(this.state_ == this.State.NOT_CONNECTED);
-  base.debug.assert(this.onStateChangedCallback_ != null);
+  console.assert(this.state_ == this.State.NOT_CONNECTED,
+                'connect() called in state ' + this.state_ + '.');
+  console.assert(this.onStateChangedCallback_ != null,
+                 'No state change callback registered.');
   this.server_ = server;
   this.username_ = username;
   this.authToken_ = authToken;
@@ -153,28 +158,6 @@ remoting.FallbackSignalStrategy.prototype.sendMessage = function(message) {
   this.getConnectedSignalStrategy_().sendMessage(message);
 };
 
-/**
- * Send any messages accumulated during connection set-up.
- *
- * @param {remoting.LogToServer} logToServer The LogToServer instance for the
- *     connection.
- */
-remoting.FallbackSignalStrategy.prototype.sendConnectionSetupResults =
-    function(logToServer) {
-  this.logToServer_ = logToServer;
-  this.sendConnectionSetupResultsInternal_();
-}
-
-remoting.FallbackSignalStrategy.prototype.sendConnectionSetupResultsInternal_ =
-    function() {
-  for (var i = 0; i < this.connectionSetupResults_.length; ++i) {
-    var result = this.connectionSetupResults_[i];
-    this.logToServer_.logSignalStrategyProgress(result.strategyType,
-                                                result.progress);
-  }
-  this.connectionSetupResults_ = [];
-};
-
 /** @return {remoting.SignalStrategy.State} Current state */
 remoting.FallbackSignalStrategy.prototype.getState = function() {
   return (this.externalState_ === null)
@@ -184,9 +167,12 @@ remoting.FallbackSignalStrategy.prototype.getState = function() {
 
 /** @return {!remoting.Error} Error when in FAILED state. */
 remoting.FallbackSignalStrategy.prototype.getError = function() {
-  base.debug.assert(this.state_ == this.State.SECONDARY_FAILED);
-  base.debug.assert(
-      this.secondary_.getState() == remoting.SignalStrategy.State.FAILED);
+  console.assert(this.state_ == this.State.SECONDARY_FAILED,
+                'getError() called in state ' + this.state_ + '.');
+  console.assert(
+      this.secondary_.getState() == remoting.SignalStrategy.State.FAILED,
+      'getError() called with secondary state ' + this.secondary_.getState() +
+      '.');
   return this.secondary_.getError();
 };
 
@@ -208,17 +194,21 @@ remoting.FallbackSignalStrategy.prototype.getType = function() {
 remoting.FallbackSignalStrategy.prototype.getConnectedSignalStrategy_ =
     function() {
   if (this.state_ == this.State.PRIMARY_SUCCEEDED) {
-    base.debug.assert(
-        this.primary_.getState() == remoting.SignalStrategy.State.CONNECTED);
+    console.assert(
+        this.primary_.getState() == remoting.SignalStrategy.State.CONNECTED,
+        'getConnectedSignalStrategy_() called with primary state ' +
+        this.primary_.getState() + '.');
     return this.primary_;
   } else if (this.state_ == this.State.SECONDARY_SUCCEEDED) {
-    base.debug.assert(
-        this.secondary_.getState() == remoting.SignalStrategy.State.CONNECTED);
+    console.assert(
+        this.secondary_.getState() == remoting.SignalStrategy.State.CONNECTED,
+        'getConnectedSignalStrategy_() called with secondary state ' +
+        this.secondary_.getState() + '.');
     return this.secondary_;
   } else {
-    base.debug.assert(
+    console.assert(
         false,
-        'getConnectedSignalStrategy called in unconnected state');
+        'getConnectedSignalStrategy() called in state ' + this.state_ + '.');
     return null;
   }
 };
@@ -317,10 +307,11 @@ remoting.FallbackSignalStrategy.prototype.notifyExternalCallback_ =
  * @private
  */
 remoting.FallbackSignalStrategy.prototype.connectSecondary_ = function() {
-  base.debug.assert(this.state_ == this.State.PRIMARY_PENDING);
-  base.debug.assert(this.server_ != '');
-  base.debug.assert(this.username_ != '');
-  base.debug.assert(this.authToken_ != '');
+  console.assert(this.state_ == this.State.PRIMARY_PENDING,
+                'connectSecondary_() called in state ' + this.state_ + '.');
+  console.assert(this.server_ != '', 'No server address set.');
+  console.assert(this.username_ != '', 'No username set.');
+  console.assert(this.authToken_ != '', 'No auth token set.');
 
   this.state_ = this.State.SECONDARY_PENDING;
   this.primary_.setIncomingStanzaCallback(null);
@@ -347,11 +338,5 @@ remoting.FallbackSignalStrategy.prototype.updateProgress_ = function(
     strategy, progress) {
   console.log('FallbackSignalStrategy progress: ' + strategy.getType() + ' ' +
       progress);
-  this.connectionSetupResults_.push({
-    'strategyType': strategy.getType(),
-    'progress': progress
-  });
-  if (this.logToServer_) {
-    this.sendConnectionSetupResultsInternal_();
-  }
+  this.logger_.logSignalStrategyProgress(strategy.getType(), progress);
 };

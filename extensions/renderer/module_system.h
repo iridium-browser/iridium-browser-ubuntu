@@ -51,12 +51,16 @@ class ModuleSystem : public ObjectBackedNativeHandler,
 
   class ExceptionHandler {
    public:
+    explicit ExceptionHandler(ScriptContext* context) : context_(context) {}
     virtual ~ExceptionHandler() {}
     virtual void HandleUncaughtException(const v8::TryCatch& try_catch) = 0;
 
    protected:
     // Formats |try_catch| as a nice string.
     std::string CreateExceptionString(const v8::TryCatch& try_catch);
+    // A script context associated with this handler. Owned by the module
+    // system.
+    ScriptContext* context_;
   };
 
   // Enables native bindings for the duration of its lifetime.
@@ -76,7 +80,7 @@ class ModuleSystem : public ObjectBackedNativeHandler,
 
   // Require the specified module. This is the equivalent of calling
   // require('module_name') from the loaded JS files.
-  v8::Local<v8::Value> Require(const std::string& module_name);
+  v8::MaybeLocal<v8::Object> Require(const std::string& module_name);
   void Require(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // Run |code| in the current context with the name |name| used for stack
@@ -126,7 +130,7 @@ class ModuleSystem : public ObjectBackedNativeHandler,
                     const std::string& field,
                     const std::string& module_name,
                     const std::string& module_field,
-                    v8::AccessorGetterCallback getter);
+                    v8::AccessorNameGetterCallback getter);
 
   // Make |object|.|field| lazily evaluate to the result of
   // requireNative(|module_name|)[|module_field|].
@@ -150,12 +154,12 @@ class ModuleSystem : public ObjectBackedNativeHandler,
   typedef std::map<std::string, linked_ptr<NativeHandler> > NativeHandlerMap;
 
   // Retrieves the lazily defined field specified by |property|.
-  static void LazyFieldGetter(v8::Local<v8::String> property,
+  static void LazyFieldGetter(v8::Local<v8::Name> property,
                               const v8::PropertyCallbackInfo<v8::Value>& info);
   // Retrieves the lazily defined field specified by |property| on a native
   // object.
   static void NativeLazyFieldGetter(
-      v8::Local<v8::String> property,
+      v8::Local<v8::Name> property,
       const v8::PropertyCallbackInfo<v8::Value>& info);
 
   // Called when an exception is thrown but not caught.
@@ -164,7 +168,7 @@ class ModuleSystem : public ObjectBackedNativeHandler,
   void RequireForJs(const v8::FunctionCallbackInfo<v8::Value>& args);
   v8::Local<v8::Value> RequireForJsInner(v8::Local<v8::String> module_name);
 
-  typedef v8::Local<v8::Value>(ModuleSystem::*RequireFunction)(
+  typedef v8::MaybeLocal<v8::Object>(ModuleSystem::*RequireFunction)(
       const std::string&);
   // Base implementation of a LazyFieldGetter which uses |require_fn| to require
   // modules.
@@ -180,7 +184,8 @@ class ModuleSystem : public ObjectBackedNativeHandler,
   // Return an object that contains the native methods defined by the named
   // NativeHandler.
   // |args[0]| - the name of a native handler object.
-  v8::Local<v8::Value> RequireNativeFromString(const std::string& native_name);
+  v8::MaybeLocal<v8::Object> RequireNativeFromString(
+      const std::string& native_name);
   void RequireNative(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // Return a promise for a requested module.

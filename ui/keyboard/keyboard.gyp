@@ -8,7 +8,7 @@
     'input_tools_root_dir': '../../third_party/google_input_tools/src/chrome/os',
     'inputview_gen_js': '<(SHARED_INTERMEDIATE_DIR)/ui/keyboard/resources/inputview.js',
   },
-  'targets': [ 
+  'targets': [
     {
       # GN version: //ui/keyboard:resources
       'target_name': 'keyboard_resources',
@@ -85,7 +85,14 @@
         'keyboard_switches.h',
         'keyboard_util.cc',
         'keyboard_util.h',
-      ]
+      ],
+      'conditions': [
+        ['use_ozone==1', {
+          'dependencies': [
+            '../ozone/ozone.gyp:ozone',
+          ],
+        }],
+      ],
     },
     {
       'target_name': 'keyboard_unittests',
@@ -111,6 +118,7 @@
       ],
       'sources': [
         'keyboard_controller_unittest.cc',
+        'keyboard_util_unittest.cc',
         'test/run_all_unittests.cc',
       ],
       'conditions': [

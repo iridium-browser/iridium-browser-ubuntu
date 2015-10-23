@@ -26,6 +26,7 @@ UNCONDITIONALLY_BOUND_EXTENSIONS = set([
   'WGL_EXT_extensions_string',
   'GL_CHROMIUM_gles_depth_binding_hack', # crbug.com/448206
   'GL_CHROMIUM_glgetstringi_hack', # crbug.com/470396
+  'GL_CHROMIUM_egl_khr_fence_sync_hack', # crbug.com/504758
 ])
 
 """Function binding conditions can be specified manually by supplying a versions
@@ -35,9 +36,13 @@ array instead of the names array. Each version has the following keys:
    extensions: Extra Extensions for which the function is bound. Only needed
                in some cases where the extension cannot be parsed from the
                headers.
-
+   is_optional: True if the GetProcAddress can return NULL for the
+                function.  This may happen for example when functions
+                are added to a new version of an extension, but the
+                extension string is not modified.
 By default, the function gets its name from the first name in its names or
 versions array. This can be overridden by supplying a 'known_as' key.
+
 """
 GL_FUNCTIONS = [
 { 'return_type': 'void',
@@ -234,6 +239,12 @@ GL_FUNCTIONS = [
   'arguments':
       'GLenum target, GLint level, GLint xoffset, GLint yoffset, '
       'GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height', },
+{ 'return_type': 'void',
+  'names': ['glCoverFillPathNV'],
+  'arguments': 'GLuint path, GLenum coverMode' },
+{ 'return_type': 'void',
+  'names': ['glCoverStrokePathNV'],
+  'arguments': 'GLuint name, GLenum coverMode' },
 { 'return_type': 'GLuint',
   'names': ['glCreateProgram'],
   'arguments': 'void', },
@@ -258,6 +269,9 @@ GL_FUNCTIONS = [
 { 'return_type': 'void',
   'names': ['glDeleteFramebuffersEXT', 'glDeleteFramebuffers'],
   'arguments': 'GLsizei n, const GLuint* framebuffers', },
+{ 'return_type': 'void',
+  'names': ['glDeletePathsNV'],
+  'arguments': 'GLuint path, GLsizei range' },
 { 'return_type': 'void',
   'names': ['glDeleteProgram'],
   'arguments': 'GLuint program', },
@@ -437,6 +451,9 @@ GL_FUNCTIONS = [
 { 'return_type': 'void',
   'names': ['glGenFramebuffersEXT', 'glGenFramebuffers'],
   'arguments': 'GLsizei n, GLuint* framebuffers', },
+{ 'return_type': 'GLuint',
+  'names': ['glGenPathsNV'],
+  'arguments': 'GLsizei range' },
 { 'return_type': 'void',
   'versions': [{ 'name': 'glGenQueries' },
                { 'name': 'glGenQueriesARB', },
@@ -704,6 +721,9 @@ GL_FUNCTIONS = [
   'names': ['glIsFramebufferEXT', 'glIsFramebuffer'],
   'arguments': 'GLuint framebuffer', },
 { 'return_type': 'GLboolean',
+  'names': ['glIsPathNV'],
+  'arguments': 'GLuint path' },
+{ 'return_type': 'GLboolean',
   'names': ['glIsProgram'],
   'arguments': 'GLuint program', },
 { 'return_type': 'GLboolean',
@@ -769,6 +789,19 @@ GL_FUNCTIONS = [
                  'extensions': ['GL_EXT_direct_state_access',
                                 'GL_NV_path_rendering'] },],
   'arguments': 'GLenum matrixMode' },
+{ 'return_type': 'void',
+  'names': ['glPathCommandsNV'],
+  'arguments': 'GLuint path, GLsizei numCommands, const GLubyte* commands, '
+  'GLsizei numCoords, GLenum coordType, const GLvoid* coords' },
+{ 'return_type': 'void',
+  'names': ['glPathParameterfNV'],
+  'arguments': 'GLuint path, GLenum pname, GLfloat value' },
+{ 'return_type': 'void',
+  'names': ['glPathParameteriNV'],
+  'arguments': 'GLuint path, GLenum pname, GLint value' },
+{ 'return_type': 'void',
+  'names': ['glPathStencilFuncNV'],
+  'arguments': 'GLenum func, GLint ref, GLuint mask' },
 { 'return_type': 'void',
   'versions': [{ 'name': 'glPauseTransformFeedback' }],
   'arguments': 'void', },
@@ -888,6 +921,9 @@ GL_FUNCTIONS = [
   });
 """, },
 { 'return_type': 'void',
+  'names': ['glStencilFillPathNV'],
+  'arguments': 'GLuint path, GLenum fillMode, GLuint mask' },
+{ 'return_type': 'void',
   'names': ['glStencilFunc'],
   'arguments': 'GLenum func, GLint ref, GLuint mask', },
 { 'return_type': 'void',
@@ -905,6 +941,17 @@ GL_FUNCTIONS = [
 { 'return_type': 'void',
   'names': ['glStencilOpSeparate'],
   'arguments': 'GLenum face, GLenum fail, GLenum zfail, GLenum zpass', },
+{ 'return_type': 'void',
+  'names': ['glStencilStrokePathNV'],
+  'arguments': 'GLuint path, GLint reference, GLuint mask' },
+{ 'return_type': 'void',
+  'names': ['glStencilThenCoverFillPathNV'],
+  'arguments': 'GLuint path, GLenum fillMode, GLuint mask, GLenum coverMode',
+  'is_optional': True, },
+{ 'return_type': 'void',
+  'names': ['glStencilThenCoverStrokePathNV'],
+  'arguments': 'GLuint path, GLint reference, GLuint mask, GLenum coverMode',
+  'is_optional': True, },
 { 'return_type': 'GLboolean',
   'known_as': 'glTestFenceAPPLE',
   'versions': [{ 'name': 'glTestFenceAPPLE',
@@ -1202,7 +1249,10 @@ EGL_FUNCTIONS = [
                'EGLint config_size, EGLint* num_config', },
 { 'return_type': 'EGLint',
   'versions': [{ 'name': 'eglClientWaitSyncKHR',
-                 'extensions': ['EGL_KHR_fence_sync'] }],
+                 'extensions': [
+                   'EGL_KHR_fence_sync',
+                   'GL_CHROMIUM_egl_khr_fence_sync_hack'
+                 ] }],
   'arguments': 'EGLDisplay dpy, EGLSyncKHR sync, EGLint flags, '
       'EGLTimeKHR timeout' },
 { 'return_type': 'EGLBoolean',
@@ -1234,7 +1284,10 @@ EGL_FUNCTIONS = [
                'const EGLint* attrib_list', },
 { 'return_type': 'EGLSyncKHR',
   'versions': [{ 'name': 'eglCreateSyncKHR',
-                 'extensions': ['EGL_KHR_fence_sync'] }],
+                 'extensions': [
+                   'EGL_KHR_fence_sync',
+                   'GL_CHROMIUM_egl_khr_fence_sync_hack'
+                 ] }],
   'arguments': 'EGLDisplay dpy, EGLenum type, const EGLint* attrib_list' },
 { 'return_type': 'EGLSurface',
   'names': ['eglCreateWindowSurface'],
@@ -1252,7 +1305,10 @@ EGL_FUNCTIONS = [
   'arguments': 'EGLDisplay dpy, EGLSurface surface', },
 { 'return_type': 'EGLBoolean',
   'versions': [{ 'name': 'eglDestroySyncKHR',
-                 'extensions': ['EGL_KHR_fence_sync'] }],
+                 'extensions': [
+                   'EGL_KHR_fence_sync',
+                   'GL_CHROMIUM_egl_khr_fence_sync_hack'
+                 ] }],
   'arguments': 'EGLDisplay dpy, EGLSyncKHR sync' },
 { 'return_type': 'EGLBoolean',
   'names': ['eglGetConfigAttrib'],
@@ -1288,7 +1344,10 @@ EGL_FUNCTIONS = [
   'arguments': 'const char* procname', },
 { 'return_type': 'EGLBoolean',
   'versions': [{ 'name': 'eglGetSyncAttribKHR',
-                 'extensions': ['EGL_KHR_fence_sync'] }],
+                 'extensions': [
+                   'EGL_KHR_fence_sync',
+                   'GL_CHROMIUM_egl_khr_fence_sync_hack'
+                 ] }],
   'arguments': 'EGLDisplay dpy, EGLSyncKHR sync, EGLint attribute, '
       'EGLint* value' },
 { 'return_type': 'EGLBoolean',
@@ -1892,7 +1951,8 @@ namespace gfx {
         file.write('  else if (%s) {\n  ' % (cond))
 
       WriteFuncBinding(file, known_as, version['name'])
-      file.write('DCHECK(fn.%sFn);\n' % known_as)
+      if not 'is_optional' in func or not func['is_optional']:
+        file.write('DCHECK(fn.%sFn);\n' % known_as)
       file.write('}\n')
       i += 1
       first_version = False
@@ -1905,29 +1965,12 @@ namespace gfx {
       return True
     return False
 
-  if set_name == 'egl':
-    file.write("""std::string client_extensions(GetClientExtensions());
-  client_extensions += " ";
-  ALLOW_UNUSED_LOCAL(client_extensions);
-
-""")
-    for extension in sorted(used_client_extensions):
-      # Extra space at the end of the extension name is intentional,
-      # it is used as a separator
-      file.write(
-          '  ext.b_%s = client_extensions.find("%s ") != std::string::npos;\n' %
-          (extension, extension))
-    for func in functions:
-      if not 'static_binding' in func and IsClientExtensionFunc(func):
-        file.write('\n')
-        file.write('  debug_fn.%sFn = 0;\n' % func['known_as'])
-        WriteConditionalFuncBinding(file, func)
+  file.write("}\n\n");
 
   if set_name == 'gl':
-    # Write the deferred bindings for GL that need a current context and depend
-    # on GL_VERSION and GL_EXTENSIONS.
-    file.write('}\n\n')
-    file.write("""void DriverGL::InitializeDynamicBindings(GLContext* context) {
+    file.write("""\
+void DriverGL::InitializeDynamicBindings(
+    GLContext* context) {
   DCHECK(context && context->IsCurrent(NULL));
   const GLVersionInfo* ver = context->GetVersionInfo();
   ALLOW_UNUSED_LOCAL(ver);
@@ -1935,24 +1978,53 @@ namespace gfx {
   ALLOW_UNUSED_LOCAL(extensions);
 
 """)
+  elif set_name == 'egl':
+    file.write("""\
+void DriverEGL::InitializeExtensionBindings() {
+  std::string client_extensions(GetClientExtensions());
+  client_extensions += " ";
+  ALLOW_UNUSED_LOCAL(client_extensions);
+
+""")
   else:
-    file.write("""std::string extensions(GetPlatformExtensions());
+    file.write("""\
+void Driver%s::InitializeExtensionBindings() {
+  std::string extensions(GetPlatformExtensions());
+  extensions += " ";
+  ALLOW_UNUSED_LOCAL(extensions);
+
+""" % (set_name.upper(),))
+
+  def OutputExtensionBindings(extension_var, extensions, extension_funcs):
+    # Extra space at the end of the extension name is intentional,
+    # it is used as a separator
+    for extension in extensions:
+      file.write('  ext.b_%s = %s.find("%s ") != std::string::npos;\n' %
+                 (extension, extension_var, extension))
+
+    for func in extension_funcs:
+      if not 'static_binding' in func:
+        file.write('\n')
+        file.write('  debug_fn.%sFn = 0;\n' % func['known_as'])
+        WriteConditionalFuncBinding(file, func)
+
+  OutputExtensionBindings(
+    'client_extensions',
+    sorted(used_client_extensions),
+    [ f for f in functions if IsClientExtensionFunc(f) ])
+
+  if set_name == 'egl':
+    file.write("""\
+  std::string extensions(GetPlatformExtensions());
   extensions += " ";
   ALLOW_UNUSED_LOCAL(extensions);
 
 """)
 
-  for extension in sorted(used_extensions):
-    # Extra space at the end of the extension name is intentional, it is used
-    # as a separator
-    file.write('  ext.b_%s = extensions.find("%s ") != std::string::npos;\n' %
-        (extension, extension))
-
-  for func in functions:
-    if not 'static_binding' in func and not IsClientExtensionFunc(func):
-      file.write('\n')
-      file.write('  debug_fn.%sFn = 0;\n' % func['known_as'])
-      WriteConditionalFuncBinding(file, func)
+  OutputExtensionBindings(
+    'extensions',
+    sorted(used_extensions),
+    [ f for f in functions if not IsClientExtensionFunc(f) ])
 
   # Some new function pointers have been added, so update them in debug bindings
   file.write('\n')

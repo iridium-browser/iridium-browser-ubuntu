@@ -21,7 +21,6 @@
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/platform_device.h"
 #include "third_party/WebKit/public/web/WebBindings.h"
-#include "ui/gfx/blit.h"
 #include "ui/gfx/canvas.h"
 #include "url/url_constants.h"
 
@@ -281,7 +280,7 @@ void WebPluginProxy::HandleURLRequest(const char* url,
                                       int notify_id,
                                       bool popups_allowed,
                                       bool notify_redirects) {
- if (!target && (0 == base::strcasecmp(method, "GET"))) {
+ if (!target && base::EqualsCaseInsensitiveASCII(method, "GET")) {
     // Please refer to https://bugzilla.mozilla.org/show_bug.cgi?id=366082
     // for more details on this.
     if (delegate_->GetQuirks() &

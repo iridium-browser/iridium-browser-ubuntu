@@ -36,7 +36,7 @@ template <>
 struct ParamTraits<scoped_refptr<net::HttpResponseHeaders> > {
   typedef scoped_refptr<net::HttpResponseHeaders> param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -44,7 +44,7 @@ template <>
 struct CONTENT_EXPORT ParamTraits<storage::DataElement> {
   typedef storage::DataElement param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -52,7 +52,7 @@ template <>
 struct ParamTraits<scoped_refptr<content::ResourceDevToolsInfo> > {
   typedef scoped_refptr<content::ResourceDevToolsInfo> param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -60,7 +60,7 @@ template <>
 struct ParamTraits<net::LoadTimingInfo> {
   typedef net::LoadTimingInfo param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -68,7 +68,7 @@ template <>
 struct ParamTraits<scoped_refptr<content::ResourceRequestBody> > {
   typedef scoped_refptr<content::ResourceRequestBody> param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -90,6 +90,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(content::FetchRequestMode,
 
 IPC_ENUM_TRAITS_MAX_VALUE(content::FetchCredentialsMode,
                           content::FETCH_CREDENTIALS_MODE_LAST)
+
+IPC_ENUM_TRAITS_MAX_VALUE(content::FetchRedirectMode,
+                          content::FetchRedirectMode::LAST)
 
 IPC_STRUCT_TRAITS_BEGIN(content::ResourceResponseHead)
 IPC_STRUCT_TRAITS_PARENT(content::ResourceResponseInfo)
@@ -129,9 +132,8 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResourceResponseInfo)
   IPC_STRUCT_TRAITS_MEMBER(was_fallback_required_by_service_worker)
   IPC_STRUCT_TRAITS_MEMBER(original_url_via_service_worker)
   IPC_STRUCT_TRAITS_MEMBER(response_type_via_service_worker)
-  IPC_STRUCT_TRAITS_MEMBER(service_worker_fetch_start)
-  IPC_STRUCT_TRAITS_MEMBER(service_worker_fetch_ready)
-  IPC_STRUCT_TRAITS_MEMBER(service_worker_fetch_end)
+  IPC_STRUCT_TRAITS_MEMBER(service_worker_start_time)
+  IPC_STRUCT_TRAITS_MEMBER(service_worker_ready_time)
   IPC_STRUCT_TRAITS_MEMBER(proxy_server)
 IPC_STRUCT_TRAITS_END()
 
@@ -209,6 +211,9 @@ IPC_STRUCT_BEGIN(ResourceHostMsg_Request)
 
   // The credentials mode passed to the ServiceWorker.
   IPC_STRUCT_MEMBER(content::FetchCredentialsMode, fetch_credentials_mode)
+
+  // The redirect mode used in Fetch API.
+  IPC_STRUCT_MEMBER(content::FetchRedirectMode, fetch_redirect_mode)
 
   // The request context passed to the ServiceWorker.
   IPC_STRUCT_MEMBER(content::RequestContextType, fetch_request_context_type)

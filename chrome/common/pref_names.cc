@@ -109,6 +109,9 @@ const char kSupervisedUserManualHosts[] = "profile.managed.manual_hosts";
 // Maps URLs to whether the URL is manually allowed or blocked.
 const char kSupervisedUserManualURLs[] = "profile.managed.manual_urls";
 
+// Stores whether the SafeSites filter is enabled.
+const char kSupervisedUserSafeSites[] = "profile.managed.safe_sites";
+
 // Stores the email address associated with the google account of the secondary
 // custodian of the supervised user, set when the supervised user is created.
 const char kSupervisedUserSecondCustodianEmail[] =
@@ -472,18 +475,6 @@ const char kUse24HourClock[] = "settings.clock.use_24hour_clock";
 const char kResolveTimezoneByGeolocation[] =
     "settings.resolve_timezone_by_geolocation";
 
-// A boolean pref to disable Google Drive integration.
-// The pref prefix should remain as "gdata" for backward compatibility.
-const char kDisableDrive[] = "gdata.disabled";
-
-// A boolean pref to disable Drive over cellular connections.
-// The pref prefix should remain as "gdata" for backward compatibility.
-const char kDisableDriveOverCellular[] = "gdata.cellular.disabled";
-
-// A boolean pref to disable hosted files on Drive.
-// The pref prefix should remain as "gdata" for backward compatibility.
-const char kDisableDriveHostedFiles[] = "gdata.hosted_files.disabled";
-
 // A string pref set to the current input method.
 const char kLanguageCurrentInputMethod[] =
     "settings.language.current_input_method";
@@ -566,6 +557,10 @@ const char kAccessibilityHighContrastEnabled[] =
 // A boolean pref which determines whether screen magnifier is enabled.
 const char kAccessibilityScreenMagnifierEnabled[] =
     "settings.a11y.screen_magnifier";
+// A boolean pref which determines whether screen magnifier should center
+// the text input focus.
+const char kAccessibilityScreenMagnifierCenterFocus[] =
+    "settings.a11y.screen_magnifier_center_focus";
 // A integer pref which determines what type of screen magnifier is enabled.
 // Note that: 'screen_magnifier_type' had been used as string pref. Hence,
 // we are using another name pref here.
@@ -599,10 +594,6 @@ const char kLabsMediaplayerEnabled[] = "settings.labs.mediaplayer";
 
 // A boolean pref that turns on automatic screen locking.
 const char kEnableAutoScreenLock[] = "settings.enable_screen_lock";
-
-// A boolean pref of whether to show mobile plan notifications.
-const char kShowPlanNotifications[] =
-    "settings.internet.mobile.show_plan_notifications";
 
 // A boolean pref of whether to show 3G promo notification.
 const char kShow3gPromoNotification[] =
@@ -815,6 +806,10 @@ const char kCaptivePortalAuthenticationIgnoresProxy[] =
 // unconditionally maximized, overriding the heuristic that normally chooses the
 // window size.
 const char kForceMaximizeOnFirstRun[] = "ui.force_maximize_on_first_run";
+
+// A dictionary pref mapping public keys that identify platform keys to its
+// properties like whether it's meant for corporate usage.
+const char kPlatformKeys[] = "platform_keys";
 #endif  // defined(OS_CHROMEOS)
 
 // A boolean pref set to true if a Home button to open the Home pages should be
@@ -911,22 +906,11 @@ const char kPluginsDisabledPluginsExceptions[] =
 // List pref containing names of plugins that are enabled by policy.
 const char kPluginsEnabledPlugins[] = "plugins.plugins_enabled";
 
-// Whether NPAPI plugins are enabled.
-const char kEnableNpapi[] = "plugins.enable_npapi";
-
 // When bundled NPAPI Flash is removed, if at that point it is enabled while
 // Pepper Flash is disabled, we would like to turn on Pepper Flash. And we will
-// want to do so only once.
-const char kPluginsMigratedToPepperFlash[] = "plugins.migrated_to_pepper_flash";
-
-// In the early stage of component-updated PPAPI Flash, we did field trials in
-// which it was set to disabled by default. The corresponding settings item may
-// remain in some users' profiles. Currently it affects both the bundled and
-// component-updated PPAPI Flash (since the two share the same enable/disable
-// state). We want to remove this item to get those users to use PPAPI Flash.
-// We will want to do so only once.
-const char kPluginsRemovedOldComponentPepperFlashSettings[] =
-    "plugins.removed_old_component_pepper_flash_settings";
+// want to do so in M45, once, for realz.
+const char kNpapiFlashMigratedToPepperFlash[] =
+    "plugins.npapi_flash_migrated_to_pepper_flash";
 
 #if !defined(OS_ANDROID)
 // Whether about:plugins is shown in the details mode or not.
@@ -975,25 +959,16 @@ const char kContentSettingsPluginWhitelist[] =
     "profile.content_settings.plugin_whitelist";
 #endif
 
-// Boolean that is true if we should unconditionally block third-party cookies,
-// regardless of other content settings.
-const char kBlockThirdPartyCookies[] = "profile.block_third_party_cookies";
-
 // Boolean that is true when all locally stored site data (e.g. cookies, local
 // storage, etc..) should be deleted on exit.
 const char kClearSiteDataOnExit[] = "profile.clear_site_data_on_exit";
 
 // Double that indicates the default zoom level.
 const char kPartitionDefaultZoomLevel[] = "partition.default_zoom_level";
-// TODO(wjmaclean): Remove this once sufficient users have migrated to the
-// per-StoragePartition zoom levels. http://crbug.com/420643.
-const char kDefaultZoomLevelDeprecated[] = "profile.default_zoom_level";
 
 // Dictionary that maps hostnames to zoom levels.  Hosts not in this pref will
 // be displayed at the default zoom level.
 const char kPartitionPerHostZoomLevels[] = "partition.per_host_zoom_levels";
-// TODO(wjmaclean): Remove this.
-const char kPerHostZoomLevelsDeprecated[] = "profile.per_host_zoom_levels";
 
 // A dictionary that tracks the default data model to use for each section of
 // the dialog.
@@ -1181,10 +1156,6 @@ const char kFullscreenAllowed[] = "fullscreen.allowed";
 const char kLocalDiscoveryNotificationsEnabled[] =
     "local_discovery.notifications_enabled";
 
-// A timestamp (stored in base::Time::ToInternalValue format) of the last time
-// a preference was reset.
-const char kPreferenceResetTime[] = "prefs.preference_reset_time";
-
 // How many Service Workers are registered with the Push API (could be zero).
 const char kPushMessagingRegistrationCount[] =
     "gcm.push_messaging_registration_count";
@@ -1205,9 +1176,6 @@ const char kEasyUnlockPairing[] = "easy_unlock.pairing";
 // Whether close proximity between the remote and the local device is required
 // in order to use Easy Unlock.
 const char kEasyUnlockProximityRequired[] = "easy_unlock.proximity_required";
-
-// A cache of zero suggest results using JSON serialized into a string.
-const char kZeroSuggestCachedResults[] = "zerosuggest.cachedresults";
 
 #if defined(ENABLE_EXTENSIONS) && !defined(OS_ANDROID) && !defined(OS_IOS)
 // These device IDs are used by the copresence component, to uniquely identify
@@ -1290,31 +1258,6 @@ const char kMetricsReportingEnabled[] =
 const char kCrashReportingEnabled[] =
     "user_experience_metrics_crash.reporting_enabled";
 #endif
-
-// Base64-encoded compressed serialized form of the variations seed protobuf.
-const char kVariationsCompressedSeed[] = "variations_compressed_seed";
-
-// 64-bit integer serialization of the base::Time from the last successful seed
-// fetch (i.e. when the Variations server responds with 200 or 304).
-const char kVariationsLastFetchTime[] = "variations_last_fetch_time";
-
-// Pair of <Chrome version string, country code string> representing the country
-// used for filtering permanent consistency studies until the next time Chrome
-// is updated.
-const char kVariationsPermanentConsistencyCountry[] =
-    "variations_permanent_consistency_country";
-
-// String for the restrict parameter to be appended to the variations URL.
-const char kVariationsRestrictParameter[] = "variations_restrict_parameter";
-
-// Base64-encoded serialized form of the variations seed protobuf.
-const char kVariationsSeed[] = "variations_seed";
-
-// 64-bit integer serialization of the base::Time from the last seed received.
-const char kVariationsSeedDate[] = "variations_seed_date";
-
-// Digital signature of the binary variations seed data, base64-encoded.
-const char kVariationsSeedSignature[] = "variations_seed_signature";
 
 // Number of times a page load event occurred since the last report.
 const char kStabilityPageLoadCount[] =
@@ -1414,6 +1357,10 @@ const char kBrowserWindowPlacementPopup[] = "browser.window_placement_popup";
 // manager window to restore on startup.
 const char kTaskManagerWindowPlacement[] = "task_manager.window_placement";
 
+// The most recent stored column visibility of the task manager table to be
+// restored on startup.
+const char kTaskManagerColumnVisibility[] = "task_manager.column_visibility";
+
 // A collection of position, size, and other data relating to app windows to
 // restore on startup.
 const char kAppWindowPlacement[] = "browser.app_window_placement";
@@ -1466,7 +1413,11 @@ const char kPluginMessageResponseTimeout[] =
     "browser.plugin_message_response_timeout";
 
 // String which represents the dictionary name for our spell-checker.
+// This is an old preference that is being migrated to kSpellCheckDictionaries.
 const char kSpellCheckDictionary[] = "spellcheck.dictionary";
+
+// List of strings representing the dictionary names for our spell-checker.
+const char kSpellCheckDictionaries[] = "spellcheck.dictionaries";
 
 // String which represents whether we use the spelling service.
 const char kSpellCheckUseSpellingService[] = "spellcheck.use_spelling_service";
@@ -1538,9 +1489,6 @@ const char kNtpCollapsedSnapshotDocument[] = "ntp.collapsed_snapshot_document";
 const char kNtpCollapsedSyncPromo[] = "ntp.collapsed_sync_promo";
 #endif
 
-// New Tab Page URLs that should not be shown as most visited thumbnails.
-const char kNtpMostVisitedURLsBlacklist[] = "ntp.most_visited_blacklist";
-
 // Which page should be visible on the new tab page v4
 const char kNtpShownPage[] = "ntp.shown_page";
 
@@ -1607,6 +1555,31 @@ const char kSignInPromoShowOnFirstRunAllowed[] =
 const char kSignInPromoShowNTPBubble[] = "sync_promo.show_ntp_bubble";
 #endif
 
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+// Boolean tracking whether the user chose to opt out of the x-device promo.
+const char kCrossDevicePromoOptedOut[] = "x_device_promo.opted_out";
+
+// Boolean tracking whether the x-device promo should be shown.
+const char kCrossDevicePromoShouldBeShown[] = "x_device_promo.should_be_shown";
+
+// Int64, representing the time when we first observed a single GAIA account in
+// the cookie. If the most recent observation does not contain exactly one
+// account, this pref does not exist.
+const char kCrossDevicePromoObservedSingleAccountCookie[] =
+    "x_device_promo.single_account_observed";
+
+// Int64, representing the time to next call the ListDevices endpoint.
+const char kCrossDevicePromoNextFetchListDevicesTime[] =
+    "x_device_promo.next_list_devices_fetch";
+
+// Int containing the number of other devices where the profile's account syncs.
+const char kCrossDevicePromoNumDevices[] = "x_device_promo.num_devices";
+
+// Int64, representing the time when we last saw activity on another device.
+const char kCrossDevicePromoLastDeviceActiveTime[] =
+    "x_device_promo.last_device_active_time";
+#endif
+
 // Create web application shortcut dialog preferences.
 const char kWebAppCreateOnDesktop[] = "browser.web_app.create_on_desktop";
 const char kWebAppCreateInAppsMenu[] = "browser.web_app.create_in_apps_menu";
@@ -1644,10 +1617,6 @@ const char kMediaDeviceIdSalt[] = "media.device_id_salt";
 // The last used printer and its settings.
 const char kPrintPreviewStickySettings[] =
     "printing.print_preview_sticky_settings";
-
-// The last requested size of the dialog as it was closed.
-const char kCloudPrintDialogWidth[] = "cloud_print.dialog_size.width";
-const char kCloudPrintDialogHeight[] = "cloud_print.dialog_size.height";
 
 // The list of BackgroundContents that should be loaded when the browser
 // launches.
@@ -1691,6 +1660,11 @@ const char kAuthNegotiateDelegateWhitelist[] =
 // String that specifies the name of a custom GSSAPI library to load.
 const char kGSSAPILibraryName[] = "auth.gssapi_library_name";
 
+// String that specifies the Android account type to use for Negotiate
+// authentication.
+const char kAuthAndroidNegotiateAccountType[] =
+    "auth.android_negotiate_account_type";
+
 // Boolean that specifies whether to allow basic auth prompting on cross-
 // domain sub-content requests.
 const char kAllowCrossOriginAuthPrompt[] = "auth.allow_cross_origin_prompt";
@@ -1705,9 +1679,7 @@ const char kBuiltInDnsClientEnabled[] = "async_dns.enabled";
 // See also kAudioCaptureAllowedUrls.
 const char kAudioCaptureAllowed[] = "hardware.audio_capture_enabled";
 // Holds URL patterns that specify URLs that will be granted access to audio
-// capture devices without prompt.  NOTE: This whitelist is currently only
-// supported when running in kiosk mode.
-// TODO(tommi): Update comment when this is supported for all modes.
+// capture devices without prompt.
 const char kAudioCaptureAllowedUrls[] = "hardware.audio_capture_allowed_urls";
 
 // A pref holding the value of the policy used to explicitly allow or deny
@@ -1716,9 +1688,7 @@ const char kAudioCaptureAllowedUrls[] = "hardware.audio_capture_allowed_urls";
 // is not allowed and no prompt will be shown.
 const char kVideoCaptureAllowed[] = "hardware.video_capture_enabled";
 // Holds URL patterns that specify URLs that will be granted access to video
-// capture devices without prompt.  NOTE: This whitelist is currently only
-// supported when running in kiosk mode.
-// TODO(tommi): Update comment when this is supported for all modes.
+// capture devices without prompt.
 const char kVideoCaptureAllowedUrls[] = "hardware.video_capture_allowed_urls";
 
 // A boolean pref that controls the enabled-state of hotword search voice
@@ -1872,17 +1842,6 @@ const char kLogoutStartedLast[] = "chromeos.logout-started";
 // value is defined in:
 //   chrome/browser/chromeos/policy/consumer_management_stage.h
 const char kConsumerManagementStage[] = "consumer_management.stage";
-
-// A boolean pref. If set to true, new experimental OOBE UI is displayed.
-const char kNewOobe[] = "NewOobe";
-
-// A boolean pref. If set to true, experimental webview based signin flow
-// is deactivated.
-const char kWebviewSigninDisabled[] = "webview_signin_disabled";
-
-// A boolean pref. If set to true, then on the network screen we should display
-// whether the WebView-based sign-in flow is active.
-const char kNewLoginUIPopup[] = "new_login_ui_popup";
 #endif  // defined(OS_CHROMEOS)
 
 // Whether there is a Flash version installed that supports clearing LSO data.
@@ -2261,5 +2220,7 @@ const char kRegisteredSupervisedUserWhitelists[] =
 // Policy that indicates how to handle animated images.
 const char kAnimationPolicy[] = "settings.a11y.animation_policy";
 #endif
+
+const char kBackgroundTracingLastUpload[] = "background_tracing.last_upload";
 
 }  // namespace prefs

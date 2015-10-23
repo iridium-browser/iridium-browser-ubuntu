@@ -27,7 +27,7 @@ void NativeMessagingPipe::Start(
 
 void NativeMessagingPipe::OnMessage(scoped_ptr<base::Value> message) {
   std::string message_json;
-  base::JSONWriter::Write(message.get(), &message_json);
+  base::JSONWriter::Write(*message, &message_json);
   host_->OnMessage(message_json);
 }
 
@@ -38,7 +38,7 @@ void NativeMessagingPipe::OnDisconnect() {
 
 void NativeMessagingPipe::PostMessageFromNativeHost(
     const std::string& message) {
-  scoped_ptr<base::Value> json(base::JSONReader::Read(message));
+  scoped_ptr<base::Value> json = base::JSONReader::Read(message);
   channel_->SendMessage(json.Pass());
 }
 

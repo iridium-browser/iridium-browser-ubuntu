@@ -8,6 +8,7 @@
 #include "src/compiler/code-generator-impl.h"
 #include "src/compiler/gap-resolver.h"
 #include "src/compiler/node-matchers.h"
+#include "src/compiler/osr.h"
 #include "src/scopes.h"
 
 namespace v8 {
@@ -147,12 +148,9 @@ class ArmOperandConverter final : public InstructionOperandConverter {
 
   MemOperand ToMemOperand(InstructionOperand* op) const {
     DCHECK(op != NULL);
-    DCHECK(!op->IsRegister());
-    DCHECK(!op->IsDoubleRegister());
     DCHECK(op->IsStackSlot() || op->IsDoubleStackSlot());
-    // The linkage computes where all spill slots are located.
-    FrameOffset offset = linkage()->GetFrameOffset(
-        AllocatedOperand::cast(op)->index(), frame(), 0);
+    FrameOffset offset =
+        linkage()->GetFrameOffset(AllocatedOperand::cast(op)->index(), frame());
     return MemOperand(offset.from_stack_pointer() ? sp : fp, offset.offset());
   }
 };
@@ -304,10 +302,6 @@ void CodeGenerator::AssembleDeconstructActivationRecord() {
   int stack_slots = frame()->GetSpillSlotCount();
   if (descriptor->IsJSFunctionCall() || stack_slots > 0) {
     __ LeaveFrame(StackFrame::MANUAL);
-    int pop_count = descriptor->IsJSFunctionCall()
-                        ? static_cast<int>(descriptor->JSParameterCount())
-                        : 0;
-    __ Drop(pop_count);
   }
 }
 
@@ -375,6 +369,22 @@ void CodeGenerator::AssembleArchInstruction(Instruction* instr) {
       DCHECK_EQ(LeaveCC, i.OutputSBit());
       break;
     }
+    case kArchPrepareCallCFunction: {
+      int const num_parameters = MiscField::decode(instr->opcode());
+      __ PrepareCallCFunction(num_parameters, kScratchReg);
+      break;
+    }
+    case kArchCallCFunction: {
+      int const num_parameters = MiscField::decode(instr->opcode());
+      if (instr->InputAt(0)->IsImmediate()) {
+        ExternalReference ref = i.InputExternalReference(0);
+        __ CallCFunction(ref, num_parameters);
+      } else {
+        Register func = i.InputRegister(0);
+        __ CallCFunction(func, num_parameters);
+      }
+      break;
+    }
     case kArchJmp:
       AssembleArchJump(i.InputRpo(0));
       DCHECK_EQ(LeaveCC, i.OutputSBit());
@@ -403,6 +413,10 @@ void CodeGenerator::AssembleArchInstruction(Instruction* instr) {
       break;
     case kArchStackPointer:
       __ mov(i.OutputRegister(), sp);
+      DCHECK_EQ(LeaveCC, i.OutputSBit());
+      break;
+    case kArchFramePointer:
+      __ mov(i.OutputRegister(), fp);
       DCHECK_EQ(LeaveCC, i.OutputSBit());
       break;
     case kArchTruncateDoubleToI:
@@ -801,9 +815,20 @@ void CodeGenerator::AssembleArchInstruction(Instruction* instr) {
       break;
     }
     case kArmPush:
-      __ Push(i.InputRegister(0));
+      if (instr->InputAt(0)->IsDoubleRegister()) {
+        __ vstr(i.InputDoubleRegister(0), MemOperand(sp, -kDoubleSize));
+        __ sub(sp, sp, Operand(kDoubleSize));
+      } else {
+        __ Push(i.InputRegister(0));
+      }
       DCHECK_EQ(LeaveCC, i.OutputSBit());
       break;
+    case kArmPoke: {
+      int const slot = MiscField::decode(instr->opcode());
+      __ str(i.InputRegister(0), MemOperand(sp, slot * kPointerSize));
+      DCHECK_EQ(LeaveCC, i.OutputSBit());
+      break;
+    }
     case kArmStoreWriteBarrier: {
       Register object = i.InputRegister(0);
       Register index = i.InputRegister(1);
@@ -925,41 +950,25 @@ void CodeGenerator::AssembleDeoptimizerCall(
 
 void CodeGenerator::AssemblePrologue() {
   CallDescriptor* descriptor = linkage()->GetIncomingDescriptor();
-  int stack_slots = frame()->GetSpillSlotCount();
   if (descriptor->kind() == CallDescriptor::kCallAddress) {
-    bool saved_pp;
-    if (FLAG_enable_ool_constant_pool) {
+    if (FLAG_enable_embedded_constant_pool) {
       __ Push(lr, fp, pp);
       // Adjust FP to point to saved FP.
       __ sub(fp, sp, Operand(StandardFrameConstants::kConstantPoolOffset));
-      saved_pp = true;
     } else {
       __ Push(lr, fp);
       __ mov(fp, sp);
-      saved_pp = false;
-    }
-    const RegList saves = descriptor->CalleeSavedRegisters();
-    if (saves != 0 || saved_pp) {
-      // Save callee-saved registers.
-      int register_save_area_size = saved_pp ? kPointerSize : 0;
-      for (int i = Register::kNumRegisters - 1; i >= 0; i--) {
-        if (!((1 << i) & saves)) continue;
-        register_save_area_size += kPointerSize;
-      }
-      frame()->SetRegisterSaveAreaSize(register_save_area_size);
-      __ stm(db_w, sp, saves);
     }
   } else if (descriptor->IsJSFunctionCall()) {
     CompilationInfo* info = this->info();
     __ Prologue(info->IsCodePreAgingActive());
-    frame()->SetRegisterSaveAreaSize(
-        StandardFrameConstants::kFixedFrameSizeFromFp);
-  } else if (stack_slots > 0) {
+  } else if (needs_frame_) {
     __ StubPrologue();
-    frame()->SetRegisterSaveAreaSize(
-        StandardFrameConstants::kFixedFrameSizeFromFp);
+  } else {
+    frame()->SetElidedFrameSizeInSlots(0);
   }
 
+  int stack_shrink_slots = frame()->GetSpillSlotCount();
   if (info()->is_osr()) {
     // TurboFan OSR-compiled functions cannot be entered directly.
     __ Abort(kShouldNotDirectlyEnterOsrFunction);
@@ -972,43 +981,75 @@ void CodeGenerator::AssemblePrologue() {
     osr_pc_offset_ = __ pc_offset();
     // TODO(titzer): cannot address target function == local #-1
     __ ldr(r1, MemOperand(fp, JavaScriptFrameConstants::kFunctionOffset));
-    DCHECK(stack_slots >= frame()->GetOsrStackSlotCount());
-    stack_slots -= frame()->GetOsrStackSlotCount();
+    stack_shrink_slots -= OsrHelper(info()).UnoptimizedFrameSlots();
   }
 
-  if (stack_slots > 0) {
-    __ sub(sp, sp, Operand(stack_slots * kPointerSize));
+  const RegList saves_fp = descriptor->CalleeSavedFPRegisters();
+  if (saves_fp != 0) {
+    stack_shrink_slots += frame()->AlignSavedCalleeRegisterSlots();
+  }
+  if (stack_shrink_slots > 0) {
+    __ sub(sp, sp, Operand(stack_shrink_slots * kPointerSize));
+  }
+
+  if (saves_fp != 0) {
+    // Save callee-saved FP registers.
+    STATIC_ASSERT(DwVfpRegister::kMaxNumRegisters == 32);
+    uint32_t last = base::bits::CountLeadingZeros32(saves_fp) - 1;
+    uint32_t first = base::bits::CountTrailingZeros32(saves_fp);
+    DCHECK_EQ((last - first + 1), base::bits::CountPopulation32(saves_fp));
+    __ vstm(db_w, sp, DwVfpRegister::from_code(first),
+            DwVfpRegister::from_code(last));
+    frame()->AllocateSavedCalleeRegisterSlots((last - first + 1) *
+                                              (kDoubleSize / kPointerSize));
+  }
+  const RegList saves = FLAG_enable_embedded_constant_pool
+                            ? (descriptor->CalleeSavedRegisters() & ~pp.bit())
+                            : descriptor->CalleeSavedRegisters();
+  if (saves != 0) {
+    // Save callee-saved registers.
+    __ stm(db_w, sp, saves);
+    frame()->AllocateSavedCalleeRegisterSlots(
+        base::bits::CountPopulation32(saves));
   }
 }
 
 
 void CodeGenerator::AssembleReturn() {
   CallDescriptor* descriptor = linkage()->GetIncomingDescriptor();
-  int stack_slots = frame()->GetSpillSlotCount();
-  if (descriptor->kind() == CallDescriptor::kCallAddress) {
-    if (frame()->GetRegisterSaveAreaSize() > 0) {
-      // Remove this frame's spill slots first.
-      if (stack_slots > 0) {
-        __ add(sp, sp, Operand(stack_slots * kPointerSize));
-      }
-      // Restore registers.
-      const RegList saves = descriptor->CalleeSavedRegisters();
-      if (saves != 0) {
-        __ ldm(ia_w, sp, saves);
-      }
-    }
-    __ LeaveFrame(StackFrame::MANUAL);
-    __ Ret();
-  } else if (descriptor->IsJSFunctionCall() || stack_slots > 0) {
-    __ LeaveFrame(StackFrame::MANUAL);
-    int pop_count = descriptor->IsJSFunctionCall()
-                        ? static_cast<int>(descriptor->JSParameterCount())
-                        : 0;
-    __ Drop(pop_count);
-    __ Ret();
-  } else {
-    __ Ret();
+  int pop_count = static_cast<int>(descriptor->StackParameterCount());
+
+  // Restore registers.
+  const RegList saves = FLAG_enable_embedded_constant_pool
+                            ? (descriptor->CalleeSavedRegisters() & ~pp.bit())
+                            : descriptor->CalleeSavedRegisters();
+  if (saves != 0) {
+    __ ldm(ia_w, sp, saves);
   }
+
+  // Restore FP registers.
+  const RegList saves_fp = descriptor->CalleeSavedFPRegisters();
+  if (saves_fp != 0) {
+    STATIC_ASSERT(DwVfpRegister::kMaxNumRegisters == 32);
+    uint32_t last = base::bits::CountLeadingZeros32(saves_fp) - 1;
+    uint32_t first = base::bits::CountTrailingZeros32(saves_fp);
+    __ vldm(ia_w, sp, DwVfpRegister::from_code(first),
+            DwVfpRegister::from_code(last));
+  }
+
+  if (descriptor->kind() == CallDescriptor::kCallAddress) {
+    __ LeaveFrame(StackFrame::MANUAL);
+  } else if (descriptor->IsJSFunctionCall() || needs_frame_) {
+    // Canonicalize JSFunction return sites for now.
+    if (return_label_.is_bound()) {
+      __ b(&return_label_);
+      return;
+    } else {
+      __ bind(&return_label_);
+      __ LeaveFrame(StackFrame::MANUAL);
+    }
+  }
+  __ Ret(pop_count);
 }
 
 
@@ -1215,7 +1256,6 @@ void CodeGenerator::EnsureSpaceForLazyDeopt() {
       }
     }
   }
-  MarkLazyDeoptSite();
 }
 
 #undef __

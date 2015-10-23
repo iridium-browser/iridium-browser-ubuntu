@@ -57,10 +57,11 @@ static int GetRelayPreference(cricket::ProtocolType proto, bool secure) {
 class TurnAllocateRequest : public StunRequest {
  public:
   explicit TurnAllocateRequest(TurnPort* port);
-  virtual void Prepare(StunMessage* request);
-  virtual void OnResponse(StunMessage* response);
-  virtual void OnErrorResponse(StunMessage* response);
-  virtual void OnTimeout();
+  void Prepare(StunMessage* request) override;
+  void OnSent() override;
+  void OnResponse(StunMessage* response) override;
+  void OnErrorResponse(StunMessage* response) override;
+  void OnTimeout() override;
 
  private:
   // Handles authentication challenge from the server.
@@ -74,10 +75,11 @@ class TurnAllocateRequest : public StunRequest {
 class TurnRefreshRequest : public StunRequest {
  public:
   explicit TurnRefreshRequest(TurnPort* port);
-  virtual void Prepare(StunMessage* request);
-  virtual void OnResponse(StunMessage* response);
-  virtual void OnErrorResponse(StunMessage* response);
-  virtual void OnTimeout();
+  void Prepare(StunMessage* request) override;
+  void OnSent() override;
+  void OnResponse(StunMessage* response) override;
+  void OnErrorResponse(StunMessage* response) override;
+  void OnTimeout() override;
   void set_lifetime(int lifetime) { lifetime_ = lifetime; }
 
  private:
@@ -90,10 +92,11 @@ class TurnCreatePermissionRequest : public StunRequest,
  public:
   TurnCreatePermissionRequest(TurnPort* port, TurnEntry* entry,
                               const rtc::SocketAddress& ext_addr);
-  virtual void Prepare(StunMessage* request);
-  virtual void OnResponse(StunMessage* response);
-  virtual void OnErrorResponse(StunMessage* response);
-  virtual void OnTimeout();
+  void Prepare(StunMessage* request) override;
+  void OnSent() override;
+  void OnResponse(StunMessage* response) override;
+  void OnErrorResponse(StunMessage* response) override;
+  void OnTimeout() override;
 
  private:
   void OnEntryDestroyed(TurnEntry* entry);
@@ -108,10 +111,11 @@ class TurnChannelBindRequest : public StunRequest,
  public:
   TurnChannelBindRequest(TurnPort* port, TurnEntry* entry, int channel_id,
                          const rtc::SocketAddress& ext_addr);
-  virtual void Prepare(StunMessage* request);
-  virtual void OnResponse(StunMessage* response);
-  virtual void OnErrorResponse(StunMessage* response);
-  virtual void OnTimeout();
+  void Prepare(StunMessage* request) override;
+  void OnSent() override;
+  void OnResponse(StunMessage* response) override;
+  void OnErrorResponse(StunMessage* response) override;
+  void OnTimeout() override;
 
  private:
   void OnEntryDestroyed(TurnEntry* entry);
@@ -168,8 +172,12 @@ TurnPort::TurnPort(rtc::Thread* thread,
                    const RelayCredentials& credentials,
                    int server_priority,
                    const std::string& origin)
-    : Port(thread, factory, network, socket->GetLocalAddress().ipaddr(),
-           username, password),
+    : Port(thread,
+           factory,
+           network,
+           socket->GetLocalAddress().ipaddr(),
+           username,
+           password),
       server_address_(server_address),
       credentials_(credentials),
       socket_(socket),
@@ -177,7 +185,7 @@ TurnPort::TurnPort(rtc::Thread* thread,
       error_(0),
       request_manager_(thread),
       next_channel_number_(TURN_CHANNEL_NUMBER_START),
-      connected_(false),
+      state_(STATE_CONNECTING),
       server_priority_(server_priority),
       allocate_mismatch_retries_(0) {
   request_manager_.SignalSendPacket.connect(this, &TurnPort::OnSendStunPacket);
@@ -196,8 +204,15 @@ TurnPort::TurnPort(rtc::Thread* thread,
                    const RelayCredentials& credentials,
                    int server_priority,
                    const std::string& origin)
-    : Port(thread, RELAY_PORT_TYPE, factory, network, ip, min_port, max_port,
-           username, password),
+    : Port(thread,
+           RELAY_PORT_TYPE,
+           factory,
+           network,
+           ip,
+           min_port,
+           max_port,
+           username,
+           password),
       server_address_(server_address),
       credentials_(credentials),
       socket_(NULL),
@@ -205,7 +220,7 @@ TurnPort::TurnPort(rtc::Thread* thread,
       error_(0),
       request_manager_(thread),
       next_channel_number_(TURN_CHANNEL_NUMBER_START),
-      connected_(false),
+      state_(STATE_CONNECTING),
       server_priority_(server_priority),
       allocate_mismatch_retries_(0) {
   request_manager_.SignalSendPacket.connect(this, &TurnPort::OnSendStunPacket);
@@ -217,7 +232,7 @@ TurnPort::~TurnPort() {
 
   // release the allocation by sending a refresh with
   // lifetime 0.
-  if (connected_) {
+  if (ready()) {
     TurnRefreshRequest bye(this);
     bye.set_lifetime(0);
     SendRequest(&bye, 0);
@@ -257,8 +272,9 @@ void TurnPort::PrepareAddress() {
   } else {
     // If protocol family of server address doesn't match with local, return.
     if (!IsCompatibleAddress(server_address_.address)) {
-      LOG(LS_ERROR) << "Server IP address family does not match with "
-                    << "local host address family type";
+      LOG(LS_ERROR) << "IP address family does not match: "
+                    << "server: " << server_address_.address.family()
+                    << "local: " << ip().family();
       OnAllocateError();
       return;
     }
@@ -270,8 +286,11 @@ void TurnPort::PrepareAddress() {
                          << ProtoToString(server_address_.proto) << " @ "
                          << server_address_.address.ToSensitiveString();
     if (!CreateTurnClientSocket()) {
+      LOG(LS_ERROR) << "Failed to create TURN client socket";
       OnAllocateError();
-    } else if (server_address_.proto == PROTO_UDP) {
+      return;
+    }
+    if (server_address_.proto == PROTO_UDP) {
       // If its UDP, send AllocateRequest now.
       // For TCP and TLS AllcateRequest will be sent by OnSocketConnect.
       SendRequest(new TurnAllocateRequest(this), 0);
@@ -315,9 +334,13 @@ bool TurnPort::CreateTurnClientSocket() {
 
   socket_->SignalReadyToSend.connect(this, &TurnPort::OnReadyToSend);
 
+  // TCP port is ready to send stun requests after the socket is connected,
+  // while UDP port is ready to do so once the socket is created.
   if (server_address_.proto == PROTO_TCP) {
     socket_->SignalConnect.connect(this, &TurnPort::OnSocketConnect);
     socket_->SignalClose.connect(this, &TurnPort::OnSocketClose);
+  } else {
+    state_ = STATE_CONNECTED;
   }
   return true;
 }
@@ -329,15 +352,23 @@ void TurnPort::OnSocketConnect(rtc::AsyncPacketSocket* socket) {
   // given a binding address, and the platform is expected to pick the
   // correct local address.
 
-  // Further, to workaround issue 3927 in which a proxy is forcing TCP bound to
-  // localhost only, we're allowing Loopback IP even if it's not the same as the
-  // local Turn port.
+  // However, there are two situations in which we allow the bound address to
+  // differ from the requested address: 1. The bound address is the loopback
+  // address.  This happens when a proxy forces TCP to bind to only the
+  // localhost address (see issue 3927). 2. The bound address is the "any
+  // address".  This happens when multiple_routes is disabled (see issue 4780).
   if (socket->GetLocalAddress().ipaddr() != ip()) {
     if (socket->GetLocalAddress().IsLoopbackIP()) {
       LOG(LS_WARNING) << "Socket is bound to a different address:"
                       << socket->GetLocalAddress().ipaddr().ToString()
                       << ", rather then the local port:" << ip().ToString()
                       << ". Still allowing it since it's localhost.";
+    } else if (IPIsAny(ip())) {
+      LOG(LS_WARNING) << "Socket is bound to a different address:"
+                      << socket->GetLocalAddress().ipaddr().ToString()
+                      << ", rather then the local port:" << ip().ToString()
+                      << ". Still allowing it since it's any address"
+                      << ", possibly caused by multiple_routes being disabled.";
     } else {
       LOG(LS_WARNING) << "Socket is bound to a different address:"
                       << socket->GetLocalAddress().ipaddr().ToString()
@@ -348,6 +379,7 @@ void TurnPort::OnSocketConnect(rtc::AsyncPacketSocket* socket) {
     }
   }
 
+  state_ = STATE_CONNECTED;  // It is ready to send stun requests.
   if (server_address_.address.IsUnresolved()) {
     server_address_.address = socket_->GetRemoteAddress();
   }
@@ -360,10 +392,11 @@ void TurnPort::OnSocketConnect(rtc::AsyncPacketSocket* socket) {
 void TurnPort::OnSocketClose(rtc::AsyncPacketSocket* socket, int error) {
   LOG_J(LS_WARNING, this) << "Connection with server failed, error=" << error;
   ASSERT(socket == socket_);
-  if (!connected_) {
+  if (!ready()) {
     OnAllocateError();
   }
-  connected_ = false;
+  request_manager_.Clear();
+  state_ = STATE_DISCONNECTED;
 }
 
 void TurnPort::OnAllocateMismatch() {
@@ -397,6 +430,10 @@ Connection* TurnPort::CreateConnection(const Candidate& address,
   }
 
   if (!IsCompatibleAddress(address.address())) {
+    return NULL;
+  }
+
+  if (state_ == STATE_DISCONNECTED) {
     return NULL;
   }
 
@@ -450,12 +487,12 @@ int TurnPort::SendTo(const void* data, size_t size,
                      bool payload) {
   // Try to find an entry for this specific address; we should have one.
   TurnEntry* entry = FindEntry(addr);
-  ASSERT(entry != NULL);
   if (!entry) {
+    LOG(LS_ERROR) << "Did not find the TurnEntry for address " << addr;
     return 0;
   }
 
-  if (!connected()) {
+  if (!ready()) {
     error_ = EWOULDBLOCK;
     return SOCKET_ERROR;
   }
@@ -524,7 +561,7 @@ void TurnPort::OnReadPacket(
 }
 
 void TurnPort::OnReadyToSend(rtc::AsyncPacketSocket* socket) {
-  if (connected_) {
+  if (ready()) {
     Port::OnReadyToSend();
   }
 }
@@ -604,6 +641,7 @@ void TurnPort::OnResolveResult(rtc::AsyncResolverInterface* resolver) {
 
 void TurnPort::OnSendStunPacket(const void* data, size_t size,
                                 StunRequest* request) {
+  ASSERT(connected());
   rtc::PacketOptions options(DefaultDscpValue());
   if (Send(data, size, options) < 0) {
     LOG_J(LS_ERROR, this) << "Failed to send TURN message, err="
@@ -623,7 +661,7 @@ void TurnPort::OnStunAddress(const rtc::SocketAddress& address) {
 
 void TurnPort::OnAllocateSuccess(const rtc::SocketAddress& address,
                                  const rtc::SocketAddress& stun_address) {
-  connected_ = true;
+  state_ = STATE_READY;
 
   rtc::SocketAddress related_address = stun_address;
     if (!(candidate_filter() & CF_REFLEXIVE)) {
@@ -637,11 +675,11 @@ void TurnPort::OnAllocateSuccess(const rtc::SocketAddress& address,
              address,          // Base address.
              related_address,  // Related address.
              UDP_PROTOCOL_NAME,
+             ProtoToString(server_address_.proto),  // The first hop protocol.
              "",  // TCP canddiate type, empty for turn candidates.
              RELAY_PORT_TYPE,
              GetRelayPreference(server_address_.proto, server_address_.secure),
-             server_priority_,
-             true);
+             server_priority_, true);
 }
 
 void TurnPort::OnAllocateError() {
@@ -897,7 +935,18 @@ void TurnAllocateRequest::Prepare(StunMessage* request) {
   }
 }
 
+void TurnAllocateRequest::OnSent() {
+  LOG_J(LS_INFO, port_) << "TURN allocate request sent"
+                        << ", id=" << rtc::hex_encode(id());
+  StunRequest::OnSent();
+}
+
 void TurnAllocateRequest::OnResponse(StunMessage* response) {
+  LOG_J(LS_INFO, port_) << "TURN allocate requested successfully"
+                        << ", id=" << rtc::hex_encode(id())
+                        << ", code=0"  // Makes logging easier to parse.
+                        << ", rtt=" << Elapsed();
+
   // Check mandatory attributes as indicated in RFC5766, Section 6.3.
   const StunAddressAttribute* mapped_attr =
       response->GetAddress(STUN_ATTR_XOR_MAPPED_ADDRESS);
@@ -933,6 +982,12 @@ void TurnAllocateRequest::OnResponse(StunMessage* response) {
 void TurnAllocateRequest::OnErrorResponse(StunMessage* response) {
   // Process error response according to RFC5766, Section 6.4.
   const StunErrorCodeAttribute* error_code = response->GetErrorCode();
+
+  LOG_J(LS_INFO, port_) << "Received TURN allocate error response"
+                        << ", id=" << rtc::hex_encode(id())
+                        << ", code=" << error_code->code()
+                        << ", rtt=" << Elapsed();
+
   switch (error_code->code()) {
     case STUN_ERROR_UNAUTHORIZED:       // Unauthrorized.
       OnAuthChallenge(response, error_code->code());
@@ -946,14 +1001,17 @@ void TurnAllocateRequest::OnErrorResponse(StunMessage* response) {
       port_->thread()->Post(port_, TurnPort::MSG_ALLOCATE_MISMATCH);
       break;
     default:
-      LOG_J(LS_WARNING, port_) << "Allocate response error, code="
-                               << error_code->code();
+      LOG_J(LS_WARNING, port_) << "Received TURN allocate error response"
+                               << ", id=" << rtc::hex_encode(id())
+                               << ", code=" << error_code->code()
+                               << ", rtt=" << Elapsed();
       port_->OnAllocateError();
   }
 }
 
 void TurnAllocateRequest::OnTimeout() {
-  LOG_J(LS_WARNING, port_) << "Allocate request timeout";
+  LOG_J(LS_WARNING, port_) << "TURN allocate request "
+                           << rtc::hex_encode(id()) << " timout";
   port_->OnAllocateRequestTimeout();
 }
 
@@ -1050,8 +1108,17 @@ void TurnRefreshRequest::Prepare(StunMessage* request) {
   port_->AddRequestAuthInfo(request);
 }
 
+void TurnRefreshRequest::OnSent() {
+  LOG_J(LS_INFO, port_) << "TURN refresh request sent"
+                        << ", id=" << rtc::hex_encode(id());
+  StunRequest::OnSent();
+}
+
 void TurnRefreshRequest::OnResponse(StunMessage* response) {
-  LOG_J(LS_INFO, port_) << "Refresh requested successfully.";
+  LOG_J(LS_INFO, port_) << "TURN refresh requested successfully"
+                        << ", id=" << rtc::hex_encode(id())
+                        << ", code=0"  // Makes logging easier to parse.
+                        << ", rtt=" << Elapsed();
 
   // Check mandatory attributes as indicated in RFC5766, Section 7.3.
   const StunUInt32Attribute* lifetime_attr =
@@ -1068,19 +1135,27 @@ void TurnRefreshRequest::OnResponse(StunMessage* response) {
 
 void TurnRefreshRequest::OnErrorResponse(StunMessage* response) {
   const StunErrorCodeAttribute* error_code = response->GetErrorCode();
-  LOG_J(LS_WARNING, port_) << "Refresh response error, code="
-                           << error_code->code();
+
+  LOG_J(LS_INFO, port_) << "Received TURN refresh error response"
+                        << ", id=" << rtc::hex_encode(id())
+                        << ", code=" << error_code->code()
+                        << ", rtt=" << Elapsed();
 
   if (error_code->code() == STUN_ERROR_STALE_NONCE) {
     if (port_->UpdateNonce(response)) {
       // Send RefreshRequest immediately.
       port_->SendRequest(new TurnRefreshRequest(port_), 0);
     }
+  } else {
+    LOG_J(LS_WARNING, port_) << "Received TURN refresh error response"
+                             << ", id=" << rtc::hex_encode(id())
+                             << ", code=" << error_code->code()
+                             << ", rtt=" << Elapsed();
   }
 }
 
 void TurnRefreshRequest::OnTimeout() {
-  LOG_J(LS_WARNING, port_) << "Refresh request timeout";
+  LOG_J(LS_WARNING, port_) << "TURN refresh timeout " << rtc::hex_encode(id());
 }
 
 TurnCreatePermissionRequest::TurnCreatePermissionRequest(
@@ -1102,7 +1177,18 @@ void TurnCreatePermissionRequest::Prepare(StunMessage* request) {
   port_->AddRequestAuthInfo(request);
 }
 
+void TurnCreatePermissionRequest::OnSent() {
+  LOG_J(LS_INFO, port_) << "TURN create permission request sent"
+                        << ", id=" << rtc::hex_encode(id());
+  StunRequest::OnSent();
+}
+
 void TurnCreatePermissionRequest::OnResponse(StunMessage* response) {
+  LOG_J(LS_INFO, port_) << "TURN permission requested successfully"
+                        << ", id=" << rtc::hex_encode(id())
+                        << ", code=0"  // Makes logging easier to parse.
+                        << ", rtt=" << Elapsed();
+
   if (entry_) {
     entry_->OnCreatePermissionSuccess();
   }
@@ -1110,15 +1196,18 @@ void TurnCreatePermissionRequest::OnResponse(StunMessage* response) {
 
 void TurnCreatePermissionRequest::OnErrorResponse(StunMessage* response) {
   const StunErrorCodeAttribute* error_code = response->GetErrorCode();
-  LOG_J(LS_WARNING, port_) << "Allocate response error, code="
-                           << error_code->code();
+  LOG_J(LS_WARNING, port_) << "Received TURN create permission error response"
+                           << ", id=" << rtc::hex_encode(id())
+                           << ", code=" << error_code->code()
+                           << ", rtt=" << Elapsed();
   if (entry_) {
     entry_->OnCreatePermissionError(response, error_code->code());
   }
 }
 
 void TurnCreatePermissionRequest::OnTimeout() {
-  LOG_J(LS_WARNING, port_) << "Create permission timeout";
+  LOG_J(LS_WARNING, port_) << "TURN create permission timeout "
+                           << rtc::hex_encode(id());
 }
 
 void TurnCreatePermissionRequest::OnEntryDestroyed(TurnEntry* entry) {
@@ -1148,7 +1237,18 @@ void TurnChannelBindRequest::Prepare(StunMessage* request) {
   port_->AddRequestAuthInfo(request);
 }
 
+void TurnChannelBindRequest::OnSent() {
+  LOG_J(LS_INFO, port_) << "TURN channel bind request sent"
+                        << ", id=" << rtc::hex_encode(id());
+  StunRequest::OnSent();
+}
+
 void TurnChannelBindRequest::OnResponse(StunMessage* response) {
+  LOG_J(LS_INFO, port_) << "TURN channel bind requested successfully"
+                        << ", id=" << rtc::hex_encode(id())
+                        << ", code=0"  // Makes logging easier to parse.
+                        << ", rtt=" << Elapsed();
+
   if (entry_) {
     entry_->OnChannelBindSuccess();
     // Refresh the channel binding just under the permission timeout
@@ -1162,14 +1262,19 @@ void TurnChannelBindRequest::OnResponse(StunMessage* response) {
 }
 
 void TurnChannelBindRequest::OnErrorResponse(StunMessage* response) {
+  const StunErrorCodeAttribute* error_code = response->GetErrorCode();
+  LOG_J(LS_WARNING, port_) << "Received TURN channel bind error response"
+                           << ", id=" << rtc::hex_encode(id())
+                           << ", code=" << error_code->code()
+                           << ", rtt=" << Elapsed();
   if (entry_) {
-    const StunErrorCodeAttribute* error_code = response->GetErrorCode();
     entry_->OnChannelBindError(response, error_code->code());
   }
 }
 
 void TurnChannelBindRequest::OnTimeout() {
-  LOG_J(LS_WARNING, port_) << "Channel bind timeout";
+  LOG_J(LS_WARNING, port_) << "TURN channel bind timeout "
+                           << rtc::hex_encode(id());
 }
 
 void TurnChannelBindRequest::OnEntryDestroyed(TurnEntry* entry) {
@@ -1235,9 +1340,6 @@ void TurnEntry::OnCreatePermissionSuccess() {
 }
 
 void TurnEntry::OnCreatePermissionError(StunMessage* response, int code) {
-  LOG_J(LS_WARNING, port_) << "Create permission for "
-                           << ext_addr_.ToSensitiveString()
-                           << " failed, code=" << code;
   if (code == STUN_ERROR_STALE_NONCE) {
     if (port_->UpdateNonce(response)) {
       SendCreatePermissionRequest();
@@ -1258,9 +1360,6 @@ void TurnEntry::OnChannelBindSuccess() {
 void TurnEntry::OnChannelBindError(StunMessage* response, int code) {
   // TODO(mallinath) - Implement handling of error response for channel
   // bind request as per http://tools.ietf.org/html/rfc5766#section-11.3
-  LOG_J(LS_WARNING, port_) << "Channel bind for "
-                           << ext_addr_.ToSensitiveString()
-                           << " failed, code=" << code;
   if (code == STUN_ERROR_STALE_NONCE) {
     if (port_->UpdateNonce(response)) {
       // Send channel bind request with fresh nonce.

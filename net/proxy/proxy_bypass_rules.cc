@@ -5,12 +5,14 @@
 #include "net/proxy/proxy_bypass_rules.h"
 
 #include "base/stl_util.h"
+#include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/ip_address_number.h"
 #include "net/base/net_util.h"
 
 namespace net {
@@ -22,10 +24,9 @@ class HostnamePatternRule : public ProxyBypassRules::Rule {
   HostnamePatternRule(const std::string& optional_scheme,
                       const std::string& hostname_pattern,
                       int optional_port)
-      : optional_scheme_(base::StringToLowerASCII(optional_scheme)),
-        hostname_pattern_(base::StringToLowerASCII(hostname_pattern)),
-        optional_port_(optional_port) {
-  }
+      : optional_scheme_(base::ToLowerASCII(optional_scheme)),
+        hostname_pattern_(base::ToLowerASCII(hostname_pattern)),
+        optional_port_(optional_port) {}
 
   bool Matches(const GURL& url) const override {
     if (optional_port_ != -1 && url.EffectiveIntPort() != optional_port_)
@@ -36,8 +37,7 @@ class HostnamePatternRule : public ProxyBypassRules::Rule {
 
     // Note it is necessary to lower-case the host, since GURL uses capital
     // letters for percent-escaped characters.
-    return MatchPattern(base::StringToLowerASCII(url.host()),
-                        hostname_pattern_);
+    return base::MatchPattern(url.host(), hostname_pattern_);
   }
 
   std::string ToString() const override {
@@ -263,7 +263,7 @@ bool ProxyBypassRules::AddRuleFromStringInternal(
 
   // This is the special syntax used by WinInet's bypass list -- we allow it
   // on all platforms and interpret it the same way.
-  if (LowerCaseEqualsASCII(raw, "<local>")) {
+  if (base::LowerCaseEqualsASCII(raw, "<local>")) {
     AddRuleToBypassLocal();
     return true;
   }
@@ -327,12 +327,13 @@ bool ProxyBypassRules::AddRuleFromStringInternal(
 
   // Special-case hostnames that begin with a period.
   // For example, we remap ".google.com" --> "*.google.com".
-  if (StartsWithASCII(raw, ".", false))
+  if (base::StartsWith(raw, ".", base::CompareCase::SENSITIVE))
     raw = "*" + raw;
 
   // If suffix matching was asked for, make sure the pattern starts with a
   // wildcard.
-  if (use_hostname_suffix_matching && !StartsWithASCII(raw, "*", false))
+  if (use_hostname_suffix_matching &&
+      !base::StartsWith(raw, "*", base::CompareCase::SENSITIVE))
     raw = "*" + raw;
 
   return AddRuleForHostname(scheme, raw, port);

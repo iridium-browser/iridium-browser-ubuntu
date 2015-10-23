@@ -55,11 +55,17 @@ def main(argv):
                       help='Verbose output')
   parser.add_argument('-d', '--debug', action='store_true',
                       help='Enable debug stub')
+  parser.add_argument('-e', '--exceptions', action='store_true',
+                      help='Enable exception handling interface')
+  parser.add_argument('-p', '--passthrough-environment', action='store_true',
+                      help='Pass environment of host through to nexe')
   parser.add_argument('--debug-libs', action='store_true',
                       help='For dynamic executables, reference debug '
                            'libraries rather then release')
   parser.add_argument('executable', help='executable (.nexe) to run')
   parser.add_argument('args', nargs='*', help='argument to pass to exectuable')
+  parser.add_argument('--library-path',
+                      help='Pass extra library paths')
 
   # To enable bash completion for this command first install optcomplete
   # and then add this line to your .bashrc:
@@ -81,12 +87,12 @@ def main(argv):
   if not os.path.isfile(options.executable):
     raise Error('not a file: %s' % options.executable)
 
-  arch, dynamic = create_nmf.ParseElfHeader(options.executable)
+  elf_arch, dynamic = create_nmf.ParseElfHeader(options.executable)
 
-  if arch == 'arm' and osname != 'linux':
+  if elf_arch == 'arm' and osname != 'linux':
     raise Error('Cannot run ARM executables under sel_ldr on ' + osname)
 
-  arch_suffix = arch.replace('-', '_')
+  arch_suffix = elf_arch.replace('-', '_')
 
   sel_ldr = os.path.join(SCRIPT_DIR, 'sel_ldr_%s' % arch_suffix)
   irt = os.path.join(SCRIPT_DIR, 'irt_core_%s.nexe' % arch_suffix)
@@ -105,15 +111,29 @@ def main(argv):
     cmd.append('--r_debug=0xXXXXXXXXXXXXXXXX')
     cmd.append('--reserved_at_zero=0xXXXXXXXXXXXXXXXX')
 
-  cmd += ['-a', '-B', irt]
+  # This script is provided mostly as way to run binaries during testing, not
+  # to run untrusted code in a production environment.  As such we want it be
+  # as invisible as possible.  So we pass -q (quiet) to disable most of output
+  # of sel_ldr itself, and -a (disable ACL) to enable local filesystem access.
+  cmd += ['-q', '-a', '-B', irt]
+
+  # Set the default NACLVERBOSITY level LOG_ERROR (-3).  This can still be
+  # overridden in the environment if debug information is desired.  However
+  # in most cases we don't want the application stdout/stderr polluted with
+  # sel_ldr logging.
+  if 'NACLVERBOSITY' not in os.environ and not options.verbose:
+    os.environ['NACLVERBOSITY'] = "-3"
 
   if options.debug:
     cmd.append('-g')
 
-  if not options.verbose:
-    cmd += ['-l', os.devnull]
+  if options.exceptions:
+    cmd.append('-e')
 
-  if arch == 'arm':
+  if options.passthrough_environment:
+    cmd.append('-p')
+
+  if elf_arch == 'arm':
     # Use the QEMU arm emulator if available.
     qemu_bin = FindQemu()
     if not qemu_bin:
@@ -129,24 +149,46 @@ def main(argv):
 
   if dynamic:
     if options.debug_libs:
-      libpath = os.path.join(NACL_SDK_ROOT, 'lib',
-                            'glibc_%s' % arch_suffix, 'Debug')
+      sdk_lib_dir = os.path.join(NACL_SDK_ROOT, 'lib',
+                                 'glibc_%s' % arch_suffix, 'Debug')
     else:
-      libpath = os.path.join(NACL_SDK_ROOT, 'lib',
-                            'glibc_%s' % arch_suffix, 'Release')
-    toolchain = '%s_x86_glibc' % osname
-    sdk_lib_dir = os.path.join(NACL_SDK_ROOT, 'toolchain',
-                               toolchain, 'x86_64-nacl')
-    if arch == 'x86-64':
-      sdk_lib_dir = os.path.join(sdk_lib_dir, 'lib')
+      sdk_lib_dir = os.path.join(NACL_SDK_ROOT, 'lib',
+                                 'glibc_%s' % arch_suffix, 'Release')
+
+    if elf_arch == 'x86-64':
+      lib_subdir = 'lib'
+      tcarch = 'x86'
+      tcsubarch = 'x86_64'
+      usr_arch = 'x86_64'
+    elif elf_arch == 'arm':
+      lib_subdir = 'lib'
+      tcarch = 'arm'
+      tcsubarch = 'arm'
+      usr_arch = 'arm'
+      # TODO(sbc): Remove this once we get elf_loader.nexe added to the SDK
+      raise Error('Running arm/glibc binaries via sel_ldr.py is not supported')
+    elif elf_arch == 'x86-32':
+      lib_subdir = 'lib32'
+      tcarch = 'x86'
+      tcsubarch = 'x86_64'
+      usr_arch = 'i686'
     else:
-      sdk_lib_dir = os.path.join(sdk_lib_dir, 'lib32')
-    ldso = os.path.join(sdk_lib_dir, 'runnable-ld.so')
+      raise Error("Unknown arch: %s" % elf_arch)
+
+    toolchain = '%s_%s_glibc' % (osname, tcarch)
+    toolchain_dir = os.path.join(NACL_SDK_ROOT, 'toolchain', toolchain)
+    lib_dir = os.path.join(toolchain_dir, tcsubarch + '-nacl', lib_subdir)
+    usr_lib_dir = os.path.join(toolchain_dir, usr_arch + '-nacl', 'usr', 'lib')
+
+    ldso = os.path.join(lib_dir, 'runnable-ld.so')
     cmd.append(ldso)
     Log('LD.SO = %s' % ldso)
-    libpath += ':' + sdk_lib_dir
+    libpath = [usr_lib_dir, sdk_lib_dir, lib_dir]
+    if options.library_path:
+      libpath.extend([os.path.abspath(p) for p
+                      in options.library_path.split(':')])
     cmd.append('--library-path')
-    cmd.append(libpath)
+    cmd.append(':'.join(libpath))
 
 
   # Append arguments for the executable itself.

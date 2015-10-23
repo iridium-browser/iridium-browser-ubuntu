@@ -141,7 +141,7 @@ void HTTPMessage::AddBody(const string& body, bool add_content_length) {
   // Remove any transfer-encoding that was left by a previous body.
   RemoveHeader(kTransferCoding);
   if (add_content_length) {
-    ReplaceHeader(kContentLength, base::IntToString(body.size()));
+    ReplaceHeader(kContentLength, base::SizeTToString(body.size()));
   } else {
     RemoveHeader(kContentLength);
   }
@@ -158,8 +158,8 @@ void HTTPMessage::ValidateMessage() const {
   for (vector<StringPiece>::iterator it = transfer_encodings.begin();
        it != transfer_encodings.end();
        ++it) {
-    CHECK(StringPieceUtils::EqualIgnoreCase("identity", *it) ||
-          StringPieceUtils::EqualIgnoreCase("chunked", *it)) << *it;
+    CHECK(base::EqualsCaseInsensitiveASCII("identity", *it) ||
+          base::EqualsCaseInsensitiveASCII("chunked", *it)) << *it;
   }
 
   vector<StringPiece> content_lengths;

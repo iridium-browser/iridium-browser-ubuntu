@@ -9,12 +9,14 @@ import android.graphics.Typeface;
 import android.view.accessibility.CaptioningManager.CaptionStyle;
 
 import org.chromium.base.VisibleForTesting;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content.browser.accessibility.captioning.SystemCaptioningBridge.SystemCaptioningBridgeListener;
 
-import java.lang.ref.WeakReference;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
+import java.util.EnumSet;
 import java.util.Locale;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 /**
  * API level agnostic delegate for getting updates about caption styles.
@@ -30,10 +32,7 @@ public class CaptioningChangeDelegate {
     @VisibleForTesting
     public static final String DEFAULT_CAPTIONING_PREF_VALUE = "";
 
-    // Using a weak reference avoids cycles that might prevent GC of WebView's WebContents.
-    private final WeakReference<ContentViewCore> mWeakContentViewCore;
-
-    private boolean mTextTrackEnabled;
+    private boolean mTextTracksEnabled;
 
     private String mTextTrackBackgroundColor;
     private String mTextTrackFontFamily;
@@ -42,12 +41,16 @@ public class CaptioningChangeDelegate {
     private String mTextTrackTextColor;
     private String mTextTrackTextShadow;
     private String mTextTrackTextSize;
+    // Using weak references to avoid preventing listeners from getting GC'ed.
+    // TODO(qinmin): change this to a HashSet that supports weak references.
+    private final Map<SystemCaptioningBridgeListener, Boolean> mListeners =
+            new WeakHashMap<SystemCaptioningBridgeListener, Boolean>();
 
     /**
      * @see android.view.accessibility.CaptioningManager.CaptioningChangeListener#onEnabledChanged
      */
     public void onEnabledChanged(boolean enabled) {
-        mTextTrackEnabled = enabled;
+        mTextTracksEnabled = enabled;
         notifySettingsChanged();
     }
 
@@ -55,7 +58,6 @@ public class CaptioningChangeDelegate {
      * @see android.view.accessibility.CaptioningManager.CaptioningChangeListener#onFontScaleChanged
      */
     public void onFontScaleChanged(float fontScale) {
-        if (mWeakContentViewCore.get() == null) return;
         mTextTrackTextSize = androidFontScaleToPercentage(fontScale);
         notifySettingsChanged();
     }
@@ -72,8 +74,6 @@ public class CaptioningChangeDelegate {
      * @see android.view.accessibility.CaptioningManager.CaptioningChangeListener#onUserStyleChanged
      */
     public void onUserStyleChanged(CaptioningStyle userStyle) {
-        if (mWeakContentViewCore.get() == null) return;
-
         mTextTrackTextColor = androidColorToCssColor(userStyle.getForegroundColor());
         mTextTrackBackgroundColor = androidColorToCssColor(userStyle.getBackgroundColor());
 
@@ -99,12 +99,8 @@ public class CaptioningChangeDelegate {
 
     /**
      * Construct a new CaptioningChangeDelegate object.
-     *
-     * @param contentViewCore the ContentViewCore to associate with
-     *        this delegate
      */
-    public CaptioningChangeDelegate(ContentViewCore contentViewCore) {
-        mWeakContentViewCore = new WeakReference<ContentViewCore>(contentViewCore);
+    public CaptioningChangeDelegate() {
     }
 
     /**
@@ -200,22 +196,35 @@ public class CaptioningChangeDelegate {
         // The list of fonts are obtained from apps/Settings/res/values/arrays.xml
         // in Android settings app.
         // Fonts in Lollipop and above
-        DEFAULT (""),
-        SANS_SERIF ("sans-serif"),
-        SANS_SERIF_CONDENSED ("sans-serif-condensed"),
-        SANS_SERIF_MONOSPACE ("sans-serif-monospace"),
-        SERIF ("serif"),
-        SERIF_MONOSPACE ("serif-monospace"),
-        CASUAL ("casual"),
-        CURSIVE ("cursive"),
-        SANS_SERIF_SMALLCAPS ("sans-serif-smallcaps"),
-        // Fronts in Kitkat
-        MONOSPACE("monospace");
+        DEFAULT ("", EnumSet.noneOf(Flags.class)),
+        SANS_SERIF ("sans-serif", EnumSet.of(Flags.SANS_SERIF)),
+        SANS_SERIF_CONDENSED ("sans-serif-condensed", EnumSet.of(Flags.SANS_SERIF)),
+        SANS_SERIF_MONOSPACE ("sans-serif-monospace",
+                EnumSet.of(Flags.SANS_SERIF, Flags.MONOSPACE)),
+        SERIF ("serif", EnumSet.of(Flags.SERIF)),
+        SERIF_MONOSPACE ("serif-monospace", EnumSet.of(Flags.SERIF, Flags.MONOSPACE)),
+        CASUAL ("casual", EnumSet.noneOf(Flags.class)),
+        CURSIVE ("cursive", EnumSet.noneOf(Flags.class)),
+        SANS_SERIF_SMALLCAPS ("sans-serif-smallcaps", EnumSet.of(Flags.SANS_SERIF)),
+        // Fonts in KitKat
+        MONOSPACE("monospace", EnumSet.of(Flags.MONOSPACE));
+
+        /**
+         * Describes certain properties of a font, used to verify that captioning fonts
+         * with the correct properties are mapped to system typefaces.
+         */
+        @VisibleForTesting
+        /* package */ enum Flags {
+            SANS_SERIF, SERIF, MONOSPACE
+        }
 
         private final String mFontFamily;
+        @VisibleForTesting
+        /* package */ final EnumSet<Flags> mFlags;
 
-        private ClosedCaptionFont(String fontFamily) {
+        private ClosedCaptionFont(String fontFamily, EnumSet<Flags> flags) {
             mFontFamily = fontFamily;
+            mFlags = flags;
         }
 
         /**
@@ -287,16 +296,52 @@ public class CaptioningChangeDelegate {
     }
 
     private void notifySettingsChanged() {
-        final ContentViewCore contentViewCore = mWeakContentViewCore.get();
-        if (contentViewCore == null) return;
-        if (mTextTrackEnabled) {
-            final TextTrackSettings settings = new TextTrackSettings(
+        for (SystemCaptioningBridgeListener listener : mListeners.keySet()) {
+            notifyListener(listener);
+        }
+    }
+
+    /**
+     * Notify a listener about the current text track settings.
+     *
+     * @param listener the listener to notify.
+     */
+    public void notifyListener(SystemCaptioningBridgeListener listener) {
+        if (mTextTracksEnabled) {
+            final TextTrackSettings settings = new TextTrackSettings(mTextTracksEnabled,
                     mTextTrackBackgroundColor, mTextTrackFontFamily, mTextTrackFontStyle,
                     mTextTrackFontVariant, mTextTrackTextColor, mTextTrackTextShadow,
                     mTextTrackTextSize);
-            contentViewCore.setTextTrackSettings(settings);
+            listener.onSystemCaptioningChanged(settings);
         } else {
-            contentViewCore.setTextTrackSettings(new TextTrackSettings());
+            listener.onSystemCaptioningChanged(new TextTrackSettings());
         }
+    }
+
+    /**
+     * Add a listener for changes with the system CaptioningManager.
+     *
+     * @param listener The SystemCaptioningBridgeListener object to add.
+     */
+    public void addListener(SystemCaptioningBridgeListener listener) {
+        mListeners.put(listener, null);
+    }
+
+    /**
+     * Remove a listener from system CaptionManager.
+     *
+     * @param listener The SystemCaptioningBridgeListener object to remove.
+     */
+    public void removeListener(SystemCaptioningBridgeListener listener) {
+        mListeners.remove(listener);
+    }
+
+    /**
+     * Return whether there are listeners associated with this class.
+     *
+     * @return true if there are at least one listener, or false otherwise.
+     */
+    public boolean hasActiveListener() {
+        return !mListeners.isEmpty();
     }
 }

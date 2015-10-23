@@ -155,10 +155,11 @@
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '<(angle_path)/src/angle.gyp:translator',
-        '../ui/gl/gl.gyp:gl',
         '../ui/gfx/gfx.gyp:gfx',
         '../ui/gfx/gfx.gyp:gfx_geometry',
         '../ui/gfx/gfx.gyp:gfx_test_support',
+        '../ui/gl/gl.gyp:gl',
+        '../ui/gl/gl.gyp:gl_test_support',
         'command_buffer/command_buffer.gyp:gles2_utils',
         'command_buffer_client',
         'command_buffer_common',
@@ -251,6 +252,7 @@
         'command_buffer/service/shader_translator_unittest.cc',
         'command_buffer/service/test_helper.cc',
         'command_buffer/service/test_helper.h',
+        'command_buffer/service/path_manager_unittest.cc',
         'command_buffer/service/texture_manager_unittest.cc',
         'command_buffer/service/transfer_buffer_manager_unittest.cc',
         'command_buffer/service/valuebuffer_manager_unittest.cc',
@@ -358,6 +360,7 @@
         'command_buffer/tests/gl_chromium_framebuffer_multisample_unittest.cc',
         'command_buffer/tests/gl_chromium_path_rendering_unittest.cc',
         'command_buffer/tests/gl_clear_framebuffer_unittest.cc',
+        'command_buffer/tests/gl_compressed_copy_texture_CHROMIUM_unittest.cc',
         'command_buffer/tests/gl_copy_texture_CHROMIUM_unittest.cc',
         'command_buffer/tests/gl_depth_texture_unittest.cc',
         'command_buffer/tests/gl_gpu_memory_buffer_unittest.cc',
@@ -705,10 +708,10 @@
         },
       ],
     }],
-    ['OS == "win"', {
+    ['OS == "win" or (OS == "linux" and use_x11==1)', {
       'targets': [
         {
-          # TODO(kbr): port this target to the GN build.
+          # TODO(crbug.com/519834): port this target to the GN build.
           'target_name': 'angle_end2end_tests',
           'type': '<(gtest_target_type)',
           'dependencies': [
@@ -723,6 +726,10 @@
             'angle_end2end_tests_main.cc',
           ],
         },
+      ],
+    }],
+    ['OS == "win"', {
+      'targets': [
         {
           # TODO(jmadill): port this target to the GN build.
           'target_name': 'angle_perftests',
@@ -767,5 +774,45 @@
         },
       ],
     }],
+    ['OS == "win" and archive_gpu_tests==1', {
+      'targets': [
+        {
+          # Only build dEQP on test configs. Note that dEQP is test-only code,
+          # and is only a part of the Chromium build to allow easy integration
+          # with the GPU bot waterfall. (Note that dEQP uses exceptions, and
+          # currently can't build with Clang on Windows)
+          'target_name': 'angle_deqp_gles2_tests',
+          'type': '<(gtest_target_type)',
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../base/base.gyp:test_support_base',
+            '../third_party/angle/src/tests/tests.gyp:angle_deqp_gtest_support',
+            '../third_party/angle/src/tests/tests.gyp:angle_deqp_libgles2',
+          ],
+          'includes': [
+            '../third_party/angle/build/common_defines.gypi',
+          ],
+          'sources': [
+            'angle_deqp_tests_main.cc',
+          ],
+        },
+        {
+          'target_name': 'angle_deqp_gles3_tests',
+          'type': '<(gtest_target_type)',
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../base/base.gyp:test_support_base',
+            '../third_party/angle/src/tests/tests.gyp:angle_deqp_gtest_support',
+            '../third_party/angle/src/tests/tests.gyp:angle_deqp_libgles3',
+          ],
+          'includes': [
+            '../third_party/angle/build/common_defines.gypi',
+          ],
+          'sources': [
+            'angle_deqp_tests_main.cc',
+          ],
+        },
+      ],
+    }]
   ],
 }

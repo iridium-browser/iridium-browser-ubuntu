@@ -22,6 +22,7 @@
 #ifndef WTF_LinkedHashSet_h
 #define WTF_LinkedHashSet_h
 
+#include "wtf/AddressSanitizer.h"
 #include "wtf/DefaultAllocator.h"
 #include "wtf/HashSet.h"
 #include "wtf/OwnPtr.h"
@@ -53,6 +54,7 @@ class LinkedHashSetNodeBase {
 public:
     LinkedHashSetNodeBase() : m_prev(this), m_next(this) { }
 
+    NO_LAZY_SWEEP_SANITIZE_ADDRESS
     void unlink()
     {
         if (!m_next)
@@ -246,7 +248,6 @@ public:
     template<typename Collection>
     void removeAll(const Collection& other) { WTF::removeAll(*this, other); }
 
-    using HasInlinedTraceMethodMarker = int;
     template<typename VisitorDispatcher>
     void trace(VisitorDispatcher visitor) { m_impl.trace(visitor); }
 
@@ -717,18 +718,6 @@ inline void swap(LinkedHashSetNode<T, Allocator>& a, LinkedHashSetNode<T, Alloca
     swap(static_cast<Base&>(a), static_cast<Base&>(b));
     swap(a.m_value, b.m_value);
     Allocator::leaveGCForbiddenScope();
-}
-
-// Warning: After and while calling this you have a collection with deleted
-// pointers. Consider using a smart pointer like OwnPtr and calling clear()
-// instead.
-template<typename ValueType, typename T, typename U>
-void deleteAllValues(const LinkedHashSet<ValueType, T, U>& set)
-{
-    typedef typename LinkedHashSet<ValueType, T, U>::const_iterator iterator;
-    iterator end = set.end();
-    for (iterator it = set.begin(); it != end; ++it)
-        delete *it;
 }
 
 #if !ENABLE(OILPAN)

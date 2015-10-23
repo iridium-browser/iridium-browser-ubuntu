@@ -15,7 +15,7 @@
 #include "base/prefs/pref_service_factory.h"
 #include "base/prefs/pref_store.h"
 #include "chromecast/base/cast_paths.h"
-#include "chromecast/common/pref_names.h"
+#include "chromecast/base/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace chromecast {
@@ -43,8 +43,16 @@ scoped_ptr<PrefService> PrefServiceHelper::CreatePrefService(
   const base::FilePath config_path(GetConfigPath());
   VLOG(1) << "Loading config from " << config_path.value();
 
+  registry->RegisterBooleanPref(prefs::kEnableRemoteDebugging, false);
   registry->RegisterBooleanPref(prefs::kMetricsIsNewClientID, false);
-  registry->RegisterIntegerPref(prefs::kRemoteDebuggingPort, 0);
+  // Opt-in stats default to true to handle two different cases:
+  //  1) Any crashes or UMA logs are recorded prior to setup completing
+  //     successfully (even though we can't send them yet).  Unless the user
+  //     ends up actually opting out, we don't want to lose this data once
+  //     we get network connectivity and are able to send it.  If the user
+  //     opts out, nothing further will be sent (honoring the user's setting).
+  //  2) Dogfood users (see dogfood agreement).
+  registry->RegisterBooleanPref(prefs::kOptInStats, true);
 
   RegisterPlatformPrefs(registry);
 

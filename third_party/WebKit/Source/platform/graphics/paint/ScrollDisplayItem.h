@@ -12,48 +12,43 @@
 
 namespace blink {
 
-class PLATFORM_EXPORT BeginScrollDisplayItem : public PairedBeginDisplayItem {
-    WTF_MAKE_FAST_ALLOCATED(BeginScrollDisplayItem);
+class PLATFORM_EXPORT BeginScrollDisplayItem final : public PairedBeginDisplayItem {
 public:
-    static PassOwnPtr<BeginScrollDisplayItem> create(const DisplayItemClientWrapper& client, Type type, const IntSize& currentOffset)
-    {
-        return adoptPtr(new BeginScrollDisplayItem(client, type, currentOffset));
-    }
-
     BeginScrollDisplayItem(const DisplayItemClientWrapper& client, Type type, const IntSize& currentOffset)
-        : PairedBeginDisplayItem(client, type)
+        : PairedBeginDisplayItem(client, type, sizeof(*this))
         , m_currentOffset(currentOffset)
     {
         ASSERT(isScrollType(type));
     }
 
-    virtual void replay(GraphicsContext&) override;
-    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override;
+    void replay(GraphicsContext&) override;
+    void appendToWebDisplayItemList(WebDisplayItemList*) const override;
+
+    const IntSize& currentOffset() const { return m_currentOffset; }
+
+private:
+#ifndef NDEBUG
+    void dumpPropertiesAsDebugString(WTF::StringBuilder&) const final;
+#endif
 
 private:
     const IntSize m_currentOffset;
 };
 
-class PLATFORM_EXPORT EndScrollDisplayItem : public PairedEndDisplayItem {
-    WTF_MAKE_FAST_ALLOCATED(EndScrollDisplayItem);
+class PLATFORM_EXPORT EndScrollDisplayItem final : public PairedEndDisplayItem {
 public:
-    static PassOwnPtr<EndScrollDisplayItem> create(const DisplayItemClientWrapper& client, Type type)
-    {
-        return adoptPtr(new EndScrollDisplayItem(client, type));
-    }
-
     EndScrollDisplayItem(const DisplayItemClientWrapper& client, Type type)
-        : PairedEndDisplayItem(client, type)
+        : PairedEndDisplayItem(client, type, sizeof(*this))
     {
         ASSERT(isEndScrollType(type));
     }
 
-    virtual void replay(GraphicsContext&) override;
-    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override;
+    void replay(GraphicsContext&) override;
+    void appendToWebDisplayItemList(WebDisplayItemList*) const override;
 
 private:
 #if ENABLE(ASSERT)
-    virtual bool isEndAndPairedWith(const DisplayItem& other) const override final { return other.isScroll(); }
+    bool isEndAndPairedWith(DisplayItem::Type otherType) const final { return DisplayItem::isScrollType(otherType); }
 #endif
 };
 

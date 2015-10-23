@@ -16,6 +16,7 @@
 
 #include <algorithm>  // find_if()
 
+#include "webrtc/base/logging.h"
 #include "webrtc/modules/audio_coding/codecs/audio_decoder.h"
 #include "webrtc/modules/audio_coding/neteq/decoder_database.h"
 
@@ -58,6 +59,7 @@ int PacketBuffer::InsertPacket(Packet* packet) {
     if (packet) {
       delete packet;
     }
+    LOG(LS_WARNING) << "InsertPacket invalid packet";
     return kInvalidPacket;
   }
 
@@ -66,6 +68,7 @@ int PacketBuffer::InsertPacket(Packet* packet) {
   if (buffer_.size() >= max_number_of_packets_) {
     // Buffer is full. Flush it.
     Flush();
+    LOG(LS_WARNING) << "Packet buffer flushed";
     return_val = kFlushed;
   }
 
@@ -250,16 +253,12 @@ int PacketBuffer::NumSamplesInBuffer(DecoderDatabase* decoder_database,
     Packet* packet = (*it);
     AudioDecoder* decoder =
         decoder_database->GetDecoder(packet->header.payloadType);
-    if (decoder) {
-      int duration;
-      if (packet->sync_packet) {
-        duration = last_duration;
-      } else if (packet->primary) {
-        duration =
-            decoder->PacketDuration(packet->payload, packet->payload_length);
-      } else {
+    if (decoder && !packet->sync_packet) {
+      if (!packet->primary) {
         continue;
       }
+      int duration =
+          decoder->PacketDuration(packet->payload, packet->payload_length);
       if (duration >= 0) {
         last_duration = duration;  // Save the most up-to-date (valid) duration.
       }

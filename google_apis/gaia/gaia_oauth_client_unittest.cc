@@ -56,12 +56,12 @@ class MockOAuthFetcher : public net::TestURLFetcher {
       set_response_code(net::HTTP_OK);
     }
 
-    net::URLRequestStatus::Status code = net::URLRequestStatus::SUCCESS;
+    net::Error error = net::OK;
     if (GetResponseCode() != net::HTTP_OK) {
-      code = net::URLRequestStatus::FAILED;
+      error = net::ERR_FAILED;
       current_failure_count_++;
     }
-    set_status(net::URLRequestStatus(code, 0));
+    set_status(net::URLRequestStatus::FromError(error));
 
     if (complete_immediately_)
       delegate()->OnURLFetchComplete(this);
@@ -188,7 +188,7 @@ class GaiaOAuthClientTest : public testing::Test {
   net::TestURLRequestContextGetter* GetRequestContext() {
     if (!request_context_getter_.get()) {
       request_context_getter_ = new net::TestURLRequestContextGetter(
-          message_loop_.message_loop_proxy());
+          message_loop_.task_runner());
     }
     return request_context_getter_.get();
   }
@@ -368,7 +368,7 @@ TEST_F(GaiaOAuthClientTest, GetUserInfo) {
   auth.GetUserInfo("access_token", 1, &delegate);
 
   scoped_ptr<base::Value> value(
-      base::JSONReader::Read(kDummyFullUserInfoResult));
+      base::JSONReader::DeprecatedRead(kDummyFullUserInfoResult));
   DCHECK(value);
   ASSERT_TRUE(value->IsType(base::Value::TYPE_DICTIONARY));
   base::DictionaryValue* expected_result;

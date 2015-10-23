@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "net/base/net_errors.h"
@@ -95,7 +96,9 @@ class AdbQuerySocket : AdbClientSocket {
       : AdbClientSocket(port),
         current_query_(0),
         callback_(callback) {
-    if (Tokenize(query, "|", &queries_) == 0) {
+    queries_ = base::SplitString(query, "|", base::KEEP_WHITESPACE,
+                                 base::SPLIT_WANT_NONEMPTY);
+    if (queries_.empty()) {
       CheckNetResultOrDie(net::ERR_INVALID_ARGUMENT);
       return;
     }
@@ -240,22 +243,12 @@ void AdbClientSocket::OnResponseHeader(
     return;
   }
 
+  // Trim OKAY.
   data = data.substr(4);
-
-  if (!is_void) {
-    int payload_length = 0;
-    int bytes_left = -1;
-    if (data.length() >= 4 &&
-        base::HexStringToInt(data.substr(0, 4), &payload_length)) {
-      data = data.substr(4);
-      bytes_left = payload_length - result + 8;
-    } else {
-      bytes_left = -1;
-    }
-    OnResponseData(callback, data, response_buffer, bytes_left, 0);
-  } else {
+  if (!is_void)
+    OnResponseData(callback, data, response_buffer, -1, 0);
+  else
     callback.Run(net::OK, data);
-  }
 }
 
 void AdbClientSocket::OnResponseData(
@@ -269,9 +262,21 @@ void AdbClientSocket::OnResponseData(
     return;
   }
 
-  bytes_left -= result;
-  std::string new_response =
-      response + std::string(response_buffer->data(), result);
+  std::string new_response = response +
+      std::string(response_buffer->data(), result);
+
+  if (bytes_left == -1) {
+    // First read the response header.
+    int payload_length = 0;
+    if (new_response.length() >= 4 &&
+        base::HexStringToInt(new_response.substr(0, 4), &payload_length)) {
+      new_response = new_response.substr(4);
+      bytes_left = payload_length - new_response.size();
+    }
+  } else {
+    bytes_left -= result;
+  }
+
   if (bytes_left == 0) {
     callback.Run(net::OK, new_response);
     return;

@@ -348,19 +348,21 @@ class WorkonHelper(object):
           possible_ebuilds.append(ebuild)
 
       if not possible_ebuilds:
-        logging.warning('Could not find canonical package for %s', package)
+        logging.warning('Could not find canonical package for "%s"', package)
         return None
 
       if len(possible_ebuilds) > 1:
-        logging.warning('Multiple autocompletes found: %s',
-                        ' '.join(possible_ebuilds))
+        logging.warning('Multiple autocompletes found:')
+        for possible_ebuild in possible_ebuilds:
+          logging.warning('  %s', possible_ebuild)
       autocompleted_package = portage_util.EbuildToCP(possible_ebuilds[0])
-      logging.info('Autocompleted "%s" to: %s', package, autocompleted_package)
+      logging.info('Autocompleted "%s" to: "%s"',
+                   package, autocompleted_package)
 
       return self._GetCanonicalAtom(autocompleted_package)
 
     if not _IsWorkonEbuild(True, ebuild_path):
-      logging.warn(
+      logging.warning(
           '"%s" is a -9999 ebuild, but does not inherit from cros-workon?',
           ebuild_path)
       return None
@@ -584,7 +586,7 @@ class WorkonHelper(object):
     stopped_atoms = []
     for atom in atoms:
       if not atom in current_atoms:
-        logging.warn('Not working on %s', atom)
+        logging.warning('Not working on %s', atom)
         continue
 
       current_atoms.discard(atom)
@@ -691,3 +693,11 @@ class WorkonHelper(object):
       atoms = self._GetCanonicalAtoms(packages)
     for atom in atoms:
       self.RunCommandInAtomSourceDirectory(atom, command)
+
+  def InstalledWorkonAtoms(self):
+    """Returns the set of installed cros_workon packages."""
+    installed_cp = set()
+    for pkg in portage_util.PortageDB(self._sysroot).InstalledPackages():
+      installed_cp.add('%s/%s' % (pkg.category, pkg.package))
+
+    return set(a for a in self.ListAtoms(use_all=True) if a in installed_cp)

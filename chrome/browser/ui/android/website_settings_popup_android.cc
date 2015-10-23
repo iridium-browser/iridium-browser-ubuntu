@@ -128,16 +128,13 @@ void WebsiteSettingsPopupAndroid::SetPermissionInfo(
           static_cast<jint>(user_specified_settings_to_display[permission]));
     }
   }
+
+  Java_WebsiteSettingsPopup_updatePermissionDisplay(env, popup_jobject_.obj());
 }
 
 void WebsiteSettingsPopupAndroid::SetSelectedTab(
     WebsiteSettingsUI::TabId tab_id) {
   // There's no tab UI on Android - only connection info is shown.
-  NOTIMPLEMENTED();
-}
-
-void WebsiteSettingsPopupAndroid::SetFirstVisit(
-    const base::string16& first_visit) {
   NOTIMPLEMENTED();
 }
 

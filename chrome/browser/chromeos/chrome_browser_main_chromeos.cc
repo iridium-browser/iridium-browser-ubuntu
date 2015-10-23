@@ -26,6 +26,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
+#include "chrome/browser/chromeos/accessibility/spoken_feedback_event_rewriter.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_launch_error.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_mode_idle_app_name_notification.h"
@@ -33,7 +34,6 @@
 #include "chrome/browser/chromeos/dbus/chrome_console_service_provider_delegate.h"
 #include "chrome/browser/chromeos/dbus/chrome_display_power_service_provider_delegate.h"
 #include "chrome/browser/chromeos/dbus/chrome_proxy_resolver_delegate.h"
-#include "chrome/browser/chromeos/dbus/printer_service_provider.h"
 #include "chrome/browser/chromeos/dbus/screen_lock_service_provider.h"
 #include "chrome/browser/chromeos/events/event_rewriter.h"
 #include "chrome/browser/chromeos/events/event_rewriter_controller.h"
@@ -51,7 +51,6 @@
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/memory/oom_priority_manager.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_impl.h"
 #include "chrome/browser/chromeos/net/wake_on_wifi_manager.h"
 #include "chrome/browser/chromeos/options/cert_library.h"
@@ -76,12 +75,11 @@
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/ui/ash/network_connect_delegate_chromeos.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/audio/audio_devices_pref_handler_impl.h"
@@ -130,6 +128,10 @@
 #include "ui/base/touch/touch_device.h"
 #include "ui/events/event_utils.h"
 
+#if defined(ENABLE_RLZ)
+#include "components/rlz/rlz_tracker.h"
+#endif
+
 // Exclude X11 dependents for ozone
 #if defined(USE_X11)
 #include "chrome/browser/chromeos/device_uma.h"
@@ -174,7 +176,6 @@ class DBusServices {
         make_scoped_ptr(new ChromeProxyResolverDelegate())));
     service_providers.push_back(new DisplayPowerServiceProvider(
         make_scoped_ptr(new ChromeDisplayPowerServiceProviderDelegate)));
-    service_providers.push_back(new PrinterServiceProvider);
     service_providers.push_back(new LivenessServiceProvider);
     service_providers.push_back(new ScreenLockServiceProvider);
     service_providers.push_back(new ConsoleServiceProvider(
@@ -295,7 +296,7 @@ void ChromeBrowserMainPartsChromeos::PreEarlyInitialization() {
   const char kChromeOSReleaseTrack[] = "CHROMEOS_RELEASE_TRACK";
   std::string channel;
   if (base::SysInfo::GetLsbReleaseValue(kChromeOSReleaseTrack, &channel))
-    chrome::VersionInfo::SetChannel(channel);
+    chrome::SetChannel(channel);
 #endif
 
   ChromeBrowserMainPartsLinux::PreEarlyInitialization();
@@ -630,11 +631,6 @@ void ChromeBrowserMainPartsChromeos::PreBrowserStart() {
   // -- This used to be in ChromeBrowserMainParts::PreMainMessageLoopRun()
   // -- immediately after ChildProcess::WaitForDebugger().
 
-  // Start the out-of-memory priority manager here so that we give the most
-  // amount of time for the other services to start up before we start
-  // adjusting the oom priority.
-  g_browser_process->platform_part()->oom_priority_manager()->Start();
-
   if (ui::ShouldDefaultToNaturalScroll()) {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         chromeos::switches::kNaturalScrollDefault);
@@ -655,6 +651,8 @@ void ChromeBrowserMainPartsChromeos::PostBrowserStart() {
   keyboard_event_rewriters_.reset(new EventRewriterController());
   keyboard_event_rewriters_->AddEventRewriter(
       scoped_ptr<ui::EventRewriter>(new KeyboardDrivenEventRewriter()));
+  keyboard_event_rewriters_->AddEventRewriter(
+      scoped_ptr<ui::EventRewriter>(new SpokenFeedbackEventRewriter()));
   keyboard_event_rewriters_->AddEventRewriter(scoped_ptr<ui::EventRewriter>(
       new EventRewriter(ash::Shell::GetInstance()->sticky_keys_controller())));
   keyboard_event_rewriters_->Init();
@@ -665,8 +663,6 @@ void ChromeBrowserMainPartsChromeos::PostBrowserStart() {
 // Shut down services before the browser process, etc are destroyed.
 void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   BootTimesRecorder::Get()->AddLogoutTimeMarker("UIMessageLoopEnded", true);
-
-  g_browser_process->platform_part()->oom_priority_manager()->Stop();
 
   // Destroy the application name notifier for Kiosk mode.
   KioskModeIdleAppNameNotification::Shutdown();
@@ -741,6 +737,9 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // Clean up dependency on CrosSettings and stop pending data fetches.
   KioskAppManager::Shutdown();
 
+  // Make sure that there is no pending URLRequests.
+  UserSessionManager::GetInstance()->Shutdown();
+
   // Give BrowserPolicyConnectorChromeOS a chance to unregister any observers
   // on services that are going to be deleted later but before its Shutdown()
   // is called.
@@ -766,9 +765,6 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   NetworkPortalDetector::Shutdown();
 
   g_browser_process->platform_part()->DestroyChromeUserManager();
-
-  // Make sure that there is no pending URLRequests.
-  UserSessionManager::GetInstance()->Shutdown();
 
   g_browser_process->platform_part()->ShutdownSessionManager();
 }

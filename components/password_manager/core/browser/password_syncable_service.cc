@@ -7,9 +7,10 @@
 #include "base/auto_reset.h"
 #include "base/location.h"
 #include "base/memory/scoped_vector.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_store_sync.h"
 #include "net/base/escape.h"
 #include "sync/api/sync_error_factory.h"
@@ -57,7 +58,7 @@ bool AreLocalAndSyncPasswordsEqual(
           password_form.times_used == password_specifics.times_used() &&
           base::UTF16ToUTF8(password_form.display_name) ==
               password_specifics.display_name() &&
-          password_form.avatar_url.spec() == password_specifics.avatar_url() &&
+          password_form.icon_url.spec() == password_specifics.avatar_url() &&
           password_form.federation_url.spec() ==
               password_specifics.federation_url());
 }
@@ -157,6 +158,7 @@ syncer::SyncMergeResult PasswordSyncableService::MergeDataAndStartSyncing(
   if (!ReadFromPasswordStore(&password_entries, &new_local_entries)) {
     merge_result.set_error(sync_error_factory->CreateAndUploadError(
         FROM_HERE, "Failed to get passwords from store."));
+    metrics_util::LogPasswordSyncState(metrics_util::NOT_SYNCING_FAILED_READ);
     return merge_result;
   }
 
@@ -164,6 +166,8 @@ syncer::SyncMergeResult PasswordSyncableService::MergeDataAndStartSyncing(
     merge_result.set_error(sync_error_factory->CreateAndUploadError(
         FROM_HERE,
         "There are passwords with identical sync tags in the database."));
+    metrics_util::LogPasswordSyncState(
+        metrics_util::NOT_SYNCING_DUPLICATE_TAGS);
     return merge_result;
   }
   merge_result.set_num_items_before_association(new_local_entries.size());
@@ -200,8 +204,10 @@ syncer::SyncMergeResult PasswordSyncableService::MergeDataAndStartSyncing(
   WriteToPasswordStore(sync_entries);
   merge_result.set_error(
       sync_processor->ProcessSyncChanges(FROM_HERE, updated_db_entries));
-  if (merge_result.error().IsSet())
+  if (merge_result.error().IsSet()) {
+    metrics_util::LogPasswordSyncState(metrics_util::NOT_SYNCING_SERVER_ERROR);
     return merge_result;
+  }
 
   merge_result.set_num_items_after_association(
       merge_result.num_items_before_association() +
@@ -214,6 +220,8 @@ syncer::SyncMergeResult PasswordSyncableService::MergeDataAndStartSyncing(
   // failure Sync shouldn't receive any updates from the PasswordStore.
   sync_error_factory_ = sync_error_factory.Pass();
   sync_processor_ = sync_processor.Pass();
+
+  metrics_util::LogPasswordSyncState(metrics_util::SYNCING_OK);
   return merge_result;
 }
 
@@ -452,7 +460,7 @@ syncer::SyncData SyncDataFromPassword(
   CopyField(type);
   CopyField(times_used);
   CopyStringField(display_name);
-  password_specifics->set_avatar_url(password_form.avatar_url.spec());
+  password_specifics->set_avatar_url(password_form.icon_url.spec());
   password_specifics->set_federation_url(password_form.federation_url.spec());
 #undef CopyStringField
 #undef CopyField
@@ -484,7 +492,7 @@ autofill::PasswordForm PasswordFromSpecifics(
       static_cast<autofill::PasswordForm::Type>(password.type());
   new_password.times_used = password.times_used();
   new_password.display_name = base::UTF8ToUTF16(password.display_name());
-  new_password.avatar_url = GURL(password.avatar_url());
+  new_password.icon_url = GURL(password.avatar_url());
   new_password.federation_url = GURL(password.federation_url());
   return new_password;
 }

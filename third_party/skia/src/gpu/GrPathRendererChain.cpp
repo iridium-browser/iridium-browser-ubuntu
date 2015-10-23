@@ -9,9 +9,9 @@
 
 #include "GrPathRendererChain.h"
 
+#include "GrCaps.h"
 #include "GrContext.h"
 #include "GrDefaultPathRenderer.h"
-#include "GrDrawTargetCaps.h"
 #include "GrGpu.h"
 
 GrPathRendererChain::GrPathRendererChain(GrContext* context)
@@ -60,10 +60,17 @@ GrPathRenderer* GrPathRendererChain::getPathRenderer(const GrDrawTarget* target,
 
 
     for (int i = 0; i < fChain.count(); ++i) {
-        if (fChain[i]->canDrawPath(target, pipelineBuilder, viewMatrix, path, stroke, antiAlias)) {
+        GrPathRenderer::CanDrawPathArgs args;
+        args.fShaderCaps = target->caps()->shaderCaps();
+        args.fPipelineBuilder = pipelineBuilder;
+        args.fViewMatrix = &viewMatrix;
+        args.fPath = &path;
+        args.fStroke = &stroke;
+        args.fAntiAlias = antiAlias;
+        if (fChain[i]->canDrawPath(args)) {
             if (GrPathRenderer::kNoSupport_StencilSupport != minStencilSupport) {
                 GrPathRenderer::StencilSupport support =
-                    fChain[i]->getStencilSupport(target, pipelineBuilder, path, stroke);
+                                                       fChain[i]->getStencilSupport(path, stroke);
                 if (support < minStencilSupport) {
                     continue;
                 } else if (stencilSupport) {
@@ -78,9 +85,9 @@ GrPathRenderer* GrPathRendererChain::getPathRenderer(const GrDrawTarget* target,
 
 void GrPathRendererChain::init() {
     SkASSERT(!fInit);
-    GrGpu* gpu = fOwner->getGpu();
-    bool twoSided = gpu->caps()->twoSidedStencilSupport();
-    bool wrapOp = gpu->caps()->stencilWrapOpsSupport();
+    const GrCaps* caps = fOwner->caps();
+    bool twoSided = caps->twoSidedStencilSupport();
+    bool wrapOp = caps->stencilWrapOpsSupport();
     GrPathRenderer::AddPathRenderers(fOwner, this);
     this->addPathRenderer(SkNEW_ARGS(GrDefaultPathRenderer,
                                      (twoSided, wrapOp)))->unref();

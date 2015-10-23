@@ -186,4 +186,8 @@ void HeapProfiler::ClearHeapObjectMap() {
 }
 
 
-} }  // namespace v8::internal
+Heap* HeapProfiler::heap() const { return ids_->heap(); }
+
+
+}  // namespace internal
+}  // namespace v8

@@ -31,8 +31,9 @@
 #include "config.h"
 #include "core/editing/RenderedPosition.h"
 
-#include "core/dom/Position.h"
+#include "core/editing/TextAffinity.h"
 #include "core/editing/VisiblePosition.h"
+#include "core/editing/VisibleUnits.h"
 #include "core/layout/compositing/CompositedSelectionBound.h"
 #include "core/paint/DeprecatedPaintLayer.h"
 
@@ -43,20 +44,20 @@ static inline LayoutObject* layoutObjectFromPosition(const Position& position)
     ASSERT(position.isNotNull());
     Node* layoutObjectNode = nullptr;
     switch (position.anchorType()) {
-    case Position::PositionIsOffsetInAnchor:
+    case PositionAnchorType::OffsetInAnchor:
         layoutObjectNode = position.computeNodeAfterPosition();
         if (!layoutObjectNode || !layoutObjectNode->layoutObject())
             layoutObjectNode = position.anchorNode()->lastChild();
         break;
 
-    case Position::PositionIsBeforeAnchor:
-    case Position::PositionIsAfterAnchor:
+    case PositionAnchorType::BeforeAnchor:
+    case PositionAnchorType::AfterAnchor:
         break;
 
-    case Position::PositionIsBeforeChildren:
+    case PositionAnchorType::BeforeChildren:
         layoutObjectNode = position.anchorNode()->firstChild();
         break;
-    case Position::PositionIsAfterChildren:
+    case PositionAnchorType::AfterChildren:
         layoutObjectNode = position.anchorNode()->lastChild();
         break;
     }
@@ -74,14 +75,16 @@ RenderedPosition::RenderedPosition(const VisiblePosition& position)
 {
     if (position.isNull())
         return;
-    position.getInlineBoxAndOffset(m_inlineBox, m_offset);
+    InlineBoxPosition boxPosition = computeInlineBoxPosition(position);
+    m_inlineBox = boxPosition.inlineBox;
+    m_offset = boxPosition.offsetInBox;
     if (m_inlineBox)
         m_layoutObject = &m_inlineBox->layoutObject();
     else
         m_layoutObject = layoutObjectFromPosition(position.deepEquivalent());
 }
 
-RenderedPosition::RenderedPosition(const Position& position, EAffinity affinity)
+RenderedPosition::RenderedPosition(const Position& position, TextAffinity affinity)
     : m_layoutObject(nullptr)
     , m_inlineBox(nullptr)
     , m_offset(0)
@@ -90,11 +93,18 @@ RenderedPosition::RenderedPosition(const Position& position, EAffinity affinity)
 {
     if (position.isNull())
         return;
-    position.getInlineBoxAndOffset(affinity, m_inlineBox, m_offset);
+    InlineBoxPosition boxPosition = computeInlineBoxPosition(position, affinity);
+    m_inlineBox = boxPosition.inlineBox;
+    m_offset = boxPosition.offsetInBox;
     if (m_inlineBox)
         m_layoutObject = &m_inlineBox->layoutObject();
     else
         m_layoutObject = layoutObjectFromPosition(position);
+}
+
+RenderedPosition::RenderedPosition(const PositionInComposedTree& position, TextAffinity affinity)
+    : RenderedPosition(toPositionInDOMTree(position), affinity)
+{
 }
 
 InlineBox* RenderedPosition::prevLeafChild() const
@@ -209,9 +219,9 @@ Position RenderedPosition::positionAtLeftBoundaryOfBiDiRun() const
     ASSERT(atLeftBoundaryOfBidiRun());
 
     if (atLeftmostOffsetInBox())
-        return createLegacyEditingPosition(m_layoutObject->node(), m_offset);
+        return Position::editingPositionOf(m_layoutObject->node(), m_offset);
 
-    return createLegacyEditingPosition(nextLeafChild()->layoutObject().node(), nextLeafChild()->caretLeftmostOffset());
+    return Position::editingPositionOf(nextLeafChild()->layoutObject().node(), nextLeafChild()->caretLeftmostOffset());
 }
 
 Position RenderedPosition::positionAtRightBoundaryOfBiDiRun() const
@@ -219,9 +229,9 @@ Position RenderedPosition::positionAtRightBoundaryOfBiDiRun() const
     ASSERT(atRightBoundaryOfBidiRun());
 
     if (atRightmostOffsetInBox())
-        return createLegacyEditingPosition(m_layoutObject->node(), m_offset);
+        return Position::editingPositionOf(m_layoutObject->node(), m_offset);
 
-    return createLegacyEditingPosition(prevLeafChild()->layoutObject().node(), prevLeafChild()->caretRightmostOffset());
+    return Position::editingPositionOf(prevLeafChild()->layoutObject().node(), prevLeafChild()->caretRightmostOffset());
 }
 
 IntRect RenderedPosition::absoluteRect(LayoutUnit* extraWidthToEndOfLine) const

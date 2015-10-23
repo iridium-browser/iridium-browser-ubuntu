@@ -6,19 +6,10 @@
 
 namespace content {
 
-AXEventNotificationDetails::AXEventNotificationDetails(
-    int node_id_to_clear,
-    const std::vector<ui::AXNodeData>& nodes,
-    ui::AXEvent event_type,
-    int id,
-    int process_id,
-    int routing_id)
-    : node_id_to_clear(node_id_to_clear),
-      nodes(nodes),
-      event_type(event_type),
-      id(id),
-      process_id(process_id),
-      routing_id(routing_id) {
+AXEventNotificationDetails::AXEventNotificationDetails()
+    : event_type(ui::AX_EVENT_NONE),
+      id(-1),
+      ax_tree_id(-1) {
 }
 
 AXEventNotificationDetails::~AXEventNotificationDetails() {}

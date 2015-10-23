@@ -6,20 +6,22 @@
 
 #include "base/command_line.h"
 #include "base/guid.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/dom_distiller/content/dom_distiller_viewer_source.h"
+#include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
+#include "components/dom_distiller/content/browser/dom_distiller_viewer_source.h"
 #include "components/dom_distiller/core/article_entry.h"
 #include "components/dom_distiller/core/distilled_page_prefs.h"
 #include "components/dom_distiller/core/distiller.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/dom_distiller/core/dom_distiller_store.h"
+#include "components/dom_distiller/core/dom_distiller_switches.h"
 #include "components/dom_distiller/core/dom_distiller_test_util.h"
 #include "components/dom_distiller/core/fake_distiller.h"
 #include "components/dom_distiller/core/fake_distiller_page.h"
@@ -31,6 +33,7 @@
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/isolated_world_ids.h"
 #include "content/public/test/browser_test_utils.h"
 #include "grit/components_strings.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -84,6 +87,9 @@ class DomDistillerViewerSourceBrowserTest : public InProcessBrowserTest {
   ~DomDistillerViewerSourceBrowserTest() override {}
 
   void SetUpOnMainThread() override {
+    if (!DistillerJavaScriptWorldIdIsSet()) {
+      SetDistillerJavaScriptWorldId(content::ISOLATED_WORLD_ID_CONTENT_END);
+    }
     database_model_ = new FakeDB<ArticleEntry>::EntryMap;
   }
 
@@ -93,22 +99,19 @@ class DomDistillerViewerSourceBrowserTest : public InProcessBrowserTest {
     command_line->AppendSwitch(switches::kEnableDomDistiller);
   }
 
-  static KeyedService* Build(content::BrowserContext* context) {
+  static scoped_ptr<KeyedService> Build(content::BrowserContext* context) {
     FakeDB<ArticleEntry>* fake_db = new FakeDB<ArticleEntry>(database_model_);
     distiller_factory_ = new MockDistillerFactory();
     MockDistillerPageFactory* distiller_page_factory_ =
         new MockDistillerPageFactory();
-    DomDistillerContextKeyedService* service =
+    scoped_ptr<DomDistillerContextKeyedService> service(
         new DomDistillerContextKeyedService(
-            scoped_ptr<DomDistillerStoreInterface>(
-                CreateStoreWithFakeDB(fake_db,
-                                      FakeDB<ArticleEntry>::EntryMap())),
+            scoped_ptr<DomDistillerStoreInterface>(CreateStoreWithFakeDB(
+                fake_db, FakeDB<ArticleEntry>::EntryMap())),
             scoped_ptr<DistillerFactory>(distiller_factory_),
             scoped_ptr<DistillerPageFactory>(distiller_page_factory_),
-            scoped_ptr<DistilledPagePrefs>(
-                new DistilledPagePrefs(
-                      Profile::FromBrowserContext(
-                          context)->GetPrefs())));
+            scoped_ptr<DistilledPagePrefs>(new DistilledPagePrefs(
+                Profile::FromBrowserContext(context)->GetPrefs()))));
     fake_db->InitCallback(true);
     fake_db->LoadCallback(true);
     if (expect_distillation_) {
@@ -123,7 +126,7 @@ class DomDistillerViewerSourceBrowserTest : public InProcessBrowserTest {
       EXPECT_CALL(*distiller_page_factory_, CreateDistillerPageImpl())
           .WillOnce(testing::Return(distiller_page));
     }
-    return service;
+    return service.Pass();
   }
 
   void ViewSingleDistilledPage(const GURL& url,
@@ -257,6 +260,64 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
+                       EarlyTemplateLoad) {
+  dom_distiller::DomDistillerServiceFactory::GetInstance()
+      ->SetTestingFactoryAndUse(browser()->profile(), &Build);
+
+  scoped_refptr<content::MessageLoopRunner> distillation_done_runner =
+      new content::MessageLoopRunner;
+
+  FakeDistiller* distiller = new FakeDistiller(
+      false,
+      distillation_done_runner->QuitClosure());
+  EXPECT_CALL(*distiller_factory_, CreateDistillerImpl())
+      .WillOnce(testing::Return(distiller));
+
+  // Navigate to a URL.
+  GURL url(dom_distiller::url_utils::GetDistillerViewUrlFromUrl(
+      kDomDistillerScheme, GURL("http://urlthatlooksvalid.com")));
+  chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_TYPED);
+  chrome::Navigate(&params);
+  distillation_done_runner->Run();
+
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Wait for the page load to complete (should only be template).
+  content::WaitForLoadStop(contents);
+  std::string result;
+  // Loading spinner should be on screen at this point.
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      contents, kGetLoadIndicatorClassName , &result));
+  EXPECT_EQ("visible", result);
+
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      contents, kGetContent , &result));
+  EXPECT_THAT(result, Not(HasSubstr("content")));
+
+  // Finish distillation and make sure the spinner has been replaced by text.
+  std::vector<scoped_refptr<ArticleDistillationUpdate::RefCountedPageProto> >
+      update_pages;
+  scoped_ptr<DistilledArticleProto> article(new DistilledArticleProto());
+
+  scoped_refptr<base::RefCountedData<DistilledPageProto> > page_proto =
+      new base::RefCountedData<DistilledPageProto>();
+  page_proto->data.set_url("http://foo.html");
+  page_proto->data.set_html("<div>content</div>");
+  update_pages.push_back(page_proto);
+  *(article->add_pages()) = page_proto->data;
+
+  ArticleDistillationUpdate update(update_pages, true, false);
+  distiller->RunDistillerUpdateCallback(update);
+
+  content::WaitForLoadStop(contents);
+
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      contents, kGetContent , &result));
+  EXPECT_THAT(result, HasSubstr("content"));
+}
+
+IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
                        MultiPageArticle) {
   expect_distillation_ = false;
   expect_distiller_page_ = true;
@@ -331,7 +392,7 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
     std::string result;
     EXPECT_TRUE(content::ExecuteScriptAndExtractString(
         contents, kGetLoadIndicatorClassName , &result));
-    EXPECT_EQ("visible", result);
+    EXPECT_EQ("hidden", result);
 
     EXPECT_TRUE(content::ExecuteScriptAndExtractString(
         contents, kGetContent , &result));

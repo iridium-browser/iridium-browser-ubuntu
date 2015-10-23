@@ -8,16 +8,19 @@ import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
+import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
+import android.text.TextUtils;
 import android.util.Pair;
 import android.view.Surface;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.library_loader.Linker;
 import org.chromium.content.app.ChildProcessService;
 import org.chromium.content.app.ChromiumLinkerParams;
@@ -26,6 +29,7 @@ import org.chromium.content.app.SandboxedProcessService;
 import org.chromium.content.common.IChildProcessCallback;
 import org.chromium.content.common.SurfaceWrapper;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.Map;
@@ -37,7 +41,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @JNINamespace("content")
 public class ChildProcessLauncher {
-    private static final String TAG = "ChildProcessLauncher";
+    private static final String TAG = "cr.ChildProcessLaunch";
 
     static final int CALLBACK_FOR_UNKNOWN_PROCESS = 0;
     static final int CALLBACK_FOR_GPU_PROCESS = 1;
@@ -86,8 +90,8 @@ public class ChildProcessLauncher {
                 mChildProcessConnections[slot] = new ChildProcessConnectionImpl(context, slot,
                         mInSandbox, deathCallback, mChildClass, chromiumLinkerParams,
                         alwaysInForeground);
-                Log.d(TAG, "Allocator allocated a connection, sandbox: " + mInSandbox
-                        + ", slot: " + slot);
+                Log.d(TAG, "Allocator allocated a connection, sandbox: %b, slot: %d", mInSandbox,
+                        slot);
                 return mChildProcessConnections[slot];
             }
         }
@@ -98,16 +102,22 @@ public class ChildProcessLauncher {
                 if (mChildProcessConnections[slot] != connection) {
                     int occupier = mChildProcessConnections[slot] == null
                             ? -1 : mChildProcessConnections[slot].getServiceNumber();
-                    Log.e(TAG, "Unable to find connection to free in slot: " + slot
-                            + " already occupied by service: " + occupier);
+                    Log.e(TAG, "Unable to find connection to free in slot: %d "
+                            + "already occupied by service: %d", slot, occupier);
                     assert false;
                 } else {
                     mChildProcessConnections[slot] = null;
                     assert !mFreeConnectionIndices.contains(slot);
                     mFreeConnectionIndices.add(slot);
-                    Log.d(TAG, "Allocator freed a connection, sandbox: " + mInSandbox
-                            + ", slot: " + slot);
+                    Log.d(TAG, "Allocator freed a connection, sandbox: %b, slot: %d", mInSandbox,
+                            slot);
                 }
+            }
+        }
+
+        public boolean isFreeConnectionAvailable() {
+            synchronized (mConnectionLock) {
+                return !mFreeConnectionIndices.isEmpty();
             }
         }
 
@@ -212,6 +222,9 @@ public class ChildProcessLauncher {
             "org.chromium.content.browser.NUM_SANDBOXED_SERVICES";
     private static final String NUM_PRIVILEGED_SERVICES_KEY =
             "org.chromium.content.browser.NUM_PRIVILEGED_SERVICES";
+    // Overrides the number of available sandboxed services.
+    @VisibleForTesting
+    public static final String SWITCH_NUM_SANDBOXED_SERVICES_FOR_TESTING = "num-sandboxed-services";
 
     private static int getNumberOfServices(Context context, boolean inSandbox) {
         try {
@@ -220,6 +233,20 @@ public class ChildProcessLauncher {
                     PackageManager.GET_META_DATA);
             int numServices = appInfo.metaData.getInt(inSandbox ? NUM_SANDBOXED_SERVICES_KEY
                     : NUM_PRIVILEGED_SERVICES_KEY);
+            if (inSandbox
+                    && CommandLine.getInstance().hasSwitch(
+                               SWITCH_NUM_SANDBOXED_SERVICES_FOR_TESTING)) {
+                String value = CommandLine.getInstance().getSwitchValue(
+                        SWITCH_NUM_SANDBOXED_SERVICES_FOR_TESTING);
+                if (!TextUtils.isEmpty(value)) {
+                    try {
+                        numServices = Integer.parseInt(value);
+                    } catch (NumberFormatException e) {
+                        Log.w(TAG, "The value of --num-sandboxed-services is formatted wrongly: "
+                                        + value);
+                    }
+                }
+            }
             if (numServices <= 0) {
                 throw new RuntimeException("Illegal meta data value for number of child services");
             }
@@ -269,9 +296,10 @@ public class ChildProcessLauncher {
     private static long sLinkerLoadAddress = 0;
 
     private static ChromiumLinkerParams getLinkerParamsForNewConnection() {
+        Linker linker = Linker.getInstance();
         if (!sLinkerInitialized) {
-            if (Linker.isUsed()) {
-                sLinkerLoadAddress = Linker.getBaseLoadAddress();
+            if (linker.isUsed()) {
+                sLinkerLoadAddress = linker.getBaseLoadAddress();
                 if (sLinkerLoadAddress == 0) {
                     Log.i(TAG, "Shared RELRO support disabled!");
                 }
@@ -285,7 +313,7 @@ public class ChildProcessLauncher {
         final boolean waitForSharedRelros = true;
         return new ChromiumLinkerParams(sLinkerLoadAddress,
                                 waitForSharedRelros,
-                                Linker.getTestRunnerClassName());
+                                linker.getTestRunnerClassName());
     }
 
     private static ChildProcessConnection allocateBoundConnection(Context context,
@@ -295,6 +323,13 @@ public class ChildProcessLauncher {
                 allocateConnection(context, inSandbox, chromiumLinkerParams, alwaysInForeground);
         if (connection != null) {
             connection.start(commandLine);
+
+            if (inSandbox && !sSandboxedChildConnectionAllocator.isFreeConnectionAvailable()) {
+                // Proactively releases all the moderate bindings once all the sandboxed services
+                // are allocated, which will be very likely to have some of them killed by OOM
+                // killer.
+                sBindingManager.releaseAllModerateBindings();
+            }
         }
         return connection;
     }
@@ -302,6 +337,10 @@ public class ChildProcessLauncher {
     private static final long FREE_CONNECTION_DELAY_MILLIS = 1;
 
     private static void freeConnection(ChildProcessConnection connection) {
+        synchronized (ChildProcessLauncher.class) {
+            if (connection.equals(sSpareSandboxedConnection)) sSpareSandboxedConnection = null;
+        }
+
         // Freeing a service should be delayed. This is so that we avoid immediately reusing the
         // freed service (see http://crbug.com/164069): the framework might keep a service process
         // alive when it's been unbound for a short time. If a new connection to the same service
@@ -440,6 +479,15 @@ public class ChildProcessLauncher {
     }
 
     /**
+     * Starts moderate binding management.
+     */
+    public static void startModerateBindingManagement(
+            Context context, float lowReduceRatio, float highReduceRatio) {
+        sBindingManager.startModerateBindingManagement(
+                context, getNumberOfServices(context, true), lowReduceRatio, highReduceRatio);
+    }
+
+    /**
      * Called when the embedding application is brought to foreground.
      */
     public static void onBroughtToForeground() {
@@ -483,6 +531,24 @@ public class ChildProcessLauncher {
         return null;
     }
 
+    @CalledByNative
+    private static FileDescriptorInfo makeFdInfo(
+            int id, int fd, boolean autoClose, long offset, long size) {
+        ParcelFileDescriptor pFd;
+        if (autoClose) {
+            // Adopt the FD, it will be closed when we close the ParcelFileDescriptor.
+            pFd = ParcelFileDescriptor.adoptFd(fd);
+        } else {
+            try {
+                pFd = ParcelFileDescriptor.fromFd(fd);
+            } catch (IOException e) {
+                Log.e(TAG, "Invalid FD provided for process connection, aborting connection.", e);
+                return null;
+            }
+        }
+        return new FileDescriptorInfo(id, pFd, offset, size);
+    }
+
     /**
      * Spawns and connects to a child process. May be called on any thread. It will not block, but
      * will instead callback to {@link #nativeOnChildProcessStarted} when the connection is
@@ -491,27 +557,12 @@ public class ChildProcessLauncher {
      *
      * @param context Context used to obtain the application context.
      * @param commandLine The child process command line argv.
-     * @param fileIds The ID that should be used when mapping files in the created process.
-     * @param fileFds The file descriptors that should be mapped in the created process.
-     * @param fileAutoClose Whether the file descriptors should be closed once they were passed to
-     * the created process.
+     * @param filesToBeMapped File IDs, FDs, offsets, and lengths to pass through.
      * @param clientContext Arbitrary parameter used by the client to distinguish this connection.
      */
     @CalledByNative
-    static void start(
-            Context context,
-            final String[] commandLine,
-            int childProcessId,
-            int[] fileIds,
-            int[] fileFds,
-            boolean[] fileAutoClose,
-            long clientContext) {
-        assert fileIds.length == fileFds.length && fileFds.length == fileAutoClose.length;
-        FileDescriptorInfo[] filesToBeMapped = new FileDescriptorInfo[fileFds.length];
-        for (int i = 0; i < fileFds.length; i++) {
-            filesToBeMapped[i] =
-                    new FileDescriptorInfo(fileIds[i], fileFds[i], fileAutoClose[i]);
-        }
+    private static void start(Context context, final String[] commandLine, int childProcessId,
+            FileDescriptorInfo[] filesToBeMapped, long clientContext) {
         assert clientContext != 0;
 
         int callbackType = CALLBACK_FOR_UNKNOWN_PROCESS;
@@ -565,8 +616,8 @@ public class ChildProcessLauncher {
                 }
             }
 
-            Log.d(TAG, "Setting up connection to process: slot="
-                    + allocatedConnection.getServiceNumber());
+            Log.d(TAG, "Setting up connection to process: slot=%d",
+                    allocatedConnection.getServiceNumber());
             triggerConnectionSetup(allocatedConnection, commandLine, childProcessId,
                     filesToBeMapped, callbackType, clientContext);
         } finally {
@@ -586,8 +637,8 @@ public class ChildProcessLauncher {
                 new ChildProcessConnection.ConnectionCallback() {
                     @Override
                     public void onConnected(int pid) {
-                        Log.d(TAG, "on connect callback, pid=" + pid + " context=" + clientContext
-                                + " callbackType=" + callbackType);
+                        Log.d(TAG, "on connect callback, pid=%d context=%d callbackType=%d",
+                                pid, clientContext, callbackType);
                         if (pid != NULL_PROCESS_HANDLE) {
                             sBindingManager.addNewConnection(pid, connection);
                             sServiceMap.put(pid, connection);
@@ -606,7 +657,7 @@ public class ChildProcessLauncher {
                                    filesToBeMapped,
                                    createCallback(childProcessId, callbackType),
                                    connectionCallback,
-                                   Linker.getSharedRelros());
+                                   Linker.getInstance().getSharedRelros());
     }
 
     /**
@@ -616,7 +667,7 @@ public class ChildProcessLauncher {
      */
     @CalledByNative
     static void stop(int pid) {
-        Log.d(TAG, "stopping child connection: pid=" + pid);
+        Log.d(TAG, "stopping child connection: pid=%d", pid);
         ChildProcessConnection connection = sServiceMap.remove(pid);
         if (connection == null) {
             logPidWarning(pid, "Tried to stop non-existent connection");
@@ -708,7 +759,7 @@ public class ChildProcessLauncher {
     static void logPidWarning(int pid, String message) {
         // This class is effectively a no-op in single process mode, so don't log warnings there.
         if (pid > 0 && !nativeIsSingleProcess()) {
-            Log.w(TAG, message + ", pid=" + pid);
+            Log.w(TAG, "%s, pid=%d", message, pid);
         }
     }
 

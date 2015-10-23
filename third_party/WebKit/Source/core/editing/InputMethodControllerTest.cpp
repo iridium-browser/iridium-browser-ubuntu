@@ -7,15 +7,14 @@
 
 #include "core/dom/Element.h"
 #include "core/dom/Range.h"
+#include "core/editing/FrameSelection.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLDocument.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/testing/DummyPageHolder.h"
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
+namespace blink {
 
 class InputMethodControllerTest : public ::testing::Test {
 protected:
@@ -25,10 +24,10 @@ protected:
     Element* insertHTMLElement(const char* elementCode, const char* elementId);
 
 private:
-    virtual void SetUp() override;
+    void SetUp() override;
 
     OwnPtr<DummyPageHolder> m_dummyPageHolder;
-    HTMLDocument* m_document;
+    RefPtrWillBePersistent<HTMLDocument> m_document;
 };
 
 void InputMethodControllerTest::SetUp()
@@ -108,6 +107,20 @@ TEST_F(InputMethodControllerTest, SetCompositionFromExistingText)
     EXPECT_EQ(5u, plainTextRange.end());
 }
 
+TEST_F(InputMethodControllerTest, SelectionOnConfirmExistingText)
+{
+    insertHTMLElement(
+        "<div id='sample' contenteditable='true'>hello world</div>", "sample");
+
+    Vector<CompositionUnderline> underlines;
+    underlines.append(CompositionUnderline(0, 5, Color(255, 0, 0), false, 0));
+    controller().setCompositionFromExistingText(underlines, 0, 5);
+
+    controller().confirmComposition();
+    EXPECT_EQ(0, frame().selection().start().computeOffsetInContainerNode());
+    EXPECT_EQ(0, frame().selection().end().computeOffsetInContainerNode());
+}
+
 TEST_F(InputMethodControllerTest, SetCompositionFromExistingTextWithCollapsedWhiteSpace)
 {
     // Creates a div with one leading new line char. The new line char is hidden
@@ -139,4 +152,4 @@ TEST_F(InputMethodControllerTest, SetCompositionFromExistingTextWithInvalidOffse
     EXPECT_FALSE(controller().compositionRange());
 }
 
-} // namespace
+} // namespace blink

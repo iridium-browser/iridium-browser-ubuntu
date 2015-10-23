@@ -354,6 +354,28 @@ typedef pthread_once_t CRYPTO_once_t;
 OPENSSL_EXPORT void CRYPTO_once(CRYPTO_once_t *once, void (*init)(void));
 
 
+/* Reference counting. */
+
+/* CRYPTO_REFCOUNT_MAX is the value at which the reference count saturates. */
+#define CRYPTO_REFCOUNT_MAX 0xffffffff
+
+/* CRYPTO_refcount_inc atomically increments the value at |*count| unless the
+ * value would overflow. It's safe for multiple threads to concurrently call
+ * this or |CRYPTO_refcount_dec_and_test_zero| on the same
+ * |CRYPTO_refcount_t|. */
+OPENSSL_EXPORT void CRYPTO_refcount_inc(CRYPTO_refcount_t *count);
+
+/* CRYPTO_refcount_dec_and_test_zero tests the value at |*count|:
+ *   if it's zero, it crashes the address space.
+ *   if it's the maximum value, it returns zero.
+ *   otherwise, it atomically decrements it and returns one iff the resulting
+ *       value is zero.
+ *
+ * It's safe for multiple threads to concurrently call this or
+ * |CRYPTO_refcount_inc| on the same |CRYPTO_refcount_t|. */
+OPENSSL_EXPORT int CRYPTO_refcount_dec_and_test_zero(CRYPTO_refcount_t *count);
+
+
 /* Locks.
  *
  * Two types of locks are defined: |CRYPTO_MUTEX|, which can be used in
@@ -387,37 +409,40 @@ struct CRYPTO_STATIC_MUTEX {
 
 /* CRYPTO_MUTEX_init initialises |lock|. If |lock| is a static variable, use a
  * |CRYPTO_STATIC_MUTEX|. */
-void CRYPTO_MUTEX_init(CRYPTO_MUTEX *lock);
+OPENSSL_EXPORT void CRYPTO_MUTEX_init(CRYPTO_MUTEX *lock);
 
 /* CRYPTO_MUTEX_lock_read locks |lock| such that other threads may also have a
  * read lock, but none may have a write lock. (On Windows, read locks are
  * actually fully exclusive.) */
-void CRYPTO_MUTEX_lock_read(CRYPTO_MUTEX *lock);
+OPENSSL_EXPORT void CRYPTO_MUTEX_lock_read(CRYPTO_MUTEX *lock);
 
 /* CRYPTO_MUTEX_lock_write locks |lock| such that no other thread has any type
  * of lock on it. */
-void CRYPTO_MUTEX_lock_write(CRYPTO_MUTEX *lock);
+OPENSSL_EXPORT void CRYPTO_MUTEX_lock_write(CRYPTO_MUTEX *lock);
 
 /* CRYPTO_MUTEX_unlock unlocks |lock|. */
-void CRYPTO_MUTEX_unlock(CRYPTO_MUTEX *lock);
+OPENSSL_EXPORT void CRYPTO_MUTEX_unlock(CRYPTO_MUTEX *lock);
 
 /* CRYPTO_MUTEX_cleanup releases all resources held by |lock|. */
-void CRYPTO_MUTEX_cleanup(CRYPTO_MUTEX *lock);
+OPENSSL_EXPORT void CRYPTO_MUTEX_cleanup(CRYPTO_MUTEX *lock);
 
 /* CRYPTO_STATIC_MUTEX_lock_read locks |lock| such that other threads may also
  * have a read lock, but none may have a write lock. The |lock| variable does
  * not need to be initialised by any function, but must have been statically
  * initialised with |CRYPTO_STATIC_MUTEX_INIT|. */
-void CRYPTO_STATIC_MUTEX_lock_read(struct CRYPTO_STATIC_MUTEX *lock);
+OPENSSL_EXPORT void CRYPTO_STATIC_MUTEX_lock_read(
+    struct CRYPTO_STATIC_MUTEX *lock);
 
 /* CRYPTO_STATIC_MUTEX_lock_write locks |lock| such that no other thread has
  * any type of lock on it.  The |lock| variable does not need to be initialised
  * by any function, but must have been statically initialised with
  * |CRYPTO_STATIC_MUTEX_INIT|. */
-void CRYPTO_STATIC_MUTEX_lock_write(struct CRYPTO_STATIC_MUTEX *lock);
+OPENSSL_EXPORT void CRYPTO_STATIC_MUTEX_lock_write(
+    struct CRYPTO_STATIC_MUTEX *lock);
 
 /* CRYPTO_STATIC_MUTEX_unlock unlocks |lock|. */
-void CRYPTO_STATIC_MUTEX_unlock(struct CRYPTO_STATIC_MUTEX *lock);
+OPENSSL_EXPORT void CRYPTO_STATIC_MUTEX_unlock(
+    struct CRYPTO_STATIC_MUTEX *lock);
 
 
 /* Thread local storage. */
@@ -468,9 +493,14 @@ typedef struct crypto_ex_data_func_st CRYPTO_EX_DATA_FUNCS;
 typedef struct {
   struct CRYPTO_STATIC_MUTEX lock;
   STACK_OF(CRYPTO_EX_DATA_FUNCS) *meth;
+  /* num_reserved is one if the ex_data index zero is reserved for legacy
+   * |TYPE_get_app_data| functions. */
+  uint8_t num_reserved;
 } CRYPTO_EX_DATA_CLASS;
 
-#define CRYPTO_EX_DATA_CLASS_INIT {CRYPTO_STATIC_MUTEX_INIT, NULL}
+#define CRYPTO_EX_DATA_CLASS_INIT {CRYPTO_STATIC_MUTEX_INIT, NULL, 0}
+#define CRYPTO_EX_DATA_CLASS_INIT_WITH_APP_DATA \
+    {CRYPTO_STATIC_MUTEX_INIT, NULL, 1}
 
 /* CRYPTO_get_ex_new_index allocates a new index for |ex_data_class| and writes
  * it to |*out_index|. Each class of object should provide a wrapper function

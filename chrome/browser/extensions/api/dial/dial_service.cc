@@ -10,13 +10,16 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/extensions/api/dial/dial_device_data.h"
-#include "chrome/common/chrome_version_info.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
@@ -87,7 +90,6 @@ bool GetHeader(HttpResponseHeaders* headers, const char* name,
 // Returns the request string.
 std::string BuildRequest() {
   // Extra line at the end to make UPnP lib happy.
-  chrome::VersionInfo version;
   std::string request(base::StringPrintf(
       "M-SEARCH * HTTP/1.1\r\n"
       "HOST: %s:%u\r\n"
@@ -100,9 +102,9 @@ std::string BuildRequest() {
       kDialRequestPort,
       kDialMaxResponseDelaySecs,
       kDialSearchType,
-      version.Name().c_str(),
-      version.Version().c_str(),
-      version.OSType().c_str()));
+      version_info::GetProductName().c_str(),
+      version_info::GetVersionNumber().c_str(),
+      version_info::GetOSType().c_str()));
   // 1500 is a good MTU value for most Ethernet LANs.
   DCHECK(request.size() <= 1500);
   return request;
@@ -110,7 +112,7 @@ std::string BuildRequest() {
 
 #if !defined(OS_CHROMEOS)
 void GetNetworkListOnFileThread(
-    const scoped_refptr<base::MessageLoopProxy>& loop,
+    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
     const base::Callback<void(const NetworkInterfaceList& networks)>& cb) {
   NetworkInterfaceList list;
   bool success = net::GetNetworkList(
@@ -118,7 +120,7 @@ void GetNetworkListOnFileThread(
   if (!success)
     VLOG(1) << "Could not retrieve network list!";
 
-  loop->PostTask(FROM_HERE, base::Bind(cb, list));
+  task_runner->PostTask(FROM_HERE, base::Bind(cb, list));
 }
 
 #else
@@ -448,10 +450,11 @@ void DialServiceImpl::StartDiscovery() {
   DiscoverOnAddresses(chrome_os_address_list);
 
 #else
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE, base::Bind(
-      &GetNetworkListOnFileThread,
-      base::MessageLoopProxy::current(), base::Bind(
-          &DialServiceImpl::SendNetworkList, AsWeakPtr())));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&GetNetworkListOnFileThread,
+                 base::ThreadTaskRunnerHandle::Get(),
+                 base::Bind(&DialServiceImpl::SendNetworkList, AsWeakPtr())));
 #endif
 }
 

@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_IO_DATA_H_
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_IO_DATA_H_
 
+#include <string>
+
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
@@ -65,8 +67,6 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
   virtual void SetDataReductionProxyService(
       base::WeakPtr<DataReductionProxyService> data_reduction_proxy_service);
 
-  void RetrieveConfig();
-
   // Creates an interceptor suitable for following the Data Reduction Proxy
   // bypass protocol.
   scoped_ptr<net::URLRequestInterceptor> CreateInterceptor();
@@ -80,16 +80,24 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
       bool track_proxy_bypass_statistics);
 
   // Sets user defined preferences for how the Data Reduction Proxy
-  // configuration should be set. Use the alternative configuration only if
-  // |enabled| and |alternative_enabled| are true. |at_startup| is true only
+  // configuration should be set. |at_startup| is true only
   // when DataReductionProxySettings is initialized.
-  void SetProxyPrefs(bool enabled, bool alternative_enabled, bool at_startup);
+  void SetProxyPrefs(bool enabled, bool at_startup);
+
+  // Applies a serialized Data Reduction Proxy configuration.
+  void SetDataReductionProxyConfiguration(const std::string& serialized_config);
+
+  // Sets Lo-Fi mode off in |config_|.
+  void SetLoFiModeOff();
 
   // Bridge methods to safely call to the UI thread objects.
-  void UpdateContentLengths(int64 received_content_length,
-                            int64 original_content_length,
+  void UpdateContentLengths(int64 data_used,
+                            int64 original_size,
                             bool data_reduction_proxy_enabled,
-                            DataReductionProxyRequestType request_type);
+                            DataReductionProxyRequestType request_type,
+                            const std::string& data_usage_host,
+                            const std::string& mime_type);
+  void SetLoFiModeActiveOnMainFrame(bool lo_fi_mode_active);
 
   // Overrides of DataReductionProxyEventStorageDelegate. Bridges to the UI
   // thread objects.
@@ -173,6 +181,13 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
 
   // Stores an int64 value in preferences storage.
   void SetInt64Pref(const std::string& pref_path, int64 value);
+
+  // Stores a string value in preferences storage.
+  void SetStringPref(const std::string& pref_path, const std::string& value);
+
+  // Stores a serialized Data Reduction Proxy configuration in preferences
+  // storage.
+  void StoreSerializedConfig(const std::string& serialized_config);
 
   // The type of Data Reduction Proxy client.
   Client client_;

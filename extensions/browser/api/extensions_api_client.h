@@ -14,13 +14,19 @@
 
 class GURL;
 
+namespace base {
 template <class T>
 class ObserverListThreadSafe;
+}
 
 namespace content {
 class BrowserContext;
 class WebContents;
 }
+
+namespace guest_view {
+class GuestViewManagerDelegate;
+}  // namespace guest_view
 
 namespace extensions {
 
@@ -29,8 +35,6 @@ class ContentRulesRegistry;
 class DevicePermissionsPrompt;
 class ExtensionOptionsGuest;
 class ExtensionOptionsGuestDelegate;
-class ExtensionViewGuest;
-class ExtensionViewGuestDelegate;
 class ManagementAPIDelegate;
 class MimeHandlerViewGuest;
 class MimeHandlerViewGuestDelegate;
@@ -66,8 +70,14 @@ class ExtensionsAPIClient {
   virtual void AddAdditionalValueStoreCaches(
       content::BrowserContext* context,
       const scoped_refptr<SettingsStorageFactory>& factory,
-      const scoped_refptr<ObserverListThreadSafe<SettingsObserver> >& observers,
+      const scoped_refptr<base::ObserverListThreadSafe<SettingsObserver>>&
+          observers,
       std::map<settings_namespace::Namespace, ValueStoreCache*>* caches);
+
+  // Attaches any extra web contents helpers (like ExtensionWebContentsObserver)
+  // to |web_contents|.
+  virtual void AttachWebContentsHelpers(content::WebContents* web_contents)
+      const;
 
   // Creates the AppViewGuestDelegate.
   virtual AppViewGuestDelegate* CreateAppViewGuestDelegate() const;
@@ -77,10 +87,9 @@ class ExtensionsAPIClient {
   virtual ExtensionOptionsGuestDelegate* CreateExtensionOptionsGuestDelegate(
       ExtensionOptionsGuest* guest) const;
 
-  // Returns a delegate for ExtensionViewGuest. The caller owns the returned
-  // ExtensionViewGuestDelegate.
-  virtual ExtensionViewGuestDelegate* CreateExtensionViewGuestDelegate(
-      ExtensionViewGuest* guest) const;
+  // Returns a delegate for GuestViewManagerDelegate.
+  virtual scoped_ptr<guest_view::GuestViewManagerDelegate>
+  CreateGuestViewManagerDelegate(content::BrowserContext* context) const;
 
   // Creates a delegate for MimeHandlerViewGuest.
   virtual scoped_ptr<MimeHandlerViewGuestDelegate>

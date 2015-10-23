@@ -4,13 +4,14 @@
 
 #include "net/ssl/ssl_config.h"
 
+#include "net/cert/cert_verifier.h"
 #include "net/socket/ssl_client_socket.h"
 
 namespace net {
 
 const uint16 kDefaultSSLVersionMin = SSL_PROTOCOL_VERSION_TLS1;
 
-const uint16 kDefaultSSLVersionFallbackMin = SSL_PROTOCOL_VERSION_TLS1;
+const uint16 kDefaultSSLVersionFallbackMin = SSL_PROTOCOL_VERSION_TLS1_1;
 
 SSLConfig::CertAndStatus::CertAndStatus() : cert_status(0) {}
 
@@ -31,10 +32,7 @@ SSLConfig::SSLConfig()
       verify_ev_cert(false),
       version_fallback(false),
       cert_io_enabled(true),
-      renego_allowed_default(false),
-      fastradio_padding_enabled(false),
-      fastradio_padding_eligible(false) {
-}
+      renego_allowed_default(false) {}
 
 SSLConfig::~SSLConfig() {}
 
@@ -56,6 +54,19 @@ bool SSLConfig::IsAllowedBadCert(const base::StringPiece& der_cert,
     }
   }
   return false;
+}
+
+int SSLConfig::GetCertVerifyFlags() const {
+  int flags = 0;
+  if (rev_checking_enabled)
+    flags |= CertVerifier::VERIFY_REV_CHECKING_ENABLED;
+  if (verify_ev_cert)
+    flags |= CertVerifier::VERIFY_EV_CERT;
+  if (cert_io_enabled)
+    flags |= CertVerifier::VERIFY_CERT_IO_ENABLED;
+  if (rev_checking_required_local_anchors)
+    flags |= CertVerifier::VERIFY_REV_CHECKING_REQUIRED_LOCAL_ANCHORS;
+  return flags;
 }
 
 }  // namespace net

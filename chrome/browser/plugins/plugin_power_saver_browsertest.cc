@@ -10,6 +10,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/ui/zoom/zoom_controller.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/ppapi_test_utils.h"
@@ -93,7 +94,7 @@ void VerifyPluginMarkedEssential(content::WebContents* contents,
 
 }  // namespace
 
-class PluginPowerSaverBrowserTest : virtual public InProcessBrowserTest {
+class PluginPowerSaverBrowserTest : public InProcessBrowserTest {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnablePluginPowerSaver);
@@ -170,10 +171,14 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, SmallCrossOrigin) {
 
 IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, LargeCrossOrigin) {
   LoadHTML(
-      "<object id='plugin' data='http://otherorigin.com/fake.swf' "
+      "<object id='large' data='http://otherorigin.com/fake.swf' "
       "    type='application/x-ppapi-tests' width='400' height='500'>"
+      "</object>"
+      "<object id='medium_16_9' data='http://otherorigin.com/fake.swf' "
+      "    type='application/x-ppapi-tests' width='480' height='270'>"
       "</object>");
-  VerifyPluginMarkedEssential(GetActiveWebContents(), "plugin");
+  VerifyPluginMarkedEssential(GetActiveWebContents(), "large");
+  VerifyPluginMarkedEssential(GetActiveWebContents(), "medium_16_9");
 }
 
 IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest,
@@ -224,12 +229,31 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, OriginWhitelisting) {
 
 IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, LargeCrossOriginObscured) {
   LoadHTML(
-      "<div style='width: 100px; height: 100px; overflow: hidden;'>"
+      "<div id='container' "
+      "    style='width: 400px; height: 100px; overflow: hidden;'>"
       "  <object id='plugin' data='http://otherorigin.com/fake.swf' "
       "      type='application/x-ppapi-tests' width='400' height='500'>"
       "  </object>"
       "</div>");
   VerifyPluginIsThrottled(GetActiveWebContents(), "plugin");
+
+  // Test that's unthrottled if it is unobscured.
+  std::string script =
+      "var container = window.document.getElementById('container');"
+      "container.setAttribute('style', 'width: 400px; height: 400px;');";
+  ASSERT_TRUE(content::ExecuteScript(GetActiveWebContents(), script));
+  VerifyPluginMarkedEssential(GetActiveWebContents(), "plugin");
+}
+
+IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, ExpandingSmallPlugin) {
+  LoadHTML(
+      "<object id='plugin' data='http://otherorigin.com/fake.swf' "
+      "    type='application/x-ppapi-tests' width='400' height='80'></object>");
+  VerifyPluginIsThrottled(GetActiveWebContents(), "plugin");
+
+  std::string script = "window.document.getElementById('plugin').height = 400;";
+  ASSERT_TRUE(content::ExecuteScript(GetActiveWebContents(), script));
+  VerifyPluginMarkedEssential(GetActiveWebContents(), "plugin");
 }
 
 IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, BackgroundTabPlugins) {
@@ -256,4 +280,14 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, BackgroundTabPlugins) {
 
   VerifyPluginMarkedEssential(background_contents, "same_origin");
   VerifyPluginIsThrottled(background_contents, "small_cross_origin");
+}
+
+IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, ZoomIndependent) {
+  ui_zoom::ZoomController::FromWebContents(GetActiveWebContents())
+      ->SetZoomLevel(4.0);
+  LoadHTML(
+      "<object id='plugin' data='http://otherorigin.com/fake.swf' "
+      "    type='application/x-ppapi-tests' width='400' height='200'>"
+      "</object>");
+  VerifyPluginIsThrottled(GetActiveWebContents(), "plugin");
 }

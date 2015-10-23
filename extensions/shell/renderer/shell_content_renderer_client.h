@@ -15,6 +15,7 @@ namespace extensions {
 class Dispatcher;
 class DispatcherDelegate;
 class ExtensionsClient;
+class ExtensionsGuestViewContainerDispatcher;
 class ShellExtensionsRendererClient;
 class ShellRendererMainDelegate;
 
@@ -35,7 +36,6 @@ class ShellContentRendererClient : public content::ContentRendererClient {
   blink::WebPlugin* CreatePluginReplacement(
       content::RenderFrame* render_frame,
       const base::FilePath& plugin_path) override;
-  bool ShouldForwardToGuestContainer(const IPC::Message& msg) override;
   bool WillSendRequest(blink::WebFrame* frame,
                        ui::PageTransition transition_type,
                        const GURL& url,
@@ -43,7 +43,7 @@ class ShellContentRendererClient : public content::ContentRendererClient {
                        GURL* new_url) override;
   const void* CreatePPAPIInterface(const std::string& interface_name) override;
   bool IsExternalPepperPlugin(const std::string& module_name) override;
-  bool ShouldEnableSiteIsolationPolicy() const override;
+  bool ShouldGatherSiteIsolationStats() const override;
   content::BrowserPluginDelegate* CreateBrowserPluginDelegate(
       content::RenderFrame* render_frame,
       const std::string& mime_type,
@@ -59,6 +59,8 @@ class ShellContentRendererClient : public content::ContentRendererClient {
   scoped_ptr<ShellExtensionsRendererClient> extensions_renderer_client_;
   scoped_ptr<DispatcherDelegate> extension_dispatcher_delegate_;
   scoped_ptr<Dispatcher> extension_dispatcher_;
+  scoped_ptr<ExtensionsGuestViewContainerDispatcher>
+      guest_view_container_dispatcher_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellContentRendererClient);
 };

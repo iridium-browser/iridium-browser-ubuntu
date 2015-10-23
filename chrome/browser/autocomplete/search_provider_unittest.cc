@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/omnibox/search_provider.h"
+#include "components/omnibox/browser/search_provider.h"
 
 #include <string>
 
@@ -17,10 +17,8 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
-#include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
-#include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
@@ -34,13 +32,15 @@
 #include "components/google/core/browser/google_switches.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/omnibox/autocomplete_input.h"
-#include "components/omnibox/autocomplete_match.h"
-#include "components/omnibox/autocomplete_provider.h"
-#include "components/omnibox/autocomplete_provider_listener.h"
-#include "components/omnibox/omnibox_field_trial.h"
-#include "components/omnibox/omnibox_switches.h"
-#include "components/omnibox/suggestion_answer.h"
+#include "components/omnibox/browser/autocomplete_controller.h"
+#include "components/omnibox/browser/autocomplete_input.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_provider.h"
+#include "components/omnibox/browser/autocomplete_provider_listener.h"
+#include "components/omnibox/browser/history_url_provider.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
+#include "components/omnibox/browser/omnibox_switches.h"
+#include "components/omnibox/browser/suggestion_answer.h"
 #include "components/search_engines/search_engine_type.h"
 #include "components/search_engines/search_engines_switches.h"
 #include "components/search_engines/search_terms_data.h"
@@ -72,8 +72,8 @@ ACMatches::const_iterator FindDefaultMatch(const ACMatches& matches) {
 class SuggestionDeletionHandler;
 class SearchProviderForTest : public SearchProvider {
  public:
-  SearchProviderForTest(AutocompleteProviderListener* listener,
-                        TemplateURLService* template_url_service,
+  SearchProviderForTest(ChromeAutocompleteProviderClient* client,
+                        AutocompleteProviderListener* listener,
                         Profile* profile);
   bool is_success() { return is_success_; }
 
@@ -87,13 +87,10 @@ class SearchProviderForTest : public SearchProvider {
 };
 
 SearchProviderForTest::SearchProviderForTest(
+    ChromeAutocompleteProviderClient* client,
     AutocompleteProviderListener* listener,
-    TemplateURLService* template_url_service,
     Profile* profile)
-    : SearchProvider(listener, template_url_service,
-                     scoped_ptr<AutocompleteProviderClient>(
-                         new ChromeAutocompleteProviderClient(profile))),
-      is_success_(false) {
+    : SearchProvider(client, listener), is_success_(false) {
 }
 
 SearchProviderForTest::~SearchProviderForTest() {
@@ -255,13 +252,9 @@ class SearchProviderTest : public testing::Test,
 
   content::TestBrowserThreadBundle thread_bundle_;
 
-  // URLFetcherFactory implementation registered.
   net::TestURLFetcherFactory test_factory_;
-
-  // Profile we use.
   TestingProfile profile_;
-
-  // The provider.
+  scoped_ptr<ChromeAutocompleteProviderClient> client_;
   scoped_refptr<SearchProviderForTest> provider_;
 
   // If non-NULL, OnProviderUpdate quits the current |run_loop_|.
@@ -283,6 +276,8 @@ void SearchProviderTest::SetUp() {
   ASSERT_TRUE(profile_.CreateHistoryService(true, false));
   TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
       &profile_, &TemplateURLServiceFactory::BuildInstanceFor);
+
+  client_.reset(new ChromeAutocompleteProviderClient(&profile_));
 
   TemplateURLService* turl_model =
       TemplateURLServiceFactory::GetForProfile(&profile_);
@@ -325,7 +320,7 @@ void SearchProviderTest::SetUp() {
   AutocompleteClassifierFactory::GetInstance()->SetTestingFactoryAndUse(
       &profile_, &AutocompleteClassifierFactory::BuildInstanceFor);
 
-  provider_ = new SearchProviderForTest(this, turl_model, &profile_);
+  provider_ = new SearchProviderForTest(client_.get(), this, &profile_);
   OmniboxFieldTrial::kDefaultMinimumTimeBetweenSuggestQueriesMs = 0;
 }
 
@@ -341,12 +336,11 @@ void SearchProviderTest::RunTest(TestData* cases,
                                  bool prefer_keyword) {
   ACMatches matches;
   for (int i = 0; i < num_cases; ++i) {
-    AutocompleteInput input(cases[i].input, base::string16::npos,
-                            std::string(), GURL(),
-                            metrics::OmniboxEventProto::INVALID_SPEC, false,
-                            prefer_keyword, true, true,
+    AutocompleteInput input(cases[i].input, base::string16::npos, std::string(),
+                            GURL(), metrics::OmniboxEventProto::INVALID_SPEC,
+                            false, prefer_keyword, true, true, false,
                             ChromeAutocompleteSchemeClassifier(&profile_));
-    provider_->Start(input, false, false);
+    provider_->Start(input, false);
     matches = provider_->matches();
     SCOPED_TRACE(
         ASCIIToUTF16("Input was: ") +
@@ -390,8 +384,9 @@ void SearchProviderTest::QueryForInput(const base::string16& text,
   AutocompleteInput input(text, base::string16::npos, std::string(), GURL(),
                           metrics::OmniboxEventProto::INVALID_SPEC,
                           prevent_inline_autocomplete, prefer_keyword, true,
-                          true, ChromeAutocompleteSchemeClassifier(&profile_));
-  provider_->Start(input, false, false);
+                          true, false,
+                          ChromeAutocompleteSchemeClassifier(&profile_));
+  provider_->Start(input, false);
 
   // RunUntilIdle so that the task scheduled by SearchProvider to create the
   // URLFetchers runs.
@@ -981,42 +976,6 @@ TEST_F(SearchProviderTest, ResetResultsBetweenRuns) {
   ASSERT_EQ(1u, provider_->matches().size());
 }
 
-// This test is identical to the previous one except that it enables the Answers
-// in Suggest field trial which triggers a different code path in
-// SearchProvider. When Answers launches, this can be removed.
-TEST_F(SearchProviderTest, ResetResultsBetweenRunsAnswersInSuggestEnabled) {
-  CreateFieldTrial(OmniboxFieldTrial::kAnswersInSuggestRule, true);
-
-  GURL term_url_a(AddSearchToHistory(default_t_url_,
-                                     ASCIIToUTF16("games"), 1));
-  GURL term_url_b(AddSearchToHistory(default_t_url_,
-                                     ASCIIToUTF16("gangnam style"), 1));
-  GURL term_url_c(AddSearchToHistory(default_t_url_,
-                                     ASCIIToUTF16("gundam"), 1));
-  profile_.BlockUntilHistoryProcessesPendingRequests();
-
-  AutocompleteMatch wyt_match;
-  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("f"),
-                                                      &wyt_match));
-  ASSERT_EQ(1u, provider_->matches().size());
-
-  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("g"),
-                                                      &wyt_match));
-  ASSERT_EQ(4u, provider_->matches().size());
-
-  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("ga"),
-                                                      &wyt_match));
-  ASSERT_EQ(3u, provider_->matches().size());
-
-  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("gan"),
-                                                      &wyt_match));
-  ASSERT_EQ(2u, provider_->matches().size());
-
-  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("gans"),
-                                                      &wyt_match));
-  ASSERT_EQ(1u, provider_->matches().size());
-}
-
 // An autocompleted multiword search should not be replaced by a different
 // autocompletion while the user is still typing a valid prefix unless the
 // user has typed the prefix as a query before.
@@ -1129,12 +1088,12 @@ TEST_F(SearchProviderTest, KeywordOrderingAndDescriptions) {
   AddSearchToHistory(keyword_t_url_, ASCIIToUTF16("term2"), 1);
   profile_.BlockUntilHistoryProcessesPendingRequests();
 
-  AutocompleteController controller(&profile_,
-      TemplateURLServiceFactory::GetForProfile(&profile_),
-      NULL, AutocompleteProvider::TYPE_SEARCH);
+  AutocompleteController controller(
+      make_scoped_ptr(new ChromeAutocompleteProviderClient(&profile_)), nullptr,
+      AutocompleteProvider::TYPE_SEARCH);
   controller.Start(AutocompleteInput(
       ASCIIToUTF16("k t"), base::string16::npos, std::string(), GURL(),
-      metrics::OmniboxEventProto::INVALID_SPEC, false, false, true, true,
+      metrics::OmniboxEventProto::INVALID_SPEC, false, false, true, true, false,
       ChromeAutocompleteSchemeClassifier(&profile_)));
   const AutocompleteResult& result = controller.result();
 
@@ -2500,6 +2459,18 @@ TEST_F(SearchProviderTest, DefaultProviderSuggestRelevanceScoringUrlInput) {
       { { "a.com", AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, true  },
         { "info",  AutocompleteMatchType::SEARCH_SUGGEST,        false },
         kEmptyMatch, kEmptyMatch } },
+
+    // Ensure that if the user explicitly enters a scheme, a navsuggest
+    // result for a URL with a different scheme is not inlineable.
+    { "http://a.com", "[\"http://a.com\","
+               "[\"http://a.com/1\", \"https://a.com/\"],[],[],"
+                "{\"google:suggesttype\":[\"NAVIGATION\", \"NAVIGATION\"],"
+                 "\"google:suggestrelevance\":[9000, 8000]}]",
+      { { "http://a.com/1", AutocompleteMatchType::NAVSUGGEST,   true  },
+        { "https://a.com", AutocompleteMatchType::NAVSUGGEST,    false },
+        { "http://a.com",   AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
+                                                                 true  },
+        kEmptyMatch } },
   };
 
   for (size_t i = 0; i < arraysize(cases); ++i) {
@@ -3534,7 +3505,7 @@ TEST_F(SearchProviderTest, AnswersCache) {
   // Test that an answer in the first slot populates the cache.
   matches.push_back(match1);
   matches.push_back(non_answer_match1);
-  result.AppendMatches(matches);
+  result.AppendMatches(AutocompleteInput(), matches);
   provider_->RegisterDisplayedAnswers(result);
   ASSERT_FALSE(provider_->answers_cache_.empty());
 
@@ -3601,11 +3572,10 @@ TEST_F(SearchProviderTest, RemoveExtraAnswers) {
 }
 
 TEST_F(SearchProviderTest, DoesNotProvideOnFocus) {
-  AutocompleteInput input(base::ASCIIToUTF16("f"), base::string16::npos,
-                          std::string(), GURL(),
-                          metrics::OmniboxEventProto::INVALID_SPEC, false,
-                          true, true, true,
-                          ChromeAutocompleteSchemeClassifier(&profile_));
-  provider_->Start(input, false, true);
+  AutocompleteInput input(
+      base::ASCIIToUTF16("f"), base::string16::npos, std::string(), GURL(),
+      metrics::OmniboxEventProto::INVALID_SPEC, false, true, true, true, true,
+      ChromeAutocompleteSchemeClassifier(&profile_));
+  provider_->Start(input, false);
   EXPECT_TRUE(provider_->matches().empty());
 }

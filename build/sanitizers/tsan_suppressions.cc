@@ -125,9 +125,6 @@ char kTSanDefaultSuppressions[] =
 // http://crbug.com/258935
 "race:base::Thread::StopSoon\n"
 
-// http://crbug.com/268941
-"race:tracked_objects::ThreadData::tls_index_\n"
-
 // http://crbug.com/272095
 "race:base::g_top_manager\n"
 
@@ -140,9 +137,6 @@ char kTSanDefaultSuppressions[] =
 
 // http://crbug.com/285242
 "race:media::PulseAudioOutputStream::SetVolume\n"
-
-// http://crbug.com/296883
-"race:net::URLFetcherCore::Stop\n"
 
 // http://crbug.com/308590
 "race:CustomThreadWatcher::~CustomThreadWatcher\n"
@@ -273,9 +267,6 @@ char kTSanDefaultSuppressions[] =
 "race:g_next_user_script_id\n"
 
 // http://crbug.com/389098
-"race:webrtc::RtpToNtpMs\n"
-"race:webrtc::UpdateRtcpList\n"
-"race:webrtc::RemoteNtpTimeEstimator::Estimate\n"
 "race:webrtc::voe::TransmitMixer::EnableStereoChannelSwapping\n"
 
 // http://crbug.com/397022
@@ -285,8 +276,8 @@ char kTSanDefaultSuppressions[] =
 // http://crbug.com/415472
 "deadlock:base::trace_event::TraceLog::GetCategoryGroupEnabled\n"
 
-// http://crbug.com/425057
-"deadlock:webrtc::ViEChannelManagerScoped::ViEChannelManagerScoped\n"
+// http://crbug.com/490856
+"deadlock:content::TracingControllerImpl::SetEnabledOnFileThread\n"
 
 // http://crbug.com/417193
 // Suppressing both AudioContext.{cpp,h}.
@@ -301,14 +292,12 @@ char kTSanDefaultSuppressions[] =
 // https://crbug.com/448203
 "race:blink::RemoteFrame::detach\n"
 
-// https://crbug.com/454652
-"race:net::NetworkChangeNotifier::SetTestNotificationsOnly\n"
-
 // https://crbug.com/455638
 "deadlock:dbus::Bus::ShutdownAndBlock\n"
 
 // https://crbug.com/455665
 "race:mojo::common::*::tick_clock\n"
+"race:mojo::common::internal::NowTicks\n"
 
 // https://crbug.com/459429
 "race:randomnessPid\n"

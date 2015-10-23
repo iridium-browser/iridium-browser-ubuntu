@@ -25,7 +25,6 @@
 #include "webrtc/modules/rtp_rtcp/source/rtp_receiver_strategy.h"
 #include "webrtc/modules/utility/interface/audio_frame_operations.h"
 #include "webrtc/modules/utility/interface/process_thread.h"
-#include "webrtc/modules/utility/interface/rtp_dump.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/logging.h"
 #include "webrtc/system_wrappers/interface/trace.h"
@@ -74,11 +73,6 @@ class StatisticsProxy : public RtcpStatisticsCallback {
   }
 
   void CNameChanged(const char* cname, uint32_t ssrc) override {}
-
-  void ResetStatistics() {
-    CriticalSectionScoped cs(stats_lock_.get());
-    stats_ = ChannelStatistics();
-  }
 
   ChannelStatistics GetStats() {
     CriticalSectionScoped cs(stats_lock_.get());
@@ -245,14 +239,6 @@ Channel::SendPacket(int channel, const void *data, size_t len)
     uint8_t* bufferToSendPtr = (uint8_t*)data;
     size_t bufferLength = len;
 
-    // Dump the RTP packet to a file (if RTP dump is enabled).
-    if (_rtpDumpOut.DumpPacket((const uint8_t*)data, len) == -1)
-    {
-        WEBRTC_TRACE(kTraceWarning, kTraceVoice,
-                     VoEId(_instanceId,_channelId),
-                     "Channel::SendPacket() RTP dump to output file failed");
-    }
-
     int n = _transportPtr->SendPacket(channel, bufferToSendPtr,
                                       bufferLength);
     if (n < 0) {
@@ -289,14 +275,6 @@ Channel::SendRTCPPacket(int channel, const void *data, size_t len)
 
     uint8_t* bufferToSendPtr = (uint8_t*)data;
     size_t bufferLength = len;
-
-    // Dump the RTCP packet to a file (if RTP dump is enabled).
-    if (_rtpDumpOut.DumpPacket((const uint8_t*)data, len) == -1)
-    {
-        WEBRTC_TRACE(kTraceWarning, kTraceVoice,
-                     VoEId(_instanceId,_channelId),
-                     "Channel::SendPacket() RTCP dump to output file failed");
-    }
 
     int n = _transportPtr->SendRTCPPacket(channel,
                                           bufferToSendPtr,
@@ -355,15 +333,6 @@ void Channel::OnIncomingCSRCChanged(int32_t id,
     WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
                  "Channel::OnIncomingCSRCChanged(id=%d, CSRC=%d, added=%d)",
                  id, CSRC, added);
-}
-
-void Channel::ResetStatistics(uint32_t ssrc) {
-  StreamStatistician* statistician =
-      rtp_receive_statistics_->GetStatistician(ssrc);
-  if (statistician) {
-    statistician->ResetStatistics();
-  }
-  statistics_proxy_->ResetStatistics();
 }
 
 int32_t
@@ -759,8 +728,6 @@ Channel::Channel(int32_t channelId,
         VoEModuleId(instanceId, channelId), Clock::GetRealTimeClock(), this,
         this, this, rtp_payload_registry_.get())),
     telephone_event_handler_(rtp_receiver_->GetTelephoneEventHandler()),
-    _rtpDumpIn(*RtpDump::CreateRtpDump()),
-    _rtpDumpOut(*RtpDump::CreateRtpDump()),
     _outputAudioLevel(),
     _externalTransport(false),
     _inputFilePlayerPtr(NULL),
@@ -813,8 +780,8 @@ Channel::Channel(int32_t channelId,
     _lastPayloadType(0),
     _includeAudioLevelIndication(false),
     _outputSpeechType(AudioFrame::kNormalSpeech),
+    video_sync_lock_(CriticalSectionWrapper::CreateCriticalSection()),
     _average_jitter_buffer_delay_us(0),
-    least_required_delay_ms_(0),
     _previousTimestamp(0),
     _recPacketDelayMs(20),
     _RxVadDetection(false),
@@ -836,6 +803,8 @@ Channel::Channel(int32_t channelId,
       acm_config.neteq_config.max_packets_in_buffer =
           std::max(20, config.Get<NetEqCapacityConfig>().capacity);
     }
+    acm_config.neteq_config.enable_fast_accelerate =
+        config.Get<NetEqFastAccelerate>().enabled;
     audio_coding_.reset(AudioCodingModule::Create(acm_config));
 
     _inbandDtmfQueue.ResetDtmf();
@@ -927,8 +896,6 @@ Channel::~Channel()
     // End of modules shutdown
 
     // Delete other objects
-    RtpDump::DestroyRtpDump(&_rtpDumpIn);
-    RtpDump::DestroyRtpDump(&_rtpDumpOut);
     delete &_callbackCritSect;
     delete &_fileCritSect;
     delete &volume_settings_critsect_;
@@ -1116,7 +1083,7 @@ int32_t
 Channel::UpdateLocalTimeStamp()
 {
 
-    _timeStamp += _audioFrame.samples_per_channel_;
+    _timeStamp += static_cast<uint32_t>(_audioFrame.samples_per_channel_);
     return 0;
 }
 
@@ -1225,8 +1192,7 @@ Channel::StopSend()
 
     // Reset sending SSRC and sequence number and triggers direct transmission
     // of RTCP BYE
-    if (_rtpRtcpModule->SetSendingStatus(false) == -1 ||
-        _rtpRtcpModule->ResetSendDataCountersRTP() == -1)
+    if (_rtpRtcpModule->SetSendingStatus(false) == -1)
     {
         _engineStatisticsPtr->SetLastError(
             VE_RTP_RTCP_MODULE_ERROR, kTraceWarning,
@@ -1640,13 +1606,6 @@ int32_t Channel::ReceivedRTPPacket(const int8_t* data, size_t length,
   // Store playout timestamp for the received RTP packet
   UpdatePlayoutTimestamp(false);
 
-  // Dump the RTP packet to a file (if RTP dump is enabled).
-  if (_rtpDumpIn.DumpPacket((const uint8_t*)data,
-                            (uint16_t)length) == -1) {
-    WEBRTC_TRACE(kTraceWarning, kTraceVoice,
-                 VoEId(_instanceId,_channelId),
-                 "Channel::SendPacket() RTP dump to input file failed");
-  }
   const uint8_t* received_packet = reinterpret_cast<const uint8_t*>(data);
   RTPHeader header;
   if (!rtp_header_parser_->Parse(received_packet, length, &header)) {
@@ -1744,13 +1703,6 @@ int32_t Channel::ReceivedRTCPPacket(const int8_t* data, size_t length) {
                "Channel::ReceivedRTCPPacket()");
   // Store playout timestamp for the received RTCP packet
   UpdatePlayoutTimestamp(true);
-
-  // Dump the RTCP packet to a file (if RTP dump is enabled).
-  if (_rtpDumpIn.DumpPacket((const uint8_t*)data, length) == -1) {
-    WEBRTC_TRACE(kTraceWarning, kTraceVoice,
-                 VoEId(_instanceId,_channelId),
-                 "Channel::SendPacket() RTCP dump to input file failed");
-  }
 
   // Deliver RTCP packet to RTP/RTCP module for parsing
   if (_rtpRtcpModule->IncomingRtcpPacket((const uint8_t*)data, length) == -1) {
@@ -3372,82 +3324,6 @@ int Channel::ResendPackets(const uint16_t* sequence_numbers, int length) {
   return _rtpRtcpModule->SendNACK(sequence_numbers, length);
 }
 
-int
-Channel::StartRTPDump(const char fileNameUTF8[1024],
-                      RTPDirections direction)
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, _channelId),
-                 "Channel::StartRTPDump()");
-    if ((direction != kRtpIncoming) && (direction != kRtpOutgoing))
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_INVALID_ARGUMENT, kTraceError,
-            "StartRTPDump() invalid RTP direction");
-        return -1;
-    }
-    RtpDump* rtpDumpPtr = (direction == kRtpIncoming) ?
-        &_rtpDumpIn : &_rtpDumpOut;
-    if (rtpDumpPtr == NULL)
-    {
-        assert(false);
-        return -1;
-    }
-    if (rtpDumpPtr->IsActive())
-    {
-        rtpDumpPtr->Stop();
-    }
-    if (rtpDumpPtr->Start(fileNameUTF8) != 0)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_BAD_FILE, kTraceError,
-            "StartRTPDump() failed to create file");
-        return -1;
-    }
-    return 0;
-}
-
-int
-Channel::StopRTPDump(RTPDirections direction)
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, _channelId),
-                 "Channel::StopRTPDump()");
-    if ((direction != kRtpIncoming) && (direction != kRtpOutgoing))
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_INVALID_ARGUMENT, kTraceError,
-            "StopRTPDump() invalid RTP direction");
-        return -1;
-    }
-    RtpDump* rtpDumpPtr = (direction == kRtpIncoming) ?
-        &_rtpDumpIn : &_rtpDumpOut;
-    if (rtpDumpPtr == NULL)
-    {
-        assert(false);
-        return -1;
-    }
-    if (!rtpDumpPtr->IsActive())
-    {
-        return 0;
-    }
-    return rtpDumpPtr->Stop();
-}
-
-bool
-Channel::RTPDumpIsActive(RTPDirections direction)
-{
-    if ((direction != kRtpIncoming) &&
-        (direction != kRtpOutgoing))
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_INVALID_ARGUMENT, kTraceError,
-            "RTPDumpIsActive() invalid RTP direction");
-        return false;
-    }
-    RtpDump* rtpDumpPtr = (direction == kRtpIncoming) ?
-        &_rtpDumpIn : &_rtpDumpOut;
-    return rtpDumpPtr->IsActive();
-}
-
 uint32_t
 Channel::Demultiplex(const AudioFrame& audioFrame)
 {
@@ -3563,7 +3439,7 @@ Channel::EncodeAndSend()
         return 0xFFFFFFFF;
     }
 
-    _timeStamp += _audioFrame.samples_per_channel_;
+    _timeStamp += static_cast<uint32_t>(_audioFrame.samples_per_channel_);
     return 0;
 }
 
@@ -3685,6 +3561,7 @@ void Channel::GetDecodingCallStatistics(AudioDecodingCallStats* stats) const {
 
 bool Channel::GetDelayEstimate(int* jitter_buffer_delay_ms,
                                int* playout_buffer_delay_ms) const {
+  CriticalSectionScoped cs(video_sync_lock_.get());
   if (_average_jitter_buffer_delay_us == 0) {
     WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
                  "Channel::GetDelayEstimate() no valid estimate.");
@@ -3696,6 +3573,10 @@ bool Channel::GetDelayEstimate(int* jitter_buffer_delay_ms,
   WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
                "Channel::GetDelayEstimate()");
   return true;
+}
+
+int Channel::LeastRequiredDelayMs() const {
+  return audio_coding_->LeastRequiredDelayMs();
 }
 
 int Channel::SetInitialPlayoutDelay(int delay_ms)
@@ -3744,53 +3625,21 @@ Channel::SetMinimumPlayoutDelay(int delayMs)
     return 0;
 }
 
-void Channel::UpdatePlayoutTimestamp(bool rtcp) {
-  uint32_t playout_timestamp = 0;
-
-  if (audio_coding_->PlayoutTimestamp(&playout_timestamp) == -1)  {
-    // This can happen if this channel has not been received any RTP packet. In
-    // this case, NetEq is not capable of computing playout timestamp.
-    return;
-  }
-
-  uint16_t delay_ms = 0;
-  if (_audioDeviceModulePtr->PlayoutDelay(&delay_ms) == -1) {
-    WEBRTC_TRACE(kTraceWarning, kTraceVoice, VoEId(_instanceId,_channelId),
-                 "Channel::UpdatePlayoutTimestamp() failed to read playout"
-                 " delay from the ADM");
-    _engineStatisticsPtr->SetLastError(
-        VE_CANNOT_RETRIEVE_VALUE, kTraceError,
-        "UpdatePlayoutTimestamp() failed to retrieve playout delay");
-    return;
-  }
-
-  jitter_buffer_playout_timestamp_ = playout_timestamp;
-
-  // Remove the playout delay.
-  playout_timestamp -= (delay_ms * (GetPlayoutFrequency() / 1000));
-
-  WEBRTC_TRACE(kTraceStream, kTraceVoice, VoEId(_instanceId,_channelId),
-               "Channel::UpdatePlayoutTimestamp() => playoutTimestamp = %lu",
-               playout_timestamp);
-
-  if (rtcp) {
-    playout_timestamp_rtcp_ = playout_timestamp;
-  } else {
-    playout_timestamp_rtp_ = playout_timestamp;
-  }
-  playout_delay_ms_ = delay_ms;
-}
-
 int Channel::GetPlayoutTimestamp(unsigned int& timestamp) {
   WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
                "Channel::GetPlayoutTimestamp()");
-  if (playout_timestamp_rtp_ == 0)  {
+  uint32_t playout_timestamp_rtp = 0;
+  {
+    CriticalSectionScoped cs(video_sync_lock_.get());
+    playout_timestamp_rtp = playout_timestamp_rtp_;
+  }
+  if (playout_timestamp_rtp == 0)  {
     _engineStatisticsPtr->SetLastError(
         VE_CANNOT_RETRIEVE_VALUE, kTraceError,
         "GetPlayoutTimestamp() failed to retrieve timestamp");
     return -1;
   }
-  timestamp = playout_timestamp_rtp_;
+  timestamp = playout_timestamp_rtp;
   WEBRTC_TRACE(kTraceStateInfo, kTraceVoice,
                VoEId(_instanceId,_channelId),
                "GetPlayoutTimestamp() => timestamp=%u", timestamp);
@@ -4046,6 +3895,46 @@ Channel::SendPacketRaw(const void *data, size_t len, bool RTCP)
     }
 }
 
+void Channel::UpdatePlayoutTimestamp(bool rtcp) {
+  uint32_t playout_timestamp = 0;
+
+  if (audio_coding_->PlayoutTimestamp(&playout_timestamp) == -1)  {
+    // This can happen if this channel has not been received any RTP packet. In
+    // this case, NetEq is not capable of computing playout timestamp.
+    return;
+  }
+
+  uint16_t delay_ms = 0;
+  if (_audioDeviceModulePtr->PlayoutDelay(&delay_ms) == -1) {
+    WEBRTC_TRACE(kTraceWarning, kTraceVoice, VoEId(_instanceId,_channelId),
+                 "Channel::UpdatePlayoutTimestamp() failed to read playout"
+                 " delay from the ADM");
+    _engineStatisticsPtr->SetLastError(
+        VE_CANNOT_RETRIEVE_VALUE, kTraceError,
+        "UpdatePlayoutTimestamp() failed to retrieve playout delay");
+    return;
+  }
+
+  jitter_buffer_playout_timestamp_ = playout_timestamp;
+
+  // Remove the playout delay.
+  playout_timestamp -= (delay_ms * (GetPlayoutFrequency() / 1000));
+
+  WEBRTC_TRACE(kTraceStream, kTraceVoice, VoEId(_instanceId,_channelId),
+               "Channel::UpdatePlayoutTimestamp() => playoutTimestamp = %lu",
+               playout_timestamp);
+
+  {
+    CriticalSectionScoped cs(video_sync_lock_.get());
+    if (rtcp) {
+      playout_timestamp_rtcp_ = playout_timestamp;
+    } else {
+      playout_timestamp_rtp_ = playout_timestamp;
+    }
+    playout_delay_ms_ = delay_ms;
+  }
+}
+
 // Called for incoming RTP packets after successful RTP header parsing.
 void Channel::UpdatePacketDelay(uint32_t rtp_timestamp,
                                 uint16_t sequence_number) {
@@ -4055,9 +3944,6 @@ void Channel::UpdatePacketDelay(uint32_t rtp_timestamp,
 
   // Get frequency of last received payload
   int rtp_receive_frequency = GetPlayoutFrequency();
-
-  // Update the least required delay.
-  least_required_delay_ms_ = audio_coding_->LeastRequiredDelayMs();
 
   // |jitter_buffer_playout_timestamp_| updated in UpdatePlayoutTimestamp for
   // every incoming packet.
@@ -4079,21 +3965,25 @@ void Channel::UpdatePacketDelay(uint32_t rtp_timestamp,
 
   if (timestamp_diff_ms == 0) return;
 
-  if (packet_delay_ms >= 10 && packet_delay_ms <= 60) {
-    _recPacketDelayMs = packet_delay_ms;
-  }
+  {
+    CriticalSectionScoped cs(video_sync_lock_.get());
 
-  if (_average_jitter_buffer_delay_us == 0) {
-    _average_jitter_buffer_delay_us = timestamp_diff_ms * 1000;
-    return;
-  }
+    if (packet_delay_ms >= 10 && packet_delay_ms <= 60) {
+      _recPacketDelayMs = packet_delay_ms;
+    }
 
-  // Filter average delay value using exponential filter (alpha is
-  // 7/8). We derive 1000 *_average_jitter_buffer_delay_us here (reduces
-  // risk of rounding error) and compensate for it in GetDelayEstimate()
-  // later.
-  _average_jitter_buffer_delay_us = (_average_jitter_buffer_delay_us * 7 +
-      1000 * timestamp_diff_ms + 500) / 8;
+    if (_average_jitter_buffer_delay_us == 0) {
+      _average_jitter_buffer_delay_us = timestamp_diff_ms * 1000;
+      return;
+    }
+
+    // Filter average delay value using exponential filter (alpha is
+    // 7/8). We derive 1000 *_average_jitter_buffer_delay_us here (reduces
+    // risk of rounding error) and compensate for it in GetDelayEstimate()
+    // later.
+    _average_jitter_buffer_delay_us = (_average_jitter_buffer_delay_us * 7 +
+        1000 * timestamp_diff_ms + 500) / 8;
+  }
 }
 
 void

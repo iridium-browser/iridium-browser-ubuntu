@@ -72,7 +72,7 @@
 }
 
 #update-status-icon.up-to-date {
-  background-image: url(chrome://theme/IDR_CHECKMARK);
+  background-image: url(../../../../ui/webui/resources/images/check_circle.svg);
   background-size: 18px;
 }
 
@@ -82,7 +82,7 @@
 }
 
 #update-status-icon.failed {
-  background-image: url(chrome://theme/IDR_ERROR);
+  background-image: url(chrome://resources/images/error.svg);
   background-size: 18px;
 }
 
@@ -121,8 +121,8 @@
 #channel-change-disallowed-icon,
 .channel-change-error-icon {
   -webkit-margin-start: 4px;
-  background-image: url(chrome://theme/IDR_CONTROLLED_SETTING_MANDATORY);
-  background-size: 16px;
+  background-image: url(../../../../ui/webui/resources/images/business.svg);
+  background-size: 18px;
 }
 
 .channel-change-error-bubble {
@@ -140,11 +140,11 @@
   width: 240px;
 }
 
-#product-label-container {
+#regulatory-label-container {
   padding-top: 32px;
 }
 
-#product-label {
+#regulatory-label {
   display: block;
   width: 330px;
 }

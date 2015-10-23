@@ -7,7 +7,6 @@
 
 #include "core/frame/SuspendableTimer.h"
 #include "platform/heap/Handle.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/Vector.h"
 
 namespace blink {
@@ -16,30 +15,35 @@ class LocalFrame;
 class ScriptSourceCode;
 class WebScriptExecutionCallback;
 
-class SuspendableScriptExecutor final : public RefCountedWillBeRefCountedGarbageCollected<SuspendableScriptExecutor>, public SuspendableTimer {
+class SuspendableScriptExecutor final : public GarbageCollectedFinalized<SuspendableScriptExecutor>, public SuspendableTimer {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SuspendableScriptExecutor);
 public:
     static void createAndRun(LocalFrame*, int worldID, const WillBeHeapVector<ScriptSourceCode>& sources, int extensionGroup, bool userGesture, WebScriptExecutionCallback*);
-    virtual ~SuspendableScriptExecutor();
+    ~SuspendableScriptExecutor() override;
 
-    virtual void contextDestroyed() override;
+    void contextDestroyed() override;
 
     DECLARE_VIRTUAL_TRACE();
 
 private:
     SuspendableScriptExecutor(LocalFrame*, int worldID, const WillBeHeapVector<ScriptSourceCode>& sources, int extensionGroup, bool userGesture, WebScriptExecutionCallback*);
 
-    virtual void fired() override;
+    void fired() override;
 
     void run();
     void executeAndDestroySelf();
+    void dispose();
 
-    RawPtrWillBeMember<LocalFrame> m_frame;
-    int m_worldID;
+    RefPtrWillBeMember<LocalFrame> m_frame;
     WillBeHeapVector<ScriptSourceCode> m_sources;
-    int m_extensionGroup;
-    bool m_userGesture;
     WebScriptExecutionCallback* m_callback;
+
+    SelfKeepAlive<SuspendableScriptExecutor> m_keepAlive;
+
+    int m_worldID;
+    int m_extensionGroup;
+
+    bool m_userGesture;
 };
 
 } // namespace blink

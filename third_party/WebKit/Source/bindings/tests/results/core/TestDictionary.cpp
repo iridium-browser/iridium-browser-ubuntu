@@ -18,18 +18,28 @@ TestDictionary::TestDictionary()
     setOtherDoubleOrStringMember(DoubleOrString::fromString(String("default string value")));
     setRestrictedDoubleMember(3.14);
     setStringOrNullMember(String("default string value"));
+    setStringSequenceMember(Vector<String>());
+    setTestInterfaceGarbageCollectedSequenceMember(HeapVector<Member<TestInterfaceGarbageCollected>>());
+    setTestInterfaceSequenceMember(Vector<RefPtr<TestInterfaceImplementation>>());
+    setTestInterfaceWillBeGarbageCollectedSequenceMember(WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected>>());
     setUnrestrictedDoubleMember(3.14);
 }
 
 DEFINE_TRACE(TestDictionary)
 {
+    visitor->trace(m_doubleOrStringMember);
+    visitor->trace(m_doubleOrStringSequenceMember);
     visitor->trace(m_elementOrNullMember);
     visitor->trace(m_eventTargetMember);
     visitor->trace(m_internalDictionarySequenceMember);
+    visitor->trace(m_otherDoubleOrStringMember);
+    visitor->trace(m_testInterface2OrUint8ArrayMember);
     visitor->trace(m_testInterfaceGarbageCollectedMember);
     visitor->trace(m_testInterfaceGarbageCollectedOrNullMember);
+    visitor->trace(m_testInterfaceGarbageCollectedSequenceMember);
     visitor->trace(m_testInterfaceWillBeGarbageCollectedMember);
     visitor->trace(m_testInterfaceWillBeGarbageCollectedOrNullMember);
+    visitor->trace(m_testInterfaceWillBeGarbageCollectedSequenceMember);
 }
 
 } // namespace blink

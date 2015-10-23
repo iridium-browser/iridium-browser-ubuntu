@@ -5,6 +5,7 @@
 #include "chrome/browser/profile_resetter/profile_resetter.h"
 
 #include "base/json/json_string_value_serializer.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_path_override.h"
@@ -20,7 +21,7 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -107,7 +108,7 @@ class ProfileResetterTest : public extensions::ExtensionServiceTestBase,
 
   TestingProfile* profile() { return profile_.get(); }
 
-  static KeyedService* CreateTemplateURLService(
+  static scoped_ptr<KeyedService> CreateTemplateURLService(
       content::BrowserContext* context);
 
  private:
@@ -144,15 +145,15 @@ void ProfileResetterTest::SetUp() {
 }
 
 // static
-KeyedService* ProfileResetterTest::CreateTemplateURLService(
+scoped_ptr<KeyedService> ProfileResetterTest::CreateTemplateURLService(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return new TemplateURLService(
+  return make_scoped_ptr(new TemplateURLService(
       profile->GetPrefs(),
       scoped_ptr<SearchTermsData>(new UIThreadSearchTermsData(profile)),
       WebDataServiceFactory::GetKeywordWebDataForProfile(
           profile, ServiceAccessType::EXPLICIT_ACCESS),
-      scoped_ptr<TemplateURLServiceClient>(), NULL, NULL, base::Closure());
+      scoped_ptr<TemplateURLServiceClient>(), NULL, NULL, base::Closure()));
 }
 
 
@@ -732,16 +733,7 @@ TEST_F(ProfileResetterTest, ResetStartPagePartially) {
 }
 
 TEST_F(PinnedTabsResetTest, ResetPinnedTabs) {
-  scoped_refptr<Extension> extension_app = CreateExtension(
-      base::ASCIIToUTF16("hello!"),
-      base::FilePath(FILE_PATH_LITERAL("//nonexistent")),
-      Manifest::INVALID_LOCATION,
-      extensions::Manifest::TYPE_HOSTED_APP,
-      false);
   scoped_ptr<content::WebContents> contents1(CreateWebContents());
-  extensions::TabHelper::CreateForWebContents(contents1.get());
-  extensions::TabHelper::FromWebContents(contents1.get())->
-      SetExtensionApp(extension_app.get());
   scoped_ptr<content::WebContents> contents2(CreateWebContents());
   scoped_ptr<content::WebContents> contents3(CreateWebContents());
   scoped_ptr<content::WebContents> contents4(CreateWebContents());
@@ -756,17 +748,17 @@ TEST_F(PinnedTabsResetTest, ResetPinnedTabs) {
 
   EXPECT_EQ(contents2, tab_strip_model->GetWebContentsAt(0));
   EXPECT_EQ(contents1, tab_strip_model->GetWebContentsAt(1));
-  EXPECT_EQ(contents3, tab_strip_model->GetWebContentsAt(2));
-  EXPECT_EQ(contents4, tab_strip_model->GetWebContentsAt(3));
-  EXPECT_EQ(3, tab_strip_model->IndexOfFirstNonMiniTab());
+  EXPECT_EQ(contents4, tab_strip_model->GetWebContentsAt(2));
+  EXPECT_EQ(contents3, tab_strip_model->GetWebContentsAt(3));
+  EXPECT_EQ(2, tab_strip_model->IndexOfFirstNonPinnedTab());
 
   ResetAndWait(ProfileResetter::PINNED_TABS);
 
-  EXPECT_EQ(contents1, tab_strip_model->GetWebContentsAt(0));
-  EXPECT_EQ(contents2, tab_strip_model->GetWebContentsAt(1));
-  EXPECT_EQ(contents3, tab_strip_model->GetWebContentsAt(2));
-  EXPECT_EQ(contents4, tab_strip_model->GetWebContentsAt(3));
-  EXPECT_EQ(1, tab_strip_model->IndexOfFirstNonMiniTab());
+  EXPECT_EQ(contents2, tab_strip_model->GetWebContentsAt(0));
+  EXPECT_EQ(contents1, tab_strip_model->GetWebContentsAt(1));
+  EXPECT_EQ(contents4, tab_strip_model->GetWebContentsAt(2));
+  EXPECT_EQ(contents3, tab_strip_model->GetWebContentsAt(3));
+  EXPECT_EQ(0, tab_strip_model->IndexOfFirstNonPinnedTab());
 }
 
 TEST_F(ProfileResetterTest, ResetShortcuts) {

@@ -128,7 +128,8 @@ std::vector<Token> Tokenizer::Run() {
                location.line_number() ||
            tokens_.back().location().char_offset() != location.char_offset())) {
         type = Token::LINE_COMMENT;
-        Advance();  // The current \n.
+        if (!at_end())  // Could be EOF.
+          Advance();  // The current \n.
         // If this comment is separated from the next syntax element, then we
         // want to tag it as a block comment. This will become a standalone
         // statement at the parser level to keep this comment separate, rather
@@ -188,7 +189,7 @@ void Tokenizer::AdvanceToNextToken() {
 Token::Type Tokenizer::ClassifyCurrent() const {
   DCHECK(!at_end());
   char next_char = cur_char();
-  if (IsAsciiDigit(next_char))
+  if (base::IsAsciiDigit(next_char))
     return Token::INTEGER;
   if (next_char == '"')
     return Token::STRING;
@@ -228,7 +229,7 @@ Token::Type Tokenizer::ClassifyCurrent() const {
       return Token::UNCLASSIFIED_OPERATOR;  // Just the minus before end of
                                             // file.
     char following_char = input_[cur_ + 1];
-    if (IsAsciiDigit(following_char))
+    if (base::IsAsciiDigit(following_char))
       return Token::INTEGER;
     return Token::UNCLASSIFIED_OPERATOR;
   }
@@ -242,7 +243,7 @@ void Tokenizer::AdvanceToEndOfToken(const Location& location,
     case Token::INTEGER:
       do {
         Advance();
-      } while (!at_end() && IsAsciiDigit(cur_char()));
+      } while (!at_end() && base::IsAsciiDigit(cur_char()));
       if (!at_end()) {
         // Require the char after a number to be some kind of space, scope,
         // or operator.

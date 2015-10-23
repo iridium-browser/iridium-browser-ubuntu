@@ -10,8 +10,8 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
+#include "chrome/test/base/testing_browser_process.h"
 #import "ui/gfx/test/ui_cocoa_test_helper.h"
 #import "ui/message_center/cocoa/status_item_view.h"
 #include "ui/message_center/message_center.h"
@@ -46,15 +46,10 @@ class MessageCenterTrayBridgeTest : public ui::CocoaTest {
     message_center::RichNotificationData data;
     data.priority = -1;
     return make_scoped_ptr(new message_center::Notification(
-        message_center::NOTIFICATION_TYPE_SIMPLE,
-        "1",
+        message_center::NOTIFICATION_TYPE_SIMPLE, "1",
         base::ASCIIToUTF16("First notification"),
-        base::ASCIIToUTF16("This is a simple test."),
-        gfx::Image(),
-        base::string16(),
-        message_center::NotifierId(),
-        data,
-        NULL));
+        base::ASCIIToUTF16("This is a simple test."), gfx::Image(),
+        base::string16(), GURL(), message_center::NotifierId(), data, NULL));
   }
 
   TestingPrefServiceSimple* local_state() { return local_state_->Get(); }

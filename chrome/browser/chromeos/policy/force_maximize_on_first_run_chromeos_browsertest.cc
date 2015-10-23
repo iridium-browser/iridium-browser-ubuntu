@@ -9,7 +9,6 @@
 #include "ash/test/display_manager_test_api.h"
 #include "ash/wm/window_positioner.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -25,23 +24,15 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "policy/policy_constants.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 namespace policy {
 
-// Boolean parameter is used to run this test for webview (true) and for
-// iframe (false) GAIA sign in.
-class ForceMaximizeOnFirstRunTest : public LoginPolicyTestBase,
-                                    public testing::WithParamInterface<bool> {
+class ForceMaximizeOnFirstRunTest : public LoginPolicyTestBase {
  protected:
-  ForceMaximizeOnFirstRunTest() : LoginPolicyTestBase() {
-    set_use_webview(GetParam());
-  }
+  ForceMaximizeOnFirstRunTest() {}
 
-  scoped_ptr<base::DictionaryValue> GetMandatoryPoliciesValue() const override {
-    scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
-    dict->SetBoolean(key::kForceMaximizeOnFirstRun, true);
-    return dict;
+  void GetMandatoryPoliciesValue(base::DictionaryValue* policy) const override {
+    policy->SetBoolean(key::kForceMaximizeOnFirstRun, true);
   }
 
   void SetUpResolution() {
@@ -51,10 +42,7 @@ class ForceMaximizeOnFirstRunTest : public LoginPolicyTestBase,
         ash::WindowPositioner::GetForceMaximizedWidthLimit() + 100;
     // Set resolution to 1466x300.
     const std::string resolution = base::IntToString(width) + "x300";
-    ash::DisplayManager* const display_manager =
-        ash::Shell::GetInstance()->display_manager();
-    ash::test::DisplayManagerTestApi display_manager_test_api(display_manager);
-    display_manager_test_api.UpdateDisplay(resolution);
+    ash::test::DisplayManagerTestApi().UpdateDisplay(resolution);
   }
 
   const Browser* OpenNewBrowserWindow() {
@@ -69,7 +57,7 @@ class ForceMaximizeOnFirstRunTest : public LoginPolicyTestBase,
   DISALLOW_COPY_AND_ASSIGN(ForceMaximizeOnFirstRunTest);
 };
 
-IN_PROC_BROWSER_TEST_P(ForceMaximizeOnFirstRunTest, PRE_TwoRuns) {
+IN_PROC_BROWSER_TEST_F(ForceMaximizeOnFirstRunTest, PRE_TwoRuns) {
   SetUpResolution();
   SkipToLoginScreen();
   LogIn(kAccountId, kAccountPassword);
@@ -93,7 +81,7 @@ IN_PROC_BROWSER_TEST_P(ForceMaximizeOnFirstRunTest, PRE_TwoRuns) {
   EXPECT_FALSE(browser1->window()->IsMaximized());
 }
 
-IN_PROC_BROWSER_TEST_P(ForceMaximizeOnFirstRunTest, TwoRuns) {
+IN_PROC_BROWSER_TEST_F(ForceMaximizeOnFirstRunTest, TwoRuns) {
   SetUpResolution();
   content::WindowedNotificationObserver(
       chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
@@ -109,17 +97,15 @@ class ForceMaximizePolicyFalseTest : public ForceMaximizeOnFirstRunTest {
  protected:
   ForceMaximizePolicyFalseTest() : ForceMaximizeOnFirstRunTest() {}
 
-  scoped_ptr<base::DictionaryValue> GetMandatoryPoliciesValue() const override {
-    scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
-    dict->SetBoolean(key::kForceMaximizeOnFirstRun, false);
-    return dict;
+  void GetMandatoryPoliciesValue(base::DictionaryValue* policy) const override {
+    policy->SetBoolean(key::kForceMaximizeOnFirstRun, false);
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ForceMaximizePolicyFalseTest);
 };
 
-IN_PROC_BROWSER_TEST_P(ForceMaximizePolicyFalseTest, GeneralFirstRun) {
+IN_PROC_BROWSER_TEST_F(ForceMaximizePolicyFalseTest, GeneralFirstRun) {
   SetUpResolution();
   SkipToLoginScreen();
   LogIn(kAccountId, kAccountPassword);
@@ -132,11 +118,4 @@ IN_PROC_BROWSER_TEST_P(ForceMaximizePolicyFalseTest, GeneralFirstRun) {
   EXPECT_FALSE(browser->window()->IsMaximized());
 }
 
-INSTANTIATE_TEST_CASE_P(ForceMaximizeOnFirstRunTestSuite,
-                        ForceMaximizeOnFirstRunTest,
-                        testing::Bool());
-
-INSTANTIATE_TEST_CASE_P(ForceMaximizePolicyFalseTestSuite,
-                        ForceMaximizePolicyFalseTest,
-                        testing::Bool());
 }  // namespace policy

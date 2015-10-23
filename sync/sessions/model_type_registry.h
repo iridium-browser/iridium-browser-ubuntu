@@ -20,6 +20,12 @@
 #include "sync/internal_api/public/sync_context.h"
 #include "sync/internal_api/public/sync_encryption_handler.h"
 
+namespace syncer_v2 {
+struct DataTypeState;
+class ModelTypeSyncWorkerImpl;
+class ModelTypeSyncProxyImpl;
+}
+
 namespace syncer {
 
 namespace syncable {
@@ -30,8 +36,6 @@ class CommitContributor;
 class DirectoryCommitContributor;
 class DirectoryUpdateHandler;
 class DirectoryTypeDebugInfoEmitter;
-class ModelTypeSyncWorkerImpl;
-class ModelTypeSyncProxyImpl;
 class UpdateHandler;
 
 typedef std::map<ModelType, UpdateHandler*> UpdateHandlerMap;
@@ -41,7 +45,7 @@ typedef std::map<ModelType, DirectoryTypeDebugInfoEmitter*>
 
 // Keeps track of the sets of active update handlers and commit contributors.
 class SYNC_EXPORT_PRIVATE ModelTypeRegistry
-    : public SyncContext,
+    : public syncer_v2::SyncContext,
       public SyncEncryptionHandler::Observer {
  public:
   // Constructs a ModelTypeRegistry that supports directory types.
@@ -59,10 +63,10 @@ class SYNC_EXPORT_PRIVATE ModelTypeRegistry
   // Expects that the proxy's ModelType is not currently enabled.
   void ConnectSyncTypeToWorker(
       syncer::ModelType type,
-      const DataTypeState& data_type_state,
-      const syncer::UpdateResponseDataList& saved_pending_updates,
+      const syncer_v2::DataTypeState& data_type_state,
+      const syncer_v2::UpdateResponseDataList& saved_pending_updates,
       const scoped_refptr<base::SequencedTaskRunner>& type_task_runner,
-      const base::WeakPtr<ModelTypeSyncProxyImpl>& proxy) override;
+      const base::WeakPtr<syncer_v2::ModelTypeSyncProxyImpl>& proxy) override;
 
   // Disables the syncing of an off-thread type.
   //
@@ -83,6 +87,8 @@ class SYNC_EXPORT_PRIVATE ModelTypeRegistry
   void OnCryptographerStateChanged(Cryptographer* cryptographer) override;
   void OnPassphraseTypeChanged(PassphraseType type,
                                base::Time passphrase_time) override;
+  void OnLocalSetPassphraseEncryption(
+      const SyncEncryptionHandler::NigoriState& nigori_state) override;
 
   // Gets the set of enabled types.
   ModelTypeSet GetEnabledTypes() const;
@@ -114,7 +120,7 @@ class SYNC_EXPORT_PRIVATE ModelTypeRegistry
   ScopedVector<DirectoryTypeDebugInfoEmitter>
       directory_type_debug_info_emitters_;
 
-  ScopedVector<ModelTypeSyncWorkerImpl> model_type_sync_workers_;
+  ScopedVector<syncer_v2::ModelTypeSyncWorkerImpl> model_type_sync_workers_;
 
   // Maps of UpdateHandlers and CommitContributors.
   // They do not own any of the objects they point to.
@@ -150,7 +156,7 @@ class SYNC_EXPORT_PRIVATE ModelTypeRegistry
   // a lot of them, and their lifetimes are unpredictable, so it makes the
   // book-keeping easier if we just store the list here.  That way it's
   // guaranteed to live as long as this sync backend.
-  ObserverList<TypeDebugInfoObserver> type_debug_info_observers_;
+  base::ObserverList<TypeDebugInfoObserver> type_debug_info_observers_;
 
   base::WeakPtrFactory<ModelTypeRegistry> weak_ptr_factory_;
 

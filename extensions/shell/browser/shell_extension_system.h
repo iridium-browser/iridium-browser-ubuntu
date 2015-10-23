@@ -8,10 +8,9 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/one_shot_event.h"
-
-class BrowserContextKeyedServiceFactory;
 
 namespace base {
 class FilePath;
@@ -22,14 +21,6 @@ class BrowserContext;
 }
 
 namespace extensions {
-
-class DeclarativeUserScriptManager;
-class EventRouter;
-class InfoMap;
-class LazyBackgroundTaskQueue;
-class ProcessManager;
-class RendererStartupHelper;
-class SharedUserScriptMaster;
 
 // A simplified version of ExtensionSystem for app_shell. Allows
 // app_shell to skip initialization of services it doesn't need.
@@ -57,16 +48,14 @@ class ShellExtensionSystem : public ExtensionSystem {
   RuntimeData* runtime_data() override;
   ManagementPolicy* management_policy() override;
   SharedUserScriptMaster* shared_user_script_master() override;
-  DeclarativeUserScriptManager* declarative_user_script_manager() override;
   StateStore* state_store() override;
   StateStore* rules_store() override;
   InfoMap* info_map() override;
-  LazyBackgroundTaskQueue* lazy_background_task_queue() override;
-  EventRouter* event_router() override;
-  InstallVerifier* install_verifier() override;
   QuotaService* quota_service() override;
+  AppSorting* app_sorting() override;
   void RegisterExtensionWithRequestContexts(
-      const Extension* extension) override;
+      const Extension* extension,
+      const base::Closure& callback) override;
   void UnregisterExtensionWithRequestContexts(
       const std::string& extension_id,
       const UnloadedExtensionInfo::Reason reason) override;
@@ -76,18 +65,21 @@ class ShellExtensionSystem : public ExtensionSystem {
       const Extension* extension) override;
 
  private:
+  void OnExtensionRegisteredWithRequestContexts(
+      scoped_refptr<Extension> extension);
   content::BrowserContext* browser_context_;  // Not owned.
 
   // Data to be accessed on the IO thread. Must outlive process_manager_.
   scoped_refptr<InfoMap> info_map_;
 
   scoped_ptr<RuntimeData> runtime_data_;
-  scoped_ptr<LazyBackgroundTaskQueue> lazy_background_task_queue_;
-  scoped_ptr<EventRouter> event_router_;
   scoped_ptr<QuotaService> quota_service_;
+  scoped_ptr<AppSorting> app_sorting_;
 
   // Signaled when the extension system has completed its startup tasks.
   OneShotEvent ready_;
+
+  base::WeakPtrFactory<ShellExtensionSystem> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellExtensionSystem);
 };

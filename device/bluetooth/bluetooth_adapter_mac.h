@@ -19,6 +19,8 @@
 #include "device/bluetooth/bluetooth_audio_sink.h"
 #include "device/bluetooth/bluetooth_discovery_manager_mac.h"
 #include "device/bluetooth/bluetooth_export.h"
+#include "device/bluetooth/bluetooth_low_energy_device_mac.h"
+#include "device/bluetooth/bluetooth_low_energy_discovery_manager_mac.h"
 
 @class IOBluetoothDevice;
 @class NSArray;
@@ -30,17 +32,22 @@ class SequencedTaskRunner;
 
 }  // namespace base
 
-namespace device {
+@class BluetoothLowEnergyCentralManagerDelegate;
 
-class BluetoothAdapterMacTest;
+namespace device {
 
 class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
     : public BluetoothAdapter,
-      public BluetoothDiscoveryManagerMac::Observer {
+      public BluetoothDiscoveryManagerMac::Observer,
+      public BluetoothLowEnergyDiscoveryManagerMac::Observer {
  public:
-  static base::WeakPtr<BluetoothAdapter> CreateAdapter();
+  static base::WeakPtr<BluetoothAdapterMac> CreateAdapter();
+  static base::WeakPtr<BluetoothAdapterMac> CreateAdapterForTest(
+      std::string name,
+      std::string address,
+      scoped_refptr<base::SequencedTaskRunner> ui_task_runner);
 
-  // BluetoothAdapter:
+  // BluetoothAdapter overrides:
   std::string GetAddress() const override;
   std::string GetName() const override;
   void SetName(const std::string& name,
@@ -76,25 +83,43 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
       const CreateAdvertisementCallback& callback,
       const CreateAdvertisementErrorCallback& error_callback) override;
 
-  // BluetoothDiscoveryManagerMac::Observer overrides
-  void DeviceFound(IOBluetoothDevice* device) override;
-  void DiscoveryStopped(bool unexpected) override;
+  // BluetoothDiscoveryManagerMac::Observer overrides:
+  void ClassicDeviceFound(IOBluetoothDevice* device) override;
+  void ClassicDiscoveryStopped(bool unexpected) override;
 
   // Registers that a new |device| has connected to the local host.
   void DeviceConnected(IOBluetoothDevice* device);
 
+  // We only use CoreBluetooth when OS X >= 10.10. This because the
+  // CBCentralManager destructor was found to crash on the mac_chromium_rel_ng
+  // builder running 10.9.5. May also cause blued to crash on OS X 10.9.5
+  // (crbug.com/506287).
+  static bool IsLowEnergyAvailable();
+
+  // Resets |low_energy_central_manager_| to |central_manager| and sets
+  // |low_energy_central_manager_delegate_| as the manager's delegate. Should
+  // be called only when |IsLowEnergyAvailable()|.
+  void SetCentralManagerForTesting(CBCentralManager* central_manager);
+
  protected:
-  // BluetoothAdapter:
+  // BluetoothAdapter override:
   void RemovePairingDelegateInternal(
       device::BluetoothDevice::PairingDelegate* pairing_delegate) override;
 
  private:
+  // The length of time that must elapse since the last Inquiry response (on
+  // Classic devices) or call to BluetoothLowEnergyDevice::Update() (on Low
+  // Energy) before a discovered device is considered to be no longer available.
+  const static NSTimeInterval kDiscoveryTimeoutSec;
+
+  friend class BluetoothTestMac;
   friend class BluetoothAdapterMacTest;
+  friend class BluetoothLowEnergyCentralManagerBridge;
 
   BluetoothAdapterMac();
   ~BluetoothAdapterMac() override;
 
-  // BluetoothAdapter:
+  // BluetoothAdapter overrides:
   void AddDiscoverySession(BluetoothDiscoveryFilter* discovery_filter,
                            const base::Closure& callback,
                            const ErrorCallback& error_callback) override;
@@ -105,27 +130,50 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
                           const base::Closure& callback,
                           const ErrorCallback& error_callback) override;
 
+  // Start classic and/or low energy discovery sessions, according to the
+  // filter.  If a discovery session is already running the filter is updated.
+  bool StartDiscovery(BluetoothDiscoveryFilter* discovery_filter);
+
   void Init();
   void InitForTest(scoped_refptr<base::SequencedTaskRunner> ui_task_runner);
   void PollAdapter();
 
   // Registers that a new |device| has replied to an Inquiry, is paired, or has
   // connected to the local host.
-  void DeviceAdded(IOBluetoothDevice* device);
+  void ClassicDeviceAdded(IOBluetoothDevice* device);
 
-  // Updates |devices_| to include the currently paired devices, as well as any
-  // connected, but unpaired, devices. Notifies observers if any previously
-  // paired or connected devices are no longer present.
-  void UpdateDevices();
+  // BluetoothLowEnergyDiscoveryManagerMac::Observer override:
+  void LowEnergyDeviceUpdated(CBPeripheral* peripheral,
+                              NSDictionary* advertisement_data,
+                              int rssi) override;
+
+  // Updates |devices_| when there is a change to the CBCentralManager's state.
+  void LowEnergyCentralManagerUpdatedState();
+
+  // Removes from |devices_| any previously paired, connected or seen devices
+  // which are no longer present. Notifies observers.
+  void RemoveTimedOutDevices();
+
+  // Updates |devices_| to include the currently paired devices and notifies
+  // observers.
+  void AddPairedDevices();
 
   std::string address_;
   std::string name_;
-  bool powered_;
-
+  bool classic_powered_;
   int num_discovery_sessions_;
 
   // Discovery manager for Bluetooth Classic.
   scoped_ptr<BluetoothDiscoveryManagerMac> classic_discovery_manager_;
+
+  // Discovery manager for Bluetooth Low Energy.
+  scoped_ptr<BluetoothLowEnergyDiscoveryManagerMac>
+      low_energy_discovery_manager_;
+
+  // Underlying CoreBluetooth CBCentralManager and its delegate.
+  base::scoped_nsobject<CBCentralManager> low_energy_central_manager_;
+  base::scoped_nsobject<BluetoothLowEnergyCentralManagerDelegate>
+      low_energy_central_manager_delegate_;
 
   scoped_refptr<base::SequencedTaskRunner> ui_task_runner_;
 

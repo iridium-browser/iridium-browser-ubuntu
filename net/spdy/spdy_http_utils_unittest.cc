@@ -72,14 +72,14 @@ TEST(SpdyHttpUtilsTest, CreateSpdyHeadersFromHttpRequestSPDY3) {
   EXPECT_EQ("Chrome/1.1", headers["user-agent"]);
 }
 
-TEST(SpdyHttpUtilsTest, CreateSpdyHeadersFromHttpRequestSPDY4) {
+TEST(SpdyHttpUtilsTest, CreateSpdyHeadersFromHttpRequestHTTP2) {
   GURL url("https://www.google.com/index.html");
   HttpRequestInfo request;
   request.method = "GET";
   request.url = url;
   request.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Chrome/1.1");
   SpdyHeaderBlock headers;
-  CreateSpdyHeadersFromHttpRequest(request, request.extra_headers, SPDY4,
+  CreateSpdyHeadersFromHttpRequest(request, request.extra_headers, HTTP2,
                                    kDirect, &headers);
   EXPECT_EQ("GET", headers[":method"]);
   EXPECT_EQ("https", headers[":scheme"]);
@@ -123,14 +123,14 @@ TEST(SpdyHttpUtilsTest, CreateSpdyHeadersFromHttpRequestProxySPDY3) {
   EXPECT_EQ("Chrome/1.1", headers["user-agent"]);
 }
 
-TEST(SpdyHttpUtilsTest, CreateSpdyHeadersFromHttpRequestProxySPDY4) {
+TEST(SpdyHttpUtilsTest, CreateSpdyHeadersFromHttpRequestProxyHTTP2) {
   GURL url("https://www.google.com/index.html");
   HttpRequestInfo request;
   request.method = "GET";
   request.url = url;
   request.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Chrome/1.1");
   SpdyHeaderBlock headers;
-  CreateSpdyHeadersFromHttpRequest(request, request.extra_headers, SPDY4,
+  CreateSpdyHeadersFromHttpRequest(request, request.extra_headers, HTTP2,
                                    !kDirect, &headers);
   EXPECT_EQ("GET", headers[":method"]);
   EXPECT_EQ("https", headers[":scheme"]);
@@ -174,19 +174,20 @@ TEST(SpdyHttpUtilsTest, CreateSpdyHeadersFromHttpRequestConnectSPDY3) {
   EXPECT_EQ("Chrome/1.1", headers["user-agent"]);
 }
 
-TEST(SpdyHttpUtilsTest, CreateSpdyHeadersFromHttpRequestConnectSPDY4) {
+TEST(SpdyHttpUtilsTest, CreateSpdyHeadersFromHttpRequestConnectHTTP2) {
   GURL url("https://www.google.com/index.html");
   HttpRequestInfo request;
   request.method = "CONNECT";
   request.url = url;
   request.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Chrome/1.1");
   SpdyHeaderBlock headers;
-  CreateSpdyHeadersFromHttpRequest(request, request.extra_headers, SPDY4,
+  CreateSpdyHeadersFromHttpRequest(request, request.extra_headers, HTTP2,
                                    kDirect, &headers);
   EXPECT_EQ("CONNECT", headers[":method"]);
   EXPECT_TRUE(headers.end() == headers.find(":scheme"));
-  EXPECT_EQ("www.google.com", headers[":authority"]);
-  EXPECT_EQ("www.google.com:443", headers[":path"]);
+  EXPECT_EQ("www.google.com:443", headers[":authority"]);
+  EXPECT_EQ(0u, headers.count(":path"));
+  EXPECT_EQ(0u, headers.count(":scheme"));
   EXPECT_TRUE(headers.end() == headers.find(":version"));
   EXPECT_EQ("Chrome/1.1", headers["user-agent"]);
 }

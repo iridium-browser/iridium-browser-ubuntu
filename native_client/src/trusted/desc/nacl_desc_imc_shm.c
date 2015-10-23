@@ -335,6 +335,11 @@ static struct NaClDescVtbl const kNaClDescImcShmVtbl = {
   NaClDescPReadNotImplemented,
   NaClDescPWriteNotImplemented,
   NaClDescImcShmFstat,
+  NaClDescFchdirNotImplemented,
+  NaClDescFchmodNotImplemented,
+  NaClDescFsyncNotImplemented,
+  NaClDescFdatasyncNotImplemented,
+  NaClDescFtruncateNotImplemented,
   NaClDescGetdentsNotImplemented,
   NaClDescImcShmExternalizeSize,
   NaClDescImcShmExternalize,
@@ -363,14 +368,12 @@ static struct NaClDescVtbl const kNaClDescImcShmVtbl = {
 };
 
 int NaClDescImcShmInternalize(struct NaClDesc               **out_desc,
-                              struct NaClDescXferState      *xfer,
-                              struct NaClDescQuotaInterface *quota_interface) {
+                              struct NaClDescXferState      *xfer) {
   int                   rv;
   struct NaClDescImcShm *ndisp;
   NaClHandle            h;
   nacl_off64_t          hsize;
 
-  UNREFERENCED_PARAMETER(quota_interface);
   rv = -NACL_ABI_EIO;
 
   ndisp = malloc(sizeof *ndisp);

@@ -24,6 +24,7 @@
 #include "remoting/proto/audio.pb.h"
 #include "remoting/proto/control.pb.h"
 #include "remoting/proto/event.pb.h"
+#include "remoting/protocol/capability_names.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 #include "third_party/webrtc/modules/desktop_capture/mouse_cursor.h"
@@ -34,8 +35,6 @@
 #endif  // defined(OS_WIN)
 
 const bool kReadOnly = true;
-const char kSendInitialResolution[] = "sendInitialResolution";
-const char kRateLimitResizeRequests[] = "rateLimitResizeRequests";
 
 namespace remoting {
 
@@ -58,7 +57,8 @@ class DesktopSessionProxy::IpcSharedBufferCore
 #if defined(OS_WIN)
                  << ", handle=" << handle
 #else
-                 << ", handle.fd=" << handle.fd
+                 << ", handle.fd="
+                 << base::SharedMemory::GetFdFromSharedMemoryHandle(handle)
 #endif
                  << ", size=" << size;
     }
@@ -71,7 +71,8 @@ class DesktopSessionProxy::IpcSharedBufferCore
 #if defined(OS_WIN)
     return shared_memory_.handle();
 #else
-    return shared_memory_.handle().fd;
+    return base::SharedMemory::GetFdFromSharedMemoryHandle(
+        shared_memory_.handle());
 #endif
   }
 
@@ -107,7 +108,8 @@ DesktopSessionProxy::DesktopSessionProxy(
     scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
     base::WeakPtr<ClientSessionControl> client_session_control,
     base::WeakPtr<DesktopSessionConnector> desktop_session_connector,
-    bool virtual_terminal)
+    bool virtual_terminal,
+    bool supports_touch_events)
     : audio_capture_task_runner_(audio_capture_task_runner),
       caller_task_runner_(caller_task_runner),
       io_task_runner_(io_task_runner),
@@ -116,7 +118,8 @@ DesktopSessionProxy::DesktopSessionProxy(
       desktop_session_connector_(desktop_session_connector),
       pending_capture_frame_requests_(0),
       is_desktop_session_connected_(false),
-      virtual_terminal_(virtual_terminal) {
+      virtual_terminal_(virtual_terminal),
+      supports_touch_events_(supports_touch_events) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 }
 
@@ -150,10 +153,14 @@ scoped_ptr<webrtc::MouseCursorMonitor>
 }
 
 std::string DesktopSessionProxy::GetCapabilities() const {
-  std::string result = kRateLimitResizeRequests;
+  std::string result = protocol::kRateLimitResizeRequests;
   // Ask the client to send its resolution unconditionally.
   if (virtual_terminal_)
-    result = result + " " + kSendInitialResolution;
+    result = result + " " + protocol::kSendInitialResolution;
+
+  if (supports_touch_events_)
+    result = result + " "  + protocol::kTouchEventsCapability;
+
   return result;
 }
 
@@ -164,7 +171,7 @@ void DesktopSessionProxy::SetCapabilities(const std::string& capabilities) {
   // sent its screen resolution (the 'sendInitialResolution' capability is
   // supported).
   if (virtual_terminal_ &&
-      HasCapability(capabilities, kSendInitialResolution)) {
+      HasCapability(capabilities, protocol::kSendInitialResolution)) {
     VLOG(1) << "Waiting for the client screen resolution.";
     return;
   }
@@ -260,7 +267,8 @@ bool DesktopSessionProxy::AttachToDesktop(
   desktop_channel_ = IPC::ChannelProxy::Create(desktop_channel_handle,
                                                IPC::Channel::MODE_CLIENT,
                                                this,
-                                               io_task_runner_.get());
+                                               io_task_runner_.get(),
+                                               nullptr);
 
   // Pass ID of the client (which is authenticated at this point) to the desktop
   // session agent and start the agent.
@@ -478,8 +486,9 @@ void DesktopSessionProxy::OnCreateSharedBuffer(
     uint32 size) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
+  base::SharedMemoryHandle shm_handle = base::SharedMemoryHandle(handle);
   scoped_refptr<IpcSharedBufferCore> shared_buffer =
-      new IpcSharedBufferCore(id, handle, desktop_process_.Handle(), size);
+      new IpcSharedBufferCore(id, shm_handle, desktop_process_.Handle(), size);
 
   if (shared_buffer->memory() != nullptr &&
       !shared_buffers_.insert(std::make_pair(id, shared_buffer)).second) {

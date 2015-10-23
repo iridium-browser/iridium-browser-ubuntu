@@ -14,11 +14,12 @@
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/browser/browsing_data/local_data_container.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/web_site_settings_uma_util.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
@@ -34,9 +35,15 @@ using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
 using content::BrowserThread;
 
-static HostContentSettingsMap* GetHostContentSettingsMap() {
+static Profile* GetActiveUserProfile(bool is_incognito) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
-  return profile->GetHostContentSettingsMap();
+  if (is_incognito)
+    profile = profile->GetOffTheRecordProfile();
+  return profile;
+}
+
+static HostContentSettingsMap* GetHostContentSettingsMap(bool is_incognito) {
+  return GetActiveUserProfile(is_incognito)->GetHostContentSettingsMap();
 }
 
 static void GetOrigins(JNIEnv* env,
@@ -44,7 +51,8 @@ static void GetOrigins(JNIEnv* env,
                        jobject list,
                        jboolean managedOnly) {
   ContentSettingsForOneType all_settings;
-  HostContentSettingsMap* content_settings_map = GetHostContentSettingsMap();
+  HostContentSettingsMap* content_settings_map =
+      GetHostContentSettingsMap(false);
   content_settings_map->GetSettingsForOneType(
       content_type, std::string(), &all_settings);
   ContentSetting default_content_setting = content_settings_map->
@@ -74,12 +82,16 @@ static void GetOrigins(JNIEnv* env,
     const char* kHttpPortSuffix = ":80";
     const char* kHttpsPortSuffix = ":443";
     ScopedJavaLocalRef<jstring> jorigin;
-    if (StartsWithASCII(origin, url::kHttpsScheme, false) &&
-        EndsWith(origin, kHttpsPortSuffix, false)) {
+    if (base::StartsWith(origin, url::kHttpsScheme,
+                         base::CompareCase::INSENSITIVE_ASCII) &&
+        base::EndsWith(origin, kHttpsPortSuffix,
+                       base::CompareCase::INSENSITIVE_ASCII)) {
       jorigin = ConvertUTF8ToJavaString(
           env, origin.substr(0, origin.size() - strlen(kHttpsPortSuffix)));
-    } else if (StartsWithASCII(origin, url::kHttpScheme, false) &&
-               EndsWith(origin, kHttpPortSuffix, false)) {
+    } else if (base::StartsWith(origin, url::kHttpScheme,
+                                base::CompareCase::INSENSITIVE_ASCII) &&
+               base::EndsWith(origin, kHttpPortSuffix,
+                              base::CompareCase::INSENSITIVE_ASCII)) {
       jorigin = ConvertUTF8ToJavaString(
           env, origin.substr(0, origin.size() - strlen(kHttpPortSuffix)));
     } else {
@@ -128,14 +140,13 @@ static void GetOrigins(JNIEnv* env,
 static jint GetSettingForOrigin(JNIEnv* env,
                                 ContentSettingsType content_type,
                                 jstring origin,
-                                jstring embedder) {
+                                jstring embedder,
+                                jboolean is_incognito) {
   GURL url(ConvertJavaStringToUTF8(env, origin));
   GURL embedder_url(ConvertJavaStringToUTF8(env, embedder));
-  ContentSetting setting = GetHostContentSettingsMap()->GetContentSetting(
-      url,
-      embedder_url,
-      content_type,
-      std::string());
+  ContentSetting setting =
+      GetHostContentSettingsMap(is_incognito)
+          ->GetContentSetting(url, embedder_url, content_type, std::string());
   return setting;
 }
 
@@ -143,7 +154,8 @@ static void SetSettingForOrigin(JNIEnv* env,
                                 ContentSettingsType content_type,
                                 jstring origin,
                                 ContentSettingsPattern secondary_pattern,
-                                jint value) {
+                                jint value,
+                                jboolean is_incognito) {
   GURL url(ConvertJavaStringToUTF8(env, origin));
   ContentSetting setting = CONTENT_SETTING_DEFAULT;
   switch (value) {
@@ -155,12 +167,10 @@ static void SetSettingForOrigin(JNIEnv* env,
       // Note: CONTENT_SETTINGS_ASK is not and should not be supported.
       NOTREACHED();
   }
-  GetHostContentSettingsMap()->SetContentSetting(
-      ContentSettingsPattern::FromURLNoWildcard(url),
-      secondary_pattern,
-      content_type,
-      std::string(),
-      setting);
+  GetHostContentSettingsMap(is_incognito)
+      ->SetContentSetting(ContentSettingsPattern::FromURLNoWildcard(url),
+                          secondary_pattern, content_type, std::string(),
+                          setting);
   WebSiteSettingsUmaUtil::LogPermissionChange(content_type, setting);
 }
 
@@ -171,17 +181,25 @@ static void GetFullscreenOrigins(JNIEnv* env,
   GetOrigins(env, CONTENT_SETTINGS_TYPE_FULLSCREEN, list, managedOnly);
 }
 
-static jint GetFullscreenSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder) {
-  return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_FULLSCREEN,
-                             origin, embedder);
+static jint GetFullscreenSettingForOrigin(JNIEnv* env,
+                                          jclass clazz,
+                                          jstring origin,
+                                          jstring embedder,
+                                          jboolean is_incognito) {
+  return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_FULLSCREEN, origin,
+                             embedder, is_incognito);
 }
 
-static void SetFullscreenSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder, jint value) {
+static void SetFullscreenSettingForOrigin(JNIEnv* env,
+                                          jclass clazz,
+                                          jstring origin,
+                                          jstring embedder,
+                                          jint value,
+                                          jboolean is_incognito) {
   GURL embedder_url(ConvertJavaStringToUTF8(env, embedder));
-  SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_FULLSCREEN,
-      origin, ContentSettingsPattern::FromURLNoWildcard(embedder_url), value);
+  SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_FULLSCREEN, origin,
+                      ContentSettingsPattern::FromURLNoWildcard(embedder_url),
+                      value, is_incognito);
 }
 
 static void GetGeolocationOrigins(JNIEnv* env,
@@ -191,34 +209,50 @@ static void GetGeolocationOrigins(JNIEnv* env,
   GetOrigins(env, CONTENT_SETTINGS_TYPE_GEOLOCATION, list, managedOnly);
 }
 
-static jint GetGeolocationSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder) {
-  return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_GEOLOCATION,
-      origin, embedder);
+static jint GetGeolocationSettingForOrigin(JNIEnv* env,
+                                           jclass clazz,
+                                           jstring origin,
+                                           jstring embedder,
+                                           jboolean is_incognito) {
+  return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_GEOLOCATION, origin,
+                             embedder, is_incognito);
 }
 
-static void SetGeolocationSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder, jint value) {
+static void SetGeolocationSettingForOrigin(JNIEnv* env,
+                                           jclass clazz,
+                                           jstring origin,
+                                           jstring embedder,
+                                           jint value,
+                                           jboolean is_incognito) {
   GURL embedder_url(ConvertJavaStringToUTF8(env, embedder));
-  SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_GEOLOCATION,
-      origin, ContentSettingsPattern::FromURLNoWildcard(embedder_url), value);
+  SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_GEOLOCATION, origin,
+                      ContentSettingsPattern::FromURLNoWildcard(embedder_url),
+                      value, is_incognito);
 }
 
 static void GetMidiOrigins(JNIEnv* env, jclass clazz, jobject list) {
   GetOrigins(env, CONTENT_SETTINGS_TYPE_MIDI_SYSEX, list, false);
 }
 
-static jint GetMidiSettingForOrigin(JNIEnv* env, jclass clazz, jstring origin,
-    jstring embedder) {
+static jint GetMidiSettingForOrigin(JNIEnv* env,
+                                    jclass clazz,
+                                    jstring origin,
+                                    jstring embedder,
+                                    jboolean is_incognito) {
   return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_MIDI_SYSEX, origin,
-      embedder);
+                             embedder, is_incognito);
 }
 
-static void SetMidiSettingForOrigin(JNIEnv* env, jclass clazz, jstring origin,
-    jstring embedder, jint value) {
+static void SetMidiSettingForOrigin(JNIEnv* env,
+                                    jclass clazz,
+                                    jstring origin,
+                                    jstring embedder,
+                                    jint value,
+                                    jboolean is_incognito) {
   GURL embedder_url(ConvertJavaStringToUTF8(env, embedder));
   SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_MIDI_SYSEX, origin,
-      ContentSettingsPattern::FromURLNoWildcard(embedder_url), value);
+                      ContentSettingsPattern::FromURLNoWildcard(embedder_url),
+                      value, is_incognito);
 }
 
 static void GetProtectedMediaIdentifierOrigins(JNIEnv* env, jclass clazz,
@@ -228,16 +262,26 @@ static void GetProtectedMediaIdentifierOrigins(JNIEnv* env, jclass clazz,
 }
 
 static jint GetProtectedMediaIdentifierSettingForOrigin(JNIEnv* env,
-    jclass clazz, jstring origin, jstring embedder) {
-  return GetSettingForOrigin(
-      env, CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER, origin, embedder);
+                                                        jclass clazz,
+                                                        jstring origin,
+                                                        jstring embedder,
+                                                        jboolean is_incognito) {
+  return GetSettingForOrigin(env,
+                             CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER,
+                             origin, embedder, is_incognito);
 }
 
 static void SetProtectedMediaIdentifierSettingForOrigin(JNIEnv* env,
-    jclass clazz, jstring origin, jstring embedder, jint value) {
+                                                        jclass clazz,
+                                                        jstring origin,
+                                                        jstring embedder,
+                                                        jint value,
+                                                        jboolean is_incognito) {
   GURL embedder_url(ConvertJavaStringToUTF8(env, embedder));
   SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER,
-      origin, ContentSettingsPattern::FromURLNoWildcard(embedder_url), value);
+                      origin,
+                      ContentSettingsPattern::FromURLNoWildcard(embedder_url),
+                      value, is_incognito);
 }
 
 static void GetPushNotificationOrigins(JNIEnv* env,
@@ -246,18 +290,25 @@ static void GetPushNotificationOrigins(JNIEnv* env,
   GetOrigins(env, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, list, false);
 }
 
-static jint GetPushNotificationSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder) {
+static jint GetPushNotificationSettingForOrigin(JNIEnv* env,
+                                                jclass clazz,
+                                                jstring origin,
+                                                jstring embedder,
+                                                jboolean is_incognito) {
   return DesktopNotificationProfileUtil::GetContentSetting(
-      ProfileManager::GetActiveUserProfile(),
+      GetActiveUserProfile(is_incognito),
       GURL(ConvertJavaStringToUTF8(env, origin)));
 }
 
-static void SetPushNotificationSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder, jint value) {
+static void SetPushNotificationSettingForOrigin(JNIEnv* env,
+                                                jclass clazz,
+                                                jstring origin,
+                                                jstring embedder,
+                                                jint value,
+                                                jboolean is_incognito) {
   // TODO(peter): Web Notification permission behaves differently from all other
   // permission types. See https://crbug.com/416894.
-  Profile* profile = ProfileManager::GetActiveUserProfile();
+  Profile* profile = GetActiveUserProfile(is_incognito);
   GURL url = GURL(ConvertJavaStringToUTF8(env, origin));
   ContentSetting setting = CONTENT_SETTING_DEFAULT;
   switch (value) {
@@ -294,33 +345,48 @@ static void GetMicrophoneOrigins(JNIEnv* env,
   GetOrigins(env, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, list, managedOnly);
 }
 
-static jint GetMicrophoneSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder) {
-  return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-      origin, embedder);
+static jint GetMicrophoneSettingForOrigin(JNIEnv* env,
+                                          jclass clazz,
+                                          jstring origin,
+                                          jstring embedder,
+                                          jboolean is_incognito) {
+  return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, origin,
+                             embedder, is_incognito);
 }
 
-static jint GetCameraSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder) {
+static jint GetCameraSettingForOrigin(JNIEnv* env,
+                                      jclass clazz,
+                                      jstring origin,
+                                      jstring embedder,
+                                      jboolean is_incognito) {
   return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-      origin, embedder);
+                             origin, embedder, is_incognito);
 }
 
-static void SetMicrophoneSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder, jint value) {
-  SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-      origin, ContentSettingsPattern::Wildcard(), value);
+static void SetMicrophoneSettingForOrigin(JNIEnv* env,
+                                          jclass clazz,
+                                          jstring origin,
+                                          jstring embedder,
+                                          jint value,
+                                          jboolean is_incognito) {
+  SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, origin,
+                      ContentSettingsPattern::Wildcard(), value, is_incognito);
 }
 
-static void SetCameraSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder, jint value) {
-  SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-      origin, ContentSettingsPattern::Wildcard(), value);
+static void SetCameraSettingForOrigin(JNIEnv* env,
+                                      jclass clazz,
+                                      jstring origin,
+                                      jstring embedder,
+                                      jint value,
+                                      jboolean is_incognito) {
+  SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, origin,
+                      ContentSettingsPattern::Wildcard(), value, is_incognito);
 }
 
-static scoped_refptr<CookieSettings> GetCookieSettings() {
+static scoped_refptr<content_settings::CookieSettings> GetCookieSettings() {
+  // A single cookie setting applies to both incognito and non-incognito.
   Profile* profile = ProfileManager::GetActiveUserProfile();
-  return CookieSettings::Factory::GetForProfile(profile);
+  return CookieSettingsFactory::GetForProfile(profile);
 }
 
 static void GetCookieOrigins(JNIEnv* env,
@@ -350,14 +416,21 @@ static void GetCookieOrigins(JNIEnv* env,
   }
 }
 
-static jint GetCookieSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder) {
+static jint GetCookieSettingForOrigin(JNIEnv* env,
+                                      jclass clazz,
+                                      jstring origin,
+                                      jstring embedder,
+                                      jboolean is_incognito) {
   return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_COOKIES, origin,
-      embedder);
+                             embedder, false);
 }
 
-static void SetCookieSettingForOrigin(JNIEnv* env, jclass clazz,
-    jstring origin, jstring embedder, jint value) {
+static void SetCookieSettingForOrigin(JNIEnv* env,
+                                      jclass clazz,
+                                      jstring origin,
+                                      jstring embedder,
+                                      jint value,
+                                      jboolean is_incognito) {
   GURL url(ConvertJavaStringToUTF8(env, origin));
   ContentSettingsPattern primary_pattern(
       ContentSettingsPattern::FromURLNoWildcard(url));
@@ -378,6 +451,15 @@ static jboolean IsContentSettingsPatternValid(JNIEnv* env, jclass clazz,
     jstring pattern) {
   return ContentSettingsPattern::FromString(
       ConvertJavaStringToUTF8(env, pattern)).IsValid();
+}
+
+static jboolean UrlMatchesContentSettingsPattern(JNIEnv* env,
+                                                 jclass clazz,
+                                                 jstring jurl,
+                                                 jstring jpattern) {
+  ContentSettingsPattern pattern = ContentSettingsPattern::FromString(
+      ConvertJavaStringToUTF8(env, jpattern));
+  return pattern.Matches(GURL(ConvertJavaStringToUTF8(env, jurl)));
 }
 
 namespace {
@@ -616,8 +698,13 @@ class LocalStorageInfoReadyCallback {
     for (i = local_storage_info.begin(); i != local_storage_info.end(); ++i) {
       ScopedJavaLocalRef<jstring> full_origin =
           ConvertUTF8ToJavaString(env_, i->origin_url.spec());
+      // Remove the trailing backslash so the origin is matched correctly in
+      // SingleWebsitePreferences.mergePermissionInfoForTopLevelOrigin.
+      std::string origin_str = i->origin_url.GetOrigin().spec();
+      DCHECK(origin_str[origin_str.size() - 1] == '/');
+      origin_str = origin_str.substr(0, origin_str.size() - 1);
       ScopedJavaLocalRef<jstring> origin =
-          ConvertUTF8ToJavaString(env_, i->origin_url.GetOrigin().spec());
+          ConvertUTF8ToJavaString(env_, origin_str);
       Java_WebsitePreferenceBridge_insertLocalStorageInfoIntoMap(
           env_, map.obj(), origin.obj(), full_origin.obj(), i->size);
     }

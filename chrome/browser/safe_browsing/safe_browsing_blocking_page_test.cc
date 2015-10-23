@@ -11,9 +11,11 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
+#include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/local_database_manager.h"
@@ -32,6 +34,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/security_interstitials/core/metrics_helper.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_types.h"
@@ -42,6 +45,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
+#include "net/test/url_request/url_request_mock_http_job.h"
 
 using chrome_browser_interstitials::SecurityInterstitialIDNTest;
 using content::BrowserThread;
@@ -51,9 +55,10 @@ using content::WebContents;
 
 namespace {
 
-const char kEmptyPage[] = "files/empty.html";
-const char kMalwarePage[] = "files/safe_browsing/malware.html";
-const char kMalwareIframe[] = "files/safe_browsing/malware_iframe.html";
+const char kEmptyPage[] = "empty.html";
+const char kMalwarePage[] = "safe_browsing/malware.html";
+const char kMalwareIframe[] = "safe_browsing/malware_iframe.html";
+const char kUnrelatedUrl[] = "https://www.google.com";
 
 // A SafeBrowsingDatabaseManager class that allows us to inject the malicious
 // URLs.
@@ -381,8 +386,10 @@ class SafeBrowsingBlockingPageBrowserTest
     MalwareDetails::RegisterFactory(NULL);
   }
 
-  void SetUpInProcessBrowserTestFixture() override {
-    ASSERT_TRUE(test_server()->Start());
+  void SetUpOnMainThread() override {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
   }
 
   void SetURLThreatType(const GURL& url, SBThreatType threat_type) {
@@ -397,7 +404,7 @@ class SafeBrowsingBlockingPageBrowserTest
   // Adds a safebrowsing result of the current test threat to the fake
   // safebrowsing service, navigates to that page, and returns the url.
   GURL SetupWarningAndNavigate() {
-    GURL url = test_server()->GetURL(kEmptyPage);
+    GURL url = net::URLRequestMockHTTPJob::GetMockUrl(kEmptyPage);
     SetURLThreatType(url, GetParam());
 
     ui_test_utils::NavigateToURL(browser(), url);
@@ -409,8 +416,8 @@ class SafeBrowsingBlockingPageBrowserTest
   // navigates to a page with an iframe containing the threat site, and returns
   // the url of the parent page.
   GURL SetupThreatIframeWarningAndNavigate() {
-    GURL url = test_server()->GetURL(kMalwarePage);
-    GURL iframe_url = test_server()->GetURL(kMalwareIframe);
+    GURL url = net::URLRequestMockHTTPJob::GetMockUrl(kMalwarePage);
+    GURL iframe_url = net::URLRequestMockHTTPJob::GetMockUrl(kMalwareIframe);
     SetURLThreatType(iframe_url, GetParam());
 
     ui_test_utils::NavigateToURL(browser(), url);
@@ -493,9 +500,9 @@ class SafeBrowsingBlockingPageBrowserTest
   }
 
   void MalwareRedirectCancelAndProceed(const std::string& open_function) {
-    GURL load_url = test_server()->GetURL(
-        "files/safe_browsing/interstitial_cancel.html");
-    GURL malware_url("http://localhost/files/safe_browsing/malware.html");
+    GURL load_url = net::URLRequestMockHTTPJob::GetMockUrl(
+        "safe_browsing/interstitial_cancel.html");
+    GURL malware_url = net::URLRequestMockHTTPJob::GetMockUrl(kMalwarePage);
     SetURLThreatType(malware_url, GetParam());
 
     // Load the test page.
@@ -564,7 +571,7 @@ class SafeBrowsingBlockingPageBrowserTest
     // We don't use ExecuteScriptAndGetValue for this one, since clicking
     // the button/link may navigate away before the injected javascript can
     // reply, hanging the test.
-    rvh->GetMainFrame()->ExecuteJavaScript(
+    rvh->GetMainFrame()->ExecuteJavaScriptForTests(
         base::ASCIIToUTF16(
             "document.getElementById('" + node_id + "').click();\n"));
     return true;
@@ -609,8 +616,8 @@ class SafeBrowsingBlockingPageBrowserTest
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingBlockingPageBrowserTest);
 };
 
-// TODO(linux_aura) http://crbug.com/163931
-// TODO(win_aura) http://crbug.com/154081
+// TODO(linux_aura) https://crbug.com/163931
+// TODO(win_aura) https://crbug.com/154081
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
 #define MAYBE_RedirectInIFrameCanceled DISABLED_RedirectInIFrameCanceled
 #else
@@ -635,10 +642,11 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, RedirectCanceled) {
 
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, DontProceed) {
 #if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  // Disable this test in Metro+Ash for now (https://crbug.com/262796).
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
+          switches::kAshBrowserTests)) {
     return;
+  }
 #endif
 
   SetupWarningAndNavigate();
@@ -669,10 +677,11 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, Proceed) {
 
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, IframeDontProceed) {
 #if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  // Disable this test in Metro+Ash for now (https://crbug.com/262796).
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
+          switches::kAshBrowserTests)) {
     return;
+  }
 #endif
 
   SetupThreatIframeWarningAndNavigate();
@@ -750,10 +759,11 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
 // command anyway doesn't advance to the malware site.
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ProceedDisabled) {
 #if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  // Disable this test in Metro+Ash for now (https://crbug.com/262796).
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
+          switches::kAshBrowserTests)) {
     return;
+  }
 #endif
 
   // Simulate a policy disabling the "proceed anyway" link.
@@ -782,22 +792,18 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ProceedDisabled) {
 // good way to do that in the current design.
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ReportingDisabled) {
 #if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  // Disable this test in Metro+Ash for now (https://crbug.com/262796).
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
+          switches::kAshBrowserTests)) {
     return;
+  }
 #endif
 
   browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kSafeBrowsingExtendedReportingEnabled, true);
 
-  net::SpawnedTestServer https_server(
-      net::SpawnedTestServer::TYPE_HTTPS, net::SpawnedTestServer::kLocalhost,
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
-  ASSERT_TRUE(https_server.Start());
-  GURL url = https_server.GetURL(kEmptyPage);
-
-  TestReportingDisabledAndDontProceed(url);
+  TestReportingDisabledAndDontProceed(
+      net::URLRequestMockHTTPJob::GetMockHttpsUrl(kEmptyPage));
 }
 
 // Verifies that the reporting checkbox is hidden when opt-in is
@@ -805,10 +811,11 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ReportingDisabled) {
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
                        ReportingDisabledByPolicy) {
 #if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  // Disable this test in Metro+Ash for now (https://crbug.com/262796).
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
+          switches::kAshBrowserTests)) {
     return;
+  }
 #endif
 
   browser()->profile()->GetPrefs()->SetBoolean(
@@ -816,7 +823,8 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
   browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kSafeBrowsingExtendedReportingOptInAllowed, false);
 
-  TestReportingDisabledAndDontProceed(test_server()->GetURL(kEmptyPage));
+  TestReportingDisabledAndDontProceed(
+      net::URLRequestMockHTTPJob::GetMockUrl(kEmptyPage));
 }
 
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, LearnMore) {
@@ -830,6 +838,150 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, LearnMore) {
           ? "/transparencyreport/safebrowsing/"
           : "/safebrowsing/diagnostic",
       browser()->tab_strip_model()->GetActiveWebContents()->GetURL().path());
+}
+
+IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
+                       Histograms_DontProceed) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (https://crbug.com/262796).
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests)) {
+    return;
+  }
+#endif
+
+  base::HistogramTester histograms;
+  std::string prefix;
+  if (GetParam() == SB_THREAT_TYPE_URL_MALWARE)
+    prefix = "malware";
+  else if (GetParam() == SB_THREAT_TYPE_URL_PHISHING)
+    prefix = "phishing";
+  else if (GetParam() == SB_THREAT_TYPE_URL_UNWANTED)
+    prefix = "harmful";
+  else
+    NOTREACHED();
+  const std::string decision_histogram = "interstitial." + prefix + ".decision";
+  const std::string interaction_histogram =
+      "interstitial." + prefix + ".interaction";
+
+  // TODO(nparker): Check for *.from_device as well.
+
+  // Histograms should start off empty.
+  histograms.ExpectTotalCount(decision_histogram, 0);
+  histograms.ExpectTotalCount(interaction_histogram, 0);
+
+  // After navigating to the page, the totals should be set.
+  SetupWarningAndNavigate();
+  histograms.ExpectTotalCount(decision_histogram, 1);
+  histograms.ExpectBucketCount(decision_histogram,
+                               security_interstitials::MetricsHelper::SHOW, 1);
+  histograms.ExpectTotalCount(interaction_histogram, 1);
+  histograms.ExpectBucketCount(
+      interaction_histogram,
+      security_interstitials::MetricsHelper::TOTAL_VISITS, 1);
+
+  // Decision should be recorded.
+  EXPECT_TRUE(ClickAndWaitForDetach("primary-button"));
+  AssertNoInterstitial(false);  // Assert the interstitial is gone
+  histograms.ExpectTotalCount(decision_histogram, 2);
+  histograms.ExpectBucketCount(
+      decision_histogram, security_interstitials::MetricsHelper::DONT_PROCEED,
+      1);
+  histograms.ExpectTotalCount(interaction_histogram, 1);
+  histograms.ExpectBucketCount(
+      interaction_histogram,
+      security_interstitials::MetricsHelper::TOTAL_VISITS, 1);
+}
+
+IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
+                       Histograms_Proceed) {
+  base::HistogramTester histograms;
+  std::string prefix;
+  if (GetParam() == SB_THREAT_TYPE_URL_MALWARE)
+    prefix = "malware";
+  else if (GetParam() == SB_THREAT_TYPE_URL_PHISHING)
+    prefix = "phishing";
+  else if (GetParam() == SB_THREAT_TYPE_URL_UNWANTED)
+    prefix = "harmful";
+  else
+    NOTREACHED();
+  const std::string decision_histogram = "interstitial." + prefix + ".decision";
+  const std::string interaction_histogram =
+      "interstitial." + prefix + ".interaction";
+
+  // Histograms should start off empty.
+  histograms.ExpectTotalCount(decision_histogram, 0);
+  histograms.ExpectTotalCount(interaction_histogram, 0);
+
+  // After navigating to the page, the totals should be set.
+  GURL url = SetupWarningAndNavigate();
+  histograms.ExpectTotalCount(decision_histogram, 1);
+  histograms.ExpectBucketCount(decision_histogram,
+                               security_interstitials::MetricsHelper::SHOW, 1);
+  histograms.ExpectTotalCount(interaction_histogram, 1);
+  histograms.ExpectBucketCount(
+      interaction_histogram,
+      security_interstitials::MetricsHelper::TOTAL_VISITS, 1);
+
+  // Decision should be recorded.
+  EXPECT_TRUE(ClickAndWaitForDetach("proceed-link"));
+  AssertNoInterstitial(true);  // Assert the interstitial is gone.
+  histograms.ExpectTotalCount(decision_histogram, 2);
+  histograms.ExpectBucketCount(
+      decision_histogram, security_interstitials::MetricsHelper::PROCEED, 1);
+  histograms.ExpectTotalCount(interaction_histogram, 1);
+  histograms.ExpectBucketCount(
+      interaction_histogram,
+      security_interstitials::MetricsHelper::TOTAL_VISITS, 1);
+}
+
+IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, WhitelistRevisit) {
+  GURL url = SetupWarningAndNavigate();
+
+  EXPECT_TRUE(ClickAndWaitForDetach("proceed-link"));
+  AssertNoInterstitial(true);  // Assert the interstitial is gone.
+  EXPECT_EQ(url,
+            browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
+
+  // Unrelated pages should not be whitelisted now.
+  ui_test_utils::NavigateToURL(browser(), GURL(kUnrelatedUrl));
+  AssertNoInterstitial(false);
+
+  // The whitelisted page should remain whitelisted.
+  ui_test_utils::NavigateToURL(browser(), url);
+  AssertNoInterstitial(false);
+}
+
+IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
+                       WhitelistIframeRevisit) {
+  GURL url = SetupThreatIframeWarningAndNavigate();
+
+  EXPECT_TRUE(ClickAndWaitForDetach("proceed-link"));
+  AssertNoInterstitial(true);  // Assert the interstitial is gone.
+  EXPECT_EQ(url,
+            browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
+
+  // Unrelated pages should not be whitelisted now.
+  ui_test_utils::NavigateToURL(browser(), GURL(kUnrelatedUrl));
+  AssertNoInterstitial(false);
+
+  // The whitelisted page should remain whitelisted.
+  ui_test_utils::NavigateToURL(browser(), url);
+  AssertNoInterstitial(false);
+}
+
+IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, WhitelistUnsaved) {
+  GURL url = SetupWarningAndNavigate();
+
+  // Navigate without making a decision.
+  ui_test_utils::NavigateToURL(browser(), GURL(kUnrelatedUrl));
+  AssertNoInterstitial(false);
+
+  // The non-whitelisted page should now show an interstitial.
+  ui_test_utils::NavigateToURL(browser(), url);
+  EXPECT_TRUE(WaitForReady());
+  EXPECT_TRUE(ClickAndWaitForDetach("proceed-link"));
+  AssertNoInterstitial(true);
 }
 
 INSTANTIATE_TEST_CASE_P(SafeBrowsingBlockingPageBrowserTestWithThreatType,
@@ -857,6 +1009,7 @@ class SafeBrowsingBlockingPageIDNTest
     resource.threat_type = GetParam();
     resource.render_process_host_id = contents->GetRenderProcessHost()->GetID();
     resource.render_view_id = contents->GetRenderViewHost()->GetRoutingID();
+    resource.threat_source = SafeBrowsingUIManager::FROM_DEVICE;
 
     return SafeBrowsingBlockingPage::CreateBlockingPage(
         sb_service->ui_manager().get(), contents, resource);

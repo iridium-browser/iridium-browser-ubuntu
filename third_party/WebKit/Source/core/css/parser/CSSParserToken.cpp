@@ -31,8 +31,8 @@ CSSParserToken::CSSParserToken(CSSParserTokenType type, UChar c)
 CSSParserToken::CSSParserToken(CSSParserTokenType type, CSSParserString value, BlockType blockType)
     : m_type(type)
     , m_blockType(blockType)
-    , m_value(value)
 {
+    initValueFromCSSParserString(value);
 }
 
 CSSParserToken::CSSParserToken(CSSParserTokenType type, double numericValue, NumericValueType numericValueType, NumericSign sign)
@@ -40,16 +40,15 @@ CSSParserToken::CSSParserToken(CSSParserTokenType type, double numericValue, Num
     , m_blockType(NotBlock)
     , m_numericValueType(numericValueType)
     , m_numericSign(sign)
-    , m_unit(CSSPrimitiveValue::CSS_NUMBER)
+    , m_unit(static_cast<unsigned>(CSSPrimitiveValue::UnitType::Number))
     , m_numericValue(numericValue)
 {
     ASSERT(type == NumberToken);
 }
 
-CSSParserToken::CSSParserToken(CSSParserTokenType type, CSSParserString string, UChar32 start, UChar32 end)
+CSSParserToken::CSSParserToken(CSSParserTokenType type, UChar32 start, UChar32 end)
     : m_type(UnicodeRangeToken)
     , m_blockType(NotBlock)
-    , m_value(string)
 {
     ASSERT_UNUSED(type, type == UnicodeRangeToken);
     m_unicodeRange.start = start;
@@ -59,24 +58,24 @@ CSSParserToken::CSSParserToken(CSSParserTokenType type, CSSParserString string, 
 CSSParserToken::CSSParserToken(HashTokenType type, CSSParserString value)
     : m_type(HashToken)
     , m_blockType(NotBlock)
-    , m_value(value)
     , m_hashTokenType(type)
 {
+    initValueFromCSSParserString(value);
 }
 
 void CSSParserToken::convertToDimensionWithUnit(CSSParserString unit)
 {
     ASSERT(m_type == NumberToken);
     m_type = DimensionToken;
-    m_value = unit;
-    m_unit = CSSPrimitiveValue::fromName(unit);
+    initValueFromCSSParserString(unit);
+    m_unit = static_cast<unsigned>(CSSPrimitiveValue::fromName(unit));
 }
 
 void CSSParserToken::convertToPercentage()
 {
     ASSERT(m_type == NumberToken);
     m_type = PercentageToken;
-    m_unit = CSSPrimitiveValue::CSS_PERCENTAGE;
+    m_unit = static_cast<unsigned>(CSSPrimitiveValue::UnitType::Percentage);
 }
 
 UChar CSSParserToken::delimiter() const
@@ -108,7 +107,7 @@ double CSSParserToken::numericValue() const
 CSSPropertyID CSSParserToken::parseAsUnresolvedCSSPropertyID() const
 {
     ASSERT(m_type == IdentToken);
-    return unresolvedCSSPropertyID(m_value);
+    return unresolvedCSSPropertyID(value());
 }
 
 void CSSParserToken::serialize(StringBuilder& builder) const
@@ -117,18 +116,21 @@ void CSSParserToken::serialize(StringBuilder& builder) const
     // simple we handle some of the edge cases incorrectly (see comments below).
     switch (type()) {
     case IdentToken:
-        return serializeIdentifier(value(), builder);
+        serializeIdentifier(value(), builder);
+        break;
     case FunctionToken:
         serializeIdentifier(value(), builder);
         return builder.append('(');
     case AtKeywordToken:
         builder.append('@');
-        return serializeIdentifier(value(), builder);
+        serializeIdentifier(value(), builder);
+        break;
     case HashToken:
         // This will always serialize as a hash-token with 'id' type instead of
         // preserving the type of the input.
         builder.append('#');
-        return serializeIdentifier(value(), builder);
+        serializeIdentifier(value(), builder);
+        break;
     case UrlToken:
         builder.append("url(");
         serializeIdentifier(value(), builder);
@@ -146,9 +148,10 @@ void CSSParserToken::serialize(StringBuilder& builder) const
     case DimensionToken:
         // This will incorrectly serialize e.g. 4e3e2 as 4000e2
         builder.appendNumber(numericValue());
-        return serializeIdentifier(value(), builder);
+        serializeIdentifier(value(), builder);
+        break;
     case UnicodeRangeToken:
-        return builder.append(value());
+        return builder.append(String::format("U+%X-%X", unicodeRangeStart(), unicodeRangeEnd()));
     case StringToken:
         return serializeString(value(), builder);
 

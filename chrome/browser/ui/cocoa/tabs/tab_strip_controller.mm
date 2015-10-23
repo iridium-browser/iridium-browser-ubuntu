@@ -17,10 +17,9 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/favicon/favicon_helper.h"
+#include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -50,8 +49,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/omnibox/autocomplete_match.h"
-#include "components/url_fixer/url_fixer.h"
+#include "components/omnibox/browser/autocomplete_classifier.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/url_formatter/url_fixer.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
@@ -66,7 +66,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/mac/scoped_ns_disable_screen_updates.h"
+#include "ui/gfx/mac/scoped_cocoa_disable_screen_updates.h"
 #include "ui/resources/grit/ui_resources.h"
 
 using base::UserMetricsAction;
@@ -87,8 +87,8 @@ const CGFloat kUseFullAvailableWidth = -1.0;
 // on each throbber frame instead of one.
 const CGFloat kTabOverlap = 19.0;
 
-// The amount by which mini tabs are separated from normal tabs.
-const CGFloat kLastMiniTabSpacing = 2.0;
+// The amount by which pinned tabs are separated from normal tabs.
+const CGFloat kLastPinnedTabSpacing = 2.0;
 
 // The amount by which the new tab button is offset (from the tabs).
 const CGFloat kNewTabButtonOffset = 8.0;
@@ -241,8 +241,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 - (NSInteger)indexFromModelIndex:(NSInteger)index;
 - (void)clickNewTabButton:(id)sender;
 - (NSInteger)numberOfOpenTabs;
-- (NSInteger)numberOfOpenMiniTabs;
-- (NSInteger)numberOfOpenNonMiniTabs;
+- (NSInteger)numberOfOpenPinnedTabs;
+- (NSInteger)numberOfOpenNonPinnedTabs;
 - (void)mouseMoved:(NSEvent*)event;
 - (void)setTabTrackingAreasEnabled:(BOOL)enabled;
 - (void)droppingURLsAt:(NSPoint)point
@@ -573,6 +573,11 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 }
 
 - (void)dealloc {
+  [self browserWillBeDestroyed];
+  [super dealloc];
+}
+
+- (void)browserWillBeDestroyed {
   [tabStripView_ setController:nil];
 
   if (trackingArea_.get())
@@ -586,7 +591,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     [[[view animationForKey:@"frameOrigin"] delegate] invalidate];
   }
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [super dealloc];
+
+  browser_ = nullptr;
 }
 
 + (CGFloat)defaultTabHeight {
@@ -608,7 +614,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   TabContentsController* controller = [tabContentsArray_ objectAtIndex:index];
 
   // Make sure we do not draw any transient arrangements of views.
-  gfx::ScopedNSDisableScreenUpdates ns_disabler;
+  gfx::ScopedCocoaDisableScreenUpdates cocoa_disabler;
   // Make sure that any layers that move are not animated to their new
   // positions.
   ScopedCAActionDisabler ca_disabler;
@@ -683,17 +689,17 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   return static_cast<NSInteger>(tabStripModel_->count());
 }
 
-// (Private) Returns the number of open, mini-tabs.
-- (NSInteger)numberOfOpenMiniTabs {
-  // Ask the model for the number of mini tabs. Note that tabs which are in
+// (Private) Returns the number of open, pinned tabs.
+- (NSInteger)numberOfOpenPinnedTabs {
+  // Ask the model for the number of pinned tabs. Note that tabs which are in
   // the process of closing (i.e., whose controllers are in
   // |closingControllers_|) have already been removed from the model.
-  return tabStripModel_->IndexOfFirstNonMiniTab();
+  return tabStripModel_->IndexOfFirstNonPinnedTab();
 }
 
-// (Private) Returns the number of open, non-mini tabs.
-- (NSInteger)numberOfOpenNonMiniTabs {
-  NSInteger number = [self numberOfOpenTabs] - [self numberOfOpenMiniTabs];
+// (Private) Returns the number of open, non-pinned tabs.
+- (NSInteger)numberOfOpenNonPinnedTabs {
+  NSInteger number = [self numberOfOpenTabs] - [self numberOfOpenPinnedTabs];
   DCHECK_GE(number, 0);
   return number;
 }
@@ -827,8 +833,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   if (!tabStripModel_->ContainsIndex(index))
     return;
   WebContents* contents = tabStripModel_->GetWebContentsAt(index);
-  chrome::SetTabAudioMuted(contents, !chrome::IsTabAudioMuted(contents),
-                           chrome::kMutedToggleCauseUser);
+  chrome::SetTabAudioMuted(contents, !contents->IsAudioMuted(),
+                           TAB_MUTED_REASON_AUDIO_INDICATOR, std::string());
 }
 
 // Called when the user closes a tab. Asks the model to close the tab. |sender|
@@ -951,8 +957,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   const CGFloat kMaxTabWidth = [TabController maxTabWidth];
   const CGFloat kMinTabWidth = [TabController minTabWidth];
   const CGFloat kMinActiveTabWidth = [TabController minActiveTabWidth];
-  const CGFloat kMiniTabWidth = [TabController miniTabWidth];
-  const CGFloat kAppTabWidth = [TabController appTabWidth];
+  const CGFloat kPinnedTabWidth = [TabController pinnedTabWidth];
 
   NSRect enclosingRect = NSZeroRect;
   ScopedNSAnimationContextGroup mainAnimationGroup(animate);
@@ -963,7 +968,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     [self regenerateSubviewList];
 
   // Compute the base width of tabs given how much room we're allowed. Note that
-  // mini-tabs have a fixed width. We may not be able to use the entire width
+  // pinned tabs have a fixed width. We may not be able to use the entire width
   // if the user is quickly closing tabs. This may be negative, but that's okay
   // (taken care of by |MAX()| when calculating tab sizes).
   CGFloat availableSpace = 0;
@@ -987,32 +992,33 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   availableSpace -= [self leftIndentForControls];
 
   // This may be negative, but that's okay (taken care of by |MAX()| when
-  // calculating tab sizes). "mini" tabs in horizontal mode just get a special
+  // calculating tab sizes). "pinned" tabs in horizontal mode just get a special
   // section, they don't change size.
-  CGFloat availableSpaceForNonMini = availableSpace;
-  if ([self numberOfOpenMiniTabs]) {
-    availableSpaceForNonMini -=
-        [self numberOfOpenMiniTabs] * (kMiniTabWidth - kTabOverlap);
-    availableSpaceForNonMini -= kLastMiniTabSpacing;
+  CGFloat availableSpaceForNonPinned = availableSpace;
+  if ([self numberOfOpenPinnedTabs]) {
+    availableSpaceForNonPinned -=
+        [self numberOfOpenPinnedTabs] * (kPinnedTabWidth - kTabOverlap);
+    availableSpaceForNonPinned -= kLastPinnedTabSpacing;
   }
 
-  // Initialize |nonMiniTabWidth| in case there aren't any non-mini-tabs; this
-  // value shouldn't actually be used.
-  CGFloat nonMiniTabWidth = kMaxTabWidth;
-  CGFloat nonMiniTabWidthFraction = 0;
-  NSInteger numberOfNonMiniTabs = MIN(
-      [self numberOfOpenNonMiniTabs],
-      (availableSpaceForNonMini - kTabOverlap) / (kMinTabWidth - kTabOverlap));
+  // Initialize |nonPinnedTabWidth| in case there aren't any non-pinned tabs;
+  // this value shouldn't actually be used.
+  CGFloat nonPinnedTabWidth = kMaxTabWidth;
+  CGFloat nonPinnedTabWidthFraction = 0;
+  NSInteger numberOfNonPinnedTabs = MIN(
+      [self numberOfOpenNonPinnedTabs],
+      (availableSpaceForNonPinned - kTabOverlap) / (kMinTabWidth -
+          kTabOverlap));
 
-  if (numberOfNonMiniTabs) {
-    // Find the width of a non-mini-tab. This only applies to horizontal
+  if (numberOfNonPinnedTabs) {
+    // Find the width of a non-pinned tab. This only applies to horizontal
     // mode. Add in the amount we "get back" from the tabs overlapping.
-    nonMiniTabWidth =
-        ((availableSpaceForNonMini - kTabOverlap) / numberOfNonMiniTabs) +
+    nonPinnedTabWidth =
+        ((availableSpaceForNonPinned - kTabOverlap) / numberOfNonPinnedTabs) +
         kTabOverlap;
 
     // Clamp the width between the max and min.
-    nonMiniTabWidth = MAX(MIN(nonMiniTabWidth, kMaxTabWidth), kMinTabWidth);
+    nonPinnedTabWidth = MAX(MIN(nonPinnedTabWidth, kMaxTabWidth), kMinTabWidth);
 
     // When there are multiple tabs, we'll have one active and some inactive
     // tabs.  If the desired width was between the minimum sizes of these types,
@@ -1023,33 +1029,33 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     // *selected_width = 4, which results in a total width of 11.5.  Instead, we
     // want to set *unselected_width = 2, *selected_width = 4, for a total width
     // of 10.
-    if (numberOfNonMiniTabs > 1 && nonMiniTabWidth < kMinActiveTabWidth) {
-      nonMiniTabWidth = (availableSpaceForNonMini - kMinActiveTabWidth) /
-                            (numberOfNonMiniTabs - 1) +
+    if (numberOfNonPinnedTabs > 1 && nonPinnedTabWidth < kMinActiveTabWidth) {
+      nonPinnedTabWidth = (availableSpaceForNonPinned - kMinActiveTabWidth) /
+                            (numberOfNonPinnedTabs - 1) +
                         kTabOverlap;
-      if (nonMiniTabWidth < kMinTabWidth) {
+      if (nonPinnedTabWidth < kMinTabWidth) {
         // The above adjustment caused the tabs to not fit, show 1 less tab.
-        --numberOfNonMiniTabs;
-        nonMiniTabWidth =
-            ((availableSpaceForNonMini - kTabOverlap) / numberOfNonMiniTabs) +
-            kTabOverlap;
+        --numberOfNonPinnedTabs;
+        nonPinnedTabWidth = ((availableSpaceForNonPinned - kTabOverlap) /
+                                numberOfNonPinnedTabs) +
+                            kTabOverlap;
       }
     }
 
     // Separate integral and fractional parts.
-    CGFloat integralPart = std::floor(nonMiniTabWidth);
-    nonMiniTabWidthFraction = nonMiniTabWidth - integralPart;
-    nonMiniTabWidth = integralPart;
+    CGFloat integralPart = std::floor(nonPinnedTabWidth);
+    nonPinnedTabWidthFraction = nonPinnedTabWidth - integralPart;
+    nonPinnedTabWidth = integralPart;
   }
 
   BOOL visible = [[tabStripView_ window] isVisible];
 
   CGFloat offset = [self leftIndentForControls];
   bool hasPlaceholderGap = false;
-  // Whether or not the last tab processed by the loop was a mini tab.
-  BOOL isLastTabMini = NO;
+  // Whether or not the last tab processed by the loop was a pinned tab.
+  BOOL isLastTabPinned = NO;
   CGFloat tabWidthAccumulatedFraction = 0;
-  NSInteger laidOutNonMiniTabs = 0;
+  NSInteger laidOutNonPinnedTabs = 0;
 
   for (TabController* tab in tabArray_.get()) {
     // Ignore a tab that is going through a close animation.
@@ -1098,17 +1104,17 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
     // Set the width. Selected tabs are slightly wider when things get really
     // small and thus we enforce a different minimum width.
-    BOOL isMini = [tab mini];
-    if (isMini) {
-      tabFrame.size.width = [tab app] ? kAppTabWidth : kMiniTabWidth;
+    BOOL isPinned = [tab pinned];
+    if (isPinned) {
+      tabFrame.size.width = kPinnedTabWidth;
     } else {
       // Tabs have non-integer widths. Assign the integer part to the tab, and
       // keep an accumulation of the fractional parts. When the fractional
       // accumulation gets to be more than one pixel, assign that to the current
       // tab being laid out. This is vaguely inspired by Bresenham's line
       // algorithm.
-      tabFrame.size.width = nonMiniTabWidth;
-      tabWidthAccumulatedFraction += nonMiniTabWidthFraction;
+      tabFrame.size.width = nonPinnedTabWidth;
+      tabWidthAccumulatedFraction += nonPinnedTabWidthFraction;
 
       if (tabWidthAccumulatedFraction >= 1.0) {
         ++tabFrame.size.width;
@@ -1116,26 +1122,26 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
       }
 
       // In case of rounding error, give any left over pixels to the last tab.
-      if (laidOutNonMiniTabs == numberOfNonMiniTabs - 1 &&
+      if (laidOutNonPinnedTabs == numberOfNonPinnedTabs - 1 &&
           tabWidthAccumulatedFraction > 0.5) {
         ++tabFrame.size.width;
       }
 
-      ++laidOutNonMiniTabs;
+      ++laidOutNonPinnedTabs;
     }
 
     if ([tab active])
       tabFrame.size.width = MAX(tabFrame.size.width, kMinActiveTabWidth);
 
-    // If this is the first non-mini tab, then add a bit of spacing between this
-    // and the last mini tab.
-    if (!isMini && isLastTabMini) {
-      offset += kLastMiniTabSpacing;
+    // If this is the first non-pinned tab, then add a bit of spacing between
+    // this and the last pinned tab.
+    if (!isPinned && isLastTabPinned) {
+      offset += kLastPinnedTabSpacing;
       tabFrame.origin.x = offset;
     }
-    isLastTabMini = isMini;
+    isLastTabPinned = isPinned;
 
-    if (laidOutNonMiniTabs > numberOfNonMiniTabs) {
+    if (laidOutNonPinnedTabs > numberOfNonPinnedTabs) {
       // There is not enough space to fit this tab.
       tabFrame.size.width = 0;
       [self setFrame:tabFrame ofTabView:[tab view]];
@@ -1268,9 +1274,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
   // Make a new tab and add it to the strip. Keep track of its controller.
   TabController* newController = [self newTab];
-  [newController setMini:tabStripModel_->IsMiniTab(modelIndex)];
   [newController setPinned:tabStripModel_->IsTabPinned(modelIndex)];
-  [newController setApp:tabStripModel_->IsAppTab(modelIndex)];
   [newController setUrl:contents->GetURL()];
   [tabArray_ insertObject:newController atIndex:index];
   NSView* newView = [newController view];
@@ -1557,7 +1561,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   bool oldHasIcon = [tabController iconView] != nil;
   bool newHasIcon =
       favicon::ShouldDisplayFavicon(contents) ||
-      tabStripModel_->IsMiniTab(modelIndex);  // Always show icon if mini.
+      tabStripModel_->IsTabPinned(modelIndex);  // Always show icon if pinned.
 
   TabLoadingState oldState = [tabController loadingState];
   TabLoadingState newState = kTabDone;
@@ -1654,15 +1658,15 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   [tabArray_ removeObjectAtIndex:from];
   [tabArray_ insertObject:movedTabController.get() atIndex:to];
 
-  // The tab moved, which means that the mini-tab state may have changed.
-  if (tabStripModel_->IsMiniTab(modelTo) != [movedTabController mini])
-    [self tabMiniStateChangedWithContents:contents atIndex:modelTo];
+  // The tab moved, which means that the pinned tab state may have changed.
+  if (tabStripModel_->IsTabPinned(modelTo) != [movedTabController pinned])
+    [self tabPinnedStateChangedWithContents:contents atIndex:modelTo];
 
   [self layoutTabs];
 }
 
 // Called when a tab is pinned or unpinned without moving.
-- (void)tabMiniStateChangedWithContents:(content::WebContents*)contents
+- (void)tabPinnedStateChangedWithContents:(content::WebContents*)contents
                                 atIndex:(NSInteger)modelIndex {
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];
@@ -1671,15 +1675,13 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   DCHECK([tabController isKindOfClass:[TabController class]]);
 
   // Don't do anything if the change was already picked up by the move event.
-  if (tabStripModel_->IsMiniTab(modelIndex) == [tabController mini])
+  if (tabStripModel_->IsTabPinned(modelIndex) == [tabController pinned])
     return;
 
-  [tabController setMini:tabStripModel_->IsMiniTab(modelIndex)];
   [tabController setPinned:tabStripModel_->IsTabPinned(modelIndex)];
-  [tabController setApp:tabStripModel_->IsAppTab(modelIndex)];
   [tabController setUrl:contents->GetURL()];
   [self updateIconsForContents:contents atIndex:modelIndex];
-  // If the tab is being restored and it's pinned, the mini state is set after
+  // If the tab is being restored and it's pinned, the pinned state is set after
   // the tab has already been rendered, so re-layout the tabstrip. In all other
   // cases, the state is set before the tab is rendered so this isn't needed.
   [self layoutTabs];
@@ -1765,8 +1767,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 // represents where the user dropped the new tab so it can be animated into its
 // correct location when the tab is added to the model. If the tab was pinned in
 // its previous window, setting |pinned| to YES will propagate that state to the
-// new window. Mini-tabs are either app or pinned tabs; the app state is stored
-// by the |contents|, but the |pinned| state is the caller's responsibility.
+// new window. Pinned tabs are pinned tabs; the |pinned| state is the caller's
+// responsibility.
 - (void)dropWebContents:(WebContents*)contents
                 atIndex:(int)modelIndex
               withFrame:(NSRect)frame
@@ -2091,7 +2093,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     NOTIMPLEMENTED();
 
   // Get the first URL and fix it up.
-  GURL url(GURL(url_fixer::FixupURL(
+  GURL url(GURL(url_formatter::FixupURL(
       base::SysNSStringToUTF8([urls objectAtIndex:0]), std::string())));
 
   [self openURL:&url inView:view at:point];
@@ -2206,7 +2208,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     // Add the traffic light buttons. The horizontal layout was determined by
     // manual inspection on Yosemite.
     CGFloat closeButtonX = 11;
-    CGFloat miniButtonX = 31;
+    CGFloat pinnedButtonX = 31;
     CGFloat zoomButtonX = 51;
 
     NSUInteger styleMask = [[tabStripView_ window] styleMask];
@@ -2221,7 +2223,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     NSButton* miniaturizeButton =
         [NSWindow standardWindowButton:NSWindowMiniaturizeButton
                           forStyleMask:styleMask];
-    [miniaturizeButton setFrameOrigin:NSMakePoint(miniButtonX, buttonY)];
+    [miniaturizeButton setFrameOrigin:NSMakePoint(pinnedButtonX, buttonY)];
     [miniaturizeButton setEnabled:NO];
     [customWindowControls_ addSubview:miniaturizeButton];
 

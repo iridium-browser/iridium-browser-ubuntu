@@ -58,9 +58,7 @@ class PluginURLFetcher : public RequestPeer {
                           const ResourceResponseInfo& info) override;
   void OnReceivedResponse(const ResourceResponseInfo& info) override;
   void OnDownloadedData(int len, int encoded_data_length) override;
-  void OnReceivedData(const char* data,
-                      int data_length,
-                      int encoded_data_length) override;
+  void OnReceivedData(scoped_ptr<ReceivedData> data) override;
   void OnCompletedRequest(int error_code,
                           bool was_ignored_by_handler,
                           bool stale_copy_in_cache,
@@ -68,9 +66,7 @@ class PluginURLFetcher : public RequestPeer {
                           const base::TimeTicks& completion_time,
                           int64 total_transfer_size) override;
   void OnReceivedCompletedResponse(const ResourceResponseInfo& info,
-                                   const char* data,
-                                   int data_length,
-                                   int encoded_data_length,
+                                   scoped_ptr<ReceivedData> data,
                                    int error_code,
                                    bool was_ignored_by_handler,
                                    bool stale_copy_in_cache,

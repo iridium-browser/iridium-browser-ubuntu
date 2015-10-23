@@ -10,7 +10,6 @@
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -33,6 +32,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/image/canvas_image_source.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/skia_util.h"
@@ -42,21 +42,38 @@ using content::WebContents;
 namespace extensions {
 namespace {
 
+// An ImageSkia source that will do nothing (i.e., have a blank skia). We need
+// this because we need a blank canvas at a certain size, and that can't be done
+// by just using a null ImageSkia.
+class BlankImageSource : public gfx::CanvasImageSource {
+ public:
+  explicit BlankImageSource(const gfx::Size& size)
+     : gfx::CanvasImageSource(size, false) {}
+  ~BlankImageSource() override {}
+
+  void Draw(gfx::Canvas* canvas) override {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BlankImageSource);
+};
+
 const char kEmptyImageDataError[] =
     "The imageData property must contain an ImageData object or dictionary "
     "of ImageData objects.";
 const char kEmptyPathError[] = "The path property must not be empty.";
 
-// Views implementation of browser action button will return icon whose
-// background will be set.
-gfx::ImageSkia AddBackgroundForViews(const gfx::ImageSkia& icon) {
+// Views platforms have the icon superimposed over a button's background.
+// Macs don't, but still need a 29x29-sized image (and the easiest way to do
+// that is to superimpose the icon over a blank background).
+gfx::ImageSkia AddBackground(const gfx::ImageSkia& icon) {
 #if !defined(OS_MACOSX)
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   gfx::ImageSkia bg = *rb.GetImageSkiaNamed(IDR_BROWSER_ACTION);
-  return gfx::ImageSkiaOperations::CreateSuperimposedImage(bg, icon);
 #else
-  return icon;
+  const gfx::Size size(29, 29);  // Size of browser actions buttons.
+  gfx::ImageSkia bg(new BlankImageSource(size), size);
 #endif
+  return gfx::ImageSkiaOperations::CreateSuperimposedImage(bg, icon);
 }
 
 bool ImagesAreEqualAtScale(const gfx::ImageSkia& i1,
@@ -182,7 +199,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
   EXPECT_FALSE(action_icon.ToImageSkia()->HasRepresentation(2.0f));
 
   EXPECT_TRUE(
-      ImagesAreEqualAtScale(AddBackgroundForViews(*action_icon.ToImageSkia()),
+      ImagesAreEqualAtScale(AddBackground(*action_icon.ToImageSkia()),
                             *GetBrowserActionsBar()->GetIcon(0).ToImageSkia(),
                             1.0f));
 
@@ -200,7 +217,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
       action_icon.ToImageSkia()->HasRepresentation(2.0f));
 
   EXPECT_TRUE(
-      ImagesAreEqualAtScale(AddBackgroundForViews(*action_icon.ToImageSkia()),
+      ImagesAreEqualAtScale(AddBackground(*action_icon.ToImageSkia()),
                             *GetBrowserActionsBar()->GetIcon(0).ToImageSkia(),
                             1.0f));
 
@@ -218,7 +235,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
   EXPECT_TRUE(action_icon.ToImageSkia()->HasRepresentation(2.0f));
 
   EXPECT_TRUE(
-      ImagesAreEqualAtScale(AddBackgroundForViews(*action_icon.ToImageSkia()),
+      ImagesAreEqualAtScale(AddBackground(*action_icon.ToImageSkia()),
                             *GetBrowserActionsBar()->GetIcon(0).ToImageSkia(),
                             1.0f));
 
@@ -235,7 +252,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
   EXPECT_TRUE(action_icon.ToImageSkia()->HasRepresentation(2.0f));
 
   EXPECT_TRUE(
-      ImagesAreEqualAtScale(AddBackgroundForViews(*action_icon.ToImageSkia()),
+      ImagesAreEqualAtScale(AddBackground(*action_icon.ToImageSkia()),
                             *GetBrowserActionsBar()->GetIcon(0).ToImageSkia(),
                             1.0f));
 
@@ -253,7 +270,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
   EXPECT_FALSE(action_icon.ToImageSkia()->HasRepresentation(2.0f));
 
   EXPECT_TRUE(
-      ImagesAreEqualAtScale(AddBackgroundForViews(*action_icon.ToImageSkia()),
+      ImagesAreEqualAtScale(AddBackground(*action_icon.ToImageSkia()),
                             *GetBrowserActionsBar()->GetIcon(0).ToImageSkia(),
                             1.0f));
 
@@ -271,7 +288,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
   EXPECT_FALSE(action_icon.ToImageSkia()->HasRepresentation(2.0f));
 
   EXPECT_TRUE(
-      ImagesAreEqualAtScale(AddBackgroundForViews(*action_icon.ToImageSkia()),
+      ImagesAreEqualAtScale(AddBackground(*action_icon.ToImageSkia()),
                             *GetBrowserActionsBar()->GetIcon(0).ToImageSkia(),
                             1.0f));
 
@@ -296,7 +313,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
       action_icon_skia->GetRepresentation(2.0f).sk_bitmap()));
 
   EXPECT_TRUE(
-      ImagesAreEqualAtScale(AddBackgroundForViews(*action_icon_skia),
+      ImagesAreEqualAtScale(AddBackground(*action_icon_skia),
                             *GetBrowserActionsBar()->GetIcon(0).ToImageSkia(),
                             2.0f));
 
@@ -520,7 +537,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoSplit) {
                                         browser()->host_desktop_type()));
   base::RunLoop().RunUntilIdle();  // Wait for profile initialization.
   // Navigate just to have a tab in this window, otherwise wonky things happen.
-  ui_test_utils::OpenURLOffTheRecord(browser()->profile(), GURL("about:blank"));
+  OpenURLOffTheRecord(browser()->profile(), GURL("about:blank"));
   ASSERT_EQ(1,
             BrowserActionTestUtil(incognito_browser).NumberOfBrowserActions());
 

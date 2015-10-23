@@ -31,7 +31,8 @@ namespace {
 // This is undesirable, strip it if it exists.
 std::string StripFakepath(const std::string& path) {
   const char kFakePathStr[] = "C:\\fakepath\\";
-  if (StartsWithASCII(path, kFakePathStr, false))
+  if (base::StartsWith(path, kFakePathStr,
+                       base::CompareCase::INSENSITIVE_ASCII))
     return path.substr(arraysize(kFakePathStr) - 1);
   return path;
 }
@@ -88,6 +89,7 @@ void FeedbackPrivateAPI::RequestFeedback(
     args->Append(info.ToValue().release());
 
     scoped_ptr<Event> event(new Event(
+        events::FEEDBACK_PRIVATE_ON_FEEDBACK_REQUESTED,
         feedback_private::OnFeedbackRequested::kEventName, args.Pass()));
     event->restrict_to_browser_context = browser_context_;
 

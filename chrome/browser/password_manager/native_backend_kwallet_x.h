@@ -16,14 +16,13 @@
 #include "chrome/browser/password_manager/password_store_x.h"
 #include "chrome/browser/profiles/profile.h"
 
-class Pickle;
-class PickleIterator;
-
 namespace autofill {
 struct PasswordForm;
 }
 
 namespace base {
+class Pickle;
+class PickleIterator;
 class WaitableEvent;
 }
 
@@ -46,7 +45,8 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
       const autofill::PasswordForm& form) override;
   bool UpdateLogin(const autofill::PasswordForm& form,
                    password_manager::PasswordStoreChangeList* changes) override;
-  bool RemoveLogin(const autofill::PasswordForm& form) override;
+  bool RemoveLogin(const autofill::PasswordForm& form,
+                   password_manager::PasswordStoreChangeList* changes) override;
   bool RemoveLoginsCreatedBetween(
       base::Time delete_begin,
       base::Time delete_end,
@@ -71,7 +71,7 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
   // Deserializes a list of PasswordForms from the wallet.
   static ScopedVector<autofill::PasswordForm> DeserializeValue(
       const std::string& signon_realm,
-      const Pickle& pickle);
+      const base::Pickle& pickle);
 
  private:
   enum InitResult {

@@ -72,6 +72,13 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
  protected:
   Profile* GetProfile();
 
+  // Returns a (possibly truncated) version of the current selection text
+  // suitable for putting in the title of a menu item.
+  base::string16 PrintableSelectionText();
+
+  // Helper function to escape "&" as "&&".
+  void EscapeAmpersands(base::string16* text);
+
 #if defined(ENABLE_EXTENSIONS)
   extensions::ContextMenuMatcher extension_items_;
 #endif
@@ -130,9 +137,13 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendSpellingSuggestionsSubMenu();
   void AppendSpellcheckOptionsSubMenu();
   void AppendProtocolHandlerSubMenu();
+  void AppendPasswordItems();
 
   // Copy to the clipboard an image located at a point in the RenderView
   void CopyImageAt(int x, int y);
+
+  // Load the original image located at a point in the RenderView.
+  void LoadOriginalImage();
 
   // Get an image located at a point in the RenderView for search.
   void GetImageThumbnailForSearch();
@@ -153,10 +164,6 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   // Returns a list of registered ProtocolHandlers that can handle the clicked
   // on URL.
   ProtocolHandlerRegistry::ProtocolHandlerList GetHandlersForLinkUrl();
-
-  // Returns a (possibly truncated) version of the current selection text
-  // suitable or putting in the title of a menu item.
-  base::string16 PrintableSelectionText();
 
   // The destination URL to use if the user tries to search for or navigate to
   // a text selection.

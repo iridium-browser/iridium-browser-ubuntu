@@ -7,6 +7,7 @@
 
 #include "base/memory/linked_ptr.h"
 #include "base/process/process_handle.h"
+#include "content/public/browser/background_tracing_manager.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/common/process_type.h"
 
@@ -45,6 +46,9 @@ class ProcessMetricsHistory {
   // Gather metrics for the process and accumulate with past data.
   void SampleMetrics();
 
+  // Triggers any UMA histograms or background traces if cpu_usage is excessive.
+  void RunPerformanceTriggers();
+
   // Used to mark when this object was last updated, so we can cull
   // dead ones.
   void set_last_update_sequence(int new_update_sequence) {
@@ -54,8 +58,6 @@ class ProcessMetricsHistory {
   int last_update_sequence() const { return last_update_sequence_; }
 
  private:
-  void RunPerformanceTriggers();
-
   // May not be fully populated. e.g. no |id| and no |name| for browser and
   // renderer processes.
   ProcessMetricsMetadata process_data_;
@@ -63,6 +65,8 @@ class ProcessMetricsHistory {
   int last_update_sequence_;
 
   double cpu_usage_;
+
+  content::BackgroundTracingManager::TriggerHandle trace_trigger_handle_;
 
   DISALLOW_ASSIGN(ProcessMetricsHistory);
 };

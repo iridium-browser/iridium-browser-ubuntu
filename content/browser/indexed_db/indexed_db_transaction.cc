@@ -5,9 +5,11 @@
 #include "content/browser/indexed_db/indexed_db_transaction.h"
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/browser/indexed_db/indexed_db_backing_store.h"
 #include "content/browser/indexed_db/indexed_db_cursor.h"
 #include "content/browser/indexed_db/indexed_db_database.h"
@@ -122,7 +124,7 @@ void IndexedDBTransaction::RunTasksIfStarted() {
     return;
 
   should_process_queue_ = true;
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&IndexedDBTransaction::ProcessTaskQueue, this));
 }
 
@@ -391,11 +393,13 @@ void IndexedDBTransaction::ProcessTaskQueue() {
   // never requests further activity. Read-only transactions don't
   // block other transactions, so don't time those out.
   if (mode_ != blink::WebIDBTransactionModeReadOnly) {
-    timeout_timer_.Start(
-        FROM_HERE,
-        base::TimeDelta::FromSeconds(kInactivityTimeoutPeriodSeconds),
-        base::Bind(&IndexedDBTransaction::Timeout, this));
+    timeout_timer_.Start(FROM_HERE, GetInactivityTimeout(),
+                         base::Bind(&IndexedDBTransaction::Timeout, this));
   }
+}
+
+base::TimeDelta IndexedDBTransaction::GetInactivityTimeout() const {
+  return base::TimeDelta::FromSeconds(kInactivityTimeoutPeriodSeconds);
 }
 
 void IndexedDBTransaction::Timeout() {

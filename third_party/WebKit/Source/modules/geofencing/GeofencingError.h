@@ -7,6 +7,8 @@
 
 #include "platform/heap/Handle.h"
 #include "public/platform/WebGeofencingError.h"
+#include "wtf/OwnPtr.h"
+#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -17,9 +19,8 @@ class GeofencingError {
     WTF_MAKE_NONCOPYABLE(GeofencingError);
 public:
     // For CallbackPromiseAdapter.
-    typedef WebGeofencingError WebType;
-    static DOMException* take(ScriptPromiseResolver*, WebType* webErrorRaw);
-    static void dispose(WebType* webErrorRaw);
+    using WebType = const WebGeofencingError&;
+    static DOMException* take(ScriptPromiseResolver*, const WebGeofencingError& webError);
 
 private:
     GeofencingError() = delete;

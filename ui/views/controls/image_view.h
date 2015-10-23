@@ -5,6 +5,7 @@
 #ifndef UI_VIEWS_CONTROLS_IMAGE_VIEW_H_
 #define UI_VIEWS_CONTROLS_IMAGE_VIEW_H_
 
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/view.h"
 
@@ -55,11 +56,6 @@ class VIEWS_EXPORT ImageView : public View {
   // Set the desired image size for the receiving ImageView.
   void SetImageSize(const gfx::Size& image_size);
 
-  // Return the preferred size for the receiving view. Returns false if the
-  // preferred size is not defined, which means that the view uses the image
-  // size.
-  bool GetImageSize(gfx::Size* image_size) const;
-
   // Returns the actual bounds of the visible image inside the view.
   gfx::Rect GetImageBounds() const;
 
@@ -100,6 +96,9 @@ class VIEWS_EXPORT ImageView : public View {
   // intended to be a quick check, not exhaustive. In other words it's possible
   // for this to return false even though the images are in fact equal.
   bool IsImageEqual(const gfx::ImageSkia& img) const;
+
+  // Returns the size the image will be painted.
+  gfx::Size GetImageSize() const;
 
   // Compute the image origin given the desired size and the receiver alignment
   // properties.

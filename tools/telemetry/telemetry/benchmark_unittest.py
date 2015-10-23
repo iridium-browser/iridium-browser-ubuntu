@@ -5,16 +5,14 @@
 import optparse
 import unittest
 
+from telemetry import android
 from telemetry import benchmark
-from telemetry.core import browser_options
+from telemetry.internal.browser import browser_options
 from telemetry.internal import story_runner
 from telemetry import page
 from telemetry.page import page_test
 from telemetry.page import shared_page_state
-from telemetry.story import shared_state
-from telemetry import user_story
-from telemetry.user_story import android
-from telemetry.user_story import user_story_set as user_story_set_module
+from telemetry import story as story_module
 from telemetry.web_perf import timeline_based_measurement
 
 
@@ -26,38 +24,38 @@ class DummyPageTest(page_test.PageTest):
 class TestBenchmark(benchmark.Benchmark):
   def __init__(self, story):
     super(TestBenchmark, self).__init__()
-    self._uss = user_story_set_module.UserStorySet()
-    self._uss.AddUserStory(story)
+    self._story_set = story_module.StorySet()
+    self._story_set.AddStory(story)
 
   def CreatePageTest(self, _):
     return DummyPageTest()
 
-  def CreateUserStorySet(self, _):
-    return self._uss
+  def CreateStorySet(self, _):
+    return self._story_set
 
 
 class BenchmarkTest(unittest.TestCase):
 
-  def testPageTestWithIncompatibleUserStory(self):
-    b = TestBenchmark(user_story.UserStory(
+  def testPageTestWithIncompatibleStory(self):
+    b = TestBenchmark(story_module.Story(
         shared_state_class=shared_page_state.SharedPageState))
     with self.assertRaisesRegexp(
-        Exception, 'containing only telemetry.page.Page user stories'):
+        Exception, 'containing only telemetry.page.Page stories'):
       b.Run(browser_options.BrowserFinderOptions())
 
-    state_class = shared_state.SharedState
-    b = TestBenchmark(user_story.UserStory(
+    state_class = story_module.SharedState
+    b = TestBenchmark(story_module.Story(
         shared_state_class=state_class))
     with self.assertRaisesRegexp(
-        Exception, 'containing only telemetry.page.Page user stories'):
+        Exception, 'containing only telemetry.page.Page stories'):
       b.Run(browser_options.BrowserFinderOptions())
 
-    b = TestBenchmark(android.AppStory(start_intent=None))
+    b = TestBenchmark(android.AndroidStory(start_intent=None))
     with self.assertRaisesRegexp(
-        Exception, 'containing only telemetry.page.Page user stories'):
+        Exception, 'containing only telemetry.page.Page stories'):
       b.Run(browser_options.BrowserFinderOptions())
 
-  def testPageTestWithCompatibleUserStory(self):
+  def testPageTestWithCompatibleStory(self):
     original_run_fn = story_runner.Run
     was_run = [False]
     def RunStub(*_arg, **_kwargs):
@@ -138,8 +136,8 @@ class BenchmarkTest(unittest.TestCase):
     original_run_fn = story_runner.Run
     validPredicate = [False]
 
-    def RunStub(test, user_story_set, expectations, finder_options, results,
-                **args): # pylint: disable=unused-argument
+    def RunStub(test, story_set_module, finder_options, results,
+                *args): # pylint: disable=unused-argument
       predicate = results._value_can_be_added_predicate
       valid = predicate == PredicateBenchmark.ValueCanBeAddedPredicate
       validPredicate[0] = valid

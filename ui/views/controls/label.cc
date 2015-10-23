@@ -451,7 +451,7 @@ void Label::MaybeBuildRenderTextLines() {
     render_text->SetDisplayRect(rect);
     render_text->SetMultiline(multi_line());
     render_text->SetWordWrapBehavior(render_text_->word_wrap_behavior());
-    lines_.push_back(render_text.release());
+    lines_.push_back(render_text.Pass());
   } else {
     std::vector<base::string16> lines = GetLinesForWidth(rect.width());
     if (lines.size() > 1)
@@ -462,7 +462,7 @@ void Label::MaybeBuildRenderTextLines() {
       scoped_ptr<gfx::RenderText> line =
           CreateRenderText(lines[i], alignment, directionality, elide_behavior);
       line->SetDisplayRect(rect);
-      lines_.push_back(line.release());
+      lines_.push_back(line.Pass());
       rect.set_y(rect.y() + rect.height());
     }
     // Append the remaining text to the last visible line.
@@ -496,7 +496,9 @@ std::vector<base::string16> Label::GetLinesForWidth(int width) const {
   // |width| can be 0 when getting the default text size, in that case
   // the ideal lines (i.e. broken at newline characters) are wanted.
   if (width <= 0) {
-    base::SplitString(render_text_->GetDisplayText(), '\n', &lines);
+    lines = base::SplitString(
+        render_text_->GetDisplayText(), base::string16(1, '\n'),
+        base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   } else {
     gfx::ElideRectangleText(render_text_->GetDisplayText(), font_list(), width,
                             std::numeric_limits<int>::max(),

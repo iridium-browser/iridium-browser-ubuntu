@@ -52,7 +52,7 @@ public:
         return adoptRefWillBeNoop(new RepeatEvent(type, false, false, repeat));
     }
 
-    virtual ~RepeatEvent() { }
+    ~RepeatEvent() override {}
 
     int repeat() const { return m_repeat; }
 
@@ -107,9 +107,9 @@ static const double invalidCachedTime = -1.;
 
 class ConditionEventListener final : public EventListener {
 public:
-    static PassRefPtr<ConditionEventListener> create(SVGSMILElement* animation, SVGSMILElement::Condition* condition)
+    static PassRefPtrWillBeRawPtr<ConditionEventListener> create(SVGSMILElement* animation, SVGSMILElement::Condition* condition)
     {
-        return adoptRef(new ConditionEventListener(animation, condition));
+        return adoptRefWillBeNoop(new ConditionEventListener(animation, condition));
     }
 
     static const ConditionEventListener* cast(const EventListener* listener)
@@ -119,11 +119,17 @@ public:
             : nullptr;
     }
 
-    virtual bool operator==(const EventListener& other) override;
+    bool operator==(const EventListener& other) override;
 
     void disconnectAnimation()
     {
         m_animation = nullptr;
+    }
+
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        visitor->trace(m_animation);
+        EventListener::trace(visitor);
     }
 
 private:
@@ -134,9 +140,9 @@ private:
     {
     }
 
-    virtual void handleEvent(ExecutionContext*, Event*) override;
+    void handleEvent(ExecutionContext*, Event*) override;
 
-    SVGSMILElement* m_animation;
+    RawPtrWillBeMember<SVGSMILElement> m_animation;
     SVGSMILElement::Condition* m_condition;
 };
 
@@ -154,7 +160,7 @@ void ConditionEventListener::handleEvent(ExecutionContext*, Event* event)
     m_animation->handleConditionEvent(event, m_condition);
 }
 
-void SVGSMILElement::Condition::setEventListener(PassRefPtr<ConditionEventListener> eventListener)
+void SVGSMILElement::Condition::setEventListener(PassRefPtrWillBeRawPtr<ConditionEventListener> eventListener)
 {
     m_eventListener = eventListener;
 }
@@ -314,7 +320,7 @@ Node::InsertionNotificationRequest SVGSMILElement::insertedInto(ContainerNode* r
     if (!rootParent->inDocument())
         return InsertionDone;
 
-    UseCounter::count(document(), UseCounter::SVGSMILElementInDocument);
+    UseCounter::countDeprecation(document(), UseCounter::SVGSMILElementInDocument);
 
     setAttributeName(constructQualifiedName(this, fastGetAttribute(SVGNames::attributeNameAttr)));
     SVGSVGElement* owner = ownerSVGElement();
@@ -1346,6 +1352,7 @@ SVGSMILElement::Condition::~Condition()
 DEFINE_TRACE(SVGSMILElement::Condition)
 {
     visitor->trace(m_syncBase);
+    visitor->trace(m_eventListener);
 }
 
 DEFINE_TRACE(SVGSMILElement)

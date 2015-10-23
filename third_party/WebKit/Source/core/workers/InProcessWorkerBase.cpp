@@ -33,11 +33,11 @@ InProcessWorkerBase::~InProcessWorkerBase()
     m_contextProxy->workerObjectDestroyed();
 }
 
-void InProcessWorkerBase::postMessage(ExecutionContext*, PassRefPtr<SerializedScriptValue> message, const MessagePortArray* ports, ExceptionState& exceptionState)
+void InProcessWorkerBase::postMessage(ExecutionContext* context, PassRefPtr<SerializedScriptValue> message, const MessagePortArray* ports, ExceptionState& exceptionState)
 {
     ASSERT(m_contextProxy);
     // Disentangle the port in preparation for sending it to the remote context.
-    OwnPtr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(ports, exceptionState);
+    OwnPtr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(context, ports, exceptionState);
     if (exceptionState.hadException())
         return;
     m_contextProxy->postMessageToWorkerGlobalScope(message, channels.release());
@@ -52,7 +52,12 @@ bool InProcessWorkerBase::initialize(ExecutionContext* context, const String& ur
         return false;
 
     m_scriptLoader = WorkerScriptLoader::create();
-    m_scriptLoader->loadAsynchronously(*context, scriptURL, DenyCrossOriginRequests, this);
+    m_scriptLoader->loadAsynchronously(
+        *context,
+        scriptURL,
+        DenyCrossOriginRequests,
+        bind(&InProcessWorkerBase::onResponse, this),
+        bind(&InProcessWorkerBase::onFinished, this));
 
     m_contextProxy = createWorkerGlobalScopeProxy(context);
 
@@ -76,22 +81,19 @@ bool InProcessWorkerBase::hasPendingActivity() const
     return (m_contextProxy && m_contextProxy->hasPendingActivity()) || m_scriptLoader;
 }
 
-PassRefPtr<ContentSecurityPolicy> InProcessWorkerBase::contentSecurityPolicy()
+ContentSecurityPolicy* InProcessWorkerBase::contentSecurityPolicy()
 {
-    return m_contentSecurityPolicy;
+    if (m_scriptLoader)
+        return m_scriptLoader->contentSecurityPolicy();
+    return m_contentSecurityPolicy.get();
 }
 
-void InProcessWorkerBase::didReceiveResponse(unsigned long identifier, const ResourceResponse& response)
+void InProcessWorkerBase::onResponse()
 {
-    if (!response.url().protocolIs("blob") && !response.url().protocolIs("file") && !response.url().protocolIs("filesystem")) {
-        m_contentSecurityPolicy = ContentSecurityPolicy::create();
-        m_contentSecurityPolicy->setOverrideURLForSelf(response.url());
-        m_contentSecurityPolicy->didReceiveHeaders(ContentSecurityPolicyResponseHeaders(response));
-    }
-    InspectorInstrumentation::didReceiveScriptResponse(executionContext(), identifier);
+    InspectorInstrumentation::didReceiveScriptResponse(executionContext(), m_scriptLoader->identifier());
 }
 
-void InProcessWorkerBase::notifyFinished()
+void InProcessWorkerBase::onFinished()
 {
     if (m_scriptLoader->failed()) {
         dispatchEvent(Event::createCancelable(EventTypeNames::error));
@@ -103,11 +105,13 @@ void InProcessWorkerBase::notifyFinished()
         m_contextProxy->startWorkerGlobalScope(m_scriptLoader->url(), executionContext()->userAgent(m_scriptLoader->url()), m_scriptLoader->script(), startMode);
         InspectorInstrumentation::scriptImported(executionContext(), m_scriptLoader->identifier(), m_scriptLoader->script());
     }
+    m_contentSecurityPolicy = m_scriptLoader->releaseContentSecurityPolicy();
     m_scriptLoader = nullptr;
 }
 
 DEFINE_TRACE(InProcessWorkerBase)
 {
+    visitor->trace(m_contentSecurityPolicy);
     AbstractWorker::trace(visitor);
 }
 

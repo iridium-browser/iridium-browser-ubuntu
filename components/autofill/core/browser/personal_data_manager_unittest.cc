@@ -11,10 +11,10 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/guid.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/thread_task_runner_handle.h"
 #include "components/autofill/core/browser/autofill_experiments.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
@@ -31,7 +31,6 @@
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "components/webdata/common/web_database_service.h"
-#include "google_apis/gaia/fake_oauth2_token_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -95,26 +94,23 @@ class PersonalDataManagerTest : public testing::Test {
     prefs_ = test::PrefServiceForTesting();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     base::FilePath path = temp_dir_.path().AppendASCII("TestWebDB");
-    web_database_ = new WebDatabaseService(path,
-                                           base::MessageLoopProxy::current(),
-                                           base::MessageLoopProxy::current());
+    web_database_ =
+        new WebDatabaseService(path, base::ThreadTaskRunnerHandle::Get(),
+                               base::ThreadTaskRunnerHandle::Get());
 
     // Setup account tracker.
     signin_client_.reset(new TestSigninClient(prefs_.get()));
-    fake_oauth2_token_service_.reset(new FakeOAuth2TokenService());
     account_tracker_.reset(new AccountTrackerService());
-    account_tracker_->Initialize(fake_oauth2_token_service_.get(),
-                                 signin_client_.get());
+    account_tracker_->Initialize(signin_client_.get());
 
     // Hacky: hold onto a pointer but pass ownership.
-    autofill_table_ = new AutofillTable("en-US");
+    autofill_table_ = new AutofillTable;
     web_database_->AddTable(scoped_ptr<WebDatabaseTable>(autofill_table_));
     web_database_->LoadDatabase();
-    autofill_database_service_ =
-        new AutofillWebDataService(web_database_,
-                                   base::MessageLoopProxy::current(),
-                                   base::MessageLoopProxy::current(),
-                                   WebDataServiceBase::ProfileErrorCallback());
+    autofill_database_service_ = new AutofillWebDataService(
+        web_database_, base::ThreadTaskRunnerHandle::Get(),
+        base::ThreadTaskRunnerHandle::Get(),
+        WebDataServiceBase::ProfileErrorCallback());
     autofill_database_service_->Init();
 
     test::DisableSystemServices(prefs_.get());
@@ -125,7 +121,6 @@ class PersonalDataManagerTest : public testing::Test {
     // Order of destruction is important as AutofillManager relies on
     // PersonalDataManager to be around when it gets destroyed.
     account_tracker_->Shutdown();
-    fake_oauth2_token_service_.reset();
     account_tracker_.reset();
     signin_client_.reset();
   }
@@ -160,7 +155,6 @@ class PersonalDataManagerTest : public testing::Test {
   base::ScopedTempDir temp_dir_;
   base::MessageLoopForUI message_loop_;
   scoped_ptr<PrefService> prefs_;
-  scoped_ptr<FakeOAuth2TokenService> fake_oauth2_token_service_;
   scoped_ptr<AccountTrackerService> account_tracker_;
   scoped_ptr<TestSigninClient> signin_client_;
   scoped_refptr<AutofillWebDataService> autofill_database_service_;
@@ -172,7 +166,7 @@ class PersonalDataManagerTest : public testing::Test {
 
 TEST_F(PersonalDataManagerTest, AddProfile) {
   // Add profile0 to the database.
-  AutofillProfile profile0(autofill::test::GetFullProfile());
+  AutofillProfile profile0(test::GetFullProfile());
   profile0.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("j@s.com"));
   personal_data_->AddProfile(profile0);
 
@@ -856,7 +850,7 @@ TEST_F(PersonalDataManagerTest, ImportFormDataBadEmail) {
   scoped_ptr<CreditCard> imported_credit_card;
   EXPECT_FALSE(personal_data_->ImportFormData(form_structure,
                                               &imported_credit_card));
-  ASSERT_EQ(static_cast<CreditCard*>(NULL), imported_credit_card.get());
+  ASSERT_FALSE(imported_credit_card);
 
   const std::vector<AutofillProfile*>& results = personal_data_->GetProfiles();
   ASSERT_EQ(0U, results.size());
@@ -1244,98 +1238,6 @@ TEST_F(PersonalDataManagerTest, AggregateTwoDifferentProfiles) {
   ExpectSameElements(profiles, personal_data_->GetProfiles());
 }
 
-TEST_F(PersonalDataManagerTest, AggregateTwoProfilesWithMultiValue) {
-  FormData form1;
-  FormFieldData field;
-  test::CreateTestFormField(
-      "First name:", "first_name", "George", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField(
-      "Last name:", "last_name", "Washington", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField(
-      "Email:", "email", "theprez@gmail.com", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField(
-      "Address:", "address1", "21 Laussat St", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form1.fields.push_back(field);
-
-  FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
-  scoped_ptr<CreditCard> imported_credit_card;
-  EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
-                                             &imported_credit_card));
-  ASSERT_FALSE(imported_credit_card);
-
-  // Verify that the web database has been updated and the notification sent.
-  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
-      .WillOnce(QuitMainMessageLoop());
-  base::MessageLoop::current()->Run();
-
-  AutofillProfile expected(base::GenerateGUID(), "https://www.example.com");
-  test::SetProfileInfo(&expected, "George", NULL,
-      "Washington", "theprez@gmail.com", NULL, "21 Laussat St", NULL,
-      "San Francisco", "California", "94102", NULL, NULL);
-  const std::vector<AutofillProfile*>& results1 = personal_data_->GetProfiles();
-  ASSERT_EQ(1U, results1.size());
-  EXPECT_EQ(0, expected.Compare(*results1[0]));
-
-  // Now create a completely different profile.
-  FormData form2;
-  test::CreateTestFormField(
-      "First name:", "first_name", "John", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Adams", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField(
-      "Email:", "email", "second@gmail.com", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField(
-      "Address:", "address1", "21 Laussat St", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form2.fields.push_back(field);
-
-  FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
-  EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
-                                             &imported_credit_card));
-  ASSERT_FALSE(imported_credit_card);
-
-  // Verify that the web database has been updated and the notification sent.
-  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
-      .WillOnce(QuitMainMessageLoop());
-  base::MessageLoop::current()->Run();
-
-  const std::vector<AutofillProfile*>& results2 = personal_data_->GetProfiles();
-
-  // Modify expected to include multi-valued fields.
-  std::vector<base::string16> first_names, last_names, emails;
-  expected.GetRawMultiInfo(NAME_FIRST, &first_names);
-  first_names.push_back(ASCIIToUTF16("John"));
-  expected.GetRawMultiInfo(NAME_LAST, &last_names);
-  last_names.push_back(ASCIIToUTF16("Adams"));
-  expected.SetRawMultiInfo(NAME_FIRST, first_names);
-  expected.SetRawMultiInfo(NAME_LAST, last_names);
-
-  expected.GetRawMultiInfo(EMAIL_ADDRESS, &emails);
-  emails.push_back(ASCIIToUTF16("second@gmail.com"));
-  expected.SetRawMultiInfo(EMAIL_ADDRESS, emails);
-
-  ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected.Compare(*results2[0]));
-}
-
 TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
   FormData form1;
   FormFieldData field;
@@ -1376,10 +1278,10 @@ TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
   base::MessageLoop::current()->Run();
 
   AutofillProfile expected(base::GenerateGUID(), "https://www.example.com");
-  test::SetProfileInfo(
-      &expected, "George", NULL, "Washington", "theprez@gmail.com", NULL,
-      "1600 Pennsylvania Avenue", "Suite A", "San Francisco", "California",
-      "94102", NULL, "(650) 555-6666");
+  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
+                       "theprez@gmail.com", nullptr, "1600 Pennsylvania Avenue",
+                       "Suite A", "San Francisco", "California", "94102",
+                       nullptr, "(650) 555-6666");
   const std::vector<AutofillProfile*>& results1 = personal_data_->GetProfiles();
   ASSERT_EQ(1U, results1.size());
   EXPECT_EQ(0, expected.Compare(*results1[0]));
@@ -1410,8 +1312,8 @@ TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
   // Country gets added.
   test::CreateTestFormField("Country:", "country", "USA", "text", &field);
   form2.fields.push_back(field);
-  // Phone gets updated.
-  test::CreateTestFormField("Phone:", "phone", "6502231234", "text", &field);
+  // Same phone number with different formatting doesn't create a new profile.
+  test::CreateTestFormField("Phone:", "phone", "650-555-6666", "text", &field);
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
@@ -1427,11 +1329,8 @@ TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
 
   const std::vector<AutofillProfile*>& results2 = personal_data_->GetProfiles();
 
-  // Add multi-valued phone number to expectation.  Also, country gets added.
-  std::vector<base::string16> values;
-  expected.GetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, &values);
-  values.push_back(ASCIIToUTF16("(650) 223-1234"));
-  expected.SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, values);
+  // Phone formatting is updated.  Also, country gets added.
+  expected.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16("650-555-6666"));
   expected.SetRawInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("US"));
   ASSERT_EQ(1U, results2.size());
   EXPECT_EQ(0, expected.Compare(*results2[0]));
@@ -1757,7 +1656,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoDifferentCreditCards) {
   base::MessageLoop::current()->Run();
 
   CreditCard expected2(base::GenerateGUID(), "https://www.example.com");
-  test::SetCreditCardInfo(&expected2,"", "5500000000000004", "02", "2012");
+  test::SetCreditCardInfo(&expected2, "", "5500000000000004", "02", "2012");
   std::vector<CreditCard*> cards;
   cards.push_back(&expected);
   cards.push_back(&expected2);
@@ -2229,7 +2128,9 @@ TEST_F(PersonalDataManagerTest, AggregateSameCreditCardWithSeparators) {
 }
 
 // Ensure that if a verified profile already exists, aggregated profiles cannot
-// modify it in any way.
+// modify it in any way. This also checks the profile merging/matching algorithm
+// works: if either the full name OR all the non-empty name pieces match, the
+// profile is a match.
 TEST_F(PersonalDataManagerTest, AggregateExistingVerifiedProfileWithConflict) {
   // Start with a verified profile.
   AutofillProfile profile(base::GenerateGUID(), "Chrome settings");
@@ -2250,14 +2151,14 @@ TEST_F(PersonalDataManagerTest, AggregateExistingVerifiedProfileWithConflict) {
   // Simulate a form submission with conflicting info.
   FormData form;
   FormFieldData field;
-  test::CreateTestFormField(
-      "First name:", "first_name", "Marion", "text", &field);
+  test::CreateTestFormField("First name:", "first_name", "Marion Mitchell",
+                            "text", &field);
   form.fields.push_back(field);
   test::CreateTestFormField(
       "Last name:", "last_name", "Morrison", "text", &field);
   form.fields.push_back(field);
-  test::CreateTestFormField(
-      "Email:", "email", "other.email@example.com", "text", &field);
+  test::CreateTestFormField("Email:", "email", "johnwayne@me.xyz", "text",
+                            &field);
   form.fields.push_back(field);
   test::CreateTestFormField(
       "Address:", "address1", "123 Zoo St.", "text", &field);
@@ -2285,6 +2186,29 @@ TEST_F(PersonalDataManagerTest, AggregateExistingVerifiedProfileWithConflict) {
   const std::vector<AutofillProfile*>& results = personal_data_->GetProfiles();
   ASSERT_EQ(1U, results.size());
   EXPECT_EQ(0, profile.Compare(*results[0]));
+
+  // Try the same thing, but without "Mitchell". The profiles should still match
+  // because the non empty name pieces (first and last) match that stored in the
+  // profile.
+  test::CreateTestFormField("First name:", "first_name", "Marion", "text",
+                            &field);
+  form.fields[0] = field;
+
+  FormStructure form_structure2(form);
+  form_structure2.DetermineHeuristicTypes();
+  EXPECT_TRUE(
+      personal_data_->ImportFormData(form_structure2, &imported_credit_card));
+  EXPECT_FALSE(imported_credit_card);
+
+  // Wait for the refresh, which in this case is a no-op.
+  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
+      .WillOnce(QuitMainMessageLoop());
+  base::MessageLoop::current()->Run();
+
+  // Expect that no new profile is saved.
+  const std::vector<AutofillProfile*>& results2 = personal_data_->GetProfiles();
+  ASSERT_EQ(1U, results2.size());
+  EXPECT_EQ(0, profile.Compare(*results2[0]));
 }
 
 // Ensure that if a verified credit card already exists, aggregated credit cards
@@ -2358,7 +2282,8 @@ TEST_F(PersonalDataManagerTest, SaveImportedProfileWithVerifiedData) {
   AutofillProfile new_verified_profile = profile;
   new_verified_profile.set_guid(base::GenerateGUID());
   new_verified_profile.set_origin("Chrome settings");
-  new_verified_profile.SetRawInfo(COMPANY_NAME, ASCIIToUTF16("Fizzbang, Inc."));
+  new_verified_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER,
+                                  ASCIIToUTF16("1 234 567-8910"));
   EXPECT_TRUE(new_verified_profile.IsVerified());
 
   personal_data_->SaveImportedProfile(new_verified_profile);
@@ -2368,8 +2293,7 @@ TEST_F(PersonalDataManagerTest, SaveImportedProfileWithVerifiedData) {
       .WillOnce(QuitMainMessageLoop());
   base::MessageLoop::current()->Run();
 
-  // Expect that the existing profile is not modified, and instead the new
-  // profile is added.
+  // The new profile should be merged into the existing one.
   const std::vector<AutofillProfile*>& results = personal_data_->GetProfiles();
   ASSERT_EQ(1U, results.size());
   EXPECT_EQ(0, new_verified_profile.Compare(*results[0]));
@@ -2396,8 +2320,8 @@ TEST_F(PersonalDataManagerTest, SaveImportedProfileWithExistingVerifiedData) {
 
   AutofillProfile new_verified_profile = profile;
   new_verified_profile.set_guid(base::GenerateGUID());
-  new_verified_profile.SetRawInfo(COMPANY_NAME, ASCIIToUTF16("Fizzbang, Inc."));
-  new_verified_profile.SetRawInfo(NAME_MIDDLE, base::string16());
+  new_verified_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER,
+                                  ASCIIToUTF16("1 234 567-8910"));
   EXPECT_TRUE(new_verified_profile.IsVerified());
 
   personal_data_->SaveImportedProfile(new_verified_profile);
@@ -2408,22 +2332,9 @@ TEST_F(PersonalDataManagerTest, SaveImportedProfileWithExistingVerifiedData) {
   base::MessageLoop::current()->Run();
 
   // The new profile should be merged into the existing one.
-  AutofillProfile expected_profile = new_verified_profile;
-  expected_profile.set_guid(profile.guid());
-  std::vector<base::string16> first_names, middle_names, last_names;
-  expected_profile.GetRawMultiInfo(NAME_FIRST, &first_names);
-  expected_profile.GetRawMultiInfo(NAME_MIDDLE, &middle_names);
-  expected_profile.GetRawMultiInfo(NAME_LAST, &last_names);
-  first_names.insert(first_names.begin(), ASCIIToUTF16("Marion"));
-  middle_names.insert(middle_names.begin(), ASCIIToUTF16("Mitchell"));
-  last_names.insert(last_names.begin(), ASCIIToUTF16("Morrison"));
-  expected_profile.SetRawMultiInfo(NAME_FIRST, first_names);
-  expected_profile.SetRawMultiInfo(NAME_MIDDLE, middle_names);
-  expected_profile.SetRawMultiInfo(NAME_LAST, last_names);
-
   const std::vector<AutofillProfile*>& results = personal_data_->GetProfiles();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(expected_profile, *results[0]);
+  EXPECT_EQ(0, new_verified_profile.Compare(*results[0]));
 }
 
 // Ensure that verified credit cards can be saved via SaveImportedCreditCard.
@@ -2582,110 +2493,6 @@ TEST_F(PersonalDataManagerTest, GetNonEmptyTypes) {
   EXPECT_TRUE(non_empty_types.count(CREDIT_CARD_EXP_4_DIGIT_YEAR));
   EXPECT_TRUE(non_empty_types.count(CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR));
   EXPECT_TRUE(non_empty_types.count(CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR));
-}
-
-TEST_F(PersonalDataManagerTest, CaseInsensitiveMultiValueAggregation) {
-  FormData form1;
-  FormFieldData field;
-  test::CreateTestFormField(
-      "First name:", "first_name", "George", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField(
-      "Last name:", "last_name", "Washington", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField(
-      "Email:", "email", "theprez@gmail.com", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField(
-      "Address:", "address1", "21 Laussat St", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField(
-      "City:", "city", "San Francisco", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField(
-      "Zip:", "zip", "94102", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField(
-      "Phone number:", "phone_number", "817-555-6789", "text", &field);
-  form1.fields.push_back(field);
-
-  FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
-  scoped_ptr<CreditCard> imported_credit_card;
-  EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
-                                             &imported_credit_card));
-  ASSERT_FALSE(imported_credit_card);
-
-  // Verify that the web database has been updated and the notification sent.
-  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
-      .WillOnce(QuitMainMessageLoop());
-  base::MessageLoop::current()->Run();
-
-  AutofillProfile expected(base::GenerateGUID(), "https://www.example.com");
-  test::SetProfileInfo(&expected,
-                       "George",
-                       NULL,
-                       "Washington",
-                       "theprez@gmail.com",
-                       NULL,
-                       "21 Laussat St",
-                       NULL,
-                       "San Francisco",
-                       "California",
-                       "94102",
-                       NULL,
-                       "817-555-6789");
-  const std::vector<AutofillProfile*>& results1 = personal_data_->GetProfiles();
-  ASSERT_EQ(1U, results1.size());
-  EXPECT_EQ(0, expected.Compare(*results1[0]));
-
-  // Upper-case the first name and change the phone number.
-  FormData form2;
-  test::CreateTestFormField(
-      "First name:", "first_name", "GEORGE", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField(
-      "Last name:", "last_name", "Washington", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField(
-      "Email:", "email", "theprez@gmail.com", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField(
-      "Address:", "address1", "21 Laussat St", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField(
-      "Phone number:", "phone_number", "214-555-1234", "text", &field);
-  form2.fields.push_back(field);
-
-  FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
-  EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
-                                             &imported_credit_card));
-  ASSERT_FALSE(imported_credit_card);
-
-  // Verify that the web database has been updated and the notification sent.
-  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
-      .WillOnce(QuitMainMessageLoop());
-  base::MessageLoop::current()->Run();
-
-  const std::vector<AutofillProfile*>& results2 = personal_data_->GetProfiles();
-
-  // Modify expected to include multi-valued fields.
-  std::vector<base::string16> values;
-  expected.GetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, &values);
-  values.push_back(ASCIIToUTF16("214-555-1234"));
-  expected.SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, values);
-
-  ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected.Compare(*results2[0]));
 }
 
 TEST_F(PersonalDataManagerTest, IncognitoReadOnly) {
@@ -3022,13 +2829,13 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions) {
       AutofillType(CREDIT_CARD_NAME), base::string16());
   ASSERT_EQ(4U, suggestions.size());
   EXPECT_EQ(ASCIIToUTF16("John Dillinger"), suggestions[0].value);
-  EXPECT_EQ(suggestions[0].backend_id.guid, credit_card1.guid());
+  EXPECT_EQ(suggestions[0].backend_id, credit_card1.guid());
   EXPECT_EQ(ASCIIToUTF16("Clyde Barrow"), suggestions[1].value);
-  EXPECT_NE(suggestions[1].backend_id.guid, credit_card0.guid());
+  EXPECT_NE(suggestions[1].backend_id, credit_card0.guid());
   EXPECT_EQ(ASCIIToUTF16("Bonnie Parker"), suggestions[2].value);
-  EXPECT_EQ(suggestions[2].backend_id.guid, credit_card2.guid());
+  EXPECT_EQ(suggestions[2].backend_id, credit_card2.guid());
   EXPECT_EQ(ASCIIToUTF16("Bonnie Parker"), suggestions[3].value);
-  EXPECT_NE(suggestions[3].backend_id.guid, credit_card2.guid());
+  EXPECT_NE(suggestions[3].backend_id, credit_card2.guid());
 
   suggestions = personal_data_->GetCreditCardSuggestions(
       AutofillType(CREDIT_CARD_NUMBER), base::string16());
@@ -3071,6 +2878,11 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions) {
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 TEST_F(PersonalDataManagerTest, ShowAddressBookPrompt) {
+  // TODO(erikchen): After Address Book integration has been disabled for 6
+  // weeks, and there are no major problems, rip out all the code. Expected
+  // removal date: 07/15/2015. http://crbug.com/488146.
+  return;
+
   EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged()).Times(2);
 
   AutofillType type(ADDRESS_HOME_STREET_ADDRESS);
@@ -3100,6 +2912,10 @@ TEST_F(PersonalDataManagerTest, ShowAddressBookPrompt) {
 // preference that indicates the total number of times the prompt has already
 // been shown.
 TEST_F(PersonalDataManagerTest, MaxTimesToShowAddressBookPrompt) {
+  // TODO(erikchen): After Address Book integration has been disabled for 6
+  // weeks, and there are no major problems, rip out all the code. Expected
+  // removal date: 07/15/2015. http://crbug.com/488146.
+  return;
   EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged()).Times(1);
 
   AutofillType type(ADDRESS_HOME_STREET_ADDRESS);
@@ -3116,7 +2932,7 @@ TEST_F(PersonalDataManagerTest, MaxTimesToShowAddressBookPrompt) {
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
 TEST_F(PersonalDataManagerTest, RecordUseOf) {
-  AutofillProfile profile(autofill::test::GetFullProfile());
+  AutofillProfile profile(test::GetFullProfile());
   EXPECT_EQ(0U, profile.use_count());
   EXPECT_EQ(base::Time(), profile.use_date());
   EXPECT_EQ(base::Time(), profile.modification_date());

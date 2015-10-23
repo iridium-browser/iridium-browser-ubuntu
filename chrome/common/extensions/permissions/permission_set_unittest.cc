@@ -14,6 +14,7 @@
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/extensions/permissions/chrome_permission_message_provider.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/version_info/version_info.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
@@ -40,14 +41,22 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
   extent->AddPattern(URLPattern(schemes, pattern));
 }
 
-size_t IndexOf(const PermissionMessageStrings& warnings,
+size_t IndexOf(const CoalescedPermissionMessages& warnings,
                const std::string& warning) {
-  for (size_t i = 0; i < warnings.size(); ++i) {
-    if (warnings[i].message == base::ASCIIToUTF16(warning))
+  size_t i = 0;
+  for (const CoalescedPermissionMessage& msg : warnings) {
+    if (msg.message() == base::ASCIIToUTF16(warning))
       return i;
+    ++i;
   }
 
   return warnings.size();
+}
+
+PermissionIDSet MakePermissionIDSet(APIPermission::ID id) {
+  PermissionIDSet set;
+  set.insert(id);
+  return set;
 }
 
 PermissionIDSet MakePermissionIDSet(APIPermission::ID id1,
@@ -65,18 +74,11 @@ PermissionIDSet MakePermissionIDSet(const APIPermissionSet& permissions) {
   return set;
 }
 
-std::string LegacyPermissionIDsToString(const PermissionMessageIDs& ids) {
-  std::vector<std::string> strs;
-  for (const PermissionMessage::ID& id : ids)
-    strs.push_back(base::IntToString(id));
-  return base::StringPrintf("[ %s ]", JoinString(strs, ", ").c_str());
-}
-
 std::string PermissionIDsToString(const PermissionIDSet& ids) {
   std::vector<std::string> strs;
   for (const PermissionID& id : ids)
     strs.push_back(base::IntToString(id.id()));
-  return base::StringPrintf("[ %s ]", JoinString(strs, ", ").c_str());
+  return base::StringPrintf("[ %s ]", base::JoinString(strs, ", ").c_str());
 }
 
 std::string CoalescedPermissionIDsToString(
@@ -84,27 +86,18 @@ std::string CoalescedPermissionIDsToString(
   std::vector<std::string> strs;
   for (const CoalescedPermissionMessage& msg : msgs)
     strs.push_back(PermissionIDsToString(msg.permissions()));
-  return JoinString(strs, " ");
+  return base::JoinString(strs, " ");
 }
 
 // Check that the given |permissions| produce a single warning message,
-// identified by |expected_legacy_id| in the old system, and by the set of
-// |expected_ids| in the new system.
+// identified by the set of |expected_ids|.
 testing::AssertionResult PermissionSetProducesMessage(
     const PermissionSet* permissions,
     Manifest::Type extension_type,
-    PermissionMessage::ID expected_legacy_id,
     const PermissionIDSet& expected_ids) {
   const PermissionMessageProvider* provider = PermissionMessageProvider::Get();
-  PermissionMessageIDs legacy_ids =
-      provider->GetLegacyPermissionMessageIDs(permissions, extension_type);
-  if (legacy_ids.size() != 1 || expected_legacy_id != legacy_ids[0]) {
-    return testing::AssertionFailure()
-           << "Expected single legacy permission ID " << expected_legacy_id
-           << " but got " << LegacyPermissionIDsToString(legacy_ids);
-  }
 
-  CoalescedPermissionMessages msgs = provider->GetCoalescedPermissionMessages(
+  CoalescedPermissionMessages msgs = provider->GetPermissionMessages(
       provider->GetAllPermissionIDs(permissions, extension_type));
   if (msgs.size() != 1) {
     return testing::AssertionFailure()
@@ -648,7 +641,8 @@ TEST(PermissionsTest, IsPrivilegeIncrease) {
     { "hosts6", false },  // http://a.com -> http://a.com + http://a.co.uk
     { "permissions1", false },  // tabs -> tabs
     { "permissions2", true },  // tabs -> tabs,bookmarks
-    { "permissions3", true },  // http://a -> http://a,tabs
+    // TODO(treib): This is wrong, kAllHosts implies kTabs. crbug.com/512344
+    { "permissions3", true },  // http://*/* -> http://*/*,tabs
     { "permissions5", true },  // bookmarks -> bookmarks,history
     { "equivalent_warnings", false },  // tabs --> tabs, webNavigation
 #if !defined(OS_CHROMEOS)  // plugins aren't allowed in ChromeOS
@@ -753,6 +747,7 @@ TEST(PermissionsTest, PermissionMessages) {
   // These permissions are restricted to extensions force-installed by policy
   // and don't require a prompt, i.e. they're restricted to location 'policy'.
   skip.insert(APIPermission::kEnterprisePlatformKeys);
+  skip.insert(APIPermission::kEnterpriseDeviceAttributes);
 
   // TODO(erikkay) add a string for this permission.
   skip.insert(APIPermission::kBackground);
@@ -811,6 +806,7 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kHotwordPrivate);
   skip.insert(APIPermission::kIdentityPrivate);
   skip.insert(APIPermission::kInputMethodPrivate);
+  skip.insert(APIPermission::kLanguageSettingsPrivate);
   skip.insert(APIPermission::kMediaPlayerPrivate);
   skip.insert(APIPermission::kMediaRouterPrivate);
   skip.insert(APIPermission::kMetricsPrivate);
@@ -844,12 +840,12 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kFileSystemWrite);
   skip.insert(APIPermission::kSocket);
   skip.insert(APIPermission::kUsb);
-  skip.insert(APIPermission::kUsbDevice);
   skip.insert(APIPermission::kLauncherSearchProvider);
 
   // We already have a generic message for declaring externally_connectable.
   skip.insert(APIPermission::kExternallyConnectableAllUrls);
 
+  const PermissionMessageProvider* provider = PermissionMessageProvider::Get();
   PermissionsInfo* info = PermissionsInfo::GetInstance();
   APIPermissionSet permissions = info->GetAll();
   for (APIPermissionSet::const_iterator i = permissions.begin();
@@ -857,13 +853,11 @@ TEST(PermissionsTest, PermissionMessages) {
     const APIPermissionInfo* permission_info = i->info();
     EXPECT_TRUE(permission_info != NULL);
 
-    if (skip.count(i->id())) {
-      EXPECT_EQ(PermissionMessage::kNone, permission_info->message_id())
-          << "unexpected message_id for " << permission_info->name();
-    } else {
-      EXPECT_NE(PermissionMessage::kNone, permission_info->message_id())
-          << "missing message_id for " << permission_info->name();
-    }
+    PermissionIDSet id;
+    id.insert(permission_info->id());
+    bool has_message = !provider->GetPermissionMessages(id).empty();
+    bool should_have_message = !skip.count(i->id());
+    EXPECT_EQ(should_have_message, has_message) << permission_info->name();
   }
 }
 
@@ -876,7 +870,6 @@ TEST(PermissionsTest, FileSystemPermissionMessages) {
                         URLPatternSet(), URLPatternSet()));
   EXPECT_TRUE(PermissionSetProducesMessage(
       permissions.get(), Manifest::TYPE_PLATFORM_APP,
-      PermissionMessage::kFileSystemDirectory,
       MakePermissionIDSet(api_permissions)));
 }
 
@@ -922,7 +915,6 @@ TEST(PermissionsTest, HiddenFileSystemPermissionMessages) {
                         URLPatternSet(), URLPatternSet()));
   EXPECT_TRUE(PermissionSetProducesMessage(
       permissions.get(), Manifest::TYPE_PLATFORM_APP,
-      PermissionMessage::kFileSystemWriteDirectory,
       MakePermissionIDSet(api_permissions)));
 }
 
@@ -938,7 +930,7 @@ TEST(PermissionsTest, SuppressedPermissionMessages) {
         new PermissionSet(api_permissions, ManifestPermissionSet(),
                           hosts, URLPatternSet()));
     EXPECT_TRUE(PermissionSetProducesMessage(
-        permissions.get(), Manifest::TYPE_EXTENSION, PermissionMessage::kTabs,
+        permissions.get(), Manifest::TYPE_EXTENSION,
         MakePermissionIDSet(APIPermission::kTab, APIPermission::kFavicon)));
   }
   {
@@ -953,7 +945,6 @@ TEST(PermissionsTest, SuppressedPermissionMessages) {
                           hosts, URLPatternSet()));
     EXPECT_TRUE(PermissionSetProducesMessage(
         permissions.get(), Manifest::TYPE_EXTENSION,
-        PermissionMessage::kBrowsingHistory,
         MakePermissionIDSet(APIPermission::kHistory, APIPermission::kFavicon)));
   }
   {
@@ -966,7 +957,6 @@ TEST(PermissionsTest, SuppressedPermissionMessages) {
         api_permissions, ManifestPermissionSet(), hosts, URLPatternSet()));
     EXPECT_TRUE(PermissionSetProducesMessage(
         permissions.get(), Manifest::TYPE_EXTENSION,
-        PermissionMessage::kHostsAll,
         MakePermissionIDSet(APIPermission::kHostsAll, APIPermission::kTab)));
   }
   {
@@ -979,7 +969,6 @@ TEST(PermissionsTest, SuppressedPermissionMessages) {
         api_permissions, ManifestPermissionSet(), hosts, URLPatternSet()));
     EXPECT_TRUE(PermissionSetProducesMessage(
         permissions.get(), Manifest::TYPE_EXTENSION,
-        PermissionMessage::kHostsAll,
         MakePermissionIDSet(APIPermission::kHostsAll,
                             APIPermission::kTopSites)));
   }
@@ -993,9 +982,7 @@ TEST(PermissionsTest, SuppressedPermissionMessages) {
         api_permissions, ManifestPermissionSet(), hosts, URLPatternSet()));
     EXPECT_TRUE(PermissionSetProducesMessage(
         permissions.get(), Manifest::TYPE_EXTENSION,
-        PermissionMessage::kHostsAll,
-        MakePermissionIDSet(APIPermission::kHostsAll,
-                            APIPermission::kDeclarativeWebRequest)));
+        MakePermissionIDSet(APIPermission::kHostsAll)));
   }
   {
     // BrowsingHistory warning suppresses all history read/write warnings.
@@ -1010,7 +997,6 @@ TEST(PermissionsTest, SuppressedPermissionMessages) {
                           URLPatternSet(), URLPatternSet()));
     EXPECT_TRUE(PermissionSetProducesMessage(
         permissions.get(), Manifest::TYPE_EXTENSION,
-        PermissionMessage::kBrowsingHistory,
         MakePermissionIDSet(api_permissions)));
   }
   {
@@ -1024,7 +1010,7 @@ TEST(PermissionsTest, SuppressedPermissionMessages) {
         new PermissionSet(api_permissions, ManifestPermissionSet(),
                           URLPatternSet(), URLPatternSet()));
     EXPECT_TRUE(PermissionSetProducesMessage(
-        permissions.get(), Manifest::TYPE_EXTENSION, PermissionMessage::kTabs,
+        permissions.get(), Manifest::TYPE_EXTENSION,
         MakePermissionIDSet(api_permissions)));
   }
 }
@@ -1154,8 +1140,8 @@ TEST(PermissionsTest, GetWarningMessages_AudioVideo) {
   EXPECT_FALSE(VerifyHasPermissionMessage(set, extension->GetType(), kAudio));
   EXPECT_FALSE(VerifyHasPermissionMessage(set, extension->GetType(), kVideo));
   EXPECT_TRUE(VerifyHasPermissionMessage(set, extension->GetType(), kBoth));
-  PermissionMessageStrings warnings =
-      provider->GetPermissionMessageStrings(set, extension->GetType());
+  CoalescedPermissionMessages warnings = provider->GetPermissionMessages(
+      provider->GetAllPermissionIDs(set, extension->GetType()));
   size_t combined_index = IndexOf(warnings, kBoth);
   size_t combined_size = warnings.size();
 
@@ -1164,9 +1150,10 @@ TEST(PermissionsTest, GetWarningMessages_AudioVideo) {
   EXPECT_TRUE(VerifyHasPermissionMessage(set, extension->GetType(), kAudio));
   EXPECT_FALSE(VerifyHasPermissionMessage(set, extension->GetType(), kVideo));
   EXPECT_FALSE(VerifyHasPermissionMessage(set, extension->GetType(), kBoth));
-  warnings = provider->GetPermissionMessageStrings(set, extension->GetType());
-  EXPECT_EQ(combined_size, warnings.size());
-  EXPECT_EQ(combined_index, IndexOf(warnings, kAudio));
+  CoalescedPermissionMessages warnings2 = provider->GetPermissionMessages(
+      provider->GetAllPermissionIDs(set, extension->GetType()));
+  EXPECT_EQ(combined_size, warnings2.size());
+  EXPECT_EQ(combined_index, IndexOf(warnings2, kAudio));
 
   // Just video present.
   set->apis_.erase(APIPermission::kAudioCapture);
@@ -1174,9 +1161,10 @@ TEST(PermissionsTest, GetWarningMessages_AudioVideo) {
   EXPECT_FALSE(VerifyHasPermissionMessage(set, extension->GetType(), kAudio));
   EXPECT_TRUE(VerifyHasPermissionMessage(set, extension->GetType(), kVideo));
   EXPECT_FALSE(VerifyHasPermissionMessage(set, extension->GetType(), kBoth));
-  warnings = provider->GetPermissionMessageStrings(set, extension->GetType());
-  EXPECT_EQ(combined_size, warnings.size());
-  EXPECT_EQ(combined_index, IndexOf(warnings, kVideo));
+  CoalescedPermissionMessages warnings3 = provider->GetPermissionMessages(
+      provider->GetAllPermissionIDs(set, extension->GetType()));
+  EXPECT_EQ(combined_size, warnings3.size());
+  EXPECT_EQ(combined_index, IndexOf(warnings3, kVideo));
 }
 
 TEST(PermissionsTest, GetWarningMessages_CombinedSessions) {
@@ -1221,7 +1209,7 @@ TEST(PermissionsTest, GetWarningMessages_DeclarativeWebRequest) {
 
   // Until Declarative Web Request is in stable, let's make sure it is enabled
   // on the current channel.
-  ScopedCurrentChannel sc(chrome::VersionInfo::CHANNEL_CANARY);
+  ScopedCurrentChannel sc(version_info::Channel::CANARY);
 
   // First verify that declarativeWebRequest produces a message when host
   // permissions do not cover all hosts.
@@ -1259,7 +1247,7 @@ TEST(PermissionsTest, GetWarningMessages_Serial) {
 }
 
 TEST(PermissionsTest, GetWarningMessages_Socket_AnyHost) {
-  ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
+  ScopedCurrentChannel channel(version_info::Channel::DEV);
 
   scoped_refptr<Extension> extension =
       LoadManifest("permissions", "socket_any_host.json");
@@ -1272,7 +1260,7 @@ TEST(PermissionsTest, GetWarningMessages_Socket_AnyHost) {
 }
 
 TEST(PermissionsTest, GetWarningMessages_Socket_OneDomainTwoHostnames) {
-  ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
+  ScopedCurrentChannel channel(version_info::Channel::DEV);
 
   scoped_refptr<Extension> extension =
       LoadManifest("permissions", "socket_one_domain_two_hostnames.json");
@@ -1294,7 +1282,7 @@ TEST(PermissionsTest, GetWarningMessages_Socket_OneDomainTwoHostnames) {
 }
 
 TEST(PermissionsTest, GetWarningMessages_Socket_TwoDomainsOneHostname) {
-  ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
+  ScopedCurrentChannel channel(version_info::Channel::DEV);
 
   scoped_refptr<Extension> extension =
       LoadManifest("permissions", "socket_two_domains_one_hostname.json");
@@ -1782,9 +1770,7 @@ TEST(PermissionsTest, ChromeURLs) {
   scoped_refptr<PermissionSet> permissions(
       new PermissionSet(APIPermissionSet(), ManifestPermissionSet(),
                         allowed_hosts, URLPatternSet()));
-  PermissionMessageProvider::Get()->GetLegacyPermissionMessageIDs(
-      permissions.get(), Manifest::TYPE_EXTENSION);
-  PermissionMessageProvider::Get()->GetCoalescedPermissionMessages(
+  PermissionMessageProvider::Get()->GetPermissionMessages(
       PermissionMessageProvider::Get()->GetAllPermissionIDs(
           permissions.get(), Manifest::TYPE_EXTENSION));
 }

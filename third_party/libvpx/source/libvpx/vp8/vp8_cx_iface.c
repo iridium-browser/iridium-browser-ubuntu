@@ -135,7 +135,7 @@ static vpx_codec_err_t validate_config(vpx_codec_alg_priv_t      *ctx,
     RANGE_CHECK(cfg, g_w,                   1, 16383); /* 14 bits available */
     RANGE_CHECK(cfg, g_h,                   1, 16383); /* 14 bits available */
     RANGE_CHECK(cfg, g_timebase.den,        1, 1000000000);
-    RANGE_CHECK(cfg, g_timebase.num,        1, cfg->g_timebase.den);
+    RANGE_CHECK(cfg, g_timebase.num,        1, 1000000000);
     RANGE_CHECK_HI(cfg, g_profile,          3);
     RANGE_CHECK_HI(cfg, rc_max_quantizer,   63);
     RANGE_CHECK_HI(cfg, rc_min_quantizer,   cfg->rc_max_quantizer);
@@ -199,7 +199,7 @@ static vpx_codec_err_t validate_config(vpx_codec_alg_priv_t      *ctx,
     RANGE_CHECK_HI(vp8_cfg, arnr_strength,   6);
     RANGE_CHECK(vp8_cfg, arnr_type,       1, 3);
     RANGE_CHECK(vp8_cfg, cq_level, 0, 63);
-    RANGE_CHECK_BOOL(vp8_cfg, screen_content_mode);
+    RANGE_CHECK_HI(vp8_cfg, screen_content_mode, 2);
     if (finalize && (cfg->rc_end_usage == VPX_CQ || cfg->rc_end_usage == VPX_Q))
         RANGE_CHECK(vp8_cfg, cq_level,
                     cfg->rc_min_quantizer, cfg->rc_max_quantizer);
@@ -455,7 +455,7 @@ static vpx_codec_err_t vp8e_set_config(vpx_codec_alg_priv_t       *ctx,
             ERROR("Cannot change width or height after initialization");
         if ((ctx->cpi->initial_width && (int)cfg->g_w > ctx->cpi->initial_width) ||
             (ctx->cpi->initial_height && (int)cfg->g_h > ctx->cpi->initial_height))
-            ERROR("Cannot increast width or height larger than their initial values");
+            ERROR("Cannot increase width or height larger than their initial values");
     }
 
     /* Prevent increasing lag_in_frames. This check is stricter than it needs
@@ -477,8 +477,6 @@ static vpx_codec_err_t vp8e_set_config(vpx_codec_alg_priv_t       *ctx,
 
     return res;
 }
-
-int vp8_reverse_trans(int);
 
 static vpx_codec_err_t get_quantizer(vpx_codec_alg_priv_t *ctx, va_list args)
 {

@@ -28,6 +28,7 @@ class DecoderBuffer;
 
 // Return a callback that expects to be run once.
 base::Closure NewExpectedClosure();
+base::Callback<void(bool)> NewExpectedBoolCB(bool success);
 PipelineStatusCB NewExpectedStatusCB(PipelineStatus status);
 
 // Helper class for running a message loop until a callback has run. Useful for
@@ -142,11 +143,6 @@ class CallbackPairChecker {
  private:
   bool expecting_b_;
 };
-
-// Test implementation of a media log LogCB that sends media log messages to
-// DVLOG(1).
-void AddLogEntryForTest(MediaLog::MediaLogLevel level,
-                        const std::string& message);
 
 }  // namespace media
 

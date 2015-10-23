@@ -4,10 +4,9 @@
 # found in the LICENSE file.
 
 import logging
-import sys
 import os
+import sys
 
-# Import the metrics/common module for pretty print xml.
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'common'))
 import models
 import presubmit_util
@@ -63,6 +62,7 @@ _FLAGS_FIELD_TYPE = models.ObjectNodeType('flags-field',
     string_attributes=['name'],
     children=[
       models.ChildType('flags', _FLAG_TYPE, True),
+      models.ChildType('summary', _SUMMARY_TYPE, False),
     ])
 
 _RAPPOR_METRIC_TYPE = models.ObjectNodeType('rappor-metric',

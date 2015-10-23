@@ -74,7 +74,6 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   virtual blink::WebURL linkAtPosition(const blink::WebPoint& position) const;
   virtual bool getPrintPresetOptionsFromDocument(
       blink::WebPrintPresetOptions* preset_options);
-  virtual void setZoomLevel(double level, bool text_only);
   virtual bool startFind(const blink::WebString& search_text,
                          bool case_sensitive,
                          int identifier);
@@ -84,7 +83,7 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   virtual bool isPrintScalingDisabled() override;
 
   virtual int printBegin(const blink::WebPrintParams& print_params) override;
-  virtual bool printPage(int page_number, blink::WebCanvas* canvas) override;
+  void printPage(int page_number, blink::WebCanvas* canvas) override;
   virtual void printEnd() override;
 
   virtual bool canRotateView() override;
@@ -106,6 +105,7 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   gfx::Rect plugin_rect_;
   PP_Var instance_object_;
   blink::WebPluginContainer* container_;
+  base::WeakPtrFactory<PepperWebPluginImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperWebPluginImpl);
 };

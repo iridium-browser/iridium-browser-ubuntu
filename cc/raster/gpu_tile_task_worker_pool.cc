@@ -23,41 +23,53 @@ namespace {
 
 class RasterBufferImpl : public RasterBuffer {
  public:
-  RasterBufferImpl(GpuRasterizer* rasterizer, const Resource* resource)
+  RasterBufferImpl(GpuRasterizer* rasterizer,
+                   const Resource* resource,
+                   uint64_t resource_content_id,
+                   uint64_t previous_content_id)
       : rasterizer_(rasterizer),
         lock_(rasterizer->resource_provider(), resource->id()),
-        resource_(resource) {}
+        resource_has_previous_content_(
+            resource_content_id && resource_content_id == previous_content_id) {
+  }
 
   // Overridden from RasterBuffer:
   void Playback(const RasterSource* raster_source,
-                const gfx::Rect& rect,
-                float scale) override {
+                const gfx::Rect& raster_full_rect,
+                const gfx::Rect& raster_dirty_rect,
+                uint64_t new_content_id,
+                float scale,
+                bool include_images) override {
     TRACE_EVENT0("cc", "RasterBufferImpl::Playback");
+    // GPU raster doesn't do low res tiles, so should always include images.
+    DCHECK(include_images);
     ContextProvider* context_provider = rasterizer_->resource_provider()
                                             ->output_surface()
                                             ->worker_context_provider();
+    DCHECK(context_provider);
 
-    // The context lock must be held while accessing the context on a
-    // worker thread.
-    base::AutoLock context_lock(*context_provider->GetLock());
+    ContextProvider::ScopedContextLock scoped_context(context_provider);
 
-    // Allow this worker thread to bind to context_provider.
-    context_provider->DetachFromThread();
+    gfx::Rect playback_rect = raster_full_rect;
+    if (resource_has_previous_content_) {
+      playback_rect.Intersect(raster_dirty_rect);
+    }
+    DCHECK(!playback_rect.IsEmpty())
+        << "Why are we rastering a tile that's not dirty?";
 
+    // TODO(danakj): Implement partial raster with raster_dirty_rect.
     // Rasterize source into resource.
-    rasterizer_->RasterizeSource(&lock_, raster_source, rect, scale);
+    rasterizer_->RasterizeSource(&lock_, raster_source, raster_full_rect,
+                                 playback_rect, scale);
 
     // Barrier to sync worker context output to cc context.
-    context_provider->ContextGL()->OrderingBarrierCHROMIUM();
-
-    // Allow compositor thread to bind to context_provider.
-    context_provider->DetachFromThread();
+    scoped_context.ContextGL()->OrderingBarrierCHROMIUM();
   }
 
  private:
   GpuRasterizer* rasterizer_;
   ResourceProvider::ScopedWriteLockGr lock_;
-  const Resource* resource_;
+  bool resource_has_previous_content_;
 
   DISALLOW_COPY_AND_ASSIGN(RasterBufferImpl);
 };
@@ -121,7 +133,7 @@ void GpuTileTaskWorkerPool::ScheduleTasks(TileTaskQueue* queue) {
   // Mark all task sets as pending.
   tasks_pending_.set();
 
-  unsigned priority = kTileTaskPriorityBase;
+  size_t priority = kTileTaskPriorityBase;
 
   graph_.Reset();
 
@@ -189,27 +201,34 @@ void GpuTileTaskWorkerPool::CheckForCompletedTasks() {
   completed_tasks_.clear();
 }
 
-ResourceFormat GpuTileTaskWorkerPool::GetResourceFormat() {
-  return rasterizer_->resource_provider()->best_texture_format();
+ResourceFormat GpuTileTaskWorkerPool::GetResourceFormat() const {
+  return rasterizer_->resource_provider()->best_render_buffer_format();
+}
+
+bool GpuTileTaskWorkerPool::GetResourceRequiresSwizzle() const {
+  // This doesn't require a swizzle because we rasterize to the correct format.
+  return false;
 }
 
 void GpuTileTaskWorkerPool::CompleteTasks(const Task::Vector& tasks) {
   for (auto& task : tasks) {
-    RasterTask* raster_task = static_cast<RasterTask*>(task.get());
+    TileTask* tile_task = static_cast<TileTask*>(task.get());
 
-    raster_task->WillComplete();
-    raster_task->CompleteOnOriginThread(this);
-    raster_task->DidComplete();
+    tile_task->WillComplete();
+    tile_task->CompleteOnOriginThread(this);
+    tile_task->DidComplete();
 
-    raster_task->RunReplyOnOriginThread();
+    tile_task->RunReplyOnOriginThread();
   }
   completed_tasks_.clear();
 }
 
 scoped_ptr<RasterBuffer> GpuTileTaskWorkerPool::AcquireBufferForRaster(
-    const Resource* resource) {
-  return make_scoped_ptr<RasterBuffer>(
-      new RasterBufferImpl(rasterizer_.get(), resource));
+    const Resource* resource,
+    uint64_t resource_content_id,
+    uint64_t previous_content_id) {
+  return scoped_ptr<RasterBuffer>(new RasterBufferImpl(
+      rasterizer_.get(), resource, resource_content_id, previous_content_id));
 }
 
 void GpuTileTaskWorkerPool::ReleaseBufferForRaster(

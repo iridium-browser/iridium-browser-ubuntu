@@ -8,6 +8,7 @@
 #include "gm.h"
 #include "SkCanvas.h"
 #include "SkGradientShader.h"
+#include "SkPath.h"
 
 namespace skiagm {
 
@@ -87,7 +88,7 @@ static const GradMaker gGradMakers[] = {
 class ShaderTextGM : public GM {
 public:
     ShaderTextGM() {
-        this->setBGColor(0xFFDDDDDD);
+        this->setBGColor(sk_tool_utils::color_to_565(0xFFDDDDDD));
     }
 
 protected:

@@ -6,7 +6,7 @@
 
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -16,11 +16,8 @@ namespace net {
 QuicDefaultPacketWriter::QuicDefaultPacketWriter() : weak_factory_(this) {
 }
 
-QuicDefaultPacketWriter::QuicDefaultPacketWriter(DatagramClientSocket* socket)
-    : socket_(socket),
-      write_blocked_(false),
-      weak_factory_(this) {
-}
+QuicDefaultPacketWriter::QuicDefaultPacketWriter(Socket* socket)
+    : socket_(socket), write_blocked_(false), weak_factory_(this) {}
 
 QuicDefaultPacketWriter::~QuicDefaultPacketWriter() {}
 

@@ -108,7 +108,7 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
 
   {
     gpu::TransferBufferManager* manager = new gpu::TransferBufferManager();
-    transfer_buffer_manager_.reset(manager);
+    transfer_buffer_manager_ = manager;
     manager->Initialize();
   }
   scoped_ptr<gpu::CommandBufferService> command_buffer(
@@ -116,14 +116,9 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
   if (!command_buffer->Initialize())
     return NULL;
 
-  scoped_refptr<gpu::gles2::ContextGroup> group(
-      new gpu::gles2::ContextGroup(NULL,
-                                   NULL,
-                                   new gpu::gles2::ShaderTranslatorCache,
-                                   NULL,
-                                   NULL,
-                                   NULL,
-                                   true));
+  scoped_refptr<gpu::gles2::ContextGroup> group(new gpu::gles2::ContextGroup(
+      NULL, NULL, new gpu::gles2::ShaderTranslatorCache,
+      new gpu::gles2::FramebufferCompletenessCache, NULL, NULL, NULL, true));
 
   decoder_.reset(gpu::gles2::GLES2Decoder::Create(group.get()));
   if (!decoder_.get())
@@ -337,6 +332,11 @@ uint32 Display::CreateStreamTexture(uint32 texture_id) {
 
 void Display::SetLock(base::Lock*) {
   NOTIMPLEMENTED();
+}
+
+bool Display::IsGpuChannelLost() {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 }  // namespace egl

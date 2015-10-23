@@ -188,10 +188,10 @@ std::string HttpRequestHeaders::ToString() const {
   return output;
 }
 
-base::Value* HttpRequestHeaders::NetLogCallback(
+scoped_ptr<base::Value> HttpRequestHeaders::NetLogCallback(
     const std::string* request_line,
     NetLogCaptureMode capture_mode) const {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("line", *request_line);
   base::ListValue* headers = new base::ListValue();
   for (HeaderVector::const_iterator it = headers_.begin();
@@ -203,7 +203,7 @@ base::Value* HttpRequestHeaders::NetLogCallback(
                            it->key.c_str(), log_value.c_str())));
   }
   dict->Set("headers", headers);
-  return dict;
+  return dict.Pass();
 }
 
 // static
@@ -241,8 +241,7 @@ HttpRequestHeaders::HeaderVector::iterator
 HttpRequestHeaders::FindHeader(const base::StringPiece& key) {
   for (HeaderVector::iterator it = headers_.begin();
        it != headers_.end(); ++it) {
-    if (key.length() == it->key.length() &&
-        !base::strncasecmp(key.data(), it->key.data(), key.length()))
+    if (base::EqualsCaseInsensitiveASCII(key, it->key))
       return it;
   }
 
@@ -253,8 +252,7 @@ HttpRequestHeaders::HeaderVector::const_iterator
 HttpRequestHeaders::FindHeader(const base::StringPiece& key) const {
   for (HeaderVector::const_iterator it = headers_.begin();
        it != headers_.end(); ++it) {
-    if (key.length() == it->key.length() &&
-        !base::strncasecmp(key.data(), it->key.data(), key.length()))
+    if (base::EqualsCaseInsensitiveASCII(key, it->key))
       return it;
   }
 

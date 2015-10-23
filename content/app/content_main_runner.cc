@@ -10,6 +10,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
+#include "base/debug/stack_trace.h"
 #include "base/files/file_path.h"
 #include "base/i18n/icu_util.h"
 #include "base/lazy_instance.h"
@@ -27,6 +28,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
+#include "components/tracing/startup_tracing.h"
+#include "components/tracing/tracing_switches.h"
 #include "content/browser/browser_main.h"
 #include "content/common/set_process_title.h"
 #include "content/common/url_schemes.h"
@@ -86,7 +89,9 @@
 #if !defined(OS_IOS)
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "content/app/mac/mac_init.h"
+#include "content/browser/browser_io_surface_manager_mac.h"
 #include "content/browser/mach_broker_mac.h"
+#include "content/child/child_io_surface_manager_mac.h"
 #include "content/common/sandbox_init_mac.h"
 #endif  // !OS_IOS
 #endif  // OS_WIN
@@ -192,24 +197,17 @@ void CommonSubprocessInit(const std::string& process_type) {
   // surface UI -- but it's likely they get this wrong too so why not.
   setlocale(LC_NUMERIC, "C");
 #endif
-}
 
-// Only needed on Windows for creating stats tables.
+#if !defined(OFFICIAL_BUILD)
+  // Print stack traces to stderr when crashes occur. This opens up security
+  // holes so it should never be enabled for official builds.
+  base::debug::EnableInProcessStackDumping();
 #if defined(OS_WIN)
-static base::ProcessId GetBrowserPid(const base::CommandLine& command_line) {
-  base::ProcessId browser_pid = base::GetCurrentProcId();
-  if (command_line.HasSwitch(switches::kProcessChannelID)) {
-    std::string channel_name =
-        command_line.GetSwitchValueASCII(switches::kProcessChannelID);
-
-    int browser_pid_int;
-    base::StringToInt(channel_name, &browser_pid_int);
-    browser_pid = static_cast<base::ProcessId>(browser_pid_int);
-    DCHECK_NE(browser_pid_int, 0);
-  }
-  return browser_pid;
-}
+  base::RouteStdioToConsole(false);
+  LoadLibraryA("dbghelp.dll");
 #endif
+#endif
+}
 
 class ContentClientInitializer {
  public:
@@ -617,20 +615,25 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 #if defined(OS_WIN)
     // Route stdio to parent console (if any) or create one.
     if (command_line.HasSwitch(switches::kEnableLogging))
-      base::RouteStdioToConsole();
+      base::RouteStdioToConsole(true);
 #endif
 
     // Enable startup tracing asap to avoid early TRACE_EVENT calls being
     // ignored.
     if (command_line.HasSwitch(switches::kTraceStartup)) {
-      base::trace_event::CategoryFilter category_filter(
-          command_line.GetSwitchValueASCII(switches::kTraceStartup));
+      base::trace_event::TraceConfig trace_config(
+          command_line.GetSwitchValueASCII(switches::kTraceStartup),
+          base::trace_event::RECORD_UNTIL_FULL);
       base::trace_event::TraceLog::GetInstance()->SetEnabled(
-          category_filter,
-          base::trace_event::TraceLog::RECORDING_MODE,
-          base::trace_event::TraceOptions(
-              base::trace_event::RECORD_UNTIL_FULL));
+          trace_config,
+          base::trace_event::TraceLog::RECORDING_MODE);
+    } else if (process_type != switches::kZygoteProcess &&
+               process_type != switches::kRendererProcess) {
+      // There is no need to schedule stopping tracing in this case. Telemetry
+      // will stop tracing on demand later.
+      tracing::EnableStartupTracingIfConfigFileExists();
     }
+
 #if defined(OS_WIN)
     // Enable exporting of events to ETW if requested on the command line.
     if (command_line.HasSwitch(switches::kTraceExportEventsToETW))
@@ -658,6 +661,18 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     if (!process_type.empty() &&
         (!delegate_ || delegate_->ShouldSendMachPort(process_type))) {
       MachBroker::ChildSendTaskPortToParent();
+    }
+
+    if (!command_line.HasSwitch(switches::kSingleProcess) &&
+        !process_type.empty() && (process_type == switches::kRendererProcess ||
+                                  process_type == switches::kGpuProcess)) {
+      base::mac::ScopedMachSendRight service_port =
+          BrowserIOSurfaceManager::LookupServicePort(getppid());
+      if (service_port.is_valid()) {
+        ChildIOSurfaceManager::GetInstance()->set_service_port(
+            service_port.release());
+        IOSurfaceManager::SetInstance(ChildIOSurfaceManager::GetInstance());
+      }
     }
 #elif defined(OS_WIN)
     SetupCRT(command_line);
@@ -723,17 +738,23 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 #endif  // !OS_ANDROID
     int v8_natives_fd = g_fds->MaybeGet(kV8NativesDataDescriptor);
     int v8_snapshot_fd = g_fds->MaybeGet(kV8SnapshotDataDescriptor);
-    if (v8_natives_fd != -1 && v8_snapshot_fd != -1) {
-      auto v8_natives_region = g_fds->GetRegion(kV8NativesDataDescriptor);
+    if (v8_snapshot_fd != -1) {
       auto v8_snapshot_region = g_fds->GetRegion(kV8SnapshotDataDescriptor);
-      CHECK(gin::V8Initializer::LoadV8SnapshotFromFD(
-          v8_natives_fd, v8_natives_region.offset, v8_natives_region.size,
-          v8_snapshot_fd, v8_snapshot_region.offset, v8_snapshot_region.size));
+      gin::V8Initializer::LoadV8SnapshotFromFD(
+          v8_snapshot_fd, v8_snapshot_region.offset, v8_snapshot_region.size);
     } else {
-      CHECK(gin::V8Initializer::LoadV8Snapshot());
+      gin::V8Initializer::LoadV8Snapshot();
+    }
+    if (v8_natives_fd != -1) {
+      auto v8_natives_region = g_fds->GetRegion(kV8NativesDataDescriptor);
+      gin::V8Initializer::LoadV8NativesFromFD(
+          v8_natives_fd, v8_natives_region.offset, v8_natives_region.size);
+    } else {
+      gin::V8Initializer::LoadV8Natives();
     }
 #else
-    CHECK(gin::V8Initializer::LoadV8Snapshot());
+    gin::V8Initializer::LoadV8Snapshot();
+    gin::V8Initializer::LoadV8Natives();
 #endif  // OS_POSIX && !OS_MACOSX
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 

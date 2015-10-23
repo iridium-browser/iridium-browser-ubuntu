@@ -35,8 +35,8 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
-#include "core/frame/PinchViewport.h"
 #include "core/frame/Settings.h"
+#include "core/frame/VisualViewport.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLHeadElement.h"
 #include "core/html/HTMLHtmlElement.h"
@@ -48,7 +48,7 @@
 #include "wtf/text/StringBuilder.h"
 #include <limits>
 
-using std::min;
+using namespace std;
 
 namespace blink {
 
@@ -56,7 +56,10 @@ using namespace HTMLNames;
 
 class ImageEventListener : public EventListener {
 public:
-    static PassRefPtr<ImageEventListener> create(ImageDocument* document) { return adoptRef(new ImageEventListener(document)); }
+    static PassRefPtrWillBeRawPtr<ImageEventListener> create(ImageDocument* document)
+    {
+        return adoptRefWillBeNoop(new ImageEventListener(document));
+    }
     static const ImageEventListener* cast(const EventListener* listener)
     {
         return listener->type() == ImageEventListenerType
@@ -65,6 +68,12 @@ public:
     }
 
     virtual bool operator==(const EventListener& other);
+
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        visitor->trace(m_doc);
+        EventListener::trace(visitor);
+    }
 
 private:
     ImageEventListener(ImageDocument* document)
@@ -75,7 +84,7 @@ private:
 
     virtual void handleEvent(ExecutionContext*, Event*);
 
-    ImageDocument* m_doc;
+    RawPtrWillBeMember<ImageDocument> m_doc;
 };
 
 class ImageDocumentParser : public RawDataDocumentParser {
@@ -96,7 +105,7 @@ private:
     {
     }
 
-    virtual void appendBytes(const char*, size_t) override;
+    void appendBytes(const char*, size_t) override;
     virtual void finish();
 };
 
@@ -136,6 +145,10 @@ void ImageDocumentParser::appendBytes(const char* data, size_t length)
         RELEASE_ASSERT(length <= std::numeric_limits<unsigned>::max());
         document()->cachedImage()->appendData(data, length);
     }
+
+    if (!document())
+        return;
+
     // Make sure the image layoutObject gets created because we need the layoutObject
     // to read the aspect ratio. See crbug.com/320244
     document()->updateLayoutTreeIfNeeded();
@@ -164,7 +177,8 @@ void ImageDocumentParser::finish()
         document()->imageUpdated();
     }
 
-    document()->finishedParsing();
+    if (document())
+        document()->finishedParsing();
 }
 
 // --------
@@ -186,7 +200,7 @@ PassRefPtrWillBeRawPtr<DocumentParser> ImageDocument::createParser()
     return ImageDocumentParser::create(this);
 }
 
-void ImageDocument::createDocumentStructure()
+void ImageDocument::createDocumentStructure(bool loadingMultipartContent)
 {
     RefPtrWillBeRawPtr<HTMLHtmlElement> rootElement = HTMLHtmlElement::create(*this);
     appendChild(rootElement);
@@ -194,6 +208,13 @@ void ImageDocument::createDocumentStructure()
 
     if (frame())
         frame()->loader().dispatchDocumentElementAvailable();
+    // Normally, ImageDocument creates an HTMLImageElement that doesn't actually load
+    // anything, and the ImageDocument routes the main resource data into the HTMLImageElement's
+    // ImageResource. However, the main resource pipeline doesn't know how to handle multipart content.
+    // For multipart content, we instead stop streaming data through the main resource and re-request
+    // the data directly.
+    if (loadingMultipartContent)
+        loader()->stopLoading();
 
     RefPtrWillBeRawPtr<HTMLHeadElement> head = HTMLHeadElement::create(*this);
     RefPtrWillBeRawPtr<HTMLMetaElement> meta = HTMLMetaElement::create(*this);
@@ -206,13 +227,16 @@ void ImageDocument::createDocumentStructure()
 
     m_imageElement = HTMLImageElement::create(*this);
     m_imageElement->setAttribute(styleAttr, "-webkit-user-select: none");
-    m_imageElement->setLoadingImageDocument();
+    // If the image is multipart, we neglect to mention to the HTMLImageElement that it's in an
+    // ImageDocument, so that it requests the image normally.
+    if (!loadingMultipartContent)
+        m_imageElement->setLoadingImageDocument();
     m_imageElement->setSrc(url().string());
     body->appendChild(m_imageElement.get());
 
     if (shouldShrinkToFit()) {
         // Add event listeners
-        RefPtr<EventListener> listener = ImageEventListener::create(this);
+        RefPtrWillBeRawPtr<EventListener> listener = ImageEventListener::create(this);
         if (LocalDOMWindow* domWindow = this->domWindow())
             domWindow->addEventListener("resize", listener, false);
         if (m_shrinkToFitMode == Desktop)
@@ -221,6 +245,8 @@ void ImageDocument::createDocumentStructure()
 
     rootElement->appendChild(head);
     rootElement->appendChild(body);
+    if (loadingMultipartContent)
+        finishedParsing();
 }
 
 float ImageDocument::scale() const
@@ -266,9 +292,9 @@ void ImageDocument::imageClicked(int x, int y)
 
     m_shouldShrinkImage = !m_shouldShrinkImage;
 
-    if (m_shouldShrinkImage)
+    if (m_shouldShrinkImage) {
         windowSizeChanged(ScaleZoomedDocument);
-    else {
+    } else {
         restoreImageSize(ScaleZoomedDocument);
 
         updateLayout();
@@ -278,7 +304,7 @@ void ImageDocument::imageClicked(int x, int y)
         double scrollX = x / scale - static_cast<double>(frame()->view()->width()) / 2;
         double scrollY = y / scale - static_cast<double>(frame()->view()->height()) / 2;
 
-        frame()->view()->setScrollPosition(DoublePoint(scrollX, scrollY));
+        frame()->view()->setScrollPosition(DoublePoint(scrollX, scrollY), ProgrammaticScroll);
     }
 }
 
@@ -352,8 +378,8 @@ void ImageDocument::windowSizeChanged(ScaleType type)
         // the scale is minimum.
         // Don't shrink height to fit because we use width=device-width in viewport meta tag,
         // and expect a full-width reading mode for normal-width-huge-height images.
-        int viewportWidth = frame()->host()->pinchViewport().size().width();
-        m_imageElement->setInlineStyleProperty(CSSPropertyMaxWidth, viewportWidth * 10, CSSPrimitiveValue::CSS_PX);
+        int viewportWidth = frame()->host()->visualViewport().size().width();
+        m_imageElement->setInlineStyleProperty(CSSPropertyMaxWidth, viewportWidth * 10, CSSPrimitiveValue::UnitType::Pixels);
         return;
     }
 
@@ -387,10 +413,11 @@ void ImageDocument::windowSizeChanged(ScaleType type)
 
 ImageResource* ImageDocument::cachedImage()
 {
+    bool loadingMultipartContent = loader() && loader()->loadingMultipartContent();
     if (!m_imageElement)
-        createDocumentStructure();
+        createDocumentStructure(loadingMultipartContent);
 
-    return m_imageElement->cachedImage();
+    return loadingMultipartContent ? nullptr : m_imageElement->cachedImage();
 }
 
 bool ImageDocument::shouldShrinkToFit() const
@@ -416,9 +443,9 @@ DEFINE_TRACE(ImageDocument)
 
 void ImageEventListener::handleEvent(ExecutionContext*, Event* event)
 {
-    if (event->type() == EventTypeNames::resize)
+    if (event->type() == EventTypeNames::resize) {
         m_doc->windowSizeChanged(ImageDocument::ScaleOnlyUnzoomedDocument);
-    else if (event->type() == EventTypeNames::click && event->isMouseEvent()) {
+    } else if (event->type() == EventTypeNames::click && event->isMouseEvent()) {
         MouseEvent* mouseEvent = toMouseEvent(event);
         m_doc->imageClicked(mouseEvent->x(), mouseEvent->y());
     }

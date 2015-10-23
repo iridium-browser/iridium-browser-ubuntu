@@ -16,9 +16,9 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/win/scoped_co_mem.h"
 #include "components/update_client/utils.h"
 #include "ui/base/win/atl_module.h"
@@ -211,7 +211,7 @@ HRESULT GetJobByteCount(IBackgroundCopyJob* job,
   if (!job)
     return E_FAIL;
 
-  BG_JOB_PROGRESS job_progress = {0};
+  BG_JOB_PROGRESS job_progress = {};
   HRESULT hr = job->GetProgress(&job_progress);
   if (FAILED(hr))
     return hr;
@@ -295,7 +295,7 @@ struct JobCreationOlderThanDays
 
 bool JobCreationOlderThanDays::operator()(IBackgroundCopyJob* job,
                                           int num_days) const {
-  BG_JOB_TIMES times = {0};
+  BG_JOB_TIMES times = {};
   HRESULT hr = job->GetTimes(&times);
   if (FAILED(hr))
     return false;
@@ -393,7 +393,7 @@ BackgroundDownloader::BackgroundDownloader(
     net::URLRequestContextGetter* context_getter,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : CrxDownloader(successor.Pass()),
-      main_task_runner_(base::MessageLoopProxy::current()),
+      main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       context_getter_(context_getter),
       task_runner_(task_runner),
       is_completed_(false) {

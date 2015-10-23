@@ -191,7 +191,6 @@ WebInspector.ExtensionButton.prototype = {
 WebInspector.ExtensionSidebarPane = function(server, panelName, title, id)
 {
     WebInspector.SidebarPane.call(this, title);
-    this.setHideOnDetach();
     this._panelName = panelName;
     this._server = server;
     this._id = id;
@@ -251,9 +250,9 @@ WebInspector.ExtensionSidebarPane.prototype = {
             this._extensionView.detach(true);
 
         this._extensionView = new WebInspector.ExtensionView(this._server, this._id, url, "extension fill");
-        this._extensionView.show(this.bodyElement);
+        this._extensionView.show(this.element);
 
-        if (!this.bodyElement.style.height)
+        if (!this.element.style.height)
             this.setHeight("150px");
     },
 
@@ -262,7 +261,7 @@ WebInspector.ExtensionSidebarPane.prototype = {
      */
     setHeight: function(height)
     {
-        this.bodyElement.style.height = height;
+        this.element.style.height = height;
     },
 
     /**
@@ -289,7 +288,7 @@ WebInspector.ExtensionSidebarPane.prototype = {
             delete this._extensionView;
         }
         this._objectPropertiesView = new WebInspector.ExtensionNotifierView(this._server, this._id);
-        this._objectPropertiesView.show(this.bodyElement);
+        this._objectPropertiesView.show(this.element);
     },
 
     /**

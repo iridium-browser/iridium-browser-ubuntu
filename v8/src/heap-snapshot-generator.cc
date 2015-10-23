@@ -9,7 +9,7 @@
 #include "src/allocation-tracker.h"
 #include "src/code-stubs.h"
 #include "src/conversions.h"
-#include "src/debug.h"
+#include "src/debug/debug.h"
 #include "src/heap-profiler.h"
 #include "src/types.h"
 
@@ -154,6 +154,7 @@ const char* HeapEntry::TypeAsString() {
     case kConsString: return "/concatenated string/";
     case kSlicedString: return "/sliced string/";
     case kSymbol: return "/symbol/";
+    case kSimdValue: return "/simd/";
     default: return "???";
   }
 }
@@ -322,7 +323,8 @@ List<HeapEntry*>* HeapSnapshot::GetSortedEntriesList() {
     for (int i = 0; i < entries_.length(); ++i) {
       sorted_entries_[i] = &entries_[i];
     }
-    sorted_entries_.Sort(SortByIds);
+    sorted_entries_.Sort<int (*)(HeapEntry* const*, HeapEntry* const*)>(
+        SortByIds);
   }
   return &sorted_entries_;
 }
@@ -854,13 +856,13 @@ HeapEntry* V8HeapExplorer::AddEntry(HeapObject* object) {
     return AddEntry(object, HeapEntry::kHidden, "system / NativeContext");
   } else if (object->IsContext()) {
     return AddEntry(object, HeapEntry::kObject, "system / Context");
-  } else if (object->IsFixedArray() ||
-             object->IsFixedDoubleArray() ||
-             object->IsByteArray() ||
-             object->IsExternalArray()) {
+  } else if (object->IsFixedArray() || object->IsFixedDoubleArray() ||
+             object->IsByteArray()) {
     return AddEntry(object, HeapEntry::kArray, "");
   } else if (object->IsHeapNumber()) {
     return AddEntry(object, HeapEntry::kHeapNumber, "number");
+  } else if (object->IsSimd128Value()) {
+    return AddEntry(object, HeapEntry::kSimdValue, "simd");
   }
   return AddEntry(object, HeapEntry::kHidden, GetSystemEntryName(object));
 }
@@ -1261,8 +1263,6 @@ void V8HeapExplorer::ExtractContextReferences(int entry, Context* context) {
   EXTRACT_CONTEXT_FIELD(EXTENSION_INDEX, Object, extension);
   EXTRACT_CONTEXT_FIELD(GLOBAL_OBJECT_INDEX, GlobalObject, global);
   if (context->IsNativeContext()) {
-    TagObject(context->jsfunction_result_caches(),
-              "(context func. result caches)");
     TagObject(context->normalized_map_cache(), "(context norm. map cache)");
     TagObject(context->runtime_context(), "(runtime context)");
     TagObject(context->embedder_data(), "(context data)");
@@ -1291,7 +1291,7 @@ void V8HeapExplorer::ExtractMapReferences(int entry, Map* map) {
         TransitionArray::cast(raw_transitions_or_prototype_info);
     int transitions_entry = GetEntry(transitions)->index();
 
-    if (FLAG_collect_maps && map->CanTransition()) {
+    if (map->CanTransition()) {
       if (transitions->HasPrototypeTransitions()) {
         FixedArray* prototype_transitions =
             transitions->GetPrototypeTransitions();
@@ -1500,9 +1500,6 @@ void V8HeapExplorer::ExtractCodeReferences(int entry, Code* code) {
   SetInternalReference(code, entry,
                        "gc_metadata", code->gc_metadata(),
                        Code::kGCMetadataOffset);
-  SetInternalReference(code, entry,
-                       "constant_pool", code->constant_pool(),
-                       Code::kConstantPoolOffset);
   if (code->kind() == Code::OPTIMIZED_FUNCTION) {
     SetWeakReference(code, entry,
                      "next_code_link", code->next_code_link(),
@@ -1648,17 +1645,33 @@ void V8HeapExplorer::ExtractPropertyReferences(JSObject* js_obj, int entry) {
           break;
       }
     }
+  } else if (js_obj->IsGlobalObject()) {
+    // We assume that global objects can only have slow properties.
+    GlobalDictionary* dictionary = js_obj->global_dictionary();
+    int length = dictionary->Capacity();
+    for (int i = 0; i < length; ++i) {
+      Object* k = dictionary->KeyAt(i);
+      if (dictionary->IsKey(k)) {
+        DCHECK(dictionary->ValueAt(i)->IsPropertyCell());
+        PropertyCell* cell = PropertyCell::cast(dictionary->ValueAt(i));
+        Object* value = cell->value();
+        if (k == heap_->hidden_string()) {
+          TagObject(value, "(hidden properties)");
+          SetInternalReference(js_obj, entry, "hidden_properties", value);
+          continue;
+        }
+        PropertyDetails details = cell->property_details();
+        SetDataOrAccessorPropertyReference(details.kind(), js_obj, entry,
+                                           Name::cast(k), value);
+      }
+    }
   } else {
     NameDictionary* dictionary = js_obj->property_dictionary();
     int length = dictionary->Capacity();
     for (int i = 0; i < length; ++i) {
       Object* k = dictionary->KeyAt(i);
       if (dictionary->IsKey(k)) {
-        Object* target = dictionary->ValueAt(i);
-        // We assume that global objects can only have slow properties.
-        Object* value = target->IsPropertyCell()
-            ? PropertyCell::cast(target)->value()
-            : target;
+        Object* value = dictionary->ValueAt(i);
         if (k == heap_->hidden_string()) {
           TagObject(value, "(hidden properties)");
           SetInternalReference(js_obj, entry, "hidden_properties", value);
@@ -1877,18 +1890,17 @@ bool V8HeapExplorer::IterateAndExtractSinglePass() {
 
 
 bool V8HeapExplorer::IsEssentialObject(Object* object) {
-  return object->IsHeapObject()
-      && !object->IsOddball()
-      && object != heap_->empty_byte_array()
-      && object != heap_->empty_fixed_array()
-      && object != heap_->empty_descriptor_array()
-      && object != heap_->fixed_array_map()
-      && object != heap_->cell_map()
-      && object != heap_->global_property_cell_map()
-      && object != heap_->shared_function_info_map()
-      && object != heap_->free_space_map()
-      && object != heap_->one_pointer_filler_map()
-      && object != heap_->two_pointer_filler_map();
+  return object->IsHeapObject() && !object->IsOddball() &&
+         object != heap_->empty_byte_array() &&
+         object != heap_->empty_bytecode_array() &&
+         object != heap_->empty_fixed_array() &&
+         object != heap_->empty_descriptor_array() &&
+         object != heap_->fixed_array_map() && object != heap_->cell_map() &&
+         object != heap_->global_property_cell_map() &&
+         object != heap_->shared_function_info_map() &&
+         object != heap_->free_space_map() &&
+         object != heap_->one_pointer_filler_map() &&
+         object != heap_->two_pointer_filler_map();
 }
 
 
@@ -3166,4 +3178,5 @@ void HeapSnapshotJSONSerializer::SerializeStrings() {
 }
 
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

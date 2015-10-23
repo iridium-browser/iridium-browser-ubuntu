@@ -6,6 +6,7 @@
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_COMMON_DATA_REDUCTION_PROXY_EVENT_CREATOR_H_
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/macros.h"
@@ -24,6 +25,7 @@ class Value;
 
 namespace net {
 class BoundNetLog;
+class ProxyServer;
 }
 
 namespace data_reduction_proxy {
@@ -43,12 +45,11 @@ class DataReductionProxyEventCreator {
 
   // Adds the DATA_REDUCTION_PROXY_ENABLED event (with enabled=true) to the
   // event store.
-  void AddProxyEnabledEvent(net::NetLog* net_log,
-                            bool primary_restricted,
-                            bool fallback_restricted,
-                            const std::string& primary_origin,
-                            const std::string& fallback_origin,
-                            const std::string& ssl_origin);
+  void AddProxyEnabledEvent(
+      net::NetLog* net_log,
+      bool secure_transport_restricted,
+      const std::vector<net::ProxyServer>& proxies_for_http,
+      const std::vector<net::ProxyServer>& proxies_for_https);
 
   // Adds the DATA_REDUCTION_PROXY_ENABLED event (with enabled=false) to the
   // event store.
@@ -65,13 +66,19 @@ class DataReductionProxyEventCreator {
 
   // Adds a DATA_REDUCTION_PROXY_BYPASS_REQUESTED event to the event store
   // when the bypass reason is not initiated by the data reduction proxy, such
-  // as network errors.
+  // as HTTP errors.
   void AddBypassTypeEvent(const net::BoundNetLog& net_log,
                           DataReductionProxyBypassType bypass_type,
                           const std::string& request_method,
                           const GURL& gurl,
                           bool should_retry,
                           const base::TimeDelta& bypass_duration);
+
+  // Adds a DATA_REDUCTION_PROXY_FALLBACK event to the event store when there
+  // is a network error in attempting to use a Data Reduction Proxy server.
+  void AddProxyFallbackEvent(net::NetLog* net_log,
+                             const std::string& proxy_url,
+                             int net_error);
 
   // Adds a DATA_REDUCTION_PROXY_CANARY_REQUEST event to the event store
   // when the secure proxy request has started.
@@ -97,6 +104,12 @@ class DataReductionProxyEventCreator {
                         const base::TimeDelta& retry_delay);
 
  private:
+  // Prepare and post a generic Data Reduction Proxy event with no additional
+  // parameters.
+  void PostEvent(net::NetLog* net_log,
+                 net::NetLog::EventType type,
+                 const net::NetLog::ParametersCallback& callback);
+
   // Prepare and post enabling/disabling proxy events for the event store on the
   // a net::NetLog.
   void PostEnabledEvent(net::NetLog* net_log,

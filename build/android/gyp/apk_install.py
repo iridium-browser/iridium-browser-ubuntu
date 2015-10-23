@@ -23,6 +23,7 @@ sys.path.append(BUILD_ANDROID_DIR)
 from pylib import constants
 from pylib.utils import apk_helper
 
+
 def GetNewMetadata(device, apk_package):
   """Gets the metadata on the device for the apk_package apk."""
   output = device.RunShellCommand('ls -l /data/app/')
@@ -62,6 +63,9 @@ def main():
       help='Path to .apk splits (can specify multiple times, causes '
       '--install-multiple to be used.',
       action='append')
+  parser.add_option('--android-sdk-tools',
+      help='Path to the Android SDK build tools folder. ' +
+           'Required when using --split-apk-path.')
   parser.add_option('--install-record',
       help='Path to install record (touched only when APK is installed).')
   parser.add_option('--build-device-configuration',
@@ -88,13 +92,10 @@ def main():
   # the build, then the APK has to be installed (regardless of the md5 record).
   force_install = HasInstallMetadataChanged(device, apk_package, metadata_path)
 
+
   def Install():
-    # TODO: Filter splits using split-select.
-    active_splits = options.split_apk_path
-    if active_splits:
-      device.adb.InstallMultiple(
-          [options.apk_path] + active_splits,
-          reinstall=True)
+    if options.split_apk_path:
+      device.InstallSplitApk(options.apk_path, options.split_apk_path)
     else:
       device.Install(options.apk_path, reinstall=True)
 

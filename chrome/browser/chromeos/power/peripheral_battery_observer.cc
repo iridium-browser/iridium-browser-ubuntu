@@ -49,8 +49,10 @@ const char kHIDBatteryPathPrefix[] = "/sys/class/power_supply/hid-";
 const char kHIDBatteryPathSuffix[] = "-battery";
 
 bool IsBluetoothHIDBattery(const std::string& path) {
-  return StartsWithASCII(path, kHIDBatteryPathPrefix, false) &&
-      EndsWith(path, kHIDBatteryPathSuffix, false);
+  return base::StartsWith(path, kHIDBatteryPathPrefix,
+                          base::CompareCase::INSENSITIVE_ASCII) &&
+         base::EndsWith(path, kHIDBatteryPathSuffix,
+                        base::CompareCase::INSENSITIVE_ASCII);
 }
 
 std::string ExtractBluetoothAddress(const std::string& path) {
@@ -59,12 +61,12 @@ std::string ExtractBluetoothAddress(const std::string& path) {
   int key_len = path.size() - header_size - end_size;
   if (key_len <= 0)
     return std::string();
-  std::string reverse_address = path.substr(header_size, key_len);
-  base::StringToLowerASCII(&reverse_address);
-  std::vector<std::string> result;
-  base::SplitString(reverse_address, ':', &result);
+  std::string reverse_address =
+      base::ToLowerASCII(path.substr(header_size, key_len));
+  std::vector<std::string> result = base::SplitString(
+      reverse_address, ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   std::reverse(result.begin(), result.end());
-  std::string address = JoinString(result, ':');
+  std::string address = base::JoinString(result, ":");
   return address;
 }
 
@@ -179,8 +181,7 @@ void PeripheralBatteryObserver::InitializeOnBluetoothReady(
 
 void PeripheralBatteryObserver::RemoveBattery(const std::string& address) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  std::string address_lowercase = address;
-  base::StringToLowerASCII(&address_lowercase);
+  std::string address_lowercase = base::ToLowerASCII(address);
   std::map<std::string, BatteryInfo>::iterator it =
       batteries_.find(address_lowercase);
   if (it != batteries_.end()) {
@@ -208,12 +209,12 @@ bool PeripheralBatteryObserver::PostNotification(const std::string& address,
       battery.level);
 
   Notification notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE, GURL(kNotificationOriginUrl),
-      base::UTF8ToUTF16(battery.name), string_text,
-      ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-          IDR_NOTIFICATION_PERIPHERAL_BATTERY_LOW),
+      message_center::NOTIFICATION_TYPE_SIMPLE, base::UTF8ToUTF16(battery.name),
+      string_text, ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+                       IDR_NOTIFICATION_PERIPHERAL_BATTERY_LOW),
       message_center::NotifierId(GURL(kNotificationOriginUrl)),
-      base::string16(), address, message_center::RichNotificationData(),
+      base::string16(), GURL(kNotificationOriginUrl), address,
+      message_center::RichNotificationData(),
       new PeripheralBatteryNotificationDelegate(address));
 
   notification.set_priority(message_center::SYSTEM_PRIORITY);

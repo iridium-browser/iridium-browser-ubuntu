@@ -14,7 +14,7 @@
 
 namespace {
 
-namespace bluetooth_socket = extensions::core_api::bluetooth_socket;
+namespace bluetooth_socket = extensions::api::bluetooth_socket;
 using extensions::BluetoothApiSocket;
 
 int kDefaultBufferSize = 4096;
@@ -54,7 +54,7 @@ bluetooth_socket::AcceptError MapAcceptErrorReason(
 }  // namespace
 
 namespace extensions {
-namespace core_api {
+namespace api {
 
 using content::BrowserThread;
 
@@ -194,8 +194,9 @@ void BluetoothSocketEventDispatcher::ReceiveCallback(
   receive_info.data.assign(io_buffer->data(), io_buffer->data() + bytes_read);
   scoped_ptr<base::ListValue> args =
       bluetooth_socket::OnReceive::Create(receive_info);
-  scoped_ptr<Event> event(
-      new Event(bluetooth_socket::OnReceive::kEventName, args.Pass()));
+  scoped_ptr<Event> event(new Event(events::BLUETOOTH_SOCKET_ON_RECEIVE,
+                                    bluetooth_socket::OnReceive::kEventName,
+                                    args.Pass()));
   PostEvent(params, event.Pass());
 
   // Post a task to delay the read until the socket is available, as
@@ -229,7 +230,8 @@ void BluetoothSocketEventDispatcher::ReceiveErrorCallback(
   scoped_ptr<base::ListValue> args =
       bluetooth_socket::OnReceiveError::Create(receive_error_info);
   scoped_ptr<Event> event(
-      new Event(bluetooth_socket::OnReceiveError::kEventName, args.Pass()));
+      new Event(events::BLUETOOTH_SOCKET_ON_RECEIVE_ERROR,
+                bluetooth_socket::OnReceiveError::kEventName, args.Pass()));
   PostEvent(params, event.Pass());
 
   // Since we got an error, the socket is now "paused" until the application
@@ -289,8 +291,9 @@ void BluetoothSocketEventDispatcher::AcceptCallback(
   accept_info.client_socket_id = client_socket_id;
   scoped_ptr<base::ListValue> args =
       bluetooth_socket::OnAccept::Create(accept_info);
-  scoped_ptr<Event> event(
-      new Event(bluetooth_socket::OnAccept::kEventName, args.Pass()));
+  scoped_ptr<Event> event(new Event(events::BLUETOOTH_SOCKET_ON_ACCEPT,
+                                    bluetooth_socket::OnAccept::kEventName,
+                                    args.Pass()));
   PostEvent(params, event.Pass());
 
   // Post a task to delay the accept until the socket is available, as
@@ -323,8 +326,9 @@ void BluetoothSocketEventDispatcher::AcceptErrorCallback(
   accept_error_info.error = MapAcceptErrorReason(error_reason);
   scoped_ptr<base::ListValue> args =
       bluetooth_socket::OnAcceptError::Create(accept_error_info);
-  scoped_ptr<Event> event(
-      new Event(bluetooth_socket::OnAcceptError::kEventName, args.Pass()));
+  scoped_ptr<Event> event(new Event(events::BLUETOOTH_SOCKET_ON_ACCEPT_ERROR,
+                                    bluetooth_socket::OnAcceptError::kEventName,
+                                    args.Pass()));
   PostEvent(params, event.Pass());
 
   // Since we got an error, the socket is now "paused" until the application
@@ -367,5 +371,5 @@ void BluetoothSocketEventDispatcher::DispatchEvent(
     router->DispatchEventToExtension(extension_id, event.Pass());
 }
 
-}  // namespace core_api
+}  // namespace api
 }  // namespace extensions

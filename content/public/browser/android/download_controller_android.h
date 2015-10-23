@@ -37,7 +37,7 @@ class CONTENT_EXPORT DownloadControllerAndroid {
   // Called when a download is initiated by context menu.
   virtual void StartContextMenuDownload(
       const ContextMenuParams& params, WebContents* web_contents,
-      bool is_link) = 0;
+      bool is_link, const std::string& extra_headers) = 0;
 
   // Called when a dangerous download item is verified or rejected.
   virtual void DangerousDownloadValidated(
@@ -50,7 +50,8 @@ class CONTENT_EXPORT DownloadControllerAndroid {
   // Called to prompt the user for file access permission. When finished,
   // |callback| will be executed.
   virtual void AcquireFileAccessPermission(
-      WebContents* web_contents,
+      int render_process_id,
+      int render_view_id,
       const AcquireFileAccessPermissionCallback& callback) = 0;
 
   // Called by unit test to approve or disapprove file access request.

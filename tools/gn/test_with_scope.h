@@ -7,13 +7,15 @@
 
 #include <vector>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "tools/gn/build_settings.h"
 #include "tools/gn/err.h"
 #include "tools/gn/input_file.h"
 #include "tools/gn/parse_tree.h"
 #include "tools/gn/scope.h"
+#include "tools/gn/scope_per_file_provider.h"
 #include "tools/gn/settings.h"
+#include "tools/gn/target.h"
 #include "tools/gn/token.h"
 #include "tools/gn/toolchain.h"
 #include "tools/gn/value.h"
@@ -35,11 +37,20 @@ class TestWithScope {
   // threadsafe so don't write tests that call print from multiple threads.
   std::string& print_output() { return print_output_; }
 
+  // Parse the given string into a label in the default toolchain. This will
+  // assert if the label isn't valid (this is intended for hardcoded labels).
+  Label ParseLabel(const std::string& str) const;
+
   // Fills in the tools for the given toolchain with reasonable default values.
   // The toolchain in this object will be automatically set up with this
   // function, it is exposed to allow tests to get the same functionality for
-  // other toolchains they make
+  // other toolchains they make.
   static void SetupToolchain(Toolchain* toolchain);
+
+  // Sets the given text command on the given tool, parsing it as a
+  // substitution pattern. This will assert if the input is malformed. This is
+  // designed to help setting up Tools for tests.
+  static void SetCommandForTool(const std::string& cmd, Tool* tool);
 
  private:
   void AppendPrintOutput(const std::string& str);
@@ -48,6 +59,9 @@ class TestWithScope {
   Settings settings_;
   Toolchain toolchain_;
   Scope scope_;
+
+  // Supplies the scope with built-in variables like root_out_dir.
+  ScopePerFileProvider scope_progammatic_provider_;
 
   std::string print_output_;
 
@@ -80,6 +94,17 @@ class TestParseInput {
   Err parse_err_;
 
   DISALLOW_COPY_AND_ASSIGN(TestParseInput);
+};
+
+// Shortcut for creating targets for tests that take the test setup, a pretty-
+// style label, and a target type and sets everything up. The target will
+// default to public visibility.
+class TestTarget : public Target {
+ public:
+  TestTarget(TestWithScope& setup,
+             const std::string& label_string,
+             Target::OutputType type);
+  ~TestTarget() override;
 };
 
 #endif  // TOOLS_GN_TEST_WITH_SCOPE_H_

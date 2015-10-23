@@ -9,7 +9,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/chromeos/drive/file_errors.h"
+#include "base/threading/thread_checker.h"
+#include "components/drive/file_errors.h"
 
 namespace base {
 class FilePath;
@@ -72,6 +73,8 @@ class TruncateOperation {
   internal::FileCache* cache_;
 
   scoped_ptr<DownloadOperation> download_operation_;
+
+  base::ThreadChecker thread_checker_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

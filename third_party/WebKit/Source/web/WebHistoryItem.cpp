@@ -95,14 +95,24 @@ void WebHistoryItem::setTarget(const WebString& target)
     m_private->setTarget(target);
 }
 
+WebFloatPoint WebHistoryItem::visualViewportScrollOffset() const
+{
+    return m_private->visualViewportScrollPoint();
+}
+
+void WebHistoryItem::setVisualViewportScrollOffset(const WebFloatPoint& scrollOffset)
+{
+    m_private->setVisualViewportScrollPoint(scrollOffset);
+}
+
 WebFloatPoint WebHistoryItem::pinchViewportScrollOffset() const
 {
-    return m_private->pinchViewportScrollPoint();
+    return visualViewportScrollOffset();
 }
 
 void WebHistoryItem::setPinchViewportScrollOffset(const WebFloatPoint& scrollOffset)
 {
-    m_private->setPinchViewportScrollPoint(scrollOffset);
+    setVisualViewportScrollOffset(scrollOffset);
 }
 
 WebPoint WebHistoryItem::scrollOffset() const
@@ -157,16 +167,6 @@ long long WebHistoryItem::documentSequenceNumber() const
 void WebHistoryItem::setDocumentSequenceNumber(long long documentSequenceNumber)
 {
     m_private->setDocumentSequenceNumber(documentSequenceNumber);
-}
-
-long long WebHistoryItem::frameSequenceNumber() const
-{
-    return m_private->frameSequenceNumber();
-}
-
-void WebHistoryItem::setFrameSequenceNumber(long long frameSequenceNumber)
-{
-    m_private->setFrameSequenceNumber(frameSequenceNumber);
 }
 
 WebHistoryScrollRestorationType WebHistoryItem::scrollRestorationType() const

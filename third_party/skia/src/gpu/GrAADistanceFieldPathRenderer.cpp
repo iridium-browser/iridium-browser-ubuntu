@@ -8,8 +8,7 @@
 
 #include "GrAADistanceFieldPathRenderer.h"
 
-#include "GrBatch.h"
-#include "GrBatchTarget.h"
+#include "GrBatchFlushState.h"
 #include "GrBatchTest.h"
 #include "GrContext.h"
 #include "GrPipelineBuilder.h"
@@ -18,6 +17,7 @@
 #include "GrSWMaskHelper.h"
 #include "GrTexturePriv.h"
 #include "GrVertexBuffer.h"
+#include "batches/GrVertexBatch.h"
 #include "effects/GrDistanceFieldGeoProc.h"
 
 #include "SkDistanceFieldGen.h"
@@ -62,10 +62,7 @@ void GrAADistanceFieldPathRenderer::HandleEviction(GrBatchAtlas::AtlasID id, voi
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-GrAADistanceFieldPathRenderer::GrAADistanceFieldPathRenderer(GrContext* context)
-    : fContext(context)
-    , fAtlas(NULL) {
-}
+GrAADistanceFieldPathRenderer::GrAADistanceFieldPathRenderer() : fAtlas(NULL) {}
 
 GrAADistanceFieldPathRenderer::~GrAADistanceFieldPathRenderer() {
     PathDataList::Iter iter;
@@ -84,40 +81,27 @@ GrAADistanceFieldPathRenderer::~GrAADistanceFieldPathRenderer() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-bool GrAADistanceFieldPathRenderer::canDrawPath(const GrDrawTarget* target,
-                                                const GrPipelineBuilder* pipelineBuilder,
-                                                const SkMatrix& viewMatrix,
-                                                const SkPath& path,
-                                                const GrStrokeInfo& stroke,
-                                                bool antiAlias) const {
+bool GrAADistanceFieldPathRenderer::onCanDrawPath(const CanDrawPathArgs& args) const {
     
     // TODO: Support inverse fill
     // TODO: Support strokes
-    if (!target->caps()->shaderCaps()->shaderDerivativeSupport() || !antiAlias 
-        || path.isInverseFillType() || path.isVolatile() || !stroke.isFillStyle()) {
+    if (!args.fShaderCaps->shaderDerivativeSupport() || !args.fAntiAlias ||
+        args.fPath->isInverseFillType() || args.fPath->isVolatile() ||
+        !args.fStroke->isFillStyle()) {
         return false;
     }
 
     // currently don't support perspective
-    if (viewMatrix.hasPerspective()) {
+    if (args.fViewMatrix->hasPerspective()) {
         return false;
     }
     
     // only support paths smaller than 64x64, scaled to less than 256x256
     // the goal is to accelerate rendering of lots of small paths that may be scaling
-    SkScalar maxScale = viewMatrix.getMaxScale();
-    const SkRect& bounds = path.getBounds();
+    SkScalar maxScale = args.fViewMatrix->getMaxScale();
+    const SkRect& bounds = args.fPath->getBounds();
     SkScalar maxDim = SkMaxScalar(bounds.width(), bounds.height());
     return maxDim < 64.f && maxDim * maxScale < 256.f;
-}
-
-
-GrPathRenderer::StencilSupport
-GrAADistanceFieldPathRenderer::onGetStencilSupport(const GrDrawTarget*,
-                                                   const GrPipelineBuilder*,
-                                                   const SkPath&,
-                                                   const GrStrokeInfo&) const {
-    return GrPathRenderer::kNoSupport_StencilSupport;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -125,7 +109,7 @@ GrAADistanceFieldPathRenderer::onGetStencilSupport(const GrDrawTarget*,
 // padding around path bounds to allow for antialiased pixels
 static const SkScalar kAntiAliasPad = 1.0f;
 
-class AADistanceFieldPathBatch : public GrBatch {
+class AADistanceFieldPathBatch : public GrVertexBatch {
 public:
     typedef GrAADistanceFieldPathRenderer::PathData PathData;
     typedef SkTDynamicHash<PathData, PathData::Key> PathCache;
@@ -139,8 +123,8 @@ public:
         PathData* fPathData;
     };
 
-    static GrBatch* Create(const Geometry& geometry, GrColor color, const SkMatrix& viewMatrix,
-                           GrBatchAtlas* atlas, PathCache* pathCache, PathDataList* pathList) {
+    static GrDrawBatch* Create(const Geometry& geometry, GrColor color, const SkMatrix& viewMatrix,
+                               GrBatchAtlas* atlas, PathCache* pathCache, PathDataList* pathList) {
         return SkNEW_ARGS(AADistanceFieldPathBatch, (geometry, color, viewMatrix,
                                                      atlas, pathCache, pathList));
     }
@@ -155,18 +139,18 @@ public:
         out->setUnknownSingleComponent();
     }
 
-    void initBatchTracker(const GrPipelineInfo& init) override {
+private:
+    void initBatchTracker(const GrPipelineOptimizations& opt) override {
         // Handle any color overrides
-        if (init.fColorIgnored) {
+        if (!opt.readsColor()) {
             fBatch.fColor = GrColor_ILLEGAL;
-        } else if (GrColor_ILLEGAL != init.fOverrideColor) {
-            fBatch.fColor = init.fOverrideColor;
         }
+        opt.getOverrideColorIfSet(&fBatch.fColor);
 
         // setup batch properties
-        fBatch.fColorIgnored = init.fColorIgnored;
-        fBatch.fUsesLocalCoords = init.fUsesLocalCoords;
-        fBatch.fCoverageIgnored = init.fCoverageIgnored;
+        fBatch.fColorIgnored = !opt.readsColor();
+        fBatch.fUsesLocalCoords = opt.readsLocalCoords();
+        fBatch.fCoverageIgnored = !opt.readsCoverage();
     }
 
     struct FlushInfo {
@@ -176,7 +160,7 @@ public:
         int fInstancesToFlush;
     };
 
-    void generateGeometry(GrBatchTarget* batchTarget, const GrPipeline* pipeline) override {
+    void onPrepareDraws(Target* target) override {
         int instanceCount = fGeoData.count();
 
         SkMatrix invert;
@@ -197,9 +181,10 @@ public:
                                                    this->viewMatrix(),
                                                    atlas->getTexture(),
                                                    params,
-                                                   flags));
+                                                   flags,
+                                                   this->usesLocalCoords()));
 
-        this->initDraw(batchTarget, dfProcessor, pipeline);
+        target->initDraw(dfProcessor, this->pipeline());
 
         FlushInfo flushInfo;
 
@@ -208,12 +193,12 @@ public:
         SkASSERT(vertexStride == 2 * sizeof(SkPoint));
 
         const GrVertexBuffer* vertexBuffer;
-        void* vertices = batchTarget->makeVertSpace(vertexStride,
-                                                    kVerticesPerQuad * instanceCount,
-                                                    &vertexBuffer,
-                                                    &flushInfo.fVertexOffset);
+        void* vertices = target->makeVertexSpace(vertexStride,
+                                                 kVerticesPerQuad * instanceCount,
+                                                 &vertexBuffer,
+                                                 &flushInfo.fVertexOffset);
         flushInfo.fVertexBuffer.reset(SkRef(vertexBuffer));
-        flushInfo.fIndexBuffer.reset(batchTarget->resourceProvider()->refQuadIndexBuffer());
+        flushInfo.fIndexBuffer.reset(target->resourceProvider()->refQuadIndexBuffer());
         if (!vertices || !flushInfo.fIndexBuffer) {
             SkDebugf("Could not allocate vertices\n");
             return;
@@ -250,9 +235,9 @@ public:
                 }
                 SkScalar scale = desiredDimension/maxDim;
                 args.fPathData = SkNEW(PathData);
-                if (!this->addPathToAtlas(batchTarget,
+                if (!this->addPathToAtlas(target,
                                           dfProcessor,
-                                          pipeline,
+                                          this->pipeline(),
                                           &flushInfo,
                                           atlas,
                                           args.fPathData,
@@ -266,15 +251,15 @@ public:
                 }
             }
 
-            atlas->setLastUseToken(args.fPathData->fID, batchTarget->currentToken());
+            atlas->setLastUseToken(args.fPathData->fID, target->currentToken());
 
             // Now set vertices
             intptr_t offset = reinterpret_cast<intptr_t>(vertices);
             offset += i * kVerticesPerQuad * vertexStride;
             SkPoint* positions = reinterpret_cast<SkPoint*>(offset);
-            this->writePathVertices(batchTarget,
+            this->writePathVertices(target,
                                     atlas,
-                                    pipeline,
+                                    this->pipeline(),
                                     dfProcessor,
                                     positions,
                                     vertexStride,
@@ -284,12 +269,11 @@ public:
             flushInfo.fInstancesToFlush++;
         }
 
-        this->flush(batchTarget, &flushInfo);
+        this->flush(target, &flushInfo);
     }
 
     SkSTArray<1, Geometry, true>* geoData() { return &fGeoData; }
 
-private:
     AADistanceFieldPathBatch(const Geometry& geometry, GrColor color, const SkMatrix& viewMatrix,
                              GrBatchAtlas* atlas,
                              PathCache* pathCache, PathDataList* pathList) {
@@ -308,7 +292,7 @@ private:
         viewMatrix.mapRect(&fBounds);
     }
 
-    bool addPathToAtlas(GrBatchTarget* batchTarget,
+    bool addPathToAtlas(GrVertexBatch::Target* target,
                         const GrGeometryProcessor* dfProcessor,
                         const GrPipeline* pipeline,
                         FlushInfo* flushInfo,
@@ -353,14 +337,12 @@ private:
         SkIRect pathBounds = SkIRect::MakeWH(devPathBounds.width(),
                                              devPathBounds.height());
 
-        SkBitmap bmp;
-        const SkImageInfo bmImageInfo = SkImageInfo::MakeA8(pathBounds.fRight,
-                                                            pathBounds.fBottom);
-        if (!bmp.tryAllocPixels(bmImageInfo)) {
+        SkAutoPixmapStorage dst;
+        if (!dst.tryAlloc(SkImageInfo::MakeA8(pathBounds.width(),
+                                              pathBounds.height()))) {
             return false;
         }
-
-        sk_bzero(bmp.getPixels(), bmp.getSafeSize());
+        sk_bzero(dst.writable_addr(), dst.getSafeSize());
 
         // rasterize path
         SkPaint paint;
@@ -387,7 +369,7 @@ private:
         draw.fRC = &rasterClip;
         draw.fClip = &rasterClip.bwRgn();
         draw.fMatrix = &drawMatrix;
-        draw.fBitmap = &bmp;
+        draw.fDst = dst;
 
         draw.drawPathCoverage(path, paint);
 
@@ -399,24 +381,20 @@ private:
         SkAutoSMalloc<1024> dfStorage(width * height * sizeof(unsigned char));
 
         // Generate signed distance field
-        {
-            SkAutoLockPixels alp(bmp);
-
-            SkGenerateDistanceFieldFromA8Image((unsigned char*)dfStorage.get(),
-                                               (const unsigned char*)bmp.getPixels(),
-                                               bmp.width(), bmp.height(), bmp.rowBytes());
-        }
+        SkGenerateDistanceFieldFromA8Image((unsigned char*)dfStorage.get(),
+                                           (const unsigned char*)dst.addr(),
+                                           dst.width(), dst.height(), dst.rowBytes());
 
         // add to atlas
         SkIPoint16 atlasLocation;
         GrBatchAtlas::AtlasID id;
-        bool success = atlas->addToAtlas(&id, batchTarget, width, height, dfStorage.get(),
+        bool success = atlas->addToAtlas(&id, target, width, height, dfStorage.get(),
                                          &atlasLocation);
         if (!success) {
-            this->flush(batchTarget, flushInfo);
-            this->initDraw(batchTarget, dfProcessor, pipeline);
+            this->flush(target, flushInfo);
+            target->initDraw(dfProcessor, pipeline);
 
-            SkDEBUGCODE(success =) atlas->addToAtlas(&id, batchTarget, width, height,
+            SkDEBUGCODE(success =) atlas->addToAtlas(&id, target, width, height,
                                                      dfStorage.get(), &atlasLocation);
             SkASSERT(success);
 
@@ -450,7 +428,7 @@ private:
         return true;
     }
 
-    void writePathVertices(GrBatchTarget* target,
+    void writePathVertices(GrDrawBatch::Target* target,
                            GrBatchAtlas* atlas,
                            const GrPipeline* pipeline,
                            const GrGeometryProcessor* gp,
@@ -491,27 +469,13 @@ private:
                                   vertexStride);
     }
 
-    void initDraw(GrBatchTarget* batchTarget,
-                  const GrGeometryProcessor* dfProcessor,
-                  const GrPipeline* pipeline) {
-        batchTarget->initDraw(dfProcessor, pipeline);
-
-        // TODO remove this when batch is everywhere
-        GrPipelineInfo init;
-        init.fColorIgnored = fBatch.fColorIgnored;
-        init.fOverrideColor = GrColor_ILLEGAL;
-        init.fCoverageIgnored = fBatch.fCoverageIgnored;
-        init.fUsesLocalCoords = this->usesLocalCoords();
-        dfProcessor->initBatchTracker(batchTarget->currentBatchTracker(), init);
-    }
-
-    void flush(GrBatchTarget* batchTarget, FlushInfo* flushInfo) {
+    void flush(GrVertexBatch::Target* target, FlushInfo* flushInfo) {
         GrVertices vertices;
         int maxInstancesPerDraw = flushInfo->fIndexBuffer->maxQuads();
         vertices.initInstanced(kTriangles_GrPrimitiveType, flushInfo->fVertexBuffer,
             flushInfo->fIndexBuffer, flushInfo->fVertexOffset, kVerticesPerQuad,
             kIndicesPerQuad, flushInfo->fInstancesToFlush, maxInstancesPerDraw);
-        batchTarget->draw(vertices);
+        target->draw(vertices);
         flushInfo->fVertexOffset += kVerticesPerQuad * flushInfo->fInstancesToFlush;
         flushInfo->fInstancesToFlush = 0;
     }
@@ -520,8 +484,12 @@ private:
     const SkMatrix& viewMatrix() const { return fBatch.fViewMatrix; }
     bool usesLocalCoords() const { return fBatch.fUsesLocalCoords; }
 
-    bool onCombineIfPossible(GrBatch* t) override {
+    bool onCombineIfPossible(GrBatch* t, const GrCaps& caps) override {
         AADistanceFieldPathBatch* that = t->cast<AADistanceFieldPathBatch>();
+        if (!GrPipeline::CanCombine(*this->pipeline(), this->bounds(), *that->pipeline(),
+                                    that->bounds(), caps)) {
+            return false;
+        }
 
         // TODO we could actually probably do a bunch of this work on the CPU, ie map viewMatrix,
         // maybe upload color via attribute
@@ -553,57 +521,31 @@ private:
     PathDataList* fPathList;
 };
 
-static GrBatchAtlas* create_atlas(GrContext* context, GrBatchAtlas::EvictionFunc func, void* data) {
-    GrBatchAtlas* atlas;
-    // Create a new atlas
-    GrSurfaceDesc desc;
-    desc.fFlags = kNone_GrSurfaceFlags;
-    desc.fWidth = ATLAS_TEXTURE_WIDTH;
-    desc.fHeight = ATLAS_TEXTURE_HEIGHT;
-    desc.fConfig = kAlpha_8_GrPixelConfig;
-
-    // We don't want to flush the context so we claim we're in the middle of flushing so as to
-    // guarantee we do not recieve a texture with pending IO
-    GrTexture* texture = context->textureProvider()->refScratchTexture(
-        desc, GrTextureProvider::kApprox_ScratchTexMatch, true);
-    if (texture) {
-        atlas = SkNEW_ARGS(GrBatchAtlas, (texture, NUM_PLOTS_X, NUM_PLOTS_Y));
-    } else {
-        return NULL;
-    }
-    atlas->registerEvictionCallback(func, data);
-    return atlas;
-}
-
-bool GrAADistanceFieldPathRenderer::onDrawPath(GrDrawTarget* target,
-                                               GrPipelineBuilder* pipelineBuilder,
-                                               GrColor color,
-                                               const SkMatrix& viewMatrix,
-                                               const SkPath& path,
-                                               const GrStrokeInfo& stroke,
-                                               bool antiAlias) {
+bool GrAADistanceFieldPathRenderer::onDrawPath(const DrawPathArgs& args) {
     // we've already bailed on inverse filled paths, so this is safe
-    if (path.isEmpty()) {
+    if (args.fPath->isEmpty()) {
         return true;
     }
 
-    SkASSERT(fContext);
-
     if (!fAtlas) {
-        fAtlas = create_atlas(fContext, &GrAADistanceFieldPathRenderer::HandleEviction,
-                              (void*)this);
+        fAtlas = args.fResourceProvider->createAtlas(kAlpha_8_GrPixelConfig,
+                                                     ATLAS_TEXTURE_WIDTH, ATLAS_TEXTURE_HEIGHT,
+                                                     NUM_PLOTS_X, NUM_PLOTS_Y,
+                                                     &GrAADistanceFieldPathRenderer::HandleEviction,
+                                                     (void*)this);
         if (!fAtlas) {
             return false;
         }
     }
 
-    AADistanceFieldPathBatch::Geometry geometry(stroke.getStrokeRec());
-    geometry.fPath = path;
-    geometry.fAntiAlias = antiAlias;
+    AADistanceFieldPathBatch::Geometry geometry(*args.fStroke);
+    geometry.fPath = *args.fPath;
+    geometry.fAntiAlias = args.fAntiAlias;
 
-    SkAutoTUnref<GrBatch> batch(AADistanceFieldPathBatch::Create(geometry, color, viewMatrix,
-                                                                 fAtlas, &fPathCache, &fPathList));
-    target->drawBatch(pipelineBuilder, batch);
+    SkAutoTUnref<GrDrawBatch> batch(AADistanceFieldPathBatch::Create(geometry, args.fColor,
+                                                                     *args.fViewMatrix, fAtlas,
+                                                                     &fPathCache, &fPathList));
+    args.fTarget->drawBatch(*args.fPipelineBuilder, batch);
 
     return true;
 }
@@ -654,14 +596,18 @@ struct PathTestStruct {
     PathDataList fPathList;
 };
 
-BATCH_TEST_DEFINE(AADistanceFieldPathBatch) {
+DRAW_BATCH_TEST_DEFINE(AADistanceFieldPathBatch) {
     static PathTestStruct gTestStruct;
 
     if (context->uniqueID() != gTestStruct.fContextID) {
         gTestStruct.fContextID = context->uniqueID();
         gTestStruct.reset();
-        gTestStruct.fAtlas = create_atlas(context, &PathTestStruct::HandleEviction,
-                                          (void*)&gTestStruct);
+        gTestStruct.fAtlas =
+                context->resourceProvider()->createAtlas(kAlpha_8_GrPixelConfig,
+                                                     ATLAS_TEXTURE_WIDTH, ATLAS_TEXTURE_HEIGHT,
+                                                     NUM_PLOTS_X, NUM_PLOTS_Y,
+                                                     &PathTestStruct::HandleEviction,
+                                                     (void*)&gTestStruct);
     }
 
     SkMatrix viewMatrix = GrTest::TestMatrix(random);

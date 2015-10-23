@@ -73,10 +73,29 @@ class TestDefaultLibpath(unittest.TestCase):
     for path in paths:
       self.assertTrue(path.startswith('/dummy/path'))
 
+  def testFallbackPath(self):
+    paths = create_nmf.GetDefaultLibPath('foo_Debug')
+    if sys.platform == 'win32':
+      paths = [p.replace('\\', '/') for p in paths]
+    path_base = '/dummy/path/lib/glibc_x86_64/foo_Debug'
+    path_fallback = '/dummy/path/lib/glibc_x86_64/Debug'
+    self.assertIn(path_base, paths)
+    self.assertIn(path_fallback, paths)
+    self.assertGreater(paths.index(path_fallback), paths.index(path_base))
+
+    paths = create_nmf.GetDefaultLibPath('foo_bar')
+    if sys.platform == 'win32':
+      paths = [p.replace('\\', '/') for p in paths]
+    path_base = '/dummy/path/lib/glibc_x86_64/foo_bar'
+    path_fallback = '/dummy/path/lib/glibc_x86_64/Release'
+    self.assertIn(path_base, paths)
+    self.assertIn(path_fallback, paths)
+    self.assertGreater(paths.index(path_fallback), paths.index(path_base))
+
   def testIncludesNaClPorts(self):
     paths = create_nmf.GetDefaultLibPath('Debug')
     self.assertTrue(any(os.path.join('ports', 'lib') in p for p in paths),
-                    "naclports libpath missing: %s" % str(paths))
+                    'naclports libpath missing: %s' % str(paths))
 
 
 class TestNmfUtils(unittest.TestCase):
@@ -106,6 +125,7 @@ class TestNmfUtils(unittest.TestCase):
     dst_dir = os.path.dirname(name)
     if not os.path.exists(dst_dir):
       os.makedirs(dst_dir)
+    self.assertTrue(os.path.exists(compiler), 'compiler missing: %s' % compiler)
     cmd = [compiler, '-pthread', '-x' , 'c', '-o', name, '-']
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     p.communicate(input=program)

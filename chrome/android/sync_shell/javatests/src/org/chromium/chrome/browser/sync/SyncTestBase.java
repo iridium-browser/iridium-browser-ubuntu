@@ -15,15 +15,13 @@ import org.chromium.chrome.browser.signin.AccountIdProvider;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.shell.ChromeShellTestBase;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.sync.AndroidSyncSettings;
 import org.chromium.sync.signin.AccountManagerHelper;
 import org.chromium.sync.signin.ChromeSigninController;
 import org.chromium.sync.test.util.MockAccountManager;
 import org.chromium.sync.test.util.MockSyncContentResolverDelegate;
 
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Set;
 
 /**
  * Base class for common functionality between sync tests.
@@ -43,7 +41,7 @@ public class SyncTestBase extends ChromeShellTestBase {
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        clearAppData();
+        assertTrue("Clearing app data failed.", clearAppData());
         Context targetContext = getInstrumentation().getTargetContext();
         mContext = new SyncTestUtil.SyncTestContext(targetContext);
 
@@ -60,7 +58,7 @@ public class SyncTestBase extends ChromeShellTestBase {
             public void run() {
                 mSyncController = SyncController.get(mContext);
                 // Ensure SyncController is registered with the new AndroidSyncSettings.
-                AndroidSyncSettings.get(mContext).registerObserver(mSyncController);
+                AndroidSyncSettings.registerObserver(mContext, mSyncController);
                 mFakeServerHelper = FakeServerHelper.get();
             }
         });
@@ -71,6 +69,13 @@ public class SyncTestBase extends ChromeShellTestBase {
                 mProfileSyncService = ProfileSyncService.get(mContext);
             }
         });
+
+        // Start the activity by opening about:blank. This URL is ideal because it is not synced as
+        // a typed URL. If another URL is used, it could interfere with test data. This call is in
+        // this location so that it takes place before any other calls to getActivity(). If
+        // getActivity() is called without any prior configuration, an undesired URL
+        // (e.g., google.com) will be opened.
+        launchChromeShellWithBlankPage();
     }
 
     @Override
@@ -90,11 +95,7 @@ public class SyncTestBase extends ChromeShellTestBase {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                if (AccountIdProvider.getInstance() != null) {
-                    return;
-                }
-
-                AccountIdProvider.setInstance(new AccountIdProvider() {
+                AccountIdProvider.setInstanceForTest(new AccountIdProvider() {
                     @Override
                     public String getAccountId(Context ctx, String accountName) {
                         return "gaia-id-" + accountName;
@@ -115,8 +116,7 @@ public class SyncTestBase extends ChromeShellTestBase {
         AndroidSyncSettings.overrideForTests(mContext, mSyncContentResolver);
     }
 
-    protected void setupTestAccountAndSignInToSync(
-            final String syncClientIdentifier)
+    protected Account setupTestAccount(final String syncClientIdentifier)
             throws InterruptedException {
         Account defaultTestAccount = SyncTestUtil.setupTestAccountThatAcceptsAllAuthTokens(
                 mAccountManager, SyncTestUtil.DEFAULT_TEST_ACCOUNT, SyncTestUtil.DEFAULT_PASSWORD);
@@ -131,8 +131,15 @@ public class SyncTestBase extends ChromeShellTestBase {
                 }, true);
 
         SyncTestUtil.verifySyncIsSignedOut(getActivity());
+        return defaultTestAccount;
+    }
+
+    protected void setupTestAccountAndSignInToSync(
+            final String syncClientIdentifier)
+            throws InterruptedException {
+        Account defaultTestAccount = setupTestAccount(syncClientIdentifier);
         signIn(defaultTestAccount);
-        SyncTestUtil.verifySyncIsSignedIn(mContext, defaultTestAccount);
+        SyncTestUtil.verifySyncIsActiveForAccount(mContext, defaultTestAccount);
         assertTrue("Sync everything should be enabled",
                 SyncTestUtil.isSyncEverythingEnabled(mContext));
     }
@@ -144,7 +151,7 @@ public class SyncTestBase extends ChromeShellTestBase {
                 SyncController.get(mContext).start();
             }
         });
-        waitForSyncInitialized();
+        SyncTestUtil.waitForSyncActive(mContext);
     }
 
     protected void stopSync() {
@@ -175,19 +182,14 @@ public class SyncTestBase extends ChromeShellTestBase {
         });
     }
 
-    protected void waitForSyncInitialized() throws InterruptedException {
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+    protected void disableDataType(final int modelType) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
-            public boolean isSatisfied() {
-                final AtomicBoolean isInitialized = new AtomicBoolean(false);
-                ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-                    @Override
-                    public void run() {
-                        isInitialized.set(mProfileSyncService.isSyncInitialized());
-                    }
-                });
-                return isInitialized.get();
+            public void run() {
+                Set<Integer> preferredTypes = mProfileSyncService.getPreferredDataTypes();
+                preferredTypes.remove(modelType);
+                mProfileSyncService.setPreferredDataTypes(false, preferredTypes);
             }
-        }));
+        });
     }
 }

@@ -6,10 +6,10 @@
 
 #include "base/bind.h"
 #include "base/debug/dump_without_crashing.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
-#include "base/metrics/histogram.h"
+#include "base/location.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/affiliated_match_helper.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
@@ -34,7 +34,7 @@ void CheckForEmptyUsernameAndPassword(const PasswordForm& form) {
 PasswordStore::GetLoginsRequest::GetLoginsRequest(
     PasswordStoreConsumer* consumer)
     : consumer_weak_(consumer->GetWeakPtr()) {
-  origin_loop_ = base::MessageLoopProxy::current();
+  origin_task_runner_ = base::ThreadTaskRunnerHandle::Get();
 }
 
 PasswordStore::GetLoginsRequest::~GetLoginsRequest() {
@@ -54,16 +54,16 @@ void PasswordStore::GetLoginsRequest::NotifyConsumerWithResults(
     results = remaining_logins.Pass();
   }
 
-  origin_loop_->PostTask(
+  origin_task_runner_->PostTask(
       FROM_HERE, base::Bind(&PasswordStoreConsumer::OnGetPasswordStoreResults,
                             consumer_weak_, base::Passed(&results)));
 }
 
 void PasswordStore::GetLoginsRequest::NotifyWithSiteStatistics(
     scoped_ptr<InteractionsStats> stats) {
-  origin_loop_->PostTask(FROM_HERE,
-                         base::Bind(&PasswordStoreConsumer::OnGetSiteStatistics,
-                                    consumer_weak_, base::Passed(&stats)));
+  origin_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&PasswordStoreConsumer::OnGetSiteStatistics,
+                            consumer_weak_, base::Passed(&stats)));
 }
 
 PasswordStore::PasswordStore(
@@ -71,7 +71,7 @@ PasswordStore::PasswordStore(
     scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner)
     : main_thread_runner_(main_thread_runner),
       db_thread_runner_(db_thread_runner),
-      observers_(new ObserverListThreadSafe<Observer>()),
+      observers_(new base::ObserverListThreadSafe<Observer>()),
       is_propagating_password_changes_to_web_credentials_enabled_(false),
       shutdown_called_(false) {
 }
@@ -100,14 +100,24 @@ void PasswordStore::UpdateLogin(const PasswordForm& form) {
   ScheduleTask(base::Bind(&PasswordStore::UpdateLoginInternal, this, form));
 }
 
+void PasswordStore::UpdateLoginWithPrimaryKey(
+    const autofill::PasswordForm& new_form,
+    const autofill::PasswordForm& old_primary_key) {
+  CheckForEmptyUsernameAndPassword(new_form);
+  ScheduleTask(base::Bind(&PasswordStore::UpdateLoginWithPrimaryKeyInternal,
+                          this, new_form, old_primary_key));
+}
+
 void PasswordStore::RemoveLogin(const PasswordForm& form) {
   ScheduleTask(base::Bind(&PasswordStore::RemoveLoginInternal, this, form));
 }
 
-void PasswordStore::RemoveLoginsCreatedBetween(base::Time delete_begin,
-                                               base::Time delete_end) {
+void PasswordStore::RemoveLoginsCreatedBetween(
+    base::Time delete_begin,
+    base::Time delete_end,
+    const base::Closure& completion) {
   ScheduleTask(base::Bind(&PasswordStore::RemoveLoginsCreatedBetweenInternal,
-                          this, delete_begin, delete_end));
+                          this, delete_begin, delete_end, completion));
 }
 
 void PasswordStore::RemoveLoginsSyncedBetween(base::Time delete_begin,
@@ -200,6 +210,7 @@ void PasswordStore::RemoveObserver(Observer* observer) {
 }
 
 bool PasswordStore::ScheduleTask(const base::Closure& task) {
+  CHECK(is_alive());
   scoped_refptr<base::SingleThreadTaskRunner> task_runner(
       GetBackgroundTaskRunner());
   if (task_runner.get())
@@ -316,11 +327,24 @@ void PasswordStore::RemoveLoginInternal(const PasswordForm& form) {
   NotifyLoginsChanged(changes);
 }
 
-void PasswordStore::RemoveLoginsCreatedBetweenInternal(base::Time delete_begin,
-                                                       base::Time delete_end) {
+void PasswordStore::UpdateLoginWithPrimaryKeyInternal(
+    const PasswordForm& new_form,
+    const PasswordForm& old_primary_key) {
+  PasswordStoreChangeList all_changes = RemoveLoginImpl(old_primary_key);
+  PasswordStoreChangeList changes = AddLoginImpl(new_form);
+  all_changes.insert(all_changes.end(), changes.begin(), changes.end());
+  NotifyLoginsChanged(all_changes);
+}
+
+void PasswordStore::RemoveLoginsCreatedBetweenInternal(
+    base::Time delete_begin,
+    base::Time delete_end,
+    const base::Closure& completion) {
   PasswordStoreChangeList changes =
       RemoveLoginsCreatedBetweenImpl(delete_begin, delete_end);
   NotifyLoginsChanged(changes);
+  if (!completion.is_null())
+    main_thread_runner_->PostTask(FROM_HERE, completion);
 }
 
 void PasswordStore::RemoveLoginsSyncedBetweenInternal(base::Time delete_begin,
@@ -328,6 +352,22 @@ void PasswordStore::RemoveLoginsSyncedBetweenInternal(base::Time delete_begin,
   PasswordStoreChangeList changes =
       RemoveLoginsSyncedBetweenImpl(delete_begin, delete_end);
   NotifyLoginsChanged(changes);
+}
+
+void PasswordStore::GetAutofillableLoginsImpl(
+    scoped_ptr<GetLoginsRequest> request) {
+  ScopedVector<PasswordForm> obtained_forms;
+  if (!FillAutofillableLogins(&obtained_forms))
+    obtained_forms.clear();
+  request->NotifyConsumerWithResults(obtained_forms.Pass());
+}
+
+void PasswordStore::GetBlacklistLoginsImpl(
+    scoped_ptr<GetLoginsRequest> request) {
+  ScopedVector<PasswordForm> obtained_forms;
+  if (!FillBlacklistLogins(&obtained_forms))
+    obtained_forms.clear();
+  request->NotifyConsumerWithResults(obtained_forms.Pass());
 }
 
 void PasswordStore::NotifySiteStats(const GURL& origin_domain,
@@ -349,6 +389,10 @@ void PasswordStore::GetLoginsWithAffiliationsImpl(
     ScopedVector<PasswordForm> more_results(
         AffiliatedMatchHelper::TransformAffiliatedAndroidCredentials(
             form, FillMatchingLogins(android_form, DISALLOW_PROMPT)));
+    ScopedVector<PasswordForm>::iterator it_first_federated = std::partition(
+        more_results.begin(), more_results.end(),
+        [](PasswordForm* form) { return form->federation_url.is_empty(); });
+    more_results.erase(it_first_federated, more_results.end());
     results.insert(results.end(), more_results.begin(), more_results.end());
     more_results.weak_clear();
   }
@@ -371,11 +415,7 @@ scoped_ptr<PasswordForm> PasswordStore::GetLoginImpl(
   ScopedVector<PasswordForm> candidates(
       FillMatchingLogins(primary_key, DISALLOW_PROMPT));
   for (PasswordForm*& candidate : candidates) {
-    if (candidate->signon_realm == primary_key.signon_realm &&
-        candidate->username_element == primary_key.username_element &&
-        candidate->username_value == primary_key.username_value &&
-        candidate->password_element == primary_key.password_element &&
-        candidate->origin == primary_key.origin &&
+    if (ArePasswordFormUniqueKeyEqual(*candidate, primary_key) &&
         !candidate->IsPublicSuffixMatch()) {
       scoped_ptr<PasswordForm> result(candidate);
       candidate = nullptr;

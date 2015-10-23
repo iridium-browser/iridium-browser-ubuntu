@@ -92,8 +92,8 @@ public:
     }
 
 #if !ENABLE(OILPAN)
-    virtual void ref() override { RefCounted<ParserDataReceiver>::ref(); }
-    virtual void deref() override { RefCounted<ParserDataReceiver>::deref(); }
+    void ref() override { RefCounted<ParserDataReceiver>::ref(); }
+    void deref() override { RefCounted<ParserDataReceiver>::deref(); }
 #endif
 
     // ThreadedDataReceiver
@@ -220,7 +220,10 @@ void HTMLDocumentParser::detach()
     // Yet during fast/dom/HTMLScriptElement/script-load-events.html we do.
     m_preloadScanner.clear();
     m_insertionPreloadScanner.clear();
-    m_parserScheduler.clear(); // Deleting the scheduler will clear any timers.
+    if (m_parserScheduler) {
+        m_parserScheduler->detach();
+        m_parserScheduler.clear();
+    }
     // Oilpan: It is important to clear m_token to deallocate backing memory of
     // HTMLToken::m_data and let the allocator reuse the memory for
     // HTMLToken::m_data of a next HTMLDocumentParser. We need to clear
@@ -232,7 +235,10 @@ void HTMLDocumentParser::detach()
 void HTMLDocumentParser::stopParsing()
 {
     DocumentParser::stopParsing();
-    m_parserScheduler.clear(); // Deleting the scheduler will clear any timers.
+    if (m_parserScheduler) {
+        m_parserScheduler->detach();
+        m_parserScheduler.clear();
+    }
     if (m_haveBackgroundParser)
         stopBackgroundParser();
 }
@@ -555,7 +561,7 @@ void HTMLDocumentParser::pumpPendingSpeculations()
     }
 
     // FIXME: Pass in current input length.
-    TRACE_EVENT_BEGIN1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ParseHTML", "beginData", InspectorParseHtmlEvent::beginData(document(), lineNumber().zeroBasedInt()));
+    TRACE_EVENT_BEGIN1("devtools.timeline", "ParseHTML", "beginData", InspectorParseHtmlEvent::beginData(document(), lineNumber().zeroBasedInt()));
 
     SpeculationsPumpSession session(m_pumpSpeculationsSessionNestingLevel, contextForParsingSession());
     while (!m_speculations.isEmpty()) {
@@ -574,7 +580,7 @@ void HTMLDocumentParser::pumpPendingSpeculations()
             break;
     }
 
-    TRACE_EVENT_END1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ParseHTML", "endData", InspectorParseHtmlEvent::endData(lineNumber().zeroBasedInt() - 1));
+    TRACE_EVENT_END1("devtools.timeline", "ParseHTML", "endData", InspectorParseHtmlEvent::endData(lineNumber().zeroBasedInt() - 1));
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data", InspectorUpdateCountersEvent::data());
 }
 
@@ -617,7 +623,7 @@ void HTMLDocumentParser::pumpTokenizer()
     // FIXME: m_input.current().length() is only accurate if we
     // end up parsing the whole buffer in this pump.  We should pass how
     // much we parsed as part of didWriteHTML instead of willWriteHTML.
-    TRACE_EVENT_BEGIN1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ParseHTML", "beginData", InspectorParseHtmlEvent::beginData(document(), m_input.current().currentLine().zeroBasedInt()));
+    TRACE_EVENT_BEGIN1("devtools.timeline", "ParseHTML", "beginData", InspectorParseHtmlEvent::beginData(document(), m_input.current().currentLine().zeroBasedInt()));
 
     m_xssAuditor.init(document(), &m_xssAuditorDelegate);
 
@@ -672,7 +678,7 @@ void HTMLDocumentParser::pumpTokenizer()
         }
     }
 
-    TRACE_EVENT_END1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ParseHTML", "endData", InspectorParseHtmlEvent::endData(m_input.current().currentLine().zeroBasedInt() - 1));
+    TRACE_EVENT_END1("devtools.timeline", "ParseHTML", "endData", InspectorParseHtmlEvent::endData(m_input.current().currentLine().zeroBasedInt() - 1));
 }
 
 void HTMLDocumentParser::constructTreeFromHTMLToken()
@@ -783,6 +789,12 @@ void HTMLDocumentParser::startBackgroundParser()
     config->xssAuditor->init(document(), &m_xssAuditorDelegate);
     config->preloadScanner = adoptPtr(new TokenPreloadScanner(document()->url().copy(), CachedDocumentParameters::create(document())));
     config->decoder = takeDecoder();
+    if (document()->settings()) {
+        if (document()->settings()->backgroundHtmlParserOutstandingTokenLimit())
+            config->outstandingTokenLimit = document()->settings()->backgroundHtmlParserOutstandingTokenLimit();
+        if (document()->settings()->backgroundHtmlParserPendingTokenLimit())
+            config->pendingTokenLimit = document()->settings()->backgroundHtmlParserPendingTokenLimit();
+    }
 
     ASSERT(config->xssAuditor->isSafeToSendToAnotherThread());
     ASSERT(config->preloadScanner->isSafeToSendToAnotherThread());

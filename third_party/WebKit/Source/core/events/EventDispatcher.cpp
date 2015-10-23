@@ -69,7 +69,7 @@ void EventDispatcher::dispatchScopedEvent(Node& node, PassRefPtrWillBeRawPtr<Eve
     ScopedEventQueue::instance()->enqueueEventDispatchMediator(mediator);
 }
 
-void EventDispatcher::dispatchSimulatedClick(Node& node, Event* underlyingEvent, SimulatedClickMouseEventOptions mouseEventOptions)
+void EventDispatcher::dispatchSimulatedClick(Node& node, Event* underlyingEvent, SimulatedClickMouseEventOptions mouseEventOptions, SimulatedClickCreationScope creationScope)
 {
     // This persistent vector doesn't cause leaks, because added Nodes are removed
     // before dispatchSimulatedClick() returns. This vector is here just to prevent
@@ -85,19 +85,19 @@ void EventDispatcher::dispatchSimulatedClick(Node& node, Event* underlyingEvent,
     nodesDispatchingSimulatedClicks->add(&node);
 
     if (mouseEventOptions == SendMouseOverUpDownEvents)
-        EventDispatcher(node, SimulatedMouseEvent::create(EventTypeNames::mouseover, node.document().domWindow(), underlyingEvent)).dispatch();
+        EventDispatcher(node, SimulatedMouseEvent::create(EventTypeNames::mouseover, node.document().domWindow(), underlyingEvent, creationScope)).dispatch();
 
     if (mouseEventOptions != SendNoEvents) {
-        EventDispatcher(node, SimulatedMouseEvent::create(EventTypeNames::mousedown, node.document().domWindow(), underlyingEvent)).dispatch();
+        EventDispatcher(node, SimulatedMouseEvent::create(EventTypeNames::mousedown, node.document().domWindow(), underlyingEvent, creationScope)).dispatch();
         node.setActive(true);
-        EventDispatcher(node, SimulatedMouseEvent::create(EventTypeNames::mouseup, node.document().domWindow(), underlyingEvent)).dispatch();
+        EventDispatcher(node, SimulatedMouseEvent::create(EventTypeNames::mouseup, node.document().domWindow(), underlyingEvent, creationScope)).dispatch();
     }
     // Some elements (e.g. the color picker) may set active state to true before
     // calling this method and expect the state to be reset during the call.
     node.setActive(false);
 
     // always send click
-    EventDispatcher(node, SimulatedMouseEvent::create(EventTypeNames::click, node.document().domWindow(), underlyingEvent)).dispatch();
+    EventDispatcher(node, SimulatedMouseEvent::create(EventTypeNames::click, node.document().domWindow(), underlyingEvent, creationScope)).dispatch();
 
     nodesDispatchingSimulatedClicks->remove(&node);
 }
@@ -119,7 +119,7 @@ bool EventDispatcher::dispatch()
     m_event->setTarget(EventPath::eventTargetRespectingTargetRules(*m_node));
     ASSERT(!EventDispatchForbiddenScope::isEventDispatchForbidden());
     ASSERT(m_event->target());
-    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "EventDispatch", "data", InspectorEventDispatchEvent::data(*m_event));
+    TRACE_EVENT1("devtools.timeline", "EventDispatch", "data", InspectorEventDispatchEvent::data(*m_event));
     void* preDispatchEventHandlerResult;
     if (dispatchEventPreProcess(preDispatchEventHandlerResult) == ContinueDispatching) {
         if (dispatchEventAtCapturing() == ContinueDispatching) {
@@ -203,10 +203,14 @@ inline void EventDispatcher::dispatchEventPostProcess(void* preDispatchEventHand
     // Pass the data from the preDispatchEventHandler to the postDispatchEventHandler.
     m_node->postDispatchEventHandler(m_event.get(), preDispatchEventHandlerResult);
 
+    // The DOM Events spec says that events dispatched by JS (other than "click")
+    // should not have their default handlers invoked.
+    bool isTrustedOrClick = !RuntimeEnabledFeatures::trustedEventsDefaultActionEnabled() || m_event->isTrusted() || (m_event->isMouseEvent() && toMouseEvent(*m_event).type() == EventTypeNames::click);
+
     // Call default event handlers. While the DOM does have a concept of preventing
     // default handling, the detail of which handlers are called is an internal
     // implementation detail and not part of the DOM.
-    if (!m_event->defaultPrevented() && !m_event->defaultHandled()) {
+    if (!m_event->defaultPrevented() && !m_event->defaultHandled() && isTrustedOrClick) {
         // Non-bubbling events call only one default event handler, the one for the target.
         m_node->willCallDefaultEventHandler(*m_event);
         m_node->defaultEventHandler(m_event.get());

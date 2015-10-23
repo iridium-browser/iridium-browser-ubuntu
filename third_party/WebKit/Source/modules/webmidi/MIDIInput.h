@@ -43,13 +43,14 @@ class MIDIInput final : public MIDIPort {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static MIDIInput* create(MIDIAccess*, const String& id, const String& manufacturer, const String& name, const String& version, MIDIAccessor::MIDIPortState);
-    virtual ~MIDIInput() { }
+    ~MIDIInput() override { }
 
     EventListener* onmidimessage();
-    void setOnmidimessage(PassRefPtr<EventListener>);
+    void setOnmidimessage(PassRefPtrWillBeRawPtr<EventListener>);
 
     // EventTarget
-    virtual const AtomicString& interfaceName() const override { return EventTargetNames::MIDIInput; }
+    const AtomicString& interfaceName() const override { return EventTargetNames::MIDIInput; }
+    bool addEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener>, bool useCapture) override;
 
     // |timeStamp| is a DOMHighResTimeStamp in the time coordinate system of performance.now().
     void didReceiveMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStamp);

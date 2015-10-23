@@ -8,6 +8,7 @@
 
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/test/test_simple_task_runner.h"
 #include "remoting/base/auto_thread_task_runner.h"
@@ -100,10 +101,12 @@ MATCHER_P(EqCapabilities, expected_capabilities, "") {
   if (!arg.has_capabilities())
     return false;
 
-  std::vector<std::string> words_args;
-  std::vector<std::string> words_expected;
-  Tokenize(arg.capabilities(), " ", &words_args);
-  Tokenize(expected_capabilities, " ", &words_expected);
+  std::vector<std::string> words_args = base::SplitString(
+      arg.capabilities(), " ", base::KEEP_WHITESPACE,
+      base::SPLIT_WANT_NONEMPTY);
+  std::vector<std::string> words_expected = base::SplitString(
+      expected_capabilities, " ", base::KEEP_WHITESPACE,
+      base::SPLIT_WANT_NONEMPTY);
   std::sort(words_args.begin(), words_args.end());
   std::sort(words_expected.begin(), words_expected.end());
   return words_args == words_expected;
@@ -198,7 +201,7 @@ class ClientSessionTest : public testing::Test {
 void ClientSessionTest::SetUp() {
   // Arrange to run |message_loop_| until no components depend on it.
   task_runner_ = new AutoThreadTaskRunner(
-      message_loop_.message_loop_proxy(), run_loop_.QuitClosure());
+      message_loop_.task_runner(), run_loop_.QuitClosure());
 
   desktop_environment_factory_.reset(new MockDesktopEnvironmentFactory());
   EXPECT_CALL(*desktop_environment_factory_, CreatePtr())

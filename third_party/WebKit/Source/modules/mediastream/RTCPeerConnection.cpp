@@ -129,9 +129,21 @@ RTCConfiguration* RTCPeerConnection::parseConfiguration(const Dictionary& config
         }
     }
 
+    RTCRtcpMuxPolicy rtcpMuxPolicy = RTCRtcpMuxPolicyNegotiate;
+    String rtcpMuxPolicyString;
+    if (DictionaryHelper::get(configuration, "rtcpMuxPolicy", rtcpMuxPolicyString)) {
+        if (rtcpMuxPolicyString == "require") {
+            rtcpMuxPolicy = RTCRtcpMuxPolicyRequire;
+        } else if (rtcpMuxPolicyString != "negotiate") {
+            exceptionState.throwTypeError("Malformed RTCRtcpMuxPolicy");
+            return 0;
+        }
+    }
+
     RTCConfiguration* rtcConfiguration = RTCConfiguration::create();
     rtcConfiguration->setIceTransports(iceTransports);
     rtcConfiguration->setBundlePolicy(bundlePolicy);
+    rtcConfiguration->setRtcpMuxPolicy(rtcpMuxPolicy);
 
     for (size_t i = 0; i < numberOfServers; ++i) {
         Dictionary iceServer;
@@ -824,9 +836,7 @@ DEFINE_TRACE(RTCPeerConnection)
     visitor->trace(m_localStreams);
     visitor->trace(m_remoteStreams);
     visitor->trace(m_dataChannels);
-#if ENABLE(OILPAN)
     visitor->trace(m_scheduledEvents);
-#endif
     RefCountedGarbageCollectedEventTargetWithInlineData<RTCPeerConnection>::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }

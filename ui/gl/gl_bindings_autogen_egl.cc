@@ -30,7 +30,8 @@ void DriverEGL::InitializeStaticBindings() {
       GetGLProcAddress("eglBindTexImage"));
   fn.eglChooseConfigFn = reinterpret_cast<eglChooseConfigProc>(
       GetGLProcAddress("eglChooseConfig"));
-  fn.eglClientWaitSyncKHRFn = 0;
+  fn.eglClientWaitSyncKHRFn = reinterpret_cast<eglClientWaitSyncKHRProc>(
+      GetGLProcAddress("eglClientWaitSyncKHR"));
   fn.eglCopyBuffersFn =
       reinterpret_cast<eglCopyBuffersProc>(GetGLProcAddress("eglCopyBuffers"));
   fn.eglCreateContextFn = reinterpret_cast<eglCreateContextProc>(
@@ -43,7 +44,8 @@ void DriverEGL::InitializeStaticBindings() {
       GetGLProcAddress("eglCreatePbufferSurface"));
   fn.eglCreatePixmapSurfaceFn = reinterpret_cast<eglCreatePixmapSurfaceProc>(
       GetGLProcAddress("eglCreatePixmapSurface"));
-  fn.eglCreateSyncKHRFn = 0;
+  fn.eglCreateSyncKHRFn = reinterpret_cast<eglCreateSyncKHRProc>(
+      GetGLProcAddress("eglCreateSyncKHR"));
   fn.eglCreateWindowSurfaceFn = reinterpret_cast<eglCreateWindowSurfaceProc>(
       GetGLProcAddress("eglCreateWindowSurface"));
   fn.eglDestroyContextFn = reinterpret_cast<eglDestroyContextProc>(
@@ -51,7 +53,8 @@ void DriverEGL::InitializeStaticBindings() {
   fn.eglDestroyImageKHRFn = 0;
   fn.eglDestroySurfaceFn = reinterpret_cast<eglDestroySurfaceProc>(
       GetGLProcAddress("eglDestroySurface"));
-  fn.eglDestroySyncKHRFn = 0;
+  fn.eglDestroySyncKHRFn = reinterpret_cast<eglDestroySyncKHRProc>(
+      GetGLProcAddress("eglDestroySyncKHR"));
   fn.eglGetConfigAttribFn = reinterpret_cast<eglGetConfigAttribProc>(
       GetGLProcAddress("eglGetConfigAttrib"));
   fn.eglGetConfigsFn =
@@ -69,7 +72,8 @@ void DriverEGL::InitializeStaticBindings() {
   fn.eglGetPlatformDisplayEXTFn = 0;
   fn.eglGetProcAddressFn = reinterpret_cast<eglGetProcAddressProc>(
       GetGLProcAddress("eglGetProcAddress"));
-  fn.eglGetSyncAttribKHRFn = 0;
+  fn.eglGetSyncAttribKHRFn = reinterpret_cast<eglGetSyncAttribKHRProc>(
+      GetGLProcAddress("eglGetSyncAttribKHR"));
   fn.eglGetSyncValuesCHROMIUMFn = 0;
   fn.eglInitializeFn =
       reinterpret_cast<eglInitializeProc>(GetGLProcAddress("eglInitialize"));
@@ -104,6 +108,9 @@ void DriverEGL::InitializeStaticBindings() {
   fn.eglWaitNativeFn =
       reinterpret_cast<eglWaitNativeProc>(GetGLProcAddress("eglWaitNative"));
   fn.eglWaitSyncKHRFn = 0;
+}
+
+void DriverEGL::InitializeExtensionBindings() {
   std::string client_extensions(GetClientExtensions());
   client_extensions += " ";
   ALLOW_UNUSED_LOCAL(client_extensions);
@@ -145,13 +152,9 @@ void DriverEGL::InitializeStaticBindings() {
       extensions.find("EGL_KHR_wait_sync ") != std::string::npos;
   ext.b_EGL_NV_post_sub_buffer =
       extensions.find("EGL_NV_post_sub_buffer ") != std::string::npos;
-
-  debug_fn.eglClientWaitSyncKHRFn = 0;
-  if (ext.b_EGL_KHR_fence_sync || ext.b_EGL_KHR_reusable_sync) {
-    fn.eglClientWaitSyncKHRFn = reinterpret_cast<eglClientWaitSyncKHRProc>(
-        GetGLProcAddress("eglClientWaitSyncKHR"));
-    DCHECK(fn.eglClientWaitSyncKHRFn);
-  }
+  ext.b_GL_CHROMIUM_egl_khr_fence_sync_hack =
+      extensions.find("GL_CHROMIUM_egl_khr_fence_sync_hack ") !=
+      std::string::npos;
 
   debug_fn.eglCreateImageKHRFn = 0;
   if (ext.b_EGL_KHR_image || ext.b_EGL_KHR_image_base ||
@@ -161,32 +164,11 @@ void DriverEGL::InitializeStaticBindings() {
     DCHECK(fn.eglCreateImageKHRFn);
   }
 
-  debug_fn.eglCreateSyncKHRFn = 0;
-  if (ext.b_EGL_KHR_fence_sync || ext.b_EGL_KHR_reusable_sync) {
-    fn.eglCreateSyncKHRFn = reinterpret_cast<eglCreateSyncKHRProc>(
-        GetGLProcAddress("eglCreateSyncKHR"));
-    DCHECK(fn.eglCreateSyncKHRFn);
-  }
-
   debug_fn.eglDestroyImageKHRFn = 0;
   if (ext.b_EGL_KHR_image || ext.b_EGL_KHR_image_base) {
     fn.eglDestroyImageKHRFn = reinterpret_cast<eglDestroyImageKHRProc>(
         GetGLProcAddress("eglDestroyImageKHR"));
     DCHECK(fn.eglDestroyImageKHRFn);
-  }
-
-  debug_fn.eglDestroySyncKHRFn = 0;
-  if (ext.b_EGL_KHR_fence_sync || ext.b_EGL_KHR_reusable_sync) {
-    fn.eglDestroySyncKHRFn = reinterpret_cast<eglDestroySyncKHRProc>(
-        GetGLProcAddress("eglDestroySyncKHR"));
-    DCHECK(fn.eglDestroySyncKHRFn);
-  }
-
-  debug_fn.eglGetSyncAttribKHRFn = 0;
-  if (ext.b_EGL_KHR_fence_sync || ext.b_EGL_KHR_reusable_sync) {
-    fn.eglGetSyncAttribKHRFn = reinterpret_cast<eglGetSyncAttribKHRProc>(
-        GetGLProcAddress("eglGetSyncAttribKHR"));
-    DCHECK(fn.eglGetSyncAttribKHRFn);
   }
 
   debug_fn.eglGetSyncValuesCHROMIUMFn = 0;
@@ -233,8 +215,9 @@ static EGLBoolean GL_BINDING_CALL Debug_eglBindAPI(EGLenum api) {
   return result;
 }
 
-static EGLBoolean GL_BINDING_CALL
-Debug_eglBindTexImage(EGLDisplay dpy, EGLSurface surface, EGLint buffer) {
+static EGLBoolean GL_BINDING_CALL Debug_eglBindTexImage(EGLDisplay dpy,
+                                                        EGLSurface surface,
+                                                        EGLint buffer) {
   GL_SERVICE_LOG("eglBindTexImage"
                  << "(" << dpy << ", " << surface << ", " << buffer << ")");
   EGLBoolean result =
@@ -385,8 +368,8 @@ Debug_eglCreateWindowSurface(EGLDisplay dpy,
   return result;
 }
 
-static EGLBoolean GL_BINDING_CALL
-Debug_eglDestroyContext(EGLDisplay dpy, EGLContext ctx) {
+static EGLBoolean GL_BINDING_CALL Debug_eglDestroyContext(EGLDisplay dpy,
+                                                          EGLContext ctx) {
   GL_SERVICE_LOG("eglDestroyContext"
                  << "(" << dpy << ", " << ctx << ")");
   EGLBoolean result = g_driver_egl.debug_fn.eglDestroyContextFn(dpy, ctx);
@@ -394,8 +377,8 @@ Debug_eglDestroyContext(EGLDisplay dpy, EGLContext ctx) {
   return result;
 }
 
-static EGLBoolean GL_BINDING_CALL
-Debug_eglDestroyImageKHR(EGLDisplay dpy, EGLImageKHR image) {
+static EGLBoolean GL_BINDING_CALL Debug_eglDestroyImageKHR(EGLDisplay dpy,
+                                                           EGLImageKHR image) {
   GL_SERVICE_LOG("eglDestroyImageKHR"
                  << "(" << dpy << ", " << image << ")");
   EGLBoolean result = g_driver_egl.debug_fn.eglDestroyImageKHRFn(dpy, image);
@@ -403,8 +386,8 @@ Debug_eglDestroyImageKHR(EGLDisplay dpy, EGLImageKHR image) {
   return result;
 }
 
-static EGLBoolean GL_BINDING_CALL
-Debug_eglDestroySurface(EGLDisplay dpy, EGLSurface surface) {
+static EGLBoolean GL_BINDING_CALL Debug_eglDestroySurface(EGLDisplay dpy,
+                                                          EGLSurface surface) {
   GL_SERVICE_LOG("eglDestroySurface"
                  << "(" << dpy << ", " << surface << ")");
   EGLBoolean result = g_driver_egl.debug_fn.eglDestroySurfaceFn(dpy, surface);
@@ -412,8 +395,8 @@ Debug_eglDestroySurface(EGLDisplay dpy, EGLSurface surface) {
   return result;
 }
 
-static EGLBoolean GL_BINDING_CALL
-Debug_eglDestroySyncKHR(EGLDisplay dpy, EGLSyncKHR sync) {
+static EGLBoolean GL_BINDING_CALL Debug_eglDestroySyncKHR(EGLDisplay dpy,
+                                                          EGLSyncKHR sync) {
   GL_SERVICE_LOG("eglDestroySyncKHR"
                  << "(" << dpy << ", " << sync << ")");
   EGLBoolean result = g_driver_egl.debug_fn.eglDestroySyncKHRFn(dpy, sync);
@@ -546,8 +529,9 @@ Debug_eglGetSyncValuesCHROMIUM(EGLDisplay dpy,
   return result;
 }
 
-static EGLBoolean GL_BINDING_CALL
-Debug_eglInitialize(EGLDisplay dpy, EGLint* major, EGLint* minor) {
+static EGLBoolean GL_BINDING_CALL Debug_eglInitialize(EGLDisplay dpy,
+                                                      EGLint* major,
+                                                      EGLint* minor) {
   GL_SERVICE_LOG("eglInitialize"
                  << "(" << dpy << ", " << static_cast<const void*>(major)
                  << ", " << static_cast<const void*>(minor) << ")");
@@ -606,8 +590,8 @@ static EGLBoolean GL_BINDING_CALL Debug_eglQueryContext(EGLDisplay dpy,
   return result;
 }
 
-static const char* GL_BINDING_CALL
-Debug_eglQueryString(EGLDisplay dpy, EGLint name) {
+static const char* GL_BINDING_CALL Debug_eglQueryString(EGLDisplay dpy,
+                                                        EGLint name) {
   GL_SERVICE_LOG("eglQueryString"
                  << "(" << dpy << ", " << name << ")");
   const char* result = g_driver_egl.debug_fn.eglQueryStringFn(dpy, name);
@@ -642,8 +626,9 @@ Debug_eglQuerySurfacePointerANGLE(EGLDisplay dpy,
   return result;
 }
 
-static EGLBoolean GL_BINDING_CALL
-Debug_eglReleaseTexImage(EGLDisplay dpy, EGLSurface surface, EGLint buffer) {
+static EGLBoolean GL_BINDING_CALL Debug_eglReleaseTexImage(EGLDisplay dpy,
+                                                           EGLSurface surface,
+                                                           EGLint buffer) {
   GL_SERVICE_LOG("eglReleaseTexImage"
                  << "(" << dpy << ", " << surface << ", " << buffer << ")");
   EGLBoolean result =
@@ -674,8 +659,8 @@ static EGLBoolean GL_BINDING_CALL Debug_eglSurfaceAttrib(EGLDisplay dpy,
   return result;
 }
 
-static EGLBoolean GL_BINDING_CALL
-Debug_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface) {
+static EGLBoolean GL_BINDING_CALL Debug_eglSwapBuffers(EGLDisplay dpy,
+                                                       EGLSurface surface) {
   GL_SERVICE_LOG("eglSwapBuffers"
                  << "(" << dpy << ", " << surface << ")");
   EGLBoolean result = g_driver_egl.debug_fn.eglSwapBuffersFn(dpy, surface);
@@ -683,8 +668,8 @@ Debug_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface) {
   return result;
 }
 
-static EGLBoolean GL_BINDING_CALL
-Debug_eglSwapInterval(EGLDisplay dpy, EGLint interval) {
+static EGLBoolean GL_BINDING_CALL Debug_eglSwapInterval(EGLDisplay dpy,
+                                                        EGLint interval) {
   GL_SERVICE_LOG("eglSwapInterval"
                  << "(" << dpy << ", " << interval << ")");
   EGLBoolean result = g_driver_egl.debug_fn.eglSwapIntervalFn(dpy, interval);
@@ -726,8 +711,9 @@ static EGLBoolean GL_BINDING_CALL Debug_eglWaitNative(EGLint engine) {
   return result;
 }
 
-static EGLint GL_BINDING_CALL
-Debug_eglWaitSyncKHR(EGLDisplay dpy, EGLSyncKHR sync, EGLint flags) {
+static EGLint GL_BINDING_CALL Debug_eglWaitSyncKHR(EGLDisplay dpy,
+                                                   EGLSyncKHR sync,
+                                                   EGLint flags) {
   GL_SERVICE_LOG("eglWaitSyncKHR"
                  << "(" << dpy << ", " << sync << ", " << flags << ")");
   EGLint result = g_driver_egl.debug_fn.eglWaitSyncKHRFn(dpy, sync, flags);

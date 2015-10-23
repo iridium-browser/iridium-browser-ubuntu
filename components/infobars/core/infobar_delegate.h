@@ -9,7 +9,6 @@
 #include "base/strings/string16.h"
 #include "ui/base/window_open_disposition.h"
 
-class AutoLoginInfoBarDelegate;
 class ConfirmInfoBarDelegate;
 class InsecureContentInfoBarDelegate;
 class MediaStreamInfoBarDelegate;
@@ -63,8 +62,6 @@ class InfoBarDelegate {
     bool is_navigation_to_different_page;
     // True if the entry replaced the existing one.
     bool did_replace_entry;
-    // True for the main frame, false for a sub-frame.
-    bool is_main_frame;
     bool is_reload;
     bool is_redirect;
   };
@@ -113,7 +110,6 @@ class InfoBarDelegate {
   virtual void InfoBarDismissed();
 
   // Type-checking downcast routines:
-  virtual AutoLoginInfoBarDelegate* AsAutoLoginInfoBarDelegate();
   virtual ConfirmInfoBarDelegate* AsConfirmInfoBarDelegate();
   virtual InsecureContentInfoBarDelegate* AsInsecureContentInfoBarDelegate();
   virtual MediaStreamInfoBarDelegate* AsMediaStreamInfoBarDelegate();
@@ -128,27 +124,19 @@ class InfoBarDelegate {
   virtual translate::TranslateInfoBarDelegate* AsTranslateInfoBarDelegate();
 
   void set_infobar(InfoBar* infobar) { infobar_ = infobar; }
-
-  // Store the unique id for the active entry, to be used later upon navigation
-  // to determine if this InfoBarDelegate should be expired.
-  void StoreActiveEntryUniqueID();
+  void set_nav_entry_id(int nav_entry_id) { nav_entry_id_ = nav_entry_id; }
 
  protected:
   InfoBarDelegate();
 
-  // Returns true if the navigation is to a new URL or a reload occured.
-  virtual bool ShouldExpireInternal(const NavigationDetails& details) const;
-
-  int contents_unique_id() const { return contents_unique_id_; }
   InfoBar* infobar() { return infobar_; }
 
  private:
-  // The unique id of the active NavigationEntry of the WebContents that we were
-  // opened for. Used to help expire on navigations.
-  int contents_unique_id_;
-
   // The InfoBar associated with us.
   InfoBar* infobar_;
+
+  // The ID of the active navigation entry at the time we became owned.
+  int nav_entry_id_;
 
   DISALLOW_COPY_AND_ASSIGN(InfoBarDelegate);
 };

@@ -15,7 +15,7 @@
 
 #include "SampleApplication.h"
 #include "shader_utils.h"
-#include "path_utils.h"
+#include "system_utils.h"
 #include "texture_utils.h"
 
 #include <cstring>
@@ -49,15 +49,15 @@ class MultipleDrawBuffersSample : public SampleApplication
             return false;
         }
 
-        mMRTProgram = CompileProgramFromFiles(GetExecutableDirectory() + "/multiple_draw_buffers_vs.glsl",
-                                              GetExecutableDirectory() + "/multiple_draw_buffers_fs.glsl");
+        mMRTProgram = CompileProgramFromFiles(angle::GetExecutableDirectory() + "/multiple_draw_buffers_vs.glsl",
+                                              angle::GetExecutableDirectory() + "/multiple_draw_buffers_fs.glsl");
         if (!mMRTProgram)
         {
             return false;
         }
 
-        mCopyProgram = CompileProgramFromFiles(GetExecutableDirectory() + "/multiple_draw_buffers_vs.glsl",
-                                               GetExecutableDirectory() + "/multiple_draw_buffers_copy_fs.glsl");
+        mCopyProgram = CompileProgramFromFiles(angle::GetExecutableDirectory() + "/multiple_draw_buffers_vs.glsl",
+                                               angle::GetExecutableDirectory() + "/multiple_draw_buffers_copy_fs.glsl");
         if (!mCopyProgram)
         {
             return false;
@@ -87,7 +87,9 @@ class MultipleDrawBuffersSample : public SampleApplication
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0_EXT + i, GL_TEXTURE_2D, mFramebufferTextures[i], 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER,
+                                   static_cast<GLenum>(GL_COLOR_ATTACHMENT0_EXT + i), GL_TEXTURE_2D,
+                                   mFramebufferTextures[i], 0);
         }
 
         glBindTexture(GL_TEXTURE_2D, 0);
@@ -133,8 +135,8 @@ class MultipleDrawBuffersSample : public SampleApplication
         mDrawBuffers(mFramebufferAttachmentCount, drawBuffers);
 
         // Set the viewport
-        size_t width = getWindow()->getWidth();
-        size_t height = getWindow()->getHeight();
+        GLint width  = static_cast<GLint>(getWindow()->getWidth());
+        GLint height = static_cast<GLint>(getWindow()->getHeight());
         glViewport(0, 0, width, height);
 
         // Clear the color buffer

@@ -95,6 +95,12 @@ class ProvidedFileSystem : public ProvidedFileSystemInterface {
   AbortCallback GetMetadata(const base::FilePath& entry_path,
                             MetadataFieldMask fields,
                             const GetMetadataCallback& callback) override;
+  AbortCallback GetActions(const base::FilePath& entry_path,
+                           const GetActionsCallback& callback) override;
+  AbortCallback ExecuteAction(
+      const base::FilePath& entry_path,
+      const std::string& action_id,
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   AbortCallback ReadDirectory(
       const base::FilePath& directory_path,
       const storage::AsyncFileUtil::ReadDirectoryCallback& callback) override;
@@ -181,6 +187,9 @@ class ProvidedFileSystem : public ProvidedFileSystemInterface {
   // despite being handled by the providing extension or not.
   void Abort(int operation_request_id);
 
+  // Called when aborting is completed with either a success or an error.
+  void OnAbortCompleted(int operation_request_id, base::File::Error result);
+
   // Adds a watcher within |watcher_queue_|.
   AbortCallback AddWatcherInQueue(const AddWatcherInQueueArgs& args);
 
@@ -240,7 +249,7 @@ class ProvidedFileSystem : public ProvidedFileSystemInterface {
   Watchers watchers_;
   Queue watcher_queue_;
   OpenedFiles opened_files_;
-  ObserverList<ProvidedFileSystemObserver> observers_;
+  base::ObserverList<ProvidedFileSystemObserver> observers_;
 
   base::WeakPtrFactory<ProvidedFileSystem> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(ProvidedFileSystem);

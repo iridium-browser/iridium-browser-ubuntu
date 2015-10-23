@@ -46,15 +46,17 @@
       "_GLAPI_NO_EXPORTS",
     ],
     'conditions': [
-      ['OS=="android"', {
+      ['OS=="android" or OS=="linux"', {
         'defines': [
-          '__GLIBC__',
           '_GNU_SOURCE',
         ],
       }],
-      ['OS=="linux"', {
+      ['OS=="win"', {
         'defines': [
-          '_GNU_SOURCE',
+          # Generated files use const only if __cplusplus or __STDC__ is
+          # defined. On Windows, neither is defined, so define YY_USE_CONST
+          # to explicitly enable const.
+          'YY_USE_CONST',
         ],
       }],
       ['os_posix == 1', {
@@ -134,6 +136,8 @@
         'clang_warning_flags': [
           '-Wno-tautological-constant-out-of-range-compare',
           '-Wno-mismatched-tags',  # Fixed upstream.
+          # https://bugs.freedesktop.org/show_bug.cgi?id=91645:
+          '-Wno-overloaded-virtual',
         ],
         'clang_warning_flags_unset': [
           # Don't warn about string->bool used in asserts.
@@ -273,6 +277,8 @@
           '-Wno-tautological-constant-out-of-range-compare',
           '-Wno-absolute-value',  # Fires on st_atom_array.c, might be a bug
           '-Wno-mismatched-tags',  # Fixed upstream.
+          # mesa's STATIC_ASSERT() macro expands to an ununused typedef.
+          '-Wno-unused-local-typedef',
         ],
         'clang_warning_flags_unset': [
           # Don't warn about string->bool used in asserts.
@@ -688,6 +694,16 @@
             'libraries': [
               '-ldl',
               '-lm',
+              '-lstdc++',
+            ],
+          },
+        }],
+        ['OS=="linux" and chromecast==1', {
+          'sources': [
+            'chromium/empty.cc',
+          ],
+          'link_settings': {
+            'libraries!': [
               '-lstdc++',
             ],
           },

@@ -16,7 +16,6 @@
 #include "chrome/common/localized_error.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/grit/renderer_resources.h"
-#include "chrome/renderer/net/net_error_page_controller.h"
 #include "components/error_page/common/error_page_params.h"
 #include "components/error_page/common/net_error_info.h"
 #include "content/public/common/content_client.h"
@@ -42,13 +41,13 @@
 #include "url/gurl.h"
 
 using base::JSONWriter;
-using chrome_common_net::DnsProbeStatus;
-using chrome_common_net::DnsProbeStatusToString;
 using content::DocumentState;
 using content::RenderFrame;
 using content::RenderFrameObserver;
 using content::RenderThread;
 using content::kUnreachableWebDataURL;
+using error_page::DnsProbeStatus;
+using error_page::DnsProbeStatusToString;
 using error_page::ErrorPageParams;
 using error_page::NetErrorHelperCore;
 
@@ -56,7 +55,7 @@ namespace {
 
 // Number of seconds to wait for the navigation correction service to return
 // suggestions.  If it takes too long, just use the local error page.
-static const int kNavigationCorrectionFetchTimeoutSec = 3;
+const int kNavigationCorrectionFetchTimeoutSec = 3;
 
 NetErrorHelperCore::PageType GetLoadingPageType(const blink::WebFrame* frame) {
   GURL url = frame->provisionalDataSource()->request().url();
@@ -75,7 +74,8 @@ NetErrorHelperCore::FrameType GetFrameType(const blink::WebFrame* frame) {
 
 NetErrorHelper::NetErrorHelper(RenderFrame* render_frame)
     : RenderFrameObserver(render_frame),
-      content::RenderFrameObserverTracker<NetErrorHelper>(render_frame) {
+      content::RenderFrameObserverTracker<NetErrorHelper>(render_frame),
+      weak_controller_delegate_factory_(this) {
   RenderThread::Get()->AddObserver(this);
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   bool auto_reload_enabled =
@@ -92,20 +92,15 @@ NetErrorHelper::~NetErrorHelper() {
   RenderThread::Get()->RemoveObserver(this);
 }
 
-void NetErrorHelper::ReloadButtonPressed() {
-  core_->ExecuteButtonPress(NetErrorHelperCore::RELOAD_BUTTON);
+void NetErrorHelper::ButtonPressed(
+    error_page::NetErrorHelperCore::Button button) {
+  GURL url = render_frame()->GetWebFrame()->document().url();
+  bool is_error_page = (url == GURL(content::kUnreachableWebDataURL));
+  core_->ExecuteButtonPress(is_error_page, button);
 }
 
-void NetErrorHelper::ShowSavedCopyButtonPressed() {
-  core_->ExecuteButtonPress(NetErrorHelperCore::SHOW_SAVED_COPY_BUTTON);
-}
-
-void NetErrorHelper::MoreButtonPressed() {
-  core_->ExecuteButtonPress(NetErrorHelperCore::MORE_BUTTON);
-}
-
-void NetErrorHelper::TrackActivatedEasterEgg() {
-  core_->ExecuteButtonPress(NetErrorHelperCore::EASTER_EGG);
+void NetErrorHelper::TrackClick(int tracking_id) {
+  core_->TrackClick(tracking_id);
 }
 
 void NetErrorHelper::DidStartProvisionalLoad() {
@@ -115,6 +110,11 @@ void NetErrorHelper::DidStartProvisionalLoad() {
 
 void NetErrorHelper::DidCommitProvisionalLoad(bool is_new_navigation,
                                               bool is_same_page_navigation) {
+  // Invalidate weak pointers from old error page controllers. If loading a new
+  // error page, the controller has not yet been attached, so this won't affect
+  // it.
+  weak_controller_delegate_factory_.InvalidateWeakPtrs();
+
   blink::WebFrame* frame = render_frame()->GetWebFrame();
   core_->OnCommitLoad(GetFrameType(frame), frame->document().url());
 }
@@ -141,6 +141,8 @@ bool NetErrorHelper::OnMessageReceived(const IPC::Message& message) {
 
   IPC_BEGIN_MESSAGE_MAP(NetErrorHelper, message)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_NetErrorInfo, OnNetErrorInfo)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetCanShowNetworkDiagnosticsDialog,
+                        OnSetCanShowNetworkDiagnosticsDialog);
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetNavigationCorrectionInfo,
                         OnSetNavigationCorrectionInfo);
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -166,16 +168,14 @@ bool NetErrorHelper::ShouldSuppressErrorPage(blink::WebFrame* frame,
   return core_->ShouldSuppressErrorPage(GetFrameType(frame), url);
 }
 
-void NetErrorHelper::TrackClick(int tracking_id) {
-  core_->TrackClick(tracking_id);
-}
-
 void NetErrorHelper::GenerateLocalizedErrorPage(
     const blink::WebURLError& error,
     bool is_failed_post,
+    bool can_show_network_diagnostics_dialog,
     scoped_ptr<ErrorPageParams> params,
     bool* reload_button_shown,
     bool* show_saved_copy_button_shown,
+    bool* show_cached_copy_button_shown,
     std::string* error_html) const {
   error_html->clear();
 
@@ -189,14 +189,16 @@ void NetErrorHelper::GenerateLocalizedErrorPage(
     LocalizedError::GetStrings(error.reason, error.domain.utf8(),
                                error.unreachableURL, is_failed_post,
                                error.staleCopyInCache,
+                               can_show_network_diagnostics_dialog,
                                RenderThread::Get()->GetLocale(),
                                render_frame()->GetRenderView()->
                                    GetAcceptLanguages(),
                                params.Pass(), &error_strings);
-    *reload_button_shown = error_strings.Get("reloadButton", NULL);
+    *reload_button_shown = error_strings.Get("reloadButton", nullptr);
     *show_saved_copy_button_shown =
-        error_strings.Get("showSavedCopyButton", NULL);
-
+        error_strings.Get("showSavedCopyButton", nullptr);
+    *show_cached_copy_button_shown =
+        error_strings.Get("cacheButton", nullptr);
     // "t" is the id of the template's root node.
     *error_html = webui::GetTemplatesHtml(template_html, &error_strings, "t");
   }
@@ -212,17 +214,20 @@ void NetErrorHelper::LoadErrorPageInMainFrame(const std::string& html,
 }
 
 void NetErrorHelper::EnablePageHelperFunctions() {
-  NetErrorPageController::Install(render_frame());
+  NetErrorPageController::Install(
+      render_frame(), weak_controller_delegate_factory_.GetWeakPtr());
 }
 
 void NetErrorHelper::UpdateErrorPage(const blink::WebURLError& error,
-                                     bool is_failed_post) {
+                                     bool is_failed_post,
+                                     bool can_show_network_diagnostics_dialog) {
   base::DictionaryValue error_strings;
   LocalizedError::GetStrings(error.reason,
                              error.domain.utf8(),
                              error.unreachableURL,
                              is_failed_post,
                              error.staleCopyInCache,
+                             can_show_network_diagnostics_dialog,
                              RenderThread::Get()->GetLocale(),
                              render_frame()->GetRenderView()->
                                  GetAcceptLanguages(),
@@ -230,7 +235,7 @@ void NetErrorHelper::UpdateErrorPage(const blink::WebURLError& error,
                              &error_strings);
 
   std::string json;
-  JSONWriter::Write(&error_strings, &json);
+  JSONWriter::Write(error_strings, &json);
 
   std::string js = "if (window.updateForDnsProbe) "
                    "updateForDnsProbe(" + json + ");";
@@ -262,7 +267,7 @@ void NetErrorHelper::FetchNavigationCorrections(
   correction_fetcher_->Start(
       frame,
       blink::WebURLRequest::RequestContextInternal,
-      blink::WebURLRequest::FrameTypeTopLevel,
+      blink::WebURLRequest::FrameTypeNone,
       content::ResourceFetcher::PLATFORM_LOADER,
       base::Bind(&NetErrorHelper::OnNavigationCorrectionsFetched,
                  base::Unretained(this)));
@@ -304,7 +309,9 @@ void NetErrorHelper::ReloadPage() {
 
 void NetErrorHelper::LoadPageFromCache(const GURL& page_url) {
   blink::WebFrame* web_frame = render_frame()->GetWebFrame();
-  DCHECK(!EqualsASCII(web_frame->dataSource()->request().httpMethod(), "POST"));
+  DCHECK(!base::EqualsASCII(
+      base::StringPiece16(web_frame->dataSource()->request().httpMethod()),
+      "POST"));
 
   blink::WebURLRequest request(page_url);
   request.setCachePolicy(blink::WebURLRequest::ReturnCacheDataDontLoad);
@@ -312,12 +319,23 @@ void NetErrorHelper::LoadPageFromCache(const GURL& page_url) {
   web_frame->loadRequest(request);
 }
 
+void NetErrorHelper::DiagnoseError(const GURL& page_url) {
+  render_frame()->Send(new ChromeViewHostMsg_RunNetworkDiagnostics(
+      render_frame()->GetRoutingID(), page_url));
+}
+
 void NetErrorHelper::OnNetErrorInfo(int status_num) {
-  DCHECK(status_num >= 0 && status_num < chrome_common_net::DNS_PROBE_MAX);
+  DCHECK(status_num >= 0 && status_num < error_page::DNS_PROBE_MAX);
 
   DVLOG(1) << "Received status " << DnsProbeStatusToString(status_num);
 
   core_->OnNetErrorInfo(static_cast<DnsProbeStatus>(status_num));
+}
+
+void NetErrorHelper::OnSetCanShowNetworkDiagnosticsDialog(
+    bool can_use_local_diagnostics_service) {
+  core_->OnSetCanShowNetworkDiagnosticsDialog(
+      can_use_local_diagnostics_service);
 }
 
 void NetErrorHelper::OnSetNavigationCorrectionInfo(
@@ -327,7 +345,7 @@ void NetErrorHelper::OnSetNavigationCorrectionInfo(
     const std::string& api_key,
     const GURL& search_url) {
   core_->OnSetNavigationCorrectionInfo(navigation_correction_url, language,
-                                      country_code, api_key, search_url);
+                                       country_code, api_key, search_url);
 }
 
 void NetErrorHelper::OnNavigationCorrectionsFetched(

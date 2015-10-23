@@ -9,14 +9,13 @@
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/browser/renderer_host/media/video_capture_controller_event_handler.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/common/media/media_stream_options.h"
-#include "media/video/capture/fake_video_capture_device_factory.h"
+#include "media/capture/video/fake_video_capture_device_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -50,20 +49,10 @@ class MockFrameObserver : public VideoCaptureControllerEventHandler {
                        base::SharedMemoryHandle handle,
                        int length, int buffer_id) override {}
   void OnBufferDestroyed(VideoCaptureControllerID id, int buffer_id) override {}
-  void OnBufferReady(
-      VideoCaptureControllerID id,
-      int buffer_id,
-      const gfx::Size& coded_size,
-      const gfx::Rect& visible_rect,
-      const base::TimeTicks& timestamp,
-      scoped_ptr<base::DictionaryValue> metadata) override {}
-  void OnMailboxBufferReady(
-      VideoCaptureControllerID id,
-      int buffer_id,
-      const gpu::MailboxHolder& mailbox_holder,
-      const gfx::Size& packed_frame_size,
-      const base::TimeTicks& timestamp,
-      scoped_ptr<base::DictionaryValue> metadata) override {}
+  void OnBufferReady(VideoCaptureControllerID id,
+                     int buffer_id,
+                     const scoped_refptr<media::VideoFrame>& frame,
+                     const base::TimeTicks& timestamp) override {}
   void OnEnded(VideoCaptureControllerID id) override {}
 
   void OnGotControllerCallback(VideoCaptureControllerID) {}
@@ -88,7 +77,7 @@ class VideoCaptureManagerTest : public testing::Test {
             vcm_->video_capture_device_factory());
     const int32 kNumberOfFakeDevices = 2;
     video_capture_device_factory_->set_number_of_devices(kNumberOfFakeDevices);
-    vcm_->Register(listener_.get(), message_loop_->message_loop_proxy().get());
+    vcm_->Register(listener_.get(), message_loop_->task_runner().get());
     frame_observer_.reset(new MockFrameObserver());
   }
 
@@ -112,7 +101,7 @@ class VideoCaptureManagerTest : public testing::Test {
   VideoCaptureControllerID StartClient(int session_id, bool expect_success) {
     media::VideoCaptureParams params;
     params.requested_format = media::VideoCaptureFormat(
-        gfx::Size(320, 240), 30, media::PIXEL_FORMAT_I420);
+        gfx::Size(320, 240), 30, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420);
 
     VideoCaptureControllerID client_id(next_client_id_++);
     base::RunLoop run_loop;

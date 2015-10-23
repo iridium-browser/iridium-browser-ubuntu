@@ -18,12 +18,16 @@
 #include "chrome/browser/ui/website_settings/permission_bubble_request.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
-#include "net/base/net_util.h"
+#include "components/url_formatter/url_formatter.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/text_constants.h"
+#include "ui/gfx/vector_icons_public2.h"
+#include "ui/native_theme/common_theme.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/button/checkbox.h"
@@ -61,7 +65,7 @@ const int kPermissionIndentSpacing = 12;
 // This class is a MenuButton which is given a PermissionMenuModel. It
 // shows the current checked item in the menu model, and notifies its listener
 // about any updates to the state of the selection.
-// TODO: refactor PermissionMenuButton to work like this and re-use?
+// TODO(gbillock): refactor PermissionMenuButton to work like this and re-use?
 class PermissionCombobox : public views::MenuButton,
                            public views::MenuButtonListener {
  public:
@@ -212,12 +216,11 @@ PermissionsBubbleDelegateView::PermissionsBubbleDelegateView(
   SetLayoutManager(new views::BoxLayout(
       views::BoxLayout::kVertical, kBubbleOuterMargin, 0, kItemMajorSpacing));
 
-  hostname_ = net::FormatUrl(requests[0]->GetRequestingHostname(),
-                             languages,
-                             net::kFormatUrlOmitUsernamePassword |
-                             net::kFormatUrlOmitTrailingSlashOnBareHostname,
-                             net::UnescapeRule::SPACES,
-                             nullptr, nullptr, nullptr);
+  hostname_ = url_formatter::FormatUrl(
+      requests[0]->GetRequestingHostname(), languages,
+      url_formatter::kFormatUrlOmitUsernamePassword |
+          url_formatter::kFormatUrlOmitTrailingSlashOnBareHostname,
+      net::UnescapeRule::SPACES, nullptr, nullptr, nullptr);
 
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   for (size_t index = 0; index < requests.size(); index++) {
@@ -241,8 +244,16 @@ PermissionsBubbleDelegateView::PermissionsBubbleDelegateView(
                              kPermissionIndentSpacing,
                              0, kBubbleOuterMargin));
     views::ImageView* icon = new views::ImageView();
-    icon->SetImage(bundle.GetImageSkiaNamed(requests.at(index)->GetIconID()));
-    icon->SetImageSize(gfx::Size(kIconSize, kIconSize));
+    gfx::VectorIconId vector_id = requests[index]->GetVectorIconId();
+    if (vector_id != gfx::VectorIconId::VECTOR_ICON_NONE) {
+      SkColor grey;
+      ui::CommonThemeGetSystemColor(ui::NativeTheme::kColorId_ChromeIconGrey,
+                                    &grey);
+      icon->SetImage(gfx::CreateVectorIcon(vector_id, kIconSize, grey));
+    } else {
+      icon->SetImage(bundle.GetImageSkiaNamed(requests.at(index)->GetIconID()));
+      icon->SetImageSize(gfx::Size(kIconSize, kIconSize));
+    }
     icon->SetTooltipText(base::string16());  // Redundant with the text fragment
     label_container->AddChildView(icon);
     views::Label* label =
@@ -398,11 +409,17 @@ void PermissionsBubbleDelegateView::UpdateAnchor(
 PermissionBubbleViewViews::PermissionBubbleViewViews(Browser* browser)
     : browser_(browser),
       delegate_(nullptr),
-      bubble_delegate_(nullptr) {}
+      bubble_delegate_(nullptr) {
+  DCHECK(browser);
+}
 
 PermissionBubbleViewViews::~PermissionBubbleViewViews() {
-  if (delegate_)
-    delegate_->SetView(nullptr);
+}
+
+// static
+scoped_ptr<PermissionBubbleView> PermissionBubbleView::Create(
+    Browser* browser) {
+  return make_scoped_ptr(new PermissionBubbleViewViews(browser));
 }
 
 views::View* PermissionBubbleViewViews::GetAnchorView() {
@@ -421,11 +438,6 @@ views::BubbleBorder::Arrow PermissionBubbleViewViews::GetAnchorArrow() {
   if (browser_->SupportsWindowFeature(Browser::FEATURE_LOCATIONBAR))
     return views::BubbleBorder::TOP_LEFT;
   return views::BubbleBorder::NONE;
-}
-
-void PermissionBubbleViewViews::UpdateAnchorPosition() {
-  if (IsVisible())
-    bubble_delegate_->UpdateAnchor(GetAnchorView(), GetAnchorArrow());
 }
 
 void PermissionBubbleViewViews::SetDelegate(Delegate* delegate) {
@@ -466,6 +478,17 @@ void PermissionBubbleViewViews::Hide() {
 
 bool PermissionBubbleViewViews::IsVisible() {
   return bubble_delegate_ != nullptr;
+}
+
+void PermissionBubbleViewViews::UpdateAnchorPosition() {
+  if (IsVisible())
+    bubble_delegate_->UpdateAnchor(GetAnchorView(), GetAnchorArrow());
+}
+
+gfx::NativeWindow PermissionBubbleViewViews::GetNativeWindow() {
+  if (bubble_delegate_ && bubble_delegate_->GetWidget())
+    return bubble_delegate_->GetWidget()->GetNativeWindow();
+  return nullptr;
 }
 
 void PermissionBubbleViewViews::Closing() {

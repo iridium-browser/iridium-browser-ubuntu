@@ -23,7 +23,7 @@ public:
     : fDoAAClip(aaclip)
     , fDoSaveLayer(saveLayer)
     , fInvertDraw(invertDraw) {
-        this->setBGColor(0xFFDDDDDD);
+        this->setBGColor(0xFFDEDFDE);
     }
 
 protected:

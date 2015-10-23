@@ -18,7 +18,9 @@ ChildMemoryDumpManagerDelegateImpl::GetInstance() {
 }
 
 ChildMemoryDumpManagerDelegateImpl::ChildMemoryDumpManagerDelegateImpl()
-    : ctmf_(nullptr) {
+    : ctmf_(nullptr),
+      tracing_process_id_(
+          base::trace_event::MemoryDumpManager::kInvalidTracingProcessId) {
   base::trace_event::MemoryDumpManager::GetInstance()->SetDelegate(this);
 }
 
@@ -31,7 +33,7 @@ void ChildMemoryDumpManagerDelegateImpl::SetChildTraceMessageFilter(
   // replacing a valid instance with another one (should never happen).
   DCHECK(ctmf_ == nullptr || (ctmf == nullptr && ctmf_task_runner_ != nullptr));
   ctmf_ = ctmf;
-  ctmf_task_runner_ = ctmf ? (ctmf->ipc_message_loop()) : nullptr;
+  ctmf_task_runner_ = ctmf ? (ctmf->ipc_task_runner()) : nullptr;
 }
 
 // Invoked in child processes by the MemoryDumpManager.
@@ -70,6 +72,10 @@ void ChildMemoryDumpManagerDelegateImpl::RequestGlobalMemoryDump(
 
 bool ChildMemoryDumpManagerDelegateImpl::IsCoordinatorProcess() const {
   return false;
+}
+
+uint64 ChildMemoryDumpManagerDelegateImpl::GetTracingProcessId() const {
+  return tracing_process_id_;
 }
 
 }  // namespace tracing

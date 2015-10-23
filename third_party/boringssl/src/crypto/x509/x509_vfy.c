@@ -72,7 +72,8 @@
 #include "../internal.h"
 
 
-static CRYPTO_EX_DATA_CLASS g_ex_data_class = CRYPTO_EX_DATA_CLASS_INIT;
+static CRYPTO_EX_DATA_CLASS g_ex_data_class =
+	CRYPTO_EX_DATA_CLASS_INIT_WITH_APP_DATA;
 
 /* CRL score values */
 
@@ -201,7 +202,7 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
 	STACK_OF(X509) *sktmp=NULL;
 	if (ctx->cert == NULL)
 		{
-		OPENSSL_PUT_ERROR(X509, X509_verify_cert, X509_R_NO_CERT_SET_FOR_US_TO_VERIFY);
+		OPENSSL_PUT_ERROR(X509, X509_R_NO_CERT_SET_FOR_US_TO_VERIFY);
 		return -1;
 		}
 
@@ -214,7 +215,7 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
 		if (	((ctx->chain=sk_X509_new_null()) == NULL) ||
 			(!sk_X509_push(ctx->chain,ctx->cert)))
 			{
-			OPENSSL_PUT_ERROR(X509, X509_verify_cert, ERR_R_MALLOC_FAILURE);
+			OPENSSL_PUT_ERROR(X509, ERR_R_MALLOC_FAILURE);
 			goto end;
 			}
 		X509_up_ref(ctx->cert);
@@ -225,7 +226,7 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
 	if (ctx->untrusted != NULL
 	    && (sktmp=sk_X509_dup(ctx->untrusted)) == NULL)
 		{
-		OPENSSL_PUT_ERROR(X509, X509_verify_cert, ERR_R_MALLOC_FAILURE);
+		OPENSSL_PUT_ERROR(X509, ERR_R_MALLOC_FAILURE);
 		goto end;
 		}
 
@@ -251,7 +252,7 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
 			{
 			ok = ctx->get_issuer(&xtmp, ctx, x);
 			if (ok < 0)
-				return ok;
+				goto end;
 			/* If successful for now free up cert so it
 			 * will be picked up again later.
 			 */
@@ -270,10 +271,10 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
 				{
 				if (!sk_X509_push(ctx->chain,xtmp))
 					{
-					OPENSSL_PUT_ERROR(X509, X509_verify_cert, ERR_R_MALLOC_FAILURE);
+					OPENSSL_PUT_ERROR(X509, ERR_R_MALLOC_FAILURE);
 					goto end;
 					}
-				CRYPTO_add(&xtmp->references,1,CRYPTO_LOCK_X509);
+				CRYPTO_refcount_inc(&xtmp->references);
 				(void)sk_X509_delete_ptr(sktmp,xtmp);
 				ctx->last_untrusted++;
 				x=xtmp;
@@ -349,15 +350,16 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
 
 		ok = ctx->get_issuer(&xtmp, ctx, x);
 
-		if (ok < 0) return ok;
+		if (ok < 0) goto end;
 		if (ok == 0) break;
 
 		x = xtmp;
 		if (!sk_X509_push(ctx->chain,x))
 			{
 			X509_free(xtmp);
-			OPENSSL_PUT_ERROR(X509, X509_verify_cert, ERR_R_MALLOC_FAILURE);
-			return 0;
+			OPENSSL_PUT_ERROR(X509, ERR_R_MALLOC_FAILURE);
+			ok = 0;
+			goto end;
 			}
 		num++;
 		}
@@ -990,7 +992,7 @@ static int get_crl_sk(X509_STORE_CTX *ctx, X509_CRL **pcrl, X509_CRL **pdcrl,
 		*pissuer = best_crl_issuer;
 		*pscore = best_score;
 		*preasons = best_reasons;
-		CRYPTO_add(&best_crl->references, 1, CRYPTO_LOCK_X509_CRL);
+		CRYPTO_refcount_inc(&best_crl->references);
 		if (*pdcrl)
 			{
 			X509_CRL_free(*pdcrl);
@@ -1097,7 +1099,7 @@ static void get_delta_sk(X509_STORE_CTX *ctx, X509_CRL **dcrl, int *pscore,
 			{
 			if (check_crl_time(ctx, delta, 0))
 				*pscore |= CRL_SCORE_TIME_DELTA;
-			CRYPTO_add(&delta->references, 1, CRYPTO_LOCK_X509_CRL);
+			CRYPTO_refcount_inc(&delta->references);
 			*dcrl = delta;
 			return;
 			}
@@ -1634,7 +1636,7 @@ static int check_policy(X509_STORE_CTX *ctx)
 				ctx->param->policies, ctx->param->flags);
 	if (ret == 0)
 		{
-		OPENSSL_PUT_ERROR(X509, check_policy, ERR_R_MALLOC_FAILURE);
+		OPENSSL_PUT_ERROR(X509, ERR_R_MALLOC_FAILURE);
 		return 0;
 		}
 	/* Invalid or inconsistent extensions */
@@ -1829,48 +1831,88 @@ int X509_cmp_time(const ASN1_TIME *ctm, time_t *cmp_time)
 	ASN1_TIME atm;
 	long offset;
 	char buff1[24],buff2[24],*p;
-	int i,j;
+	int i, j, remaining;
 
 	p=buff1;
-	i=ctm->length;
+	remaining = ctm->length;
 	str=(char *)ctm->data;
+	/* Note that the following (historical) code allows much more slack in
+	 * the time format than RFC5280. In RFC5280, the representation is
+	 * fixed:
+	 * UTCTime: YYMMDDHHMMSSZ
+	 * GeneralizedTime: YYYYMMDDHHMMSSZ */
 	if (ctm->type == V_ASN1_UTCTIME)
 		{
-		if ((i < 11) || (i > 17)) return 0;
+		/* YYMMDDHHMM[SS]Z or YYMMDDHHMM[SS](+-)hhmm */
+		int min_length = sizeof("YYMMDDHHMMZ") - 1;
+		int max_length = sizeof("YYMMDDHHMMSS+hhmm") - 1;
+		if (remaining < min_length || remaining > max_length)
+			return 0;
 		memcpy(p,str,10);
 		p+=10;
 		str+=10;
+		remaining -= 10;
 		}
 	else
 		{
-		if (i < 13) return 0;
+		/* YYYYMMDDHHMM[SS[.fff]]Z or YYYYMMDDHHMM[SS[.f[f[f]]]](+-)hhmm */
+		int min_length = sizeof("YYYYMMDDHHMMZ") - 1;
+		int max_length = sizeof("YYYYMMDDHHMMSS.fff+hhmm") - 1;
+		if (remaining < min_length || remaining > max_length)
+			return 0;
 		memcpy(p,str,12);
 		p+=12;
 		str+=12;
+		remaining -= 12;
 		}
 
 	if ((*str == 'Z') || (*str == '-') || (*str == '+'))
 		{ *(p++)='0'; *(p++)='0'; }
 	else
 		{ 
+		/* SS (seconds) */
+		if (remaining < 2)
+			return 0;
 		*(p++)= *(str++);
 		*(p++)= *(str++);
-		/* Skip any fractional seconds... */
-		if (*str == '.')
+		remaining -= 2;
+		/* Skip any (up to three) fractional seconds...
+		 * TODO(emilia): in RFC5280, fractional seconds are forbidden.
+		 * Can we just kill them altogether? */
+		if (remaining && *str == '.')
 			{
 			str++;
-			while ((*str >= '0') && (*str <= '9')) str++;
+			remaining--;
+			for (i = 0; i < 3 && remaining; i++, str++, remaining--)
+				{
+				if (*str < '0' || *str > '9')
+					break;
+				}
 			}
 		
 		}
 	*(p++)='Z';
 	*(p++)='\0';
 
+	/* We now need either a terminating 'Z' or an offset. */
+	if (!remaining)
+		return 0;
 	if (*str == 'Z')
+		{
+		if (remaining != 1)
+			return 0;
 		offset=0;
+		}
 	else
 		{
+		/* (+-)HHMM */
 		if ((*str != '+') && (*str != '-'))
+			return 0;
+		/* Historical behaviour: the (+-)hhmm offset is forbidden in RFC5280. */
+		if (remaining != 5)
+			return 0;
+		if (str[1] < '0' || str[1] > '9' || str[2] < '0' || str[2] > '9' ||
+			str[3] < '0' || str[3] > '9' || str[4] < '0' || str[4] > '9')
 			return 0;
 		offset=((str[1]-'0')*10+(str[2]-'0'))*60;
 		offset+=(str[3]-'0')*10+(str[4]-'0');
@@ -1943,44 +1985,44 @@ X509_CRL *X509_CRL_diff(X509_CRL *base, X509_CRL *newer,
 	/* CRLs can't be delta already */
 	if (base->base_crl_number || newer->base_crl_number)
 			{
-			OPENSSL_PUT_ERROR(X509, X509_CRL_diff, X509_R_CRL_ALREADY_DELTA);
+			OPENSSL_PUT_ERROR(X509, X509_R_CRL_ALREADY_DELTA);
 			return NULL;
 			}
 	/* Base and new CRL must have a CRL number */
 	if (!base->crl_number || !newer->crl_number)
 			{
-			OPENSSL_PUT_ERROR(X509, X509_CRL_diff, X509_R_NO_CRL_NUMBER);
+			OPENSSL_PUT_ERROR(X509, X509_R_NO_CRL_NUMBER);
 			return NULL;
 			}
 	/* Issuer names must match */
 	if (X509_NAME_cmp(X509_CRL_get_issuer(base),
 				X509_CRL_get_issuer(newer)))
 			{
-			OPENSSL_PUT_ERROR(X509, X509_CRL_diff, X509_R_ISSUER_MISMATCH);
+			OPENSSL_PUT_ERROR(X509, X509_R_ISSUER_MISMATCH);
 			return NULL;
 			}
 	/* AKID and IDP must match */
 	if (!crl_extension_match(base, newer, NID_authority_key_identifier))
 			{
-			OPENSSL_PUT_ERROR(X509, X509_CRL_diff, X509_R_AKID_MISMATCH);
+			OPENSSL_PUT_ERROR(X509, X509_R_AKID_MISMATCH);
 			return NULL;
 			}
 	if (!crl_extension_match(base, newer, NID_issuing_distribution_point))
 			{
-			OPENSSL_PUT_ERROR(X509, X509_CRL_diff, X509_R_IDP_MISMATCH);
+			OPENSSL_PUT_ERROR(X509, X509_R_IDP_MISMATCH);
 			return NULL;
 			}
 	/* Newer CRL number must exceed full CRL number */
 	if (ASN1_INTEGER_cmp(newer->crl_number, base->crl_number) <= 0)
 			{
-			OPENSSL_PUT_ERROR(X509, X509_CRL_diff, X509_R_NEWER_CRL_NOT_NEWER);
+			OPENSSL_PUT_ERROR(X509, X509_R_NEWER_CRL_NOT_NEWER);
 			return NULL;
 			}
 	/* CRLs must verify */
 	if (skey && (X509_CRL_verify(base, skey) <= 0 ||
 			X509_CRL_verify(newer, skey) <= 0))
 		{
-		OPENSSL_PUT_ERROR(X509, X509_CRL_diff, X509_R_CRL_VERIFY_FAILURE);
+		OPENSSL_PUT_ERROR(X509, X509_R_CRL_VERIFY_FAILURE);
 		return NULL;
 		}
 	/* Create new CRL */
@@ -2045,7 +2087,7 @@ X509_CRL *X509_CRL_diff(X509_CRL *base, X509_CRL *newer,
 	return crl;
 
 	memerr:
-	OPENSSL_PUT_ERROR(X509, X509_CRL_diff, ERR_R_MALLOC_FAILURE);
+	OPENSSL_PUT_ERROR(X509, ERR_R_MALLOC_FAILURE);
 	if (crl)
 		X509_CRL_free(crl);
 	return NULL;
@@ -2170,7 +2212,7 @@ int X509_STORE_CTX_purpose_inherit(X509_STORE_CTX *ctx, int def_purpose,
 		idx = X509_PURPOSE_get_by_id(purpose);
 		if (idx == -1)
 			{
-			OPENSSL_PUT_ERROR(X509, X509_STORE_CTX_purpose_inherit, X509_R_UNKNOWN_PURPOSE_ID);
+			OPENSSL_PUT_ERROR(X509, X509_R_UNKNOWN_PURPOSE_ID);
 			return 0;
 			}
 		ptmp = X509_PURPOSE_get0(idx);
@@ -2179,7 +2221,7 @@ int X509_STORE_CTX_purpose_inherit(X509_STORE_CTX *ctx, int def_purpose,
 			idx = X509_PURPOSE_get_by_id(def_purpose);
 			if (idx == -1)
 				{
-				OPENSSL_PUT_ERROR(X509, X509_STORE_CTX_purpose_inherit, X509_R_UNKNOWN_PURPOSE_ID);
+				OPENSSL_PUT_ERROR(X509, X509_R_UNKNOWN_PURPOSE_ID);
 				return 0;
 				}
 			ptmp = X509_PURPOSE_get0(idx);
@@ -2192,7 +2234,7 @@ int X509_STORE_CTX_purpose_inherit(X509_STORE_CTX *ctx, int def_purpose,
 		idx = X509_TRUST_get_by_id(trust);
 		if (idx == -1)
 			{
-			OPENSSL_PUT_ERROR(X509, X509_STORE_CTX_purpose_inherit, X509_R_UNKNOWN_TRUST_ID);
+			OPENSSL_PUT_ERROR(X509, X509_R_UNKNOWN_TRUST_ID);
 			return 0;
 			}
 		}
@@ -2208,7 +2250,7 @@ X509_STORE_CTX *X509_STORE_CTX_new(void)
 	ctx = (X509_STORE_CTX *)OPENSSL_malloc(sizeof(X509_STORE_CTX));
 	if (!ctx)
 		{
-		OPENSSL_PUT_ERROR(X509, X509_STORE_CTX_new, ERR_R_MALLOC_FAILURE);
+		OPENSSL_PUT_ERROR(X509, ERR_R_MALLOC_FAILURE);
 		return NULL;
 		}
 	memset(ctx, 0, sizeof(X509_STORE_CTX));
@@ -2331,7 +2373,7 @@ err:
 		}
 
 	memset(ctx, 0, sizeof(X509_STORE_CTX));
-	OPENSSL_PUT_ERROR(X509, X509_STORE_CTX_init, ERR_R_MALLOC_FAILURE);
+	OPENSSL_PUT_ERROR(X509, ERR_R_MALLOC_FAILURE);
 	return 0;
 	}
 

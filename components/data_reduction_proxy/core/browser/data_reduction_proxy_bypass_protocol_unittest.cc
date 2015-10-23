@@ -85,9 +85,9 @@ class DataReductionProxyProtocolTest : public testing::Test {
   }
 
   void SetUp() override {
+    net::NetworkChangeNotifier::SetTestNotificationsOnly(true);
     test_context_ = DataReductionProxyTestContext::Builder().Build();
     network_change_notifier_.reset(net::NetworkChangeNotifier::CreateMock());
-    net::NetworkChangeNotifier::SetTestNotificationsOnly(true);
     test_context_->RunUntilIdle();
   }
 
@@ -109,9 +109,9 @@ class DataReductionProxyProtocolTest : public testing::Test {
         test_context_->unreachable_callback()));
 
     DataReductionProxyInterceptor* interceptor =
-        new DataReductionProxyInterceptor(test_context_->config(),
-                                          bypass_stats_.get(),
-                                          test_context_->event_creator());
+        new DataReductionProxyInterceptor(
+            test_context_->config(), test_context_->io_data()->config_client(),
+            bypass_stats_.get(), test_context_->event_creator());
     scoped_ptr<net::URLRequestJobFactoryImpl> job_factory_impl(
         new net::URLRequestJobFactoryImpl());
     job_factory_.reset(new net::URLRequestInterceptingJobFactory(
@@ -135,8 +135,7 @@ class DataReductionProxyProtocolTest : public testing::Test {
                          bool expect_response_body) {
     std::string m(method);
     std::string trailer =
-        (m == "HEAD" || m == "PUT" || m == "POST") ?
-            "Content-Length: 0\r\n" : "";
+        (m == "PUT" || m == "POST") ? "Content-Length: 0\r\n" : "";
 
     std::string request1 =
         base::StringPrintf("%s http://www.google.com/ HTTP/1.1\r\n"
@@ -943,62 +942,6 @@ TEST_F(DataReductionProxyBypassProtocolEndToEndTest,
         "DataReductionProxy.ResponseProxyServerStatus", test.expected_status,
         1);
   }
-}
-
-TEST_F(DataReductionProxyProtocolTest,
-       RelaxedMissingViaHeaderOtherBypassLogic) {
-  std::string primary = test_context_->config()->test_params()->DefaultOrigin();
-  std::string fallback =
-      test_context_->config()->test_params()->DefaultFallbackOrigin();
-  base::FieldTrialList field_trial_list(new base::MockEntropyProvider());
-  base::FieldTrialList::CreateFieldTrial(
-      "DataReductionProxyRemoveMissingViaHeaderOtherBypass", "Relaxed");
-
-  ConfigureTestDependencies(ProxyService::CreateFixedFromPacResult(
-      net::ProxyServer::FromURI(
-          primary, net::ProxyServer::SCHEME_HTTP).ToPacString() + "; " +
-          net::ProxyServer::FromURI(
-              fallback,
-              net::ProxyServer::SCHEME_HTTP).ToPacString() +
-              "; DIRECT"));
-
-  // This response with the DRP via header should be accepted without causing a
-  // bypass.
-  TestProxyFallback("GET",
-                    "HTTP/1.1 200 OK\r\n"
-                    "Server: proxy\r\n"
-                    "Via: 1.1 Chrome-Compression-Proxy\r\n\r\n",
-                    false /* expected_retry */,
-                    false /* generate_response_error */,
-                    0u /* expected_bad_proxy_count */,
-                    true /* expect_response_body */);
-  EXPECT_EQ(BYPASS_EVENT_TYPE_MAX, bypass_stats_->GetBypassType());
-  TestBadProxies(0u, -1, primary, fallback);
-
-  // This non-4xx response without the DRP via header should not cause a bypass
-  // because a DRP via header has been seen since the last network change.
-  TestProxyFallback("GET",
-                    "HTTP/1.1 200 OK\r\n\r\n",
-                    false /* expected_retry */,
-                    false /* generate_response_error */,
-                    0u /* expected_bad_proxy_count */,
-                    true /* expect_response_body */);
-  EXPECT_EQ(BYPASS_EVENT_TYPE_MAX, bypass_stats_->GetBypassType());
-  TestBadProxies(0u, -1, primary, fallback);
-
-  // The first response after a network change is missing the DRP via header, so
-  // this should cause a bypass.
-  net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
-  test_context_->RunUntilIdle();
-  TestProxyFallback("GET",
-                    "HTTP/1.1 200 OK\r\n\r\n",
-                    true /* expected_retry */,
-                    false /* generate_response_error */,
-                    1u /* expected_bad_proxy_count */,
-                    true /* expect_response_body */);
-  EXPECT_EQ(BYPASS_EVENT_TYPE_MISSING_VIA_HEADER_OTHER,
-            bypass_stats_->GetBypassType());
-  TestBadProxies(1u, 0, primary, fallback);
 }
 
 TEST_F(DataReductionProxyProtocolTest,

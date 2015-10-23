@@ -30,11 +30,10 @@
 #import "platform/graphics/GraphicsContextStateSaver.h"
 #import "platform/mac/BlockExceptions.h"
 #import "platform/mac/LocalCurrentGraphicsContext.h"
+#import "platform/mac/VersionUtilMac.h"
 #import "platform/mac/WebCoreNSCellExtras.h"
 #import "platform/scroll/ScrollableArea.h"
 #include "wtf/StdLibExtras.h"
-
-NSRect focusRingClipRect;
 
 // This is a view whose sole purpose is to tell AppKit that it's flipped.
 @interface WebCoreFlippedView : NSControl
@@ -55,34 +54,6 @@ NSRect focusRingClipRect;
 - (BOOL)_automaticFocusRingDisabled
 {
     return YES;
-}
-
-- (NSRect)_focusRingVisibleRect
-{
-    if (NSIsEmptyRect(focusRingClipRect))
-        return [self visibleRect];
-
-    NSRect rect = focusRingClipRect;
-    rect.origin.y = [self bounds].size.height - NSMaxY(rect);
-
-    return rect;
-}
-
-- (NSView *)_focusRingClipAncestor
-{
-    return self;
-}
-
-@end
-
-@implementation NSFont (WebCoreTheme)
-
-- (NSString*)webCoreFamilyName
-{
-    if ([[self familyName] hasPrefix:@"."])
-        return [self fontName];
-
-    return [self familyName];
 }
 
 @end
@@ -159,13 +130,13 @@ static void updateStates(NSCell* cell, ControlStates states)
     if (enabled != oldEnabled)
         [cell setEnabled:enabled];
 
-#if BUTTON_CELL_DRAW_WITH_FRAME_DRAWS_FOCUS_RING
-    // Focused state
-    bool oldFocused = [cell showsFirstResponder];
-    bool focused = states & FocusControlState;
-    if (focused != oldFocused)
-        [cell setShowsFirstResponder:focused];
-#endif
+    if (ThemeMac::drawWithFrameDrawsFocusRing()) {
+        // Focused state
+        bool oldFocused = [cell showsFirstResponder];
+        bool focused = states & FocusControlState;
+        if (focused != oldFocused)
+            [cell setShowsFirstResponder:focused];
+    }
 
     // Checked and Indeterminate
     bool oldIndeterminate = [cell state] == NSMixedState;
@@ -195,6 +166,16 @@ static ThemeDrawState convertControlStatesToThemeDrawState(ThemeButtonKind kind,
     return kThemeStateActive;
 }
 
+// Return a fake NSView whose sole purpose is to tell AppKit that it's flipped.
+static NSView* ensuredView(ScrollableArea* scrollableArea)
+{
+    // Use a fake flipped view.
+    static NSView *flippedView = [[WebCoreFlippedView alloc] init];
+    [flippedView setFrameSize:NSSizeFromCGSize(scrollableArea->contentsSize())];
+
+    return flippedView;
+}
+
 // static
 IntRect ThemeMac::inflateRect(const IntRect& zoomedRect, const IntSize& zoomedSize, const int* margins, float zoomFactor)
 {
@@ -222,7 +203,6 @@ IntRect ThemeMac::inflateRectForAA(const IntRect& rect) {
 
 // static
 IntRect ThemeMac::inflateRectForFocusRing(const IntRect& rect) {
-#if BUTTON_CELL_DRAW_WITH_FRAME_DRAWS_FOCUS_RING
     // Just put a margin of 16 units around the rect. The UI elements that use this don't appropriately
     // scale their focus rings appropriately (e.g, paint pickers), or switch to non-native widgets when
     // scaled (e.g, check boxes and radio buttons).
@@ -233,9 +213,6 @@ IntRect ThemeMac::inflateRectForFocusRing(const IntRect& rect) {
     result.setWidth(rect.width() + 2 * margin);
     result.setHeight(rect.height() + 2 * margin);
     return result;
-#else
-    return rect;
-#endif
 }
 
 // Checkboxes
@@ -311,12 +288,10 @@ static void paintCheckbox(ControlStates states, GraphicsContext* context, const 
     }
 
     LocalCurrentGraphicsContext localContext(context, ThemeMac::inflateRectForFocusRing(inflatedRect));
-    NSView *view = ThemeMac::ensuredView(scrollableArea);
+    NSView* view = ensuredView(scrollableArea);
     [checkboxCell drawWithFrame:NSRect(inflatedRect) inView:view];
-#if !BUTTON_CELL_DRAW_WITH_FRAME_DRAWS_FOCUS_RING
-    if (states & FocusControlState)
-        [checkboxCell _web_drawFocusRingWithFrame:NSRect(inflatedRect) inView:view];
-#endif
+    if (!ThemeMac::drawWithFrameDrawsFocusRing() && states & FocusControlState)
+        [checkboxCell cr_drawFocusRingWithFrame:NSRect(inflatedRect) inView:view];
     [checkboxCell setControlView:nil];
 
     END_BLOCK_OBJC_EXCEPTIONS
@@ -394,12 +369,10 @@ static void paintRadio(ControlStates states, GraphicsContext* context, const Int
 
     LocalCurrentGraphicsContext localContext(context, ThemeMac::inflateRectForFocusRing(inflatedRect));
     BEGIN_BLOCK_OBJC_EXCEPTIONS
-    NSView *view = ThemeMac::ensuredView(scrollableArea);
+    NSView* view = ensuredView(scrollableArea);
     [radioCell drawWithFrame:NSRect(inflatedRect) inView:view];
-#if !BUTTON_CELL_DRAW_WITH_FRAME_DRAWS_FOCUS_RING
-    if (states & FocusControlState)
-        [radioCell _web_drawFocusRingWithFrame:NSRect(inflatedRect) inView:view];
-#endif
+    if (!ThemeMac::drawWithFrameDrawsFocusRing() && states & FocusControlState)
+        [radioCell cr_drawFocusRingWithFrame:NSRect(inflatedRect) inView:view];
     [radioCell setControlView:nil];
     END_BLOCK_OBJC_EXCEPTIONS
 }
@@ -486,13 +459,11 @@ static void paintButton(ControlPart part, ControlStates states, GraphicsContext*
     }
 
     LocalCurrentGraphicsContext localContext(context, ThemeMac::inflateRectForFocusRing(inflatedRect));
-    NSView *view = ThemeMac::ensuredView(scrollableArea);
+    NSView* view = ensuredView(scrollableArea);
 
     [buttonCell drawWithFrame:NSRect(inflatedRect) inView:view];
-#if !BUTTON_CELL_DRAW_WITH_FRAME_DRAWS_FOCUS_RING
-    if (states & FocusControlState)
-        [buttonCell _web_drawFocusRingWithFrame:NSRect(inflatedRect) inView:view];
-#endif
+    if (!ThemeMac::drawWithFrameDrawsFocusRing() && states & FocusControlState)
+        [buttonCell cr_drawFocusRingWithFrame:NSRect(inflatedRect) inView:view];
     [buttonCell setControlView:nil];
 
     END_BLOCK_OBJC_EXCEPTIONS
@@ -558,23 +529,6 @@ static void paintStepper(ControlStates states, GraphicsContext* context, const I
     HIThemeDrawButton(&backgroundBounds, &drawInfo, localContext.cgContext(), kHIThemeOrientationNormal, 0);
 }
 
-// This will ensure that we always return a valid NSView, even if FrameView doesn't have an associated document NSView.
-// If the FrameView doesn't have an NSView, we will return a fake NSView whose sole purpose is to tell AppKit that it's flipped.
-NSView *ThemeMac::ensuredView(ScrollableArea* frameView)
-{
-
-    // Use a fake flipped view.
-    static NSView *flippedView = [[WebCoreFlippedView alloc] init];
-    [flippedView setFrameSize:NSSizeFromCGSize(frameView->contentsSize())];
-
-    return flippedView;
-}
-
-void ThemeMac::setFocusRingClipRect(const FloatRect& rect)
-{
-    focusRingClipRect = rect;
-}
-
 // Theme overrides
 
 int ThemeMac::baselinePositionAdjustment(ControlPart part) const
@@ -593,7 +547,7 @@ FontDescription ThemeMac::controlFont(ControlPart part, const FontDescription& f
             result.setGenericFamily(FontDescription::SerifFamily);
 
             NSFont* nsFont = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:controlSizeForFont(fontDescription)]];
-            result.firstFamily().setFamily([nsFont webCoreFamilyName]);
+            result.firstFamily().setFamily(@"BlinkMacSystemFont");
             result.setComputedSize([nsFont pointSize] * zoomFactor);
             result.setSpecifiedSize([nsFont pointSize] * zoomFactor);
             return result;
@@ -666,7 +620,7 @@ LengthBox ThemeMac::controlPadding(ControlPart part, const FontDescription& font
     }
 }
 
-void ThemeMac::inflateControlPaintRect(ControlPart part, ControlStates states, IntRect& zoomedRect, float zoomFactor) const
+void ThemeMac::addVisualOverflow(ControlPart part, ControlStates states, float zoomFactor, IntRect& zoomedRect) const
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS
     switch (part) {
@@ -741,6 +695,19 @@ void ThemeMac::paint(ControlPart part, ControlStates states, GraphicsContext* co
         default:
             break;
     }
+}
+
+bool ThemeMac::drawWithFrameDrawsFocusRing()
+{
+#if defined(MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_8
+// If compiling against an OSX 10.8+ SDK, only 10.7 and older OSes will draw a
+// focus ring with the frame.
+    return IsOSLionOrEarlier();
+#else
+// If compiling an OSX 10.7 or older SDK, OSes up through 10.9 will draw a focus
+// ring with the frame.
+    return IsOSMavericksOrEarlier();
+#endif
 }
 
 }

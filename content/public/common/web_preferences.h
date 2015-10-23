@@ -36,18 +36,10 @@ enum EditingBehavior {
 // Cache options for V8. See V8CacheOptions.h for information on the options.
 enum V8CacheOptions {
   V8_CACHE_OPTIONS_DEFAULT,
+  V8_CACHE_OPTIONS_NONE,
   V8_CACHE_OPTIONS_PARSE,
   V8_CACHE_OPTIONS_CODE,
-  V8_CACHE_OPTIONS_CODE_COMPRESSED,
-  V8_CACHE_OPTIONS_NONE,
-  V8_CACHE_OPTIONS_PARSE_MEMORY,
-  V8_CACHE_OPTIONS_HEURISTICS,
-  V8_CACHE_OPTIONS_HEURISTICS_MOBILE,
-  V8_CACHE_OPTIONS_HEURISTICS_DEFAULT,
-  V8_CACHE_OPTIONS_HEURISTICS_DEFAULT_MOBILE,
-  V8_CACHE_OPTIONS_RECENT,
-  V8_CACHE_OPTIONS_RECENT_SMALL,
-  V8_CACHE_OPTIONS_LAST = V8_CACHE_OPTIONS_RECENT_SMALL
+  V8_CACHE_OPTIONS_LAST = V8_CACHE_OPTIONS_CODE
 };
 
 // ImageAnimationPolicy is used for controlling image animation
@@ -134,7 +126,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool accelerated_filters_enabled;
   bool deferred_filters_enabled;
   bool container_culling_enabled;
-  bool text_blobs_enabled;
   bool allow_displaying_insecure_content;
   bool allow_running_insecure_content;
   // If true, taints all <canvas> elements, regardless of origin.
@@ -147,12 +138,14 @@ struct CONTENT_EXPORT WebPreferences {
   // features (like geolocation) that we haven't yet disabled for the web at
   // large.
   bool strict_powerful_feature_restrictions;
+  // Disallow user opt-in for blockable mixed content.
+  bool strictly_block_blockable_mixed_content;
+  bool block_mixed_plugin_content;
   bool password_echo_enabled;
   bool should_print_backgrounds;
   bool should_clear_document_background;
   bool enable_scroll_animator;
   bool css_variables_enabled;
-  bool region_based_columns_enabled;
   bool touch_enabled;
   // TODO(mustaq): Nuke when the new API is ready
   bool device_supports_touch;
@@ -165,7 +158,6 @@ struct CONTENT_EXPORT WebPreferences {
   int available_hover_types;
   ui::HoverType primary_hover_type;
   bool sync_xhr_in_documents_enabled;
-  bool deferred_image_decoding_enabled;
   bool image_color_profiles_enabled;
   bool should_respect_image_orientation;
   int number_of_cpu_cores;
@@ -177,12 +169,13 @@ struct CONTENT_EXPORT WebPreferences {
   bool initialize_at_minimum_page_scale;
   bool smart_insert_delete_enabled;
   bool spatial_navigation_enabled;
-  bool pinch_virtual_viewport_enabled;
+  bool invert_viewport_scroll_order;
   int pinch_overlay_scrollbar_thickness;
   bool use_solid_color_scrollbars;
   bool navigate_on_drag_drop;
   V8CacheOptions v8_cache_options;
   bool slimming_paint_enabled;
+  bool slimming_paint_v2_enabled;
 
   // This flags corresponds to a Page's Settings' setCookieEnabled state. It
   // only controls whether or not the "document.cookie" field is properly

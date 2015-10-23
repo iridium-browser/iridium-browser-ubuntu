@@ -8,6 +8,7 @@
 #include "chrome/browser/extensions/extension_test_notification_observer.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/test/base/web_ui_browser_test.h"
+#include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/test_management_policy.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/feature_switch.h"
@@ -45,6 +46,9 @@ class ExtensionSettingsUIBrowserTest : public WebUIBrowserTest {
   // Enables the error console so errors are displayed in the extensions page.
   void EnableErrorConsole();
 
+  // Shrinks the web contents view in order to ensure vertical overflow.
+  void ShrinkWebContentsView();
+
  private:
   bool WaitForExtensionViewsToLoad();
   const extensions::Extension* InstallUnpackedExtension(
@@ -63,6 +67,8 @@ class ExtensionSettingsUIBrowserTest : public WebUIBrowserTest {
 
   // Used to enable the error console.
   scoped_ptr<extensions::FeatureSwitch::ScopedOverride> error_console_override_;
+
+  scoped_ptr<extensions::ScopedTestDialogAutoConfirm> uninstall_auto_confirm_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionSettingsUIBrowserTest);
 };

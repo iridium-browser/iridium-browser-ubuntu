@@ -312,7 +312,8 @@ class NET_EXPORT NetworkChangeNotifier {
 
   // Enable or disable notifications from the host. After setting to true, be
   // sure to pump the RunLoop until idle to finish any preexisting
-  // notifications.
+  // notifications. To use this, it must must be called before a
+  // NetworkChangeNotifier is created.
   static void SetTestNotificationsOnly(bool test_only);
 
   // Return a string equivalent to |type|.
@@ -430,15 +431,15 @@ class NET_EXPORT NetworkChangeNotifier {
   void NotifyObserversOfNetworkChangeImpl(ConnectionType type);
   void NotifyObserversOfMaxBandwidthChangeImpl(double max_bandwidth_mbps);
 
-  const scoped_refptr<ObserverListThreadSafe<IPAddressObserver>>
+  const scoped_refptr<base::ObserverListThreadSafe<IPAddressObserver>>
       ip_address_observer_list_;
-  const scoped_refptr<ObserverListThreadSafe<ConnectionTypeObserver>>
+  const scoped_refptr<base::ObserverListThreadSafe<ConnectionTypeObserver>>
       connection_type_observer_list_;
-  const scoped_refptr<ObserverListThreadSafe<DNSObserver>>
+  const scoped_refptr<base::ObserverListThreadSafe<DNSObserver>>
       resolver_state_observer_list_;
-  const scoped_refptr<ObserverListThreadSafe<NetworkChangeObserver>>
+  const scoped_refptr<base::ObserverListThreadSafe<NetworkChangeObserver>>
       network_change_observer_list_;
-  const scoped_refptr<ObserverListThreadSafe<MaxBandwidthObserver>>
+  const scoped_refptr<base::ObserverListThreadSafe<MaxBandwidthObserver>>
       max_bandwidth_observer_list_;
 
   // The current network state. Hosts DnsConfig, exposed via GetDnsConfig.
@@ -451,7 +452,7 @@ class NET_EXPORT NetworkChangeNotifier {
   scoped_ptr<NetworkChangeCalculator> network_change_calculator_;
 
   // Set true to disable non-test notifications (to prevent flakes in tests).
-  bool test_notifications_only_;
+  static bool test_notifications_only_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkChangeNotifier);
 };

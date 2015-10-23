@@ -38,8 +38,8 @@ void Noop() {
 
 HidServiceWin::HidServiceWin(
     scoped_refptr<base::SingleThreadTaskRunner> file_task_runner)
-    : device_observer_(this),
-      file_task_runner_(file_task_runner),
+    : file_task_runner_(file_task_runner),
+      device_observer_(this),
       weak_factory_(this) {
   task_runner_ = base::ThreadTaskRunnerHandle::Get();
   DCHECK(task_runner_.get());
@@ -121,7 +121,7 @@ void HidServiceWin::EnumerateOnFileThread(
           base::SysWideToUTF8(device_interface_detail_data->DevicePath));
       DCHECK(base::IsStringASCII(device_path));
       AddDeviceOnFileThread(service, task_runner,
-                            base::StringToLowerASCII(device_path));
+                            base::ToLowerASCII(device_path));
     }
   }
 

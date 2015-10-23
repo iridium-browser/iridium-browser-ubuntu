@@ -100,22 +100,11 @@ class MockSdchObserver : public SdchObserver {
 class SdchManagerTest : public testing::Test {
  protected:
   SdchManagerTest()
-      : sdch_manager_(new SdchManager),
-        default_support_(false),
-        default_https_support_(false) {
-    default_support_ = sdch_manager_->sdch_enabled();
-    default_https_support_ = sdch_manager_->secure_scheme_supported();
-  }
+      : sdch_manager_(new SdchManager) {}
 
   ~SdchManagerTest() override {}
 
   SdchManager* sdch_manager() { return sdch_manager_.get(); }
-
-  // Reset globals back to default state.
-  void TearDown() override {
-    SdchManager::EnableSdchSupport(default_support_);
-    SdchManager::EnableSecureSchemeSupport(default_https_support_);
-  }
 
   // Attempt to add a dictionary to the manager and probe for success or
   // failure.
@@ -127,8 +116,6 @@ class SdchManagerTest : public testing::Test {
 
  private:
   scoped_ptr<SdchManager> sdch_manager_;
-  bool default_support_;
-  bool default_https_support_;
 };
 
 static std::string NewSdchDictionary(const std::string& domain) {
@@ -146,9 +133,6 @@ static std::string NewSdchDictionary(const std::string& domain) {
 TEST_F(SdchManagerTest, DomainSupported) {
   GURL google_url("http://www.google.com");
 
-  SdchManager::EnableSdchSupport(false);
-  EXPECT_EQ(SDCH_DISABLED, sdch_manager()->IsInSupportedDomain(google_url));
-  SdchManager::EnableSdchSupport(true);
   EXPECT_EQ(SDCH_OK, sdch_manager()->IsInSupportedDomain(google_url));
 }
 
@@ -268,10 +252,6 @@ TEST_F(SdchManagerTest, CanUseHTTPSDictionaryOverHTTPSIfEnabled) {
   std::string dictionary_domain("x.y.z.google.com");
   std::string dictionary_text(NewSdchDictionary(dictionary_domain));
 
-  SdchManager::EnableSecureSchemeSupport(false);
-  EXPECT_FALSE(AddSdchDictionary(dictionary_text,
-                                 GURL("https://" + dictionary_domain)));
-  SdchManager::EnableSecureSchemeSupport(true);
   EXPECT_TRUE(AddSdchDictionary(dictionary_text,
                                 GURL("https://" + dictionary_domain)));
 
@@ -303,7 +283,6 @@ TEST_F(SdchManagerTest, CanNotUseHTTPDictionaryOverHTTPS) {
   GURL target_url("https://" + dictionary_domain + "/test");
   // HTTPS target URL should not advertise dictionary acquired over HTTP even if
   // secure scheme support is enabled.
-  SdchManager::EnableSecureSchemeSupport(true);
   EXPECT_FALSE(sdch_manager()->GetDictionarySet(target_url));
 
   std::string client_hash;
@@ -321,7 +300,6 @@ TEST_F(SdchManagerTest, CanNotUseHTTPSDictionaryOverHTTP) {
   std::string dictionary_domain("x.y.z.google.com");
   std::string dictionary_text(NewSdchDictionary(dictionary_domain));
 
-  SdchManager::EnableSecureSchemeSupport(true);
   EXPECT_TRUE(AddSdchDictionary(dictionary_text,
                                 GURL("https://" + dictionary_domain)));
 
@@ -518,23 +496,6 @@ TEST_F(SdchManagerTest, CanUseMultipleManagers) {
   EXPECT_EQ(SDCH_DICTIONARY_HASH_NOT_FOUND, problem_code);
 }
 
-TEST_F(SdchManagerTest, HttpsCorrectlySupported) {
-  GURL url("http://www.google.com");
-  GURL secure_url("https://www.google.com");
-
-  bool expect_https_support = true;
-
-  SdchProblemCode expected_code =
-      expect_https_support ? SDCH_OK : SDCH_SECURE_SCHEME_NOT_SUPPORTED;
-
-  EXPECT_EQ(SDCH_OK, sdch_manager()->IsInSupportedDomain(url));
-  EXPECT_EQ(expected_code, sdch_manager()->IsInSupportedDomain(secure_url));
-
-  SdchManager::EnableSecureSchemeSupport(!expect_https_support);
-  EXPECT_EQ(SDCH_OK, sdch_manager()->IsInSupportedDomain(url));
-  EXPECT_NE(expected_code, sdch_manager()->IsInSupportedDomain(secure_url));
-}
-
 TEST_F(SdchManagerTest, ClearDictionaryData) {
   std::string dictionary_domain("x.y.z.google.com");
   GURL blacklist_url("http://bad.chromium.org");
@@ -618,15 +579,6 @@ TEST_F(SdchManagerTest, ExpirationCheckedProperly) {
   EXPECT_TRUE(sdch_manager()->GetDictionarySetByHash(
       target_gurl, server_hash, &problem_code));
   EXPECT_EQ(SDCH_OK, problem_code);
-}
-
-TEST_F(SdchManagerTest, SdchOnByDefault) {
-  GURL google_url("http://www.google.com");
-  scoped_ptr<SdchManager> sdch_manager(new SdchManager);
-
-  EXPECT_EQ(SDCH_OK, sdch_manager->IsInSupportedDomain(google_url));
-  SdchManager::EnableSdchSupport(false);
-  EXPECT_EQ(SDCH_DISABLED, sdch_manager->IsInSupportedDomain(google_url));
 }
 
 // Confirm dispatch of notification.

@@ -47,20 +47,21 @@ void EnsureSearchTermsAreSet(content::WebContents* contents,
 
   // If search terms are already correct or there is already a transient entry
   // (there shouldn't be), bail out early.
-  if (chrome::GetSearchTerms(contents) == search_terms ||
+  if (search::GetSearchTerms(contents) == search_terms ||
       controller->GetTransientEntry())
     return;
 
   const content::NavigationEntry* entry = controller->GetLastCommittedEntry();
-  content::NavigationEntry* transient = controller->CreateNavigationEntry(
-      entry->GetURL(),
-      entry->GetReferrer(),
-      entry->GetTransitionType(),
-      false,
-      std::string(),
-      contents->GetBrowserContext());
+  scoped_ptr<content::NavigationEntry> transient =
+      controller->CreateNavigationEntry(
+          entry->GetURL(),
+          entry->GetReferrer(),
+          entry->GetTransitionType(),
+          false,
+          std::string(),
+          contents->GetBrowserContext());
   transient->SetExtraData(sessions::kSearchTermsKey, search_terms);
-  controller->SetTransientEntry(transient);
+  controller->SetTransientEntry(transient.Pass());
 
   SearchTabHelper::FromWebContents(contents)->NavigationEntryUpdated();
 }
@@ -107,7 +108,7 @@ void InstantController::ActiveTabChanged() {
 void InstantController::TabDeactivated(content::WebContents* contents) {
   // If user is deactivating an NTP tab, log the number of mouseovers for this
   // NTP session.
-  if (chrome::IsInstantNTP(contents))
+  if (search::IsInstantNTP(contents))
     InstantTab::EmitNtpStatistics(contents);
 }
 

@@ -12,7 +12,6 @@
 
 #include "SkPaint.h"
 #include "SkPDFTypes.h"
-#include "SkTemplates.h"
 #include "SkChecksum.h"
 
 class SkPDFCanon;
@@ -24,7 +23,7 @@ class SkPDFFormXObject;
     once, we want to canonicalize them.
 */
 class SkPDFGraphicState : public SkPDFObject {
-    SK_DECLARE_INST_COUNT(SkPDFGraphicState)
+    
 public:
     enum SkPDFSMaskMode {
         kAlpha_SMaskMode,
@@ -33,9 +32,9 @@ public:
 
     // Override emitObject so that we can populate the dictionary on
     // demand.
-    virtual void emitObject(SkWStream* stream,
-                            const SkPDFObjNumMap& objNumMap,
-                            const SkPDFSubstituteMap& substitutes);
+    void emitObject(SkWStream* stream,
+                    const SkPDFObjNumMap& objNumMap,
+                    const SkPDFSubstituteMap& substitutes) const override;
 
     /** Get the graphic state for the passed SkPaint. The reference count of
      *  the object is incremented and it is the caller's responsibility to

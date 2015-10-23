@@ -6,7 +6,8 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chromecast/media/cma/base/decoder_buffer_base.h"
 #include "chromecast/media/cma/test/frame_generator_for_test.h"
@@ -20,7 +21,7 @@
 namespace chromecast {
 namespace media {
 
-MockFrameProvider::MockFrameProvider() {
+MockFrameProvider::MockFrameProvider() : delay_flush_(false) {
 }
 
 MockFrameProvider::~MockFrameProvider() {
@@ -35,26 +36,33 @@ void MockFrameProvider::Configure(
   frame_generator_.reset(frame_generator.release());
 }
 
+void MockFrameProvider::SetDelayFlush(bool delay_flush) {
+  delay_flush_ = delay_flush;
+}
+
 void MockFrameProvider::Read(const ReadCB& read_cb) {
   bool delayed = delayed_task_pattern_[pattern_idx_];
   pattern_idx_ = (pattern_idx_ + 1) % delayed_task_pattern_.size();
 
   if (delayed) {
-    base::MessageLoopProxy::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&MockFrameProvider::DoRead,
-                   base::Unretained(this), read_cb),
+        base::Bind(&MockFrameProvider::DoRead, base::Unretained(this), read_cb),
         base::TimeDelta::FromMilliseconds(1));
   } else {
-    base::MessageLoopProxy::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&MockFrameProvider::DoRead,
-                   base::Unretained(this), read_cb));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&MockFrameProvider::DoRead,
+                              base::Unretained(this), read_cb));
   }
 }
 
 void MockFrameProvider::Flush(const base::Closure& flush_cb) {
-  flush_cb.Run();
+  if (delay_flush_) {
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, flush_cb, base::TimeDelta::FromMilliseconds(10));
+  } else {
+    flush_cb.Run();
+  }
 }
 
 void MockFrameProvider::DoRead(const ReadCB& read_cb) {
@@ -70,14 +78,9 @@ void MockFrameProvider::DoRead(const ReadCB& read_cb) {
     gfx::Rect visible_rect(640, 480);
     gfx::Size natural_size(640, 480);
     video_config = ::media::VideoDecoderConfig(
-        ::media::kCodecH264,
-        ::media::VIDEO_CODEC_PROFILE_UNKNOWN,
-        ::media::VideoFrame::YV12,
-        coded_size,
-        visible_rect,
-        natural_size,
-        NULL, 0,
-        false);
+        ::media::kCodecH264, ::media::VIDEO_CODEC_PROFILE_UNKNOWN,
+        ::media::PIXEL_FORMAT_YV12, ::media::COLOR_SPACE_UNSPECIFIED,
+        coded_size, visible_rect, natural_size, NULL, 0, false);
 
     audio_config = ::media::AudioDecoderConfig(
       ::media::kCodecAAC,

@@ -38,9 +38,9 @@
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutTreeAsText.h"
-#include "core/page/EventHandler.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
@@ -55,13 +55,11 @@
 #include "public/web/WebWidgetClient.h"
 #include "web/WebViewImpl.h"
 #include "web/tests/FrameTestHelpers.h"
-
 #include <gtest/gtest.h>
 
-using namespace blink;
 using blink::testing::runPendingTasks;
 
-namespace {
+namespace blink {
 
 class TouchActionTrackingWebViewClient : public FrameTestHelpers::TestWebViewClient {
 public:
@@ -72,7 +70,7 @@ public:
     }
 
     // WebWidgetClient methods
-    virtual void setTouchAction(WebTouchAction touchAction)
+    void setTouchAction(WebTouchAction touchAction) override
     {
         m_actionSetCount++;
         m_action = touchAction;
@@ -111,7 +109,7 @@ public:
         URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL), "touch-action-tests.js");
     }
 
-    virtual void TearDown()
+    void TearDown() override
     {
         Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
     }
@@ -164,7 +162,7 @@ void TouchActionTest::runShadowDOMTest(std::string file)
     ASSERT_GE(hostNodes->length(), 1u);
 
     for (unsigned index = 0; index < hostNodes->length(); index++) {
-        ShadowRoot* shadowRoot = hostNodes->item(index)->shadowRoot();
+        ShadowRoot* shadowRoot = hostNodes->item(index)->openShadowRoot();
         runTestOnTree(shadowRoot, webView, client);
     }
 
@@ -186,7 +184,7 @@ WebView* TouchActionTest::setupTest(std::string file, TouchActionTrackingWebView
     // Scroll to verify the code properly transforms windows to client co-ords.
     const int kScrollOffset = 100;
     RefPtrWillBeRawPtr<Document> document = static_cast<PassRefPtrWillBeRawPtr<Document>>(webView->mainFrame()->document());
-    document->frame()->view()->setScrollOffset(IntPoint(0, kScrollOffset));
+    document->frame()->view()->setScrollPosition(IntPoint(0, kScrollOffset), ProgrammaticScroll);
 
     return webView;
 }
@@ -326,7 +324,7 @@ void TouchActionTest::sendTouchEvent(WebView* webView, WebInputEvent::Type type,
 }
 
 // crbug.com/411038
-TEST_F(TouchActionTest, DISABLED_Simple)
+TEST_F(TouchActionTest, Simple)
 {
     runTouchActionTest("touch-action-simple.html");
 }
@@ -346,4 +344,4 @@ TEST_F(TouchActionTest, Pan)
     runTouchActionTest("touch-action-pan.html");
 }
 
-}
+} // namespace blink

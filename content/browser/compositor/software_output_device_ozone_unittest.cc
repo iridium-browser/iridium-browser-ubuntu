@@ -4,7 +4,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "cc/output/software_frame_data.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/browser/compositor/software_output_device_ozone.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkDevice.h"
@@ -37,7 +37,8 @@ class TestPlatformWindowDelegate : public ui::PlatformWindowDelegate {
   void OnClosed() override {}
   void OnWindowStateChanged(ui::PlatformWindowState new_state) override {}
   void OnLostCapture() override {}
-  void OnAcceleratedWidgetAvailable(gfx::AcceleratedWidget widget) override {
+  void OnAcceleratedWidgetAvailable(gfx::AcceleratedWidget widget,
+                                    float device_pixel_ratio) override {
     widget_ = widget;
   }
   void OnActivationChanged(bool active) override {}
@@ -88,7 +89,7 @@ void SoftwareOutputDeviceOzoneTest::SetUp() {
       &window_delegate_, gfx::Rect(size));
   compositor_.reset(new ui::Compositor(window_delegate_.GetAcceleratedWidget(),
                                        context_factory,
-                                       base::MessageLoopProxy::current()));
+                                       base::ThreadTaskRunnerHandle::Get()));
   compositor_->SetScaleAndSize(1.0f, size);
 
   output_device_.reset(new content::SoftwareOutputDeviceOzone(

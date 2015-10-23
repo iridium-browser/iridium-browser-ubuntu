@@ -15,9 +15,17 @@
 #include "extensions/test/test_extensions_client.h"
 #include "third_party/mojo/src/mojo/edk/embedder/test_embedder.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gl/gl_surface.h"
+#include "ui/gl/test/gl_surface_test_support.h"
+#include "url/url_util.h"
 
 namespace {
+
+const int kNumExtensionStandardURLSchemes = 2;
+const url::SchemeWithType kExtensionStandardURLSchemes[
+    kNumExtensionStandardURLSchemes] = {
+  {extensions::kExtensionScheme, url::SCHEME_WITHOUT_PORT},
+  {extensions::kExtensionResourceScheme, url::SCHEME_WITHOUT_PORT},
+};
 
 // Content client that exists only to register chrome-extension:// scheme with
 // the url module.
@@ -30,11 +38,12 @@ class ExtensionsContentClient : public content::ContentClient {
 
   // content::ContentClient overrides:
   void AddAdditionalSchemes(
-      std::vector<std::string>* standard_schemes,
+      std::vector<url::SchemeWithType>* standard_schemes,
       std::vector<std::string>* savable_schemes) override {
-    standard_schemes->push_back(extensions::kExtensionScheme);
+    for (int i = 0; i < kNumExtensionStandardURLSchemes; i++)
+      standard_schemes->push_back(kExtensionStandardURLSchemes[i]);
+
     savable_schemes->push_back(extensions::kExtensionScheme);
-    standard_schemes->push_back(extensions::kExtensionResourceScheme);
     savable_schemes->push_back(extensions::kExtensionResourceScheme);
   }
 
@@ -65,7 +74,7 @@ ExtensionsTestSuite::~ExtensionsTestSuite() {}
 
 void ExtensionsTestSuite::Initialize() {
   content::ContentTestSuiteBase::Initialize();
-  gfx::GLSurface::InitializeOneOffForTests();
+  gfx::GLSurfaceTestSupport::InitializeOneOff();
 
   // Register the chrome-extension:// scheme via this circuitous path. Note
   // that this does not persistently set up a ContentClient; individual tests

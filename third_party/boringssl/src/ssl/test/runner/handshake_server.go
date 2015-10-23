@@ -69,7 +69,7 @@ func (c *Conn) serverHandshake() error {
 				return err
 			}
 		}
-		if err := hs.sendFinished(); err != nil {
+		if err := hs.sendFinished(c.firstFinished[:]); err != nil {
 			return err
 		}
 		// Most retransmits are triggered by a timeout, but the final
@@ -81,7 +81,7 @@ func (c *Conn) serverHandshake() error {
 		}); err != nil {
 			return err
 		}
-		if err := hs.readFinished(isResume); err != nil {
+		if err := hs.readFinished(nil, isResume); err != nil {
 			return err
 		}
 		c.didResume = true
@@ -94,7 +94,7 @@ func (c *Conn) serverHandshake() error {
 		if err := hs.establishKeys(); err != nil {
 			return err
 		}
-		if err := hs.readFinished(isResume); err != nil {
+		if err := hs.readFinished(c.firstFinished[:], isResume); err != nil {
 			return err
 		}
 		if c.config.Bugs.AlertBeforeFalseStartTest != 0 {
@@ -108,7 +108,7 @@ func (c *Conn) serverHandshake() error {
 		if err := hs.sendSessionTicket(); err != nil {
 			return err
 		}
-		if err := hs.sendFinished(); err != nil {
+		if err := hs.sendFinished(nil); err != nil {
 			return err
 		}
 	}
@@ -139,8 +139,8 @@ func (hs *serverHandshakeState) readClientHello() (isResume bool, err error) {
 		c.sendAlert(alertUnexpectedMessage)
 		return false, unexpectedMessageError(hs.clientHello, msg)
 	}
-	if config.Bugs.RequireFastradioPadding && len(hs.clientHello.raw) < 1000 {
-		return false, errors.New("tls: ClientHello record size should be larger than 1000 bytes when padding enabled.")
+	if size := config.Bugs.RequireClientHelloSize; size != 0 && len(hs.clientHello.raw) != size {
+		return false, fmt.Errorf("tls: ClientHello record size is %d, but expected %d", len(hs.clientHello.raw), size)
 	}
 
 	if c.isDTLS && !config.Bugs.SkipHelloVerifyRequest {
@@ -210,8 +210,10 @@ func (hs *serverHandshakeState) readClientHello() (isResume bool, err error) {
 	}
 	c.haveVers = true
 
-	hs.hello = new(serverHelloMsg)
-	hs.hello.isDTLS = c.isDTLS
+	hs.hello = &serverHelloMsg{
+		isDTLS:          c.isDTLS,
+		customExtension: config.Bugs.CustomExtension,
+	}
 
 	supportedCurve := false
 	preferredCurves := config.curvePreferences()
@@ -274,6 +276,10 @@ Curves:
 		hs.hello.secureRenegotiation = hs.clientHello.secureRenegotiation
 	}
 
+	if c.config.Bugs.NoRenegotiationInfo {
+		hs.hello.secureRenegotiation = nil
+	}
+
 	hs.hello.compressionMethod = compressionNone
 	hs.hello.duplicateExtension = c.config.Bugs.DuplicateExtension
 	if len(hs.clientHello.serverName) > 0 {
@@ -281,7 +287,12 @@ Curves:
 	}
 
 	if len(hs.clientHello.alpnProtocols) > 0 {
-		if selectedProto, fallback := mutualProtocol(hs.clientHello.alpnProtocols, c.config.NextProtos); !fallback {
+		if proto := c.config.Bugs.ALPNProtocol; proto != nil {
+			hs.hello.alpnProtocol = *proto
+			hs.hello.alpnProtocolEmpty = len(*proto) == 0
+			c.clientProtocol = *proto
+			c.usedALPN = true
+		} else if selectedProto, fallback := mutualProtocol(hs.clientHello.alpnProtocols, c.config.NextProtos); !fallback {
 			hs.hello.alpnProtocol = selectedProto
 			c.clientProtocol = selectedProto
 			c.usedALPN = true
@@ -329,6 +340,12 @@ Curves:
 
 	if c.config.Bugs.SendSRTPProtectionProfile != 0 {
 		hs.hello.srtpProtectionProfile = c.config.Bugs.SendSRTPProtectionProfile
+	}
+
+	if expected := c.config.Bugs.ExpectedCustomExtension; expected != nil {
+		if hs.clientHello.customExtension != *expected {
+			return false, fmt.Errorf("tls: bad custom extension contents %q", hs.clientHello.customExtension)
+		}
 	}
 
 	_, hs.ecdsaOk = hs.cert.PrivateKey.(*ecdsa.PrivateKey)
@@ -512,7 +529,9 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 
 	if !isPSK {
 		certMsg := new(certificateMsg)
-		certMsg.certificates = hs.cert.Certificate
+		if !config.Bugs.EmptyCertificateList {
+			certMsg.certificates = hs.cert.Certificate
+		}
 		if !config.Bugs.UnauthenticatedECDH {
 			certMsgBytes := certMsg.marshal()
 			if config.Bugs.WrongCertificateMessageType {
@@ -750,7 +769,7 @@ func (hs *serverHandshakeState) establishKeys() error {
 	return nil
 }
 
-func (hs *serverHandshakeState) readFinished(isResume bool) error {
+func (hs *serverHandshakeState) readFinished(out []byte, isResume bool) error {
 	c := hs.c
 
 	c.readRecord(recordTypeChangeCipherSpec)
@@ -819,6 +838,7 @@ func (hs *serverHandshakeState) readFinished(isResume bool) error {
 		return errors.New("tls: client's Finished message is incorrect")
 	}
 	c.clientVerify = append(c.clientVerify[:0], clientFinished.verifyData...)
+	copy(out, clientFinished.verifyData)
 
 	hs.writeClientHash(clientFinished.marshal())
 	return nil
@@ -855,11 +875,12 @@ func (hs *serverHandshakeState) sendSessionTicket() error {
 	return nil
 }
 
-func (hs *serverHandshakeState) sendFinished() error {
+func (hs *serverHandshakeState) sendFinished(out []byte) error {
 	c := hs.c
 
 	finished := new(finishedMsg)
 	finished.verifyData = hs.finishedHash.serverSum(hs.masterSecret)
+	copy(out, finished.verifyData)
 	if c.config.Bugs.BadFinished {
 		finished.verifyData[0]++
 	}

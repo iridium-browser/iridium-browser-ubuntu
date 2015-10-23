@@ -5,6 +5,7 @@
 #include "chrome/browser/task_management/providers/browser_process_task.h"
 
 #include "base/command_line.h"
+#include "chrome/browser/task_management/task_manager_observer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -13,15 +14,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
-#if defined(OS_MACOSX)
-#include "ui/gfx/image/image_skia_util_mac.h"
-#endif  // defined(OS_MACOSX)
-
-#if defined(OS_WIN)
-#include "chrome/browser/app_icon_win.h"
-#include "ui/gfx/icon_util.h"
-#endif  // defined(OS_WIN)
-
 namespace task_management {
 
 namespace {
@@ -29,22 +21,9 @@ namespace {
 gfx::ImageSkia* g_default_icon = nullptr;
 
 gfx::ImageSkia* GetDefaultIcon() {
-  if (!g_default_icon) {
-#if defined(OS_WIN)
-    HICON icon = GetAppIcon();
-    if (icon) {
-      scoped_ptr<SkBitmap> bitmap(IconUtil::CreateSkBitmapFromHICON(icon));
-      g_default_icon = new gfx::ImageSkia(gfx::ImageSkiaRep(*bitmap, 1.0f));
-    }
-#elif defined(OS_POSIX)
-    if (ResourceBundle::HasSharedInstance()) {
+  if (!g_default_icon && ResourceBundle::HasSharedInstance()) {
       g_default_icon = ResourceBundle::GetSharedInstance().
           GetImageSkiaNamed(IDR_PRODUCT_LOGO_16);
-    }
-#else
-    // TODO(port): Port icon code.
-    NOTIMPLEMENTED();
-#endif  // defined(OS_WIN)
     if (g_default_icon)
       g_default_icon->MakeThreadSafe();
   }
@@ -74,19 +53,19 @@ BrowserProcessTask::BrowserProcessTask()
 BrowserProcessTask::~BrowserProcessTask() {
 }
 
-void BrowserProcessTask::Refresh(const base::TimeDelta& update_interval) {
-  Task::Refresh(update_interval);
+void BrowserProcessTask::Refresh(const base::TimeDelta& update_interval,
+                                 int64 refresh_flags) {
+  Task::Refresh(update_interval, refresh_flags);
 
-  // TODO(afakhry): Add code to skip v8 and sqlite stats update if they have
-  // never been requested.
-  if (reports_v8_stats_) {
+  if (reports_v8_stats_ && (refresh_flags & REFRESH_TYPE_V8_MEMORY) != 0) {
     allocated_v8_memory_ =
         static_cast<int64>(net::ProxyResolverV8::GetTotalHeapSize());
     used_v8_memory_ =
         static_cast<int64>(net::ProxyResolverV8::GetUsedHeapSize());
   }
 
-  used_sqlite_memory_ = static_cast<int64>(sqlite3_memory_used());
+  if ((refresh_flags & REFRESH_TYPE_SQLITE_MEMORY) != 0)
+    used_sqlite_memory_ = static_cast<int64>(sqlite3_memory_used());
 }
 
 Task::Type BrowserProcessTask::GetType() const {

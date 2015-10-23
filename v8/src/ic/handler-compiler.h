@@ -251,11 +251,12 @@ class NamedStoreHandlerCompiler : public PropertyHandlerCompiler {
 
   virtual void FrontendFooter(Handle<Name> name, Label* miss);
   void GenerateRestoreName(Label* label, Handle<Name> name);
+  void GeneratePushMap(Register map_reg, Register scratch);
 
  private:
   void GenerateRestoreName(Handle<Name> name);
-  void GenerateRestoreMap(Handle<Map> transition, Register scratch,
-                          Label* miss);
+  void GenerateRestoreMap(Handle<Map> transition, Register map_reg,
+                          Register scratch, Label* miss);
 
   void GenerateConstantCheck(Register map_reg, int descriptor,
                              Register value_reg, Register scratch,
@@ -290,7 +291,8 @@ class ElementHandlerCompiler : public PropertyHandlerCompiler {
   virtual ~ElementHandlerCompiler() {}
 
   void CompileElementHandlers(MapHandleList* receiver_maps,
-                              CodeHandleList* handlers);
+                              CodeHandleList* handlers,
+                              LanguageMode language_mode);
 
   static void GenerateStoreSlow(MacroAssembler* masm);
 };

@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// https://w3c.github.io/hr-time/#the-performance-interface
+
+// TODO(philipj): This should be a GlobalPerformance interface implemented by
+// Window and WorkerGlobalScope.
 [
     ImplementedAs=DOMWindowPerformance,
 ] partial interface Window {
-    // https://dvcs.w3.org/hg/webperf/raw-file/tip/specs/NavigationTiming/Overview.html#sec-window.performance-attribute
     [Replaceable] readonly attribute Performance performance;
 };

@@ -46,7 +46,7 @@ namespace blink {
 FEImage::FEImage(Filter* filter, PassRefPtr<Image> image, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio> preserveAspectRatio)
     : FilterEffect(filter)
     , m_image(image)
-    , m_treeScope(0)
+    , m_treeScope(nullptr)
     , m_preserveAspectRatio(preserveAspectRatio)
 {
     FilterEffect::setOperatingColorSpace(ColorSpaceDeviceRGB);
@@ -63,6 +63,7 @@ FEImage::FEImage(Filter* filter, TreeScope& treeScope, const String& href, PassR
 
 DEFINE_TRACE(FEImage)
 {
+    visitor->trace(m_treeScope);
     visitor->trace(m_preserveAspectRatio);
     FilterEffect::trace(visitor);
 }
@@ -173,7 +174,7 @@ PassRefPtr<SkImageFilter> FEImage::createImageFilterForLayoutObject(LayoutObject
         transform.translate(dstRect.x(), dstRect.y());
     }
 
-    SkPictureBuilder filterPicture(FloatRect(FloatPoint(), dstRect.size()));
+    SkPictureBuilder filterPicture(dstRect);
     {
         TransformRecorder transformRecorder(filterPicture.context(), layoutObject, transform);
         SVGPaintContext::paintSubtree(&filterPicture.context(), &layoutObject);
@@ -196,15 +197,10 @@ PassRefPtr<SkImageFilter> FEImage::createImageFilter(SkiaImageFilterBuilder* bui
     FloatRect srcRect = FloatRect(FloatPoint(), m_image->size());
     FloatRect dstRect = filterPrimitiveSubregion();
 
-    // FIXME: CSS image filters currently do not seem to set filter primitive
-    // subregion correctly if unspecified. So default to srcRect size if so.
-    if (dstRect.isEmpty())
-        dstRect = srcRect;
-
     m_preserveAspectRatio->transformRect(dstRect, srcRect);
 
     SkBitmap bitmap;
-    if (!m_image->bitmapForCurrentFrame(&bitmap))
+    if (!m_image->deprecatedBitmapForCurrentFrame(&bitmap))
         return adoptRef(SkBitmapSource::Create(SkBitmap()));
 
     return adoptRef(SkBitmapSource::Create(bitmap, srcRect, dstRect));

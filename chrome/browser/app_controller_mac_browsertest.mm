@@ -17,7 +17,6 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "components/bookmarks/browser/bookmark_model.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -29,6 +28,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #include "chrome/browser/ui/cocoa/history_menu_bridge.h"
+#include "chrome/browser/ui/cocoa/run_loop_testing.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/user_manager.h"
@@ -38,6 +38,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_contents.h"
@@ -156,10 +157,12 @@ IN_PROC_BROWSER_TEST_F(AppControllerPlatformAppBrowserTest,
                              ->GetNativeWindow();
   NSWindow* browser_window = browser()->window()->GetNativeWindow();
 
+  chrome::testing::NSRunLoopRunAllPending();
   EXPECT_LE([[NSApp orderedWindows] indexOfObject:app_window],
             [[NSApp orderedWindows] indexOfObject:browser_window]);
   [app_controller applicationShouldHandleReopen:NSApp
                               hasVisibleWindows:YES];
+  chrome::testing::NSRunLoopRunAllPending();
   EXPECT_LE([[NSApp orderedWindows] indexOfObject:browser_window],
             [[NSApp orderedWindows] indexOfObject:app_window]);
 }
@@ -664,10 +667,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerHandoffBrowserTest, TestHandoffURLs) {
       BrowserList::GetInstance(chrome::GetActiveDesktop());
   EXPECT_EQ(2u, active_browser_list->size());
 
-  // Close the one and only tab for the second browser window.
+  // Close the second browser window (which only has 1 tab left).
   Browser* browser2 = active_browser_list->get(1);
-  CloseTab(browser2, 0);
-  base::RunLoop().RunUntilIdle();
+  CloseBrowserSynchronously(browser2);
   EXPECT_EQ(g_handoff_url, test_url2);
 
   // The URLs of incognito windows should not be passed to Handoff.

@@ -40,6 +40,7 @@
         "kernel_wrap_bionic.cc",
         "kernel_wrap_dummy.cc",
         "kernel_wrap_glibc.cc",
+        "kernel_wrap_irt_ext.c",
         "kernel_wrap_newlib.cc",
         "kernel_wrap_win.cc",
         "log.c",
@@ -81,7 +82,6 @@
         "syscalls/pipe.c",
         "syscalls/poll.c",
         "syscalls/realpath.c",
-        "syscalls/rename.c",
         "syscalls/select.c",
         "syscalls/sigaction.c",
         "syscalls/signal.c",
@@ -171,6 +171,7 @@
         "ioctl.h",
         "jsfs/js_fs.h",
         "jsfs/js_fs_node.h",
+        "nacl_abi_dirent.h",
         "kernel_handle.h",
         "kernel_intercept.h",
         "kernel_object.h",
@@ -236,6 +237,14 @@
         "utime.h",
       ],
       'DEST': 'include/newlib',
+    },
+    {
+      'FILES': [
+        "bits/ioctls.h",
+        "rpc/netdb.h",
+        "sys/mount.h",
+      ],
+      'DEST': 'include/glibc',
     },
     {
       'FILES': [

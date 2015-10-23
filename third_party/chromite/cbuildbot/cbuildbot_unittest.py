@@ -7,14 +7,13 @@
 from __future__ import print_function
 
 import argparse
-import copy
 import glob
 import optparse
 import os
 
-from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot import commands
+from chromite.cbuildbot import config_lib_unittest
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot.builders import simple_builders
@@ -82,17 +81,17 @@ class RunBuildStagesTest(cros_build_lib_unittest.RunCommandTempDirTestCase,
     self.buildroot = os.path.join(self.tempdir, 'buildroot')
     osutils.SafeMakedirs(self.buildroot)
     # Always stub RunCommmand out as we use it in every method.
-    self.bot_id = 'x86-generic-paladin'
-    self.build_config = copy.deepcopy(cbuildbot_config.GetConfig()[self.bot_id])
+    self.site_config = config_lib_unittest.MockSiteConfig()
+    self.build_config = config_lib_unittest.MockBuildConfig()
+    self.bot_id = self.build_config.name
     self.build_config['master'] = False
     self.build_config['important'] = False
 
     # Use the cbuildbot parser to create properties and populate default values.
     self.parser = cbuildbot._CreateParser()
 
-    argv = ['-r', self.buildroot, '--buildbot', '--debug',
-            'x86-generic-paladin']
-    (self.options, _) = cbuildbot._ParseCommandLine(self.parser, argv)
+    argv = ['-r', self.buildroot, '--buildbot', '--debug', self.bot_id]
+    self.options, _ = cbuildbot._ParseCommandLine(self.parser, argv)
     self.options.bootstrap = False
     self.options.clean = False
     self.options.resume = False
@@ -107,8 +106,8 @@ class RunBuildStagesTest(cros_build_lib_unittest.RunCommandTempDirTestCase,
 
     self._manager = parallel.Manager()
     self._manager.__enter__()
-    self.run = cbuildbot_run.BuilderRun(self.options, self.build_config,
-                                        self._manager)
+    self.run = cbuildbot_run.BuilderRun(self.options, self.site_config,
+                                        self.build_config, self._manager)
 
     self.rc.AddCmdResult(
         [constants.PATH_TO_CBUILDBOT, '--reexec-api-version'],
@@ -191,6 +190,7 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
 
   def setUp(self):
     self.parser = cbuildbot._CreateParser()
+    self.site_config = config_lib_unittest.MockSiteConfig()
 
   def assertDieSysExit(self, *args, **kwargs):
     self.assertRaises(cros_build_lib.DieSystemExit, *args, **kwargs)
@@ -216,14 +216,14 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
   def testDebugBuildBotSetByDefault(self):
     """Test that debug and buildbot flags are set by default."""
     args = ['--local', '-r', self._BUILD_ROOT, self._X86_PREFLIGHT]
-    (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
+    options, args = cbuildbot._ParseCommandLine(self.parser, args)
     self.assertTrue(options.debug)
     self.assertFalse(options.buildbot)
 
   def testBuildBotOption(self):
     """Test that --buildbot option unsets debug flag."""
     args = ['-r', self._BUILD_ROOT, '--buildbot', self._X86_PREFLIGHT]
-    (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
+    options, args = cbuildbot._ParseCommandLine(self.parser, args)
     self.assertFalse(options.debug)
     self.assertTrue(options.buildbot)
 
@@ -231,7 +231,7 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
     """Test that --debug option overrides --buildbot option."""
     args = ['-r', self._BUILD_ROOT, '--buildbot', '--debug',
             self._X86_PREFLIGHT]
-    (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
+    options, args = cbuildbot._ParseCommandLine(self.parser, args)
     self.assertTrue(options.debug)
     self.assertTrue(options.buildbot)
 
@@ -240,7 +240,7 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
     args = ['-r', self._BUILD_ROOT, '--remote', '--local-patches',
             ' proj:br \t  proj2:b2 ',
             self._X86_PREFLIGHT]
-    (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
+    options, args = cbuildbot._ParseCommandLine(self.parser, args)
     self.assertEquals(options.local_patches, ['proj:br', 'proj2:b2'])
 
   def testBuildBotWithRemotePatches(self):
@@ -264,13 +264,13 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
   def testBuildBotWithoutProfileOption(self):
     """Test that no --profile option gets defaulted."""
     args = ['--buildbot', self._X86_PREFLIGHT]
-    (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
+    options, args = cbuildbot._ParseCommandLine(self.parser, args)
     self.assertEquals(options.profile, None)
 
   def testBuildBotWithProfileOption(self):
     """Test that --profile option gets parsed."""
     args = ['--buildbot', '--profile', 'carp', self._X86_PREFLIGHT]
-    (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
+    options, args = cbuildbot._ParseCommandLine(self.parser, args)
     self.assertEquals(options.profile, 'carp')
 
   def testValidateClobberUserDeclines_1(self):
@@ -336,7 +336,7 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
         '--chrome_root=.',
         self._X86_PREFLIGHT,
     ]
-    (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
+    options, args = cbuildbot._ParseCommandLine(self.parser, args)
     self.assertEquals(options.chrome_rev, constants.CHROME_REV_LOCAL)
     self.assertNotEquals(options.chrome_root, None)
 
@@ -357,21 +357,21 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
         '--chrome_rev=%s' % constants.CHROME_REV_LOCAL,
         self._X86_PREFLIGHT,
     ]
-    (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
+    options, args = cbuildbot._ParseCommandLine(self.parser, args)
     self.assertEquals(options.chrome_rev, constants.CHROME_REV_LOCAL)
     self.assertNotEquals(options.chrome_root, None)
 
   def testPassThroughOptions(self):
     """Test we are building up pass-through list properly."""
     args = ['--remote', '-g', '1234', self._X86_PREFLIGHT]
-    (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
+    options, args = cbuildbot._ParseCommandLine(self.parser, args)
 
     self.assertEquals(options.pass_through_args, ['-g', '1234'])
 
   def testDebugPassThrough(self):
     """Test we are passing --debug through."""
     args = ['--remote', '--debug', '--buildbot', self._X86_PREFLIGHT]
-    (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
+    options, args = cbuildbot._ParseCommandLine(self.parser, args)
     self.assertEquals(options.pass_through_args, ['--debug', '--buildbot'])
 
   def testCreateBranch(self):

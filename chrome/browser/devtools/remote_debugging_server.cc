@@ -7,16 +7,17 @@
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_version_info.h"
 #include "components/devtools_http_handler/devtools_http_handler.h"
 #include "components/devtools_http_handler/devtools_http_handler_delegate.h"
 #include "components/history/core/browser/top_sites.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/devtools_frontend_host.h"
 #include "grit/browser_resources.h"
 #include "net/base/net_errors.h"
@@ -159,17 +160,18 @@ RemoteDebuggingServer::RemoteDebuggingServer(
   PathService::Get(chrome::DIR_INSPECTOR, &debug_frontend_dir);
 #endif
 
-  chrome::VersionInfo version_info;
-
   devtools_http_handler_.reset(new devtools_http_handler::DevToolsHttpHandler(
       make_scoped_ptr(new TCPServerSocketFactory(ip, port)),
       std::string(),
       new ChromeDevToolsHttpHandlerDelegate(),
       output_dir,
       debug_frontend_dir,
-      version_info.ProductNameAndVersionForUserAgent(),
+      version_info::GetProductNameAndVersionForUserAgent(),
       ::GetUserAgent()));
 }
 
 RemoteDebuggingServer::~RemoteDebuggingServer() {
+  // Ensure Profile is alive, because the whole DevTools subsystem
+  // accesses it during shutdown.
+  DCHECK(g_browser_process->profile_manager());
 }

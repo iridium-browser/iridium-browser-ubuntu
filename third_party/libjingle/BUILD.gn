@@ -294,35 +294,6 @@ static_library("libjingle_p2p_constants") {
   all_dependent_configs = [ ":jingle_all_dependent_configs" ]
 }
 
-# GYP version: third_party/libjingle.gyp:peerconnnection_server
-#TODO(GYP): Switch to executable when WebRTC dependency is resolved.
-source_set("peerconnnection_server") {
-  sources = [
-    "source/talk/examples/peerconnection/server/data_socket.cc",
-    "source/talk/examples/peerconnection/server/data_socket.h",
-    "source/talk/examples/peerconnection/server/main.cc",
-    "source/talk/examples/peerconnection/server/peer_channel.cc",
-    "source/talk/examples/peerconnection/server/peer_channel.h",
-    "source/talk/examples/peerconnection/server/utils.cc",
-    "source/talk/examples/peerconnection/server/utils.h",
-  ]
-  include_dirs = [ "source" ]
-  public_deps = [
-    ":jingle_deps",
-  ]
-  deps = [
-    ":libjingle",
-    ":jingle_deps",
-  ]
-  configs += [ ":jingle_unexported_configs" ]
-  public_configs = [ ":jingle_public_configs" ]
-  all_dependent_configs = [ ":jingle_all_dependent_configs" ]
-  if (is_win) {
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4309" ]
-  }
-}
-
 if (enable_webrtc) {
   source_set("libjingle_webrtc") {
     sources = [
@@ -347,8 +318,6 @@ if (enable_webrtc) {
       "source/talk/app/webrtc/audiotrackrenderer.h",
       "source/talk/app/webrtc/datachannel.cc",
       "source/talk/app/webrtc/datachannel.h",
-      "source/talk/app/webrtc/dtlsidentityservice.cc",
-      "source/talk/app/webrtc/dtlsidentityservice.h",
       "source/talk/app/webrtc/dtlsidentitystore.cc",
       "source/talk/app/webrtc/dtlsidentitystore.h",
       "source/talk/app/webrtc/dtmfsender.cc",
@@ -417,8 +386,6 @@ if (enable_webrtc) {
       "source/talk/media/base/constants.cc",
       "source/talk/media/base/constants.h",
       "source/talk/media/base/cryptoparams.h",
-      "source/talk/media/base/filemediaengine.cc",
-      "source/talk/media/base/filemediaengine.h",
       "source/talk/media/base/hybriddataengine.h",
       "source/talk/media/base/mediachannel.h",
       "source/talk/media/base/mediaengine.cc",
@@ -448,13 +415,10 @@ if (enable_webrtc) {
       "source/talk/media/webrtc/webrtccommon.h",
       "source/talk/media/webrtc/webrtcpassthroughrender.cc",
       "source/talk/media/webrtc/webrtcpassthroughrender.h",
-      "source/talk/media/webrtc/webrtcvideocapturer.cc",
-      "source/talk/media/webrtc/webrtcvideocapturer.h",
       "source/talk/media/webrtc/webrtcvideoframe.cc",
       "source/talk/media/webrtc/webrtcvideoframe.h",
       "source/talk/media/webrtc/webrtcvideoframefactory.cc",
       "source/talk/media/webrtc/webrtcvideoframefactory.h",
-      "source/talk/media/webrtc/webrtcvie.h",
       "source/talk/media/webrtc/webrtcvoe.h",
       "source/talk/session/media/audiomonitor.cc",
       "source/talk/session/media/audiomonitor.h",
@@ -517,8 +481,6 @@ if (enable_webrtc) {
       "source/talk/media/webrtc/simulcast.h",
       "source/talk/media/webrtc/webrtcmediaengine.cc",
       "source/talk/media/webrtc/webrtcmediaengine.h",
-      "source/talk/media/webrtc/webrtcvideoengine.cc",
-      "source/talk/media/webrtc/webrtcvideoengine.h",
       "source/talk/media/webrtc/webrtcvideoengine2.cc",
       "source/talk/media/webrtc/webrtcvideoengine2.h",
       "source/talk/media/webrtc/webrtcvoiceengine.cc",
@@ -537,6 +499,18 @@ if (enable_webrtc) {
       "//third_party/webrtc",
       "//third_party/webrtc/system_wrappers",
       "//third_party/webrtc/voice_engine",
+    ]
+  }
+
+  source_set("libstunprober") {
+    p2p_dir = "../webrtc/p2p"
+    sources = [
+      "$p2p_dir/stunprober/stunprober.cc",
+    ]
+
+    deps = [
+      "//third_party/webrtc/base:rtc_base",
+      ":libjingle_webrtc_common",
     ]
   }
 }  # enable_webrtc

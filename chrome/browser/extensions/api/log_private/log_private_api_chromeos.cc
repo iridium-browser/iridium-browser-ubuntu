@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -26,6 +27,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/extensions/api/log_private.h"
 #include "chrome/common/logging_chrome.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function.h"
@@ -248,15 +250,15 @@ void LogPrivateAPI::AddEntriesOnUI(scoped_ptr<base::ListValue> value) {
     scoped_ptr<base::ListValue> event_args(new base::ListValue());
     event_args->Append(value->DeepCopy());
     scoped_ptr<Event> event(
-        new Event(events::kOnCapturedEvents, event_args.Pass()));
+        new Event(::extensions::events::LOG_PRIVATE_ON_CAPTURED_EVENTS,
+                  ::events::kOnCapturedEvents, event_args.Pass()));
     EventRouter::Get(browser_context_)
         ->DispatchEventToExtension(*ix, event.Pass());
   }
 }
 
-void LogPrivateAPI::CreateFileForNetLogger(
-    const std::string& owner_extension_id,
-    base::ScopedFILE* file) {
+void LogPrivateAPI::CreateTempNetLogFile(const std::string& owner_extension_id,
+                                         base::ScopedFILE* file) {
   DCHECK(IsRunningOnSequenceThread());
 
   // Create app-specific subdirectory in session logs folder.
@@ -314,7 +316,7 @@ void LogPrivateAPI::MaybeStartNetInternalLogging(
         // on IO thread.
         GetSequencedTaskRunner()->PostTaskAndReply(
             FROM_HERE,
-            base::Bind(&LogPrivateAPI::CreateFileForNetLogger,
+            base::Bind(&LogPrivateAPI::CreateTempNetLogFile,
                        base::Unretained(this),
                        caller_extension_id,
                        file),
@@ -529,7 +531,7 @@ void LogPrivateDumpLogsFunction::OnStoreLogsCompleted(
       extensions::app_file_handler_util::CreateFileEntry(
           Profile::FromBrowserContext(browser_context()),
           extension(),
-          render_view_host_->GetProcess()->GetID(),
+          render_frame_host()->GetProcess()->GetID(),
           log_path,
           false);
 

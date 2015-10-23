@@ -7,6 +7,7 @@
 #include "gm.h"
 #include "SkCanvas.h"
 #include "SkGradientShader.h"
+#include "SkPath.h"
 
 namespace skiagm {
 
@@ -43,7 +44,7 @@ struct LabeledMatrix {
 class ShaderText2GM : public GM {
 public:
     ShaderText2GM() {
-        this->setBGColor(0xFFDDDDDD);
+        this->setBGColor(sk_tool_utils::color_to_565(0xFFDDDDDD));
     }
 
 protected:

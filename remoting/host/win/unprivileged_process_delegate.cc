@@ -25,8 +25,8 @@
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message.h"
 #include "remoting/base/typed_buffer.h"
-#include "remoting/host/ipc_constants.h"
 #include "remoting/host/ipc_util.h"
+#include "remoting/host/switches.h"
 #include "remoting/host/win/launch_process_with_token.h"
 #include "remoting/host/win/security_descriptor.h"
 #include "remoting/host/win/window_station_and_desktop.h"
@@ -100,11 +100,9 @@ bool CreateRestrictedToken(ScopedHandle* token_out) {
   }
 
   // Return the resulting token.
-  if (restricted_token.GetRestrictedTokenHandle(&temp_handle) ==
-      ERROR_SUCCESS) {
-    token_out->Set(temp_handle);
+  if (restricted_token.GetRestrictedToken(token_out) ==  ERROR_SUCCESS)
     return true;
-  }
+
   return false;
 }
 
@@ -218,8 +216,8 @@ UnprivilegedProcessDelegate::UnprivilegedProcessDelegate(
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     scoped_ptr<base::CommandLine> target_command)
     : io_task_runner_(io_task_runner),
-      event_handler_(nullptr),
-      target_command_(target_command.Pass()) {
+      target_command_(target_command.Pass()),
+      event_handler_(nullptr) {
 }
 
 UnprivilegedProcessDelegate::~UnprivilegedProcessDelegate() {

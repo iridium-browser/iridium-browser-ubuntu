@@ -37,6 +37,7 @@
 #include "platform/FileChooser.h"
 #include "platform/Widget.h"
 #include "public/platform/WebApplicationCacheHost.h"
+#include "public/platform/WebMediaPlayer.h"
 #include "public/platform/WebServiceWorkerProvider.h"
 #include "public/platform/WebServiceWorkerProviderClient.h"
 
@@ -44,36 +45,36 @@ namespace blink {
 
 void fillWithEmptyClients(Page::PageClients& pageClients)
 {
-    static ChromeClient* dummyChromeClient = adoptPtr(new EmptyChromeClient).leakPtr();
-    pageClients.chromeClient = dummyChromeClient;
+    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<ChromeClient>, dummyChromeClient, (EmptyChromeClient::create()));
+    pageClients.chromeClient = dummyChromeClient.get();
 
-    static ContextMenuClient* dummyContextMenuClient = adoptPtr(new EmptyContextMenuClient).leakPtr();
-    pageClients.contextMenuClient = dummyContextMenuClient;
+    DEFINE_STATIC_LOCAL(EmptyContextMenuClient, dummyContextMenuClient, ());
+    pageClients.contextMenuClient = &dummyContextMenuClient;
 
-    static DragClient* dummyDragClient = adoptPtr(new EmptyDragClient).leakPtr();
-    pageClients.dragClient = dummyDragClient;
+    DEFINE_STATIC_LOCAL(EmptyDragClient, dummyDragClient, ());
+    pageClients.dragClient = &dummyDragClient;
 
-    static EditorClient* dummyEditorClient = adoptPtr(new EmptyEditorClient).leakPtr();
-    pageClients.editorClient = dummyEditorClient;
+    DEFINE_STATIC_LOCAL(EmptyEditorClient, dummyEditorClient, ());
+    pageClients.editorClient = &dummyEditorClient;
 
-    static SpellCheckerClient* dummySpellCheckerClient = adoptPtr(new EmptySpellCheckerClient).leakPtr();
-    pageClients.spellCheckerClient = dummySpellCheckerClient;
+    DEFINE_STATIC_LOCAL(EmptySpellCheckerClient, dummySpellCheckerClient, ());
+    pageClients.spellCheckerClient = &dummySpellCheckerClient;
 }
 
 class EmptyPopupMenu : public PopupMenu {
 public:
-    virtual void show(const FloatQuad&, const IntSize&, int) override { }
-    virtual void hide() override { }
-    virtual void updateFromElement() override { }
-    virtual void disconnectClient() override { }
+    void show(const FloatQuad&, const IntSize&, int) override { }
+    void hide() override { }
+    void updateFromElement() override { }
+    void disconnectClient() override { }
 };
 
-PassRefPtrWillBeRawPtr<PopupMenu> EmptyChromeClient::createPopupMenu(LocalFrame&, PopupMenuClient*)
+PassRefPtrWillBeRawPtr<PopupMenu> EmptyChromeClient::openPopupMenu(LocalFrame&, HTMLSelectElement&)
 {
     return adoptRefWillBeNoop(new EmptyPopupMenu());
 }
 
-PassOwnPtrWillBeRawPtr<ColorChooser> EmptyChromeClient::createColorChooser(LocalFrame*, ColorChooserClient*, const Color&)
+PassOwnPtrWillBeRawPtr<ColorChooser> EmptyChromeClient::openColorChooser(LocalFrame*, ColorChooserClient*, const Color&)
 {
     return nullptr;
 }
@@ -87,7 +88,7 @@ void EmptyChromeClient::openTextDataListChooser(HTMLInputElement&)
 {
 }
 
-void EmptyChromeClient::runOpenPanel(LocalFrame*, PassRefPtr<FileChooser>)
+void EmptyChromeClient::openFileChooser(LocalFrame*, PassRefPtr<FileChooser>)
 {
 }
 
@@ -96,7 +97,7 @@ String EmptyChromeClient::acceptLanguages()
     return String();
 }
 
-NavigationPolicy EmptyFrameLoaderClient::decidePolicyForNavigation(const ResourceRequest&, DocumentLoader*, NavigationPolicy, bool isTransitionNavigation)
+NavigationPolicy EmptyFrameLoaderClient::decidePolicyForNavigation(const ResourceRequest&, DocumentLoader*, NavigationPolicy)
 {
     return NavigationPolicyIgnore;
 }
@@ -109,7 +110,7 @@ void EmptyFrameLoaderClient::dispatchWillSubmitForm(HTMLFormElement*)
 {
 }
 
-PassRefPtr<DocumentLoader> EmptyFrameLoaderClient::createDocumentLoader(LocalFrame* frame, const ResourceRequest& request, const SubstituteData& substituteData)
+PassRefPtrWillBeRawPtr<DocumentLoader> EmptyFrameLoaderClient::createDocumentLoader(LocalFrame* frame, const ResourceRequest& request, const SubstituteData& substituteData)
 {
     return DocumentLoader::create(frame, request, substituteData);
 }
@@ -134,12 +135,22 @@ PassRefPtrWillBeRawPtr<Widget> EmptyFrameLoaderClient::createJavaAppletWidget(HT
     return nullptr;
 }
 
+PassOwnPtr<WebMediaPlayer> EmptyFrameLoaderClient::createWebMediaPlayer(HTMLMediaElement&, const WebURL&, WebMediaPlayerClient*)
+{
+    return nullptr;
+}
+
 void EmptyTextCheckerClient::requestCheckingOfString(PassRefPtrWillBeRawPtr<TextCheckingRequest>)
 {
 }
 
 void EmptyFrameLoaderClient::didRequestAutocomplete(HTMLFormElement*)
 {
+}
+
+v8::Local<v8::Value> EmptyFrameLoaderClient::createTestInterface(const AtomicString& name)
+{
+    return v8::Local<v8::Value>();
 }
 
 PassOwnPtr<WebServiceWorkerProvider> EmptyFrameLoaderClient::createServiceWorkerProvider()

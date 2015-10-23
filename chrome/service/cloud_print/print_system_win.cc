@@ -9,6 +9,7 @@
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/win/object_watcher.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
@@ -34,8 +35,7 @@ namespace {
 class PrintSystemWatcherWin : public base::win::ObjectWatcher::Delegate {
  public:
   PrintSystemWatcherWin()
-      : delegate_(NULL),
-        did_signal_(false) {
+      : delegate_(NULL) {
   }
   ~PrintSystemWatcherWin() override { Stop(); }
 
@@ -120,7 +120,6 @@ class PrintSystemWatcherWin : public base::win::ObjectWatcher::Delegate {
   // Returned by FindFirstPrinterChangeNotifier.
   printing::ScopedPrinterChangeHandle printer_change_;
   Delegate* delegate_;           // Delegate to notify
-  bool did_signal_;              // DoneWaiting was called
   std::string printer_info_;     // For crash reporting.
 };
 
@@ -410,26 +409,22 @@ class JobSpoolerWin : public PrintSystem::JobSpooler {
       int dc_width = GetDeviceCaps(printer_dc_.Get(), PHYSICALWIDTH);
       int dc_height = GetDeviceCaps(printer_dc_.Get(), PHYSICALHEIGHT);
       gfx::Rect render_area(0, 0, dc_width, dc_height);
-      g_service_process->io_thread()->message_loop_proxy()->PostTask(
+      g_service_process->io_task_runner()->PostTask(
           FROM_HERE,
-          base::Bind(&JobSpoolerWin::Core::RenderPDFPagesInSandbox,
-                     this,
-                     print_data_file_path_,
-                     render_area,
-                     printer_dpi,
-                     base::MessageLoopProxy::current()));
+          base::Bind(&JobSpoolerWin::Core::RenderPDFPagesInSandbox, this,
+                     print_data_file_path_, render_area, printer_dpi,
+                     base::ThreadTaskRunnerHandle::Get()));
     }
 
     // Called on the service process IO thread.
-    void RenderPDFPagesInSandbox(const base::FilePath& pdf_path,
-                                 const gfx::Rect& render_area,
-                                 int render_dpi,
-                                 const scoped_refptr<base::MessageLoopProxy>&
-                                     client_message_loop_proxy) {
-      DCHECK(g_service_process->io_thread()->message_loop_proxy()->
-          BelongsToCurrentThread());
+    void RenderPDFPagesInSandbox(
+        const base::FilePath& pdf_path,
+        const gfx::Rect& render_area,
+        int render_dpi,
+        const scoped_refptr<base::SingleThreadTaskRunner>& client_task_runner) {
+      DCHECK(g_service_process->io_task_runner()->BelongsToCurrentThread());
       scoped_ptr<ServiceUtilityProcessHost> utility_host(
-          new ServiceUtilityProcessHost(this, client_message_loop_proxy.get()));
+          new ServiceUtilityProcessHost(this, client_task_runner.get()));
       // TODO(gene): For now we disabling autorotation for CloudPrinting.
       // Landscape/Portrait setting is passed in the print ticket and
       // server is generating portrait PDF always.
@@ -441,7 +436,7 @@ class JobSpoolerWin : public PrintSystem::JobSpooler {
         // The object will self-destruct when the child process dies.
         utility_host.release();
       } else {
-        client_message_loop_proxy->PostTask(
+        client_task_runner->PostTask(
             FROM_HERE, base::Bind(&Core::PrintJobDone, this, false));
       }
     }
@@ -545,7 +540,7 @@ class PrinterCapsHandler : public ServiceUtilityProcessHost::Client {
           PrinterSemanticCapsAndDefaultsToCdd(semantic_info));
       if (description) {
         base::JSONWriter::WriteWithOptions(
-            description.get(), base::JSONWriter::OPTIONS_PRETTY_PRINT,
+            *description, base::JSONWriter::OPTIONS_PRETTY_PRINT,
             &printer_info.printer_capabilities);
       }
     }
@@ -555,53 +550,47 @@ class PrinterCapsHandler : public ServiceUtilityProcessHost::Client {
   }
 
   void StartGetPrinterCapsAndDefaults() {
-    g_service_process->io_thread()->message_loop_proxy()->PostTask(
+    g_service_process->io_task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&PrinterCapsHandler::GetPrinterCapsAndDefaultsImpl, this,
-                    base::MessageLoopProxy::current()));
+                   base::ThreadTaskRunnerHandle::Get()));
   }
 
   void StartGetPrinterSemanticCapsAndDefaults() {
-    g_service_process->io_thread()->message_loop_proxy()->PostTask(
+    g_service_process->io_task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&PrinterCapsHandler::GetPrinterSemanticCapsAndDefaultsImpl,
-                   this, base::MessageLoopProxy::current()));
+                   this, base::ThreadTaskRunnerHandle::Get()));
   }
 
  private:
   ~PrinterCapsHandler() override {}
 
   void GetPrinterCapsAndDefaultsImpl(
-      const scoped_refptr<base::MessageLoopProxy>&
-          client_message_loop_proxy) {
-    DCHECK(g_service_process->io_thread()->message_loop_proxy()->
-        BelongsToCurrentThread());
+      const scoped_refptr<base::SingleThreadTaskRunner>& client_task_runner) {
+    DCHECK(g_service_process->io_task_runner()->BelongsToCurrentThread());
     scoped_ptr<ServiceUtilityProcessHost> utility_host(
-        new ServiceUtilityProcessHost(this, client_message_loop_proxy.get()));
+        new ServiceUtilityProcessHost(this, client_task_runner.get()));
     if (utility_host->StartGetPrinterCapsAndDefaults(printer_name_)) {
       // The object will self-destruct when the child process dies.
       utility_host.release();
     } else {
-      client_message_loop_proxy->PostTask(
-          FROM_HERE,
-          base::Bind(&PrinterCapsHandler::OnChildDied, this));
+      client_task_runner->PostTask(
+          FROM_HERE, base::Bind(&PrinterCapsHandler::OnChildDied, this));
     }
   }
 
   void GetPrinterSemanticCapsAndDefaultsImpl(
-      const scoped_refptr<base::MessageLoopProxy>&
-          client_message_loop_proxy) {
-    DCHECK(g_service_process->io_thread()->message_loop_proxy()->
-        BelongsToCurrentThread());
+      const scoped_refptr<base::SingleThreadTaskRunner>& client_task_runner) {
+    DCHECK(g_service_process->io_task_runner()->BelongsToCurrentThread());
     scoped_ptr<ServiceUtilityProcessHost> utility_host(
-        new ServiceUtilityProcessHost(this, client_message_loop_proxy.get()));
+        new ServiceUtilityProcessHost(this, client_task_runner.get()));
     if (utility_host->StartGetPrinterSemanticCapsAndDefaults(printer_name_)) {
       // The object will self-destruct when the child process dies.
       utility_host.release();
     } else {
-      client_message_loop_proxy->PostTask(
-          FROM_HERE,
-          base::Bind(&PrinterCapsHandler::OnChildDied, this));
+      client_task_runner->PostTask(
+          FROM_HERE, base::Bind(&PrinterCapsHandler::OnChildDied, this));
     }
   }
 
@@ -638,8 +627,7 @@ class PrintSystemWin : public PrintSystem {
  private:
   ~PrintSystemWin() override {}
 
-  std::string PrintSystemWin::GetPrinterDriverInfo(
-      const std::string& printer_name) const;
+  std::string GetPrinterDriverInfo(const std::string& printer_name) const;
 
   scoped_refptr<printing::PrintBackend> print_backend_;
   bool use_cdd_;
@@ -722,8 +710,8 @@ bool PrintSystemWin::ValidatePrintTicket(
                                print_ticket_data.length(),
                                &bytes_written);
     DCHECK(bytes_written == print_ticket_data.length());
-    LARGE_INTEGER pos = {0};
-    ULARGE_INTEGER new_pos = {0};
+    LARGE_INTEGER pos = {};
+    ULARGE_INTEGER new_pos = {};
     print_ticket_stream->Seek(pos, STREAM_SEEK_SET, &new_pos);
     base::win::ScopedBstr error;
     base::win::ScopedComPtr<IStream> result_ticket_stream;

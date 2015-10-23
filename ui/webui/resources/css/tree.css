@@ -24,9 +24,7 @@ tree {
 .expand-icon {
   -webkit-transform: rotate(-90deg);
   -webkit-transition: all 150ms;
-  background-image: -webkit-canvas(tree-triangle);
-  background-position: 50% 50%;
-  background-repeat: no-repeat;
+  background: url(../images/tree_triangle.svg) no-repeat center center;
   background-size: 8px 5px;
   display: inline-block;
   height: 16px;
@@ -43,7 +41,7 @@ html[dir=rtl] .expand-icon {
 
 .tree-item[expanded] > .tree-row > .expand-icon {
   -webkit-transform: rotate(0);
-  background-image: -webkit-canvas(tree-triangle);
+  background-image: url(../images/tree_triangle.svg);
   opacity: .5;
 }
 
@@ -122,8 +120,8 @@ html[dir=rtl] .tree-row[may-have-children] > .tree-label {
 
 html[dir=rtl] .tree-item[expanded] > .tree-row > .tree-label {
   background-image: -webkit-image-set(
-     url(../../../resources/default_100_percent/common/folder_open_rtl.png) 1x,
-     url(../../../resources/default_200_percent/common/folder_open_rtl.png) 2x);
+     url(../../../views/resources/default_100_percent/common/folder_open_rtl.png) 1x,
+     url(../../../views/resources/default_200_percent/common/folder_open_rtl.png) 2x);
 }
 
 tree[icon-visibility=hidden] .tree-label {
@@ -145,8 +143,8 @@ tree[icon-visibility=parent] .tree-row[has-children=false] > .tree-label {
 
 .tree-item[expanded] > .tree-row > .tree-label {
   background-image: -webkit-image-set(
-      url(../../../resources/default_100_percent/common/folder_open.png) 1x,
-      url(../../../resources/default_200_percent/common/folder_open.png) 2x);
+      url(../../../views/resources/default_100_percent/common/folder_open.png) 1x,
+      url(../../../views/resources/default_200_percent/common/folder_open.png) 2x);
 }
 
 /* We need to ensure that even empty labels take up space */

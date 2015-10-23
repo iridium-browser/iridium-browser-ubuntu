@@ -29,7 +29,6 @@
  */
 
 #include "config.h"
-
 #include "web/WebInputEventConversion.h"
 
 #include "core/dom/Touch.h"
@@ -51,9 +50,7 @@
 #include "web/tests/FrameTestHelpers.h"
 #include <gtest/gtest.h>
 
-using namespace blink;
-
-namespace {
+namespace blink {
 
 PassRefPtrWillBeRawPtr<KeyboardEvent> createKeyboardEventWithLocation(KeyboardEvent::KeyLocationCode location)
 {
@@ -219,7 +216,7 @@ TEST(WebInputEventConversionTest, WebTouchEventBuilder)
     {
         RefPtrWillBeRawPtr<TouchList> touchList = TouchList::create();
         RefPtrWillBeRawPtr<TouchList> changedTouchList = TouchList::create();
-        for (unsigned i = 0; i <= static_cast<unsigned>(WebTouchEvent::touchesLengthCap) * 2; ++i) {
+        for (int i = 0; i <= static_cast<int>(WebTouchEvent::touchesLengthCap) * 2; ++i) {
             RefPtrWillBeRawPtr<Touch> touch = Touch::create(toLocalFrame(webViewImpl->page()->mainFrame()), document.get(), i, p0.screenPosition, p0.position, FloatSize(p0.radiusX, p0.radiusY), p0.rotationAngle, p0.force);
             touchList->append(touch);
             changedTouchList->append(touch);
@@ -670,7 +667,7 @@ TEST(WebInputEventConversionTest, InputEventsConversions)
     }
 }
 
-TEST(WebInputEventConversionTest, PinchViewportOffset)
+TEST(WebInputEventConversionTest, VisualViewportOffset)
 {
     const std::string baseURL("http://www.test4.com/");
     const std::string fileName("fixed_layout.html");
@@ -685,8 +682,8 @@ TEST(WebInputEventConversionTest, PinchViewportOffset)
 
     webViewImpl->setPageScaleFactor(2);
 
-    IntPoint pinchOffset(35, 60);
-    webViewImpl->page()->frameHost().pinchViewport().setLocation(pinchOffset);
+    IntPoint visualOffset(35, 60);
+    webViewImpl->page()->frameHost().visualViewport().setLocation(visualOffset);
 
     FrameView* view = toLocalFrame(webViewImpl->page()->mainFrame())->view();
 
@@ -701,8 +698,8 @@ TEST(WebInputEventConversionTest, PinchViewportOffset)
         webMouseEvent.globalY = 10;
 
         PlatformMouseEventBuilder platformMouseBuilder(view, webMouseEvent);
-        EXPECT_EQ(5 + pinchOffset.x(), platformMouseBuilder.position().x());
-        EXPECT_EQ(5 + pinchOffset.y(), platformMouseBuilder.position().y());
+        EXPECT_EQ(5 + visualOffset.x(), platformMouseBuilder.position().x());
+        EXPECT_EQ(5 + visualOffset.y(), platformMouseBuilder.position().y());
         EXPECT_EQ(10, platformMouseBuilder.globalPosition().x());
         EXPECT_EQ(10, platformMouseBuilder.globalPosition().y());
     }
@@ -718,8 +715,8 @@ TEST(WebInputEventConversionTest, PinchViewportOffset)
         webMouseWheelEvent.globalY = 10;
 
         PlatformWheelEventBuilder platformWheelBuilder(view, webMouseWheelEvent);
-        EXPECT_EQ(5 + pinchOffset.x(), platformWheelBuilder.position().x());
-        EXPECT_EQ(5 + pinchOffset.y(), platformWheelBuilder.position().y());
+        EXPECT_EQ(5 + visualOffset.x(), platformWheelBuilder.position().x());
+        EXPECT_EQ(5 + visualOffset.y(), platformWheelBuilder.position().y());
         EXPECT_EQ(10, platformWheelBuilder.globalPosition().x());
         EXPECT_EQ(10, platformWheelBuilder.globalPosition().y());
     }
@@ -733,8 +730,8 @@ TEST(WebInputEventConversionTest, PinchViewportOffset)
         webGestureEvent.globalY = 10;
 
         PlatformGestureEventBuilder platformGestureBuilder(view, webGestureEvent);
-        EXPECT_EQ(5 + pinchOffset.x(), platformGestureBuilder.position().x());
-        EXPECT_EQ(5 + pinchOffset.y(), platformGestureBuilder.position().y());
+        EXPECT_EQ(5 + visualOffset.x(), platformGestureBuilder.position().x());
+        EXPECT_EQ(5 + visualOffset.y(), platformGestureBuilder.position().y());
         EXPECT_EQ(10, platformGestureBuilder.globalPosition().x());
         EXPECT_EQ(10, platformGestureBuilder.globalPosition().y());
     }
@@ -757,8 +754,8 @@ TEST(WebInputEventConversionTest, PinchViewportOffset)
         PlatformTouchEventBuilder platformTouchBuilder(view, webTouchEvent);
         EXPECT_FLOAT_EQ(10.6f, platformTouchBuilder.touchPoints()[0].screenPos().x());
         EXPECT_FLOAT_EQ(10.4f, platformTouchBuilder.touchPoints()[0].screenPos().y());
-        EXPECT_FLOAT_EQ(5.3f + pinchOffset.x(), platformTouchBuilder.touchPoints()[0].pos().x());
-        EXPECT_FLOAT_EQ(5.2f + pinchOffset.y(), platformTouchBuilder.touchPoints()[0].pos().y());
+        EXPECT_FLOAT_EQ(5.3f + visualOffset.x(), platformTouchBuilder.touchPoints()[0].pos().x());
+        EXPECT_FLOAT_EQ(5.2f + visualOffset.y(), platformTouchBuilder.touchPoints()[0].pos().y());
     }
 }
 
@@ -778,7 +775,7 @@ TEST(WebInputEventConversionTest, ElasticOverscroll)
     FrameView* view = toLocalFrame(webViewImpl->page()->mainFrame())->view();
 
     FloatSize elasticOverscroll(10, -20);
-    view->setElasticOverscroll(elasticOverscroll);
+    webViewImpl->applyViewportDeltas(WebFloatSize(), WebFloatSize(), elasticOverscroll, 1.0f, 0.0f);
 
     // Just elastic overscroll.
     {
@@ -803,8 +800,8 @@ TEST(WebInputEventConversionTest, ElasticOverscroll)
     // pinch-zoom).
     float pageScale = 2;
     webViewImpl->setPageScaleFactor(pageScale);
-    IntPoint pinchOffset(35, 60);
-    webViewImpl->page()->frameHost().pinchViewport().setLocation(pinchOffset);
+    IntPoint visualOffset(35, 60);
+    webViewImpl->page()->frameHost().visualViewport().setLocation(visualOffset);
     {
         WebMouseEvent webMouseEvent;
         webMouseEvent.type = WebInputEvent::MouseMove;
@@ -816,8 +813,46 @@ TEST(WebInputEventConversionTest, ElasticOverscroll)
         webMouseEvent.globalY = 10;
 
         PlatformMouseEventBuilder platformMouseBuilder(view, webMouseEvent);
-        EXPECT_EQ(webMouseEvent.x / pageScale + pinchOffset.x() + elasticOverscroll.width(), platformMouseBuilder.position().x());
-        EXPECT_EQ(webMouseEvent.y / pageScale + pinchOffset.y() + elasticOverscroll.height(), platformMouseBuilder.position().y());
+        EXPECT_EQ(webMouseEvent.x / pageScale + visualOffset.x() + elasticOverscroll.width(), platformMouseBuilder.position().x());
+        EXPECT_EQ(webMouseEvent.y / pageScale + visualOffset.y() + elasticOverscroll.height(), platformMouseBuilder.position().y());
+        EXPECT_EQ(webMouseEvent.globalX, platformMouseBuilder.globalPosition().x());
+        EXPECT_EQ(webMouseEvent.globalY, platformMouseBuilder.globalPosition().y());
+    }
+}
+
+// Page reload/navigation should not reset elastic overscroll.
+TEST(WebInputEventConversionTest, ElasticOverscrollWithPageReload)
+{
+    const std::string baseURL("http://www.test5.com/");
+    const std::string fileName("fixed_layout.html");
+
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(baseURL.c_str()), WebString::fromUTF8("fixed_layout.html"));
+    FrameTestHelpers::WebViewHelper webViewHelper;
+    WebViewImpl* webViewImpl = webViewHelper.initializeAndLoad(baseURL + fileName, true);
+    int pageWidth = 640;
+    int pageHeight = 480;
+    webViewImpl->resize(WebSize(pageWidth, pageHeight));
+    webViewImpl->layout();
+
+    FloatSize elasticOverscroll(10, -20);
+    webViewImpl->applyViewportDeltas(WebFloatSize(), WebFloatSize(), elasticOverscroll, 1.0f, 0.0f);
+    FrameTestHelpers::reloadFrame(webViewHelper.webView()->mainFrame());
+    FrameView* view = toLocalFrame(webViewImpl->page()->mainFrame())->view();
+
+    // Just elastic overscroll.
+    {
+        WebMouseEvent webMouseEvent;
+        webMouseEvent.type = WebInputEvent::MouseMove;
+        webMouseEvent.x = 10;
+        webMouseEvent.y = 50;
+        webMouseEvent.windowX = 10;
+        webMouseEvent.windowY = 50;
+        webMouseEvent.globalX = 10;
+        webMouseEvent.globalY = 50;
+
+        PlatformMouseEventBuilder platformMouseBuilder(view, webMouseEvent);
+        EXPECT_EQ(webMouseEvent.x + elasticOverscroll.width(), platformMouseBuilder.position().x());
+        EXPECT_EQ(webMouseEvent.y + elasticOverscroll.height(), platformMouseBuilder.position().y());
         EXPECT_EQ(webMouseEvent.globalX, platformMouseBuilder.globalPosition().x());
         EXPECT_EQ(webMouseEvent.globalY, platformMouseBuilder.globalPosition().y());
     }
@@ -940,4 +975,4 @@ TEST(WebInputEventConversionTest, PlatformWheelEventBuilder)
     }
 }
 
-} // anonymous namespace
+} // namespace blink

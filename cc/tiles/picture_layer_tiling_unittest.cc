@@ -14,6 +14,7 @@
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/tiles/picture_layer_tiling.h"
 #include "cc/tiles/picture_layer_tiling_set.h"
+#include "cc/trees/layer_tree_settings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/rect_conversions.h"
@@ -48,7 +49,7 @@ class TestablePictureLayerTiling : public PictureLayerTiling {
       const LayerTreeSettings& settings) {
     return make_scoped_ptr(new TestablePictureLayerTiling(
         tree, contents_scale, raster_source, client,
-        settings.max_tiles_for_interest_area,
+        settings.tiling_interest_area_padding,
         settings.skewport_target_time_in_seconds,
         settings.skewport_extrapolation_limit_in_content_pixels));
   }
@@ -63,14 +64,14 @@ class TestablePictureLayerTiling : public PictureLayerTiling {
                              float contents_scale,
                              scoped_refptr<RasterSource> raster_source,
                              PictureLayerTilingClient* client,
-                             size_t max_tiles_for_interest_area,
+                             size_t tiling_interest_area_padding,
                              float skewport_target_time,
                              int skewport_extrapolation_limit)
       : PictureLayerTiling(tree,
                            contents_scale,
                            raster_source,
                            client,
-                           max_tiles_for_interest_area,
+                           tiling_interest_area_padding,
                            skewport_target_time,
                            skewport_extrapolation_limit) {}
 };
@@ -88,6 +89,7 @@ class PictureLayerTilingIteratorTest : public testing::Test {
         FakePicturePileImpl::CreateFilledPileWithDefaultTileSize(layer_bounds);
     tiling_ = TestablePictureLayerTiling::Create(
         PENDING_TREE, contents_scale, pile, &client_, LayerTreeSettings());
+    tiling_->set_resolution(HIGH_RESOLUTION);
   }
 
   void InitializeActive(const gfx::Size& tile_size,
@@ -98,6 +100,7 @@ class PictureLayerTilingIteratorTest : public testing::Test {
         FakePicturePileImpl::CreateFilledPileWithDefaultTileSize(layer_bounds);
     tiling_ = TestablePictureLayerTiling::Create(
         ACTIVE_TREE, contents_scale, pile, &client_, LayerTreeSettings());
+    tiling_->set_resolution(HIGH_RESOLUTION);
   }
 
   void SetLiveRectAndVerifyTiles(const gfx::Rect& live_tiles_rect) {
@@ -549,7 +552,6 @@ TEST(PictureLayerTilingTest, SkewportLimits) {
 
   client.SetTileSize(gfx::Size(100, 100));
   LayerTreeSettings settings;
-  settings.max_tiles_for_interest_area = 10000;
   settings.skewport_extrapolation_limit_in_content_pixels = 75;
 
   scoped_refptr<FakePicturePileImpl> pile =
@@ -792,7 +794,6 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
 
   client.SetTileSize(gfx::Size(10, 10));
   LayerTreeSettings settings;
-  settings.max_tiles_for_interest_area = 10000;
 
   // Tiling at 0.25 scale: this should create 47x47 tiles of size 10x10.
   // The reason is that each tile has a one pixel border, so tile at (1, 2)
@@ -804,6 +805,7 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
   scoped_ptr<TestablePictureLayerTiling> tiling =
       TestablePictureLayerTiling::Create(ACTIVE_TREE, 0.25f, pile, &client,
                                          settings);
+  tiling->set_resolution(HIGH_RESOLUTION);
   gfx::Rect viewport_in_content_space =
       gfx::ToEnclosedRect(gfx::ScaleRect(viewport, 0.25f));
 
@@ -962,6 +964,7 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
   // Test additional scales.
   tiling = TestablePictureLayerTiling::Create(ACTIVE_TREE, 0.2f, pile, &client,
                                               LayerTreeSettings());
+  tiling->set_resolution(HIGH_RESOLUTION);
   tiling->ComputeTilePriorityRects(viewport, 1.0f, 4.0, Occlusion());
   prioritized_tiles = tiling->UpdateAndGetAllPrioritizedTilesForTesting();
 
@@ -985,228 +988,6 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
 
   priority = prioritized_tiles[tiling->TileAt(3, 4)].priority();
   EXPECT_FLOAT_EQ(30.f, priority.distance_to_visible);
-}
-
-TEST(PictureLayerTilingTest, ExpandRectEqual) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(-1000, -1000, 10000, 10000);
-  int64 target_area = 100 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(in.ToString(), out.ToString());
-}
-
-TEST(PictureLayerTilingTest, ExpandRectSmaller) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(-1000, -1000, 10000, 10000);
-  int64 target_area = 100 * 100;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(out.bottom() - in.bottom(), in.y() - out.y());
-  EXPECT_EQ(out.right() - in.right(), in.x() - out.x());
-  EXPECT_EQ(out.width() - in.width(), out.height() - in.height());
-
-  // |in| represents the visible rect, and |out| represents the eventually rect.
-  // If the eventually rect doesn't contain the visible rect, we will start
-  // losing tiles.
-  EXPECT_TRUE(out.Contains(in));
-  EXPECT_TRUE(bounds.Contains(out));
-}
-
-TEST(PictureLayerTilingTest, ExpandRectUnbounded) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(-1000, -1000, 10000, 10000);
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(out.bottom() - in.bottom(), in.y() - out.y());
-  EXPECT_EQ(out.right() - in.right(), in.x() - out.x());
-  EXPECT_EQ(out.width() - in.width(), out.height() - in.height());
-  EXPECT_NEAR(200 * 200, out.width() * out.height(), 100);
-  EXPECT_TRUE(bounds.Contains(out));
-}
-
-TEST(PictureLayerTilingTest, ExpandRectBoundedSmaller) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(50, 60, 40, 30);
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(bounds.ToString(), out.ToString());
-}
-
-TEST(PictureLayerTilingTest, ExpandRectBoundedEqual) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds = in;
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(bounds.ToString(), out.ToString());
-}
-
-TEST(PictureLayerTilingTest, ExpandRectBoundedSmallerStretchVertical) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(45, 0, 90, 300);
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(bounds.ToString(), out.ToString());
-}
-
-TEST(PictureLayerTilingTest, ExpandRectBoundedEqualStretchVertical) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(40, 0, 100, 300);
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(bounds.ToString(), out.ToString());
-}
-
-TEST(PictureLayerTilingTest, ExpandRectBoundedSmallerStretchHorizontal) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(0, 55, 180, 190);
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(bounds.ToString(), out.ToString());
-}
-
-TEST(PictureLayerTilingTest, ExpandRectBoundedEqualStretchHorizontal) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(0, 50, 180, 200);
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(bounds.ToString(), out.ToString());
-}
-
-TEST(PictureLayerTilingTest, ExpandRectBoundedLeft) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(20, -1000, 10000, 10000);
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(out.bottom() - in.bottom(), in.y() - out.y());
-  EXPECT_EQ(out.bottom() - in.bottom(), out.right() - in.right());
-  EXPECT_LE(out.width() * out.height(), target_area);
-  EXPECT_GT(out.width() * out.height(),
-            target_area - out.width() - out.height() * 2);
-  EXPECT_TRUE(bounds.Contains(out));
-}
-
-TEST(PictureLayerTilingTest, ExpandRectBoundedRight) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(-1000, -1000, 1000+120, 10000);
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(out.bottom() - in.bottom(), in.y() - out.y());
-  EXPECT_EQ(out.bottom() - in.bottom(), in.x() - out.x());
-  EXPECT_LE(out.width() * out.height(), target_area);
-  EXPECT_GT(out.width() * out.height(),
-            target_area - out.width() - out.height() * 2);
-  EXPECT_TRUE(bounds.Contains(out));
-}
-
-TEST(PictureLayerTilingTest, ExpandRectBoundedTop) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(-1000, 30, 10000, 10000);
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(out.right() - in.right(), in.x() - out.x());
-  EXPECT_EQ(out.right() - in.right(), out.bottom() - in.bottom());
-  EXPECT_LE(out.width() * out.height(), target_area);
-  EXPECT_GT(out.width() * out.height(),
-            target_area - out.width() * 2 - out.height());
-  EXPECT_TRUE(bounds.Contains(out));
-}
-
-TEST(PictureLayerTilingTest, ExpandRectBoundedBottom) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(-1000, -1000, 10000, 1000 + 220);
-  int64 target_area = 200 * 200;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(out.right() - in.right(), in.x() - out.x());
-  EXPECT_EQ(out.right() - in.right(), in.y() - out.y());
-  EXPECT_LE(out.width() * out.height(), target_area);
-  EXPECT_GT(out.width() * out.height(),
-            target_area - out.width() * 2 - out.height());
-  EXPECT_TRUE(bounds.Contains(out));
-}
-
-TEST(PictureLayerTilingTest, ExpandRectSquishedHorizontally) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(0, -4000, 100+40+20, 100000);
-  int64 target_area = 400 * 400;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(20, out.right() - in.right());
-  EXPECT_EQ(40, in.x() - out.x());
-  EXPECT_EQ(out.bottom() - in.bottom(), in.y() - out.y());
-  EXPECT_LE(out.width() * out.height(), target_area);
-  EXPECT_GT(out.width() * out.height(),
-            target_area - out.width() * 2);
-  EXPECT_TRUE(bounds.Contains(out));
-}
-
-TEST(PictureLayerTilingTest, ExpandRectSquishedVertically) {
-  gfx::Rect in(40, 50, 100, 200);
-  gfx::Rect bounds(-4000, 0, 100000, 200+50+30);
-  int64 target_area = 400 * 400;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(30, out.bottom() - in.bottom());
-  EXPECT_EQ(50, in.y() - out.y());
-  EXPECT_EQ(out.right() - in.right(), in.x() - out.x());
-  EXPECT_LE(out.width() * out.height(), target_area);
-  EXPECT_GT(out.width() * out.height(),
-            target_area - out.height() * 2);
-  EXPECT_TRUE(bounds.Contains(out));
-}
-
-TEST(PictureLayerTilingTest, ExpandRectOutOfBoundsFarAway) {
-  gfx::Rect in(400, 500, 100, 200);
-  gfx::Rect bounds(0, 0, 10, 10);
-  int64 target_area = 400 * 400;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_TRUE(out.IsEmpty());
-}
-
-TEST(PictureLayerTilingTest, ExpandRectOutOfBoundsExpandedFullyCover) {
-  gfx::Rect in(40, 50, 100, 100);
-  gfx::Rect bounds(0, 0, 10, 10);
-  int64 target_area = 400 * 400;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(bounds.ToString(), out.ToString());
-}
-
-TEST(PictureLayerTilingTest, ExpandRectOutOfBoundsExpandedPartlyCover) {
-  gfx::Rect in(600, 600, 100, 100);
-  gfx::Rect bounds(0, 0, 500, 500);
-  int64 target_area = 400 * 400;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_EQ(bounds.right(), out.right());
-  EXPECT_EQ(bounds.bottom(), out.bottom());
-  EXPECT_LE(out.width() * out.height(), target_area);
-  EXPECT_GT(out.width() * out.height(),
-            target_area - out.width() - out.height());
-  EXPECT_TRUE(bounds.Contains(out));
-}
-
-TEST(PictureLayerTilingTest, EmptyStartingRect) {
-  // If a layer has a non-invertible transform, then the starting rect
-  // for the layer would be empty.
-  gfx::Rect in(40, 40, 0, 0);
-  gfx::Rect bounds(0, 0, 10, 10);
-  int64 target_area = 400 * 400;
-  gfx::Rect out = PictureLayerTiling::ExpandRectEquallyToAreaBoundedBy(
-      in, target_area, bounds, NULL);
-  EXPECT_TRUE(out.IsEmpty());
 }
 
 static void TileExists(bool exists, Tile* tile,
@@ -1292,12 +1073,13 @@ TEST_F(PictureLayerTilingIteratorTest,
   gfx::Size layer_bounds(10000, 10000);
   client_.SetTileSize(gfx::Size(100, 100));
   LayerTreeSettings settings;
-  settings.max_tiles_for_interest_area = 1;
+  settings.tiling_interest_area_padding = 1;
 
   scoped_refptr<FakePicturePileImpl> pile =
       FakePicturePileImpl::CreateFilledPileWithDefaultTileSize(layer_bounds);
   tiling_ = TestablePictureLayerTiling::Create(PENDING_TREE, 1.f, pile,
                                                &client_, settings);
+  tiling_->set_resolution(HIGH_RESOLUTION);
   VerifyTilesExactlyCoverRect(1.f, gfx::Rect(layer_bounds));
   VerifyTiles(1.f, gfx::Rect(layer_bounds), base::Bind(&TileExists, false));
 
@@ -1335,6 +1117,7 @@ TEST(ComputeTilePriorityRectsTest, VisibleTiles) {
   scoped_ptr<TestablePictureLayerTiling> tiling =
       TestablePictureLayerTiling::Create(ACTIVE_TREE, 1.0f, pile, &client,
                                          LayerTreeSettings());
+  tiling->set_resolution(HIGH_RESOLUTION);
 
   tiling->ComputeTilePriorityRects(viewport_in_layer_space,
                                    current_layer_contents_scale,
@@ -1390,6 +1173,7 @@ TEST(ComputeTilePriorityRectsTest, OffscreenTiles) {
   scoped_ptr<TestablePictureLayerTiling> tiling =
       TestablePictureLayerTiling::Create(ACTIVE_TREE, 1.0f, pile, &client,
                                          LayerTreeSettings());
+  tiling->set_resolution(HIGH_RESOLUTION);
 
   tiling->ComputeTilePriorityRects(viewport_in_layer_space,
                                    current_layer_contents_scale,
@@ -1455,6 +1239,7 @@ TEST(ComputeTilePriorityRectsTest, PartiallyOffscreenLayer) {
   scoped_ptr<TestablePictureLayerTiling> tiling =
       TestablePictureLayerTiling::Create(ACTIVE_TREE, 1.0f, pile, &client,
                                          LayerTreeSettings());
+  tiling->set_resolution(HIGH_RESOLUTION);
 
   tiling->ComputeTilePriorityRects(viewport_in_layer_space,
                                    current_layer_contents_scale,
@@ -1514,6 +1299,7 @@ TEST(ComputeTilePriorityRectsTest, PartiallyOffscreenRotatedLayer) {
   scoped_ptr<TestablePictureLayerTiling> tiling =
       TestablePictureLayerTiling::Create(ACTIVE_TREE, 1.0f, pile, &client,
                                          LayerTreeSettings());
+  tiling->set_resolution(HIGH_RESOLUTION);
 
   tiling->ComputeTilePriorityRects(viewport_in_layer_space,
                                    current_layer_contents_scale,
@@ -1598,6 +1384,7 @@ TEST(ComputeTilePriorityRectsTest, PerspectiveLayer) {
   scoped_ptr<TestablePictureLayerTiling> tiling =
       TestablePictureLayerTiling::Create(ACTIVE_TREE, 1.0f, pile, &client,
                                          LayerTreeSettings());
+  tiling->set_resolution(HIGH_RESOLUTION);
 
   tiling->ComputeTilePriorityRects(viewport_in_layer_space,
                                    current_layer_contents_scale,
@@ -1692,6 +1479,7 @@ TEST(ComputeTilePriorityRectsTest, PerspectiveLayerClippedByW) {
   scoped_ptr<TestablePictureLayerTiling> tiling =
       TestablePictureLayerTiling::Create(ACTIVE_TREE, 1.0f, pile, &client,
                                          LayerTreeSettings());
+  tiling->set_resolution(HIGH_RESOLUTION);
 
   tiling->ComputeTilePriorityRects(viewport_in_layer_space,
                                    current_layer_contents_scale,
@@ -1749,7 +1537,6 @@ TEST(ComputeTilePriorityRectsTest, BasicMotion) {
 
   client.SetTileSize(gfx::Size(100, 100));
   LayerTreeSettings settings;
-  settings.max_tiles_for_interest_area = 10000;
 
   scoped_refptr<FakePicturePileImpl> pile =
       FakePicturePileImpl::CreateFilledPileWithDefaultTileSize(
@@ -1757,6 +1544,7 @@ TEST(ComputeTilePriorityRectsTest, BasicMotion) {
   scoped_ptr<TestablePictureLayerTiling> tiling =
       TestablePictureLayerTiling::Create(ACTIVE_TREE, 1.0f, pile, &client,
                                          settings);
+  tiling->set_resolution(HIGH_RESOLUTION);
 
   // previous ("last") frame
   tiling->ComputeTilePriorityRects(viewport_in_layer_space,
@@ -1834,6 +1622,7 @@ TEST(ComputeTilePriorityRectsTest, RotationMotion) {
           current_layer_bounds);
   tiling = TestablePictureLayerTiling::Create(ACTIVE_TREE, 1.0f, pile, &client,
                                               LayerTreeSettings());
+  tiling->set_resolution(HIGH_RESOLUTION);
 
   // previous ("last") frame
   tiling->ComputeTilePriorityRects(viewport_in_layer_space,
@@ -1879,7 +1668,6 @@ TEST(PictureLayerTilingTest, RecycledTilesCleared) {
 
   active_client.SetTileSize(gfx::Size(100, 100));
   LayerTreeSettings settings;
-  settings.max_tiles_for_interest_area = 10;
 
   scoped_refptr<FakePicturePileImpl> pile =
       FakePicturePileImpl::CreateFilledPileWithDefaultTileSize(
@@ -1887,6 +1675,7 @@ TEST(PictureLayerTilingTest, RecycledTilesCleared) {
   scoped_ptr<TestablePictureLayerTiling> active_tiling =
       TestablePictureLayerTiling::Create(ACTIVE_TREE, 1.0f, pile,
                                          &active_client, settings);
+  active_tiling->set_resolution(HIGH_RESOLUTION);
   // Create all tiles on this tiling.
   active_tiling->ComputeTilePriorityRects(gfx::Rect(0, 0, 100, 100), 1.0f, 1.0f,
                                           Occlusion());
@@ -1900,6 +1689,7 @@ TEST(PictureLayerTilingTest, RecycledTilesCleared) {
   scoped_ptr<TestablePictureLayerTiling> recycle_tiling =
       TestablePictureLayerTiling::Create(PENDING_TREE, 1.0f, pile,
                                          &recycle_client, settings);
+  recycle_tiling->set_resolution(HIGH_RESOLUTION);
 
   // Create all tiles on the second tiling. All tiles should be shared.
   recycle_tiling->ComputeTilePriorityRects(gfx::Rect(0, 0, 100, 100), 1.0f,
@@ -1938,6 +1728,7 @@ TEST(PictureLayerTilingTest, RecycledTilesClearedOnReset) {
   scoped_ptr<TestablePictureLayerTiling> active_tiling =
       TestablePictureLayerTiling::Create(ACTIVE_TREE, 1.0f, pile,
                                          &active_client, LayerTreeSettings());
+  active_tiling->set_resolution(HIGH_RESOLUTION);
   // Create all tiles on this tiling.
   active_tiling->ComputeTilePriorityRects(gfx::Rect(0, 0, 100, 100), 1.0f, 1.0f,
                                           Occlusion());
@@ -1947,13 +1738,13 @@ TEST(PictureLayerTilingTest, RecycledTilesClearedOnReset) {
   recycle_client.set_twin_tiling(active_tiling.get());
 
   LayerTreeSettings settings;
-  settings.max_tiles_for_interest_area = 10;
 
   pile = FakePicturePileImpl::CreateFilledPileWithDefaultTileSize(
       gfx::Size(100, 100));
   scoped_ptr<TestablePictureLayerTiling> recycle_tiling =
       TestablePictureLayerTiling::Create(PENDING_TREE, 1.0f, pile,
                                          &recycle_client, settings);
+  recycle_tiling->set_resolution(HIGH_RESOLUTION);
 
   // Create all tiles on the recycle tiling. All tiles should be shared.
   recycle_tiling->ComputeTilePriorityRects(gfx::Rect(0, 0, 100, 100), 1.0f,
@@ -1996,6 +1787,23 @@ TEST_F(PictureLayerTilingIteratorTest, ResizeTilesAndUpdateToCurrent) {
   EXPECT_EQ(250, tiling_->TilingDataForTesting().max_texture_size().width());
   EXPECT_EQ(200, tiling_->TilingDataForTesting().max_texture_size().height());
   EXPECT_EQ(0u, tiling_->AllTilesForTesting().size());
+}
+
+// This test runs into floating point issues because of big numbers.
+TEST_F(PictureLayerTilingIteratorTest, GiantRect) {
+  gfx::Size tile_size(256, 256);
+  gfx::Size layer_size(33554432, 33554432);
+  bool filled = false;
+  float contents_scale = 1.f;
+
+  client_.SetTileSize(tile_size);
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreatePile(tile_size, layer_size, filled);
+  tiling_ = TestablePictureLayerTiling::Create(
+      PENDING_TREE, contents_scale, pile, &client_, LayerTreeSettings());
+
+  gfx::Rect content_rect(25554432, 25554432, 950, 860);
+  VerifyTilesExactlyCoverRect(contents_scale, content_rect);
 }
 
 }  // namespace

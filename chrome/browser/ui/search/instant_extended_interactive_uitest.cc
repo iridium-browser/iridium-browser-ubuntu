@@ -15,7 +15,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -32,7 +31,6 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/search/instant_tab.h"
 #include "chrome/browser/ui/search/instant_test_utils.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
@@ -51,11 +49,14 @@
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/history/core/common/thumbnail_score.h"
-#include "components/omnibox/autocomplete_match.h"
-#include "components/omnibox/autocomplete_provider.h"
-#include "components/omnibox/autocomplete_result.h"
-#include "components/omnibox/omnibox_field_trial.h"
-#include "components/omnibox/search_provider.h"
+#include "components/omnibox/browser/autocomplete_controller.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_provider.h"
+#include "components/omnibox/browser/autocomplete_result.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
+#include "components/omnibox/browser/omnibox_view.h"
+#include "components/omnibox/browser/search_provider.h"
+#include "components/search/search.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/sessions/serialized_navigation_entry.h"
 #include "content/public/browser/navigation_controller.h"
@@ -140,7 +141,7 @@ class InstantExtendedTest : public InProcessBrowserTest,
   }
  protected:
   void SetUpInProcessBrowserTestFixture() override {
-    chrome::EnableQueryExtractionForTesting();
+    search::EnableQueryExtractionForTesting();
     ASSERT_TRUE(https_test_server().Start());
     GURL instant_url = https_test_server().GetURL(
         "files/instant_extended.html?strk=1&");
@@ -255,7 +256,7 @@ class InstantExtendedPrefetchTest : public InstantExtendedTest {
   }
 
   void SetUpInProcessBrowserTestFixture() override {
-    chrome::EnableQueryExtractionForTesting();
+    search::EnableQueryExtractionForTesting();
     ASSERT_TRUE(https_test_server().Start());
     GURL instant_url = https_test_server().GetURL(
         "files/instant_extended.html?strk=1&");
@@ -429,7 +430,15 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
   ASSERT_THAT(active_tab->GetURL().spec(), HasSubstr("q=puppies"));
 }
 
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest, OmniboxMarginSetForSearchURLs) {
+#if defined(OS_LINUX) && defined(ADDRESS_SANITIZER)
+// Flaky crashes at shutdown on Linux Asan; http://crbug.com/517886.
+#define MAYBE_OmniboxMarginSetForSearchURLs \
+  DISABLED_OmniboxMarginSetForSearchURLs
+#else
+#define MAYBE_OmniboxMarginSetForSearchURLs OmniboxMarginSetForSearchURLs
+#endif
+IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
+                       MAYBE_OmniboxMarginSetForSearchURLs) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
   FocusOmnibox();
 
@@ -750,7 +759,7 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest, DISABLED_NavigateBackToNTP) {
   load_stop_observer_2.Wait();
 
   active_tab = browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_TRUE(chrome::IsInstantNTP(active_tab));
+  EXPECT_TRUE(search::IsInstantNTP(active_tab));
 }
 
 // Flaky: crbug.com/267119
@@ -798,7 +807,13 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
   EXPECT_EQ(1, on_most_visited_change_calls_);
 }
 
-IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, SetPrefetchQuery) {
+// http://crbug.com/518106
+#if defined(OS_WIN)
+#define MAYBE_SetPrefetchQuery DISABLED_SetPrefetchQuery
+#else
+#define MAYBE_SetPrefetchQuery SetPrefetchQuery
+#endif
+IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, MAYBE_SetPrefetchQuery) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
   FocusOmnibox();
 
@@ -860,7 +875,14 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, SetPrefetchQuery) {
   ASSERT_EQ("puppy", prefetch_query_value_);
 }
 
-IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, ClearPrefetchedResults) {
+// http://crbug.com/518106
+#if defined(OS_WIN)
+#define MAYBE_ClearPrefetchedResults DISABLED_ClearPrefetchedResults
+#else
+#define MAYBE_ClearPrefetchedResults ClearPrefetchedResults
+#endif
+IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest,
+                       MAYBE_ClearPrefetchedResults) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
   FocusOmnibox();
 
@@ -919,7 +941,13 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, ClearPrefetchedResults) {
   ASSERT_EQ("", prefetch_query_value_);
 }
 
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest, ShowURL) {
+#if defined(OS_LINUX) && defined(ADDRESS_SANITIZER)
+// Flaky timeouts at shutdown on Linux ASan; http://crbug.com/505478.
+#define MAYBE_ShowURL DISABLED_ShowURL
+#else
+#define MAYBE_ShowURL ShowURL
+#endif
+IN_PROC_BROWSER_TEST_F(InstantExtendedTest, MAYBE_ShowURL) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
   FocusOmnibox();
 

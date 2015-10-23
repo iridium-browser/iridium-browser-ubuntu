@@ -6,11 +6,12 @@
 
 #include <string>
 
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "device/bluetooth/bluetooth_gatt_service.h"
-#include "grit/device_bluetooth_strings.h"
+#include "grit/bluetooth_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace device {
@@ -241,7 +242,7 @@ std::string BluetoothDevice::CanonicalizeAddress(const std::string& address) {
 
       canonicalized[i] = ':';
     } else {
-      if (!IsHexDigit(canonicalized[i]))
+      if (!base::IsHexDigit(canonicalized[i]))
         return std::string();
 
       canonicalized[i] = base::ToUpperASCII(canonicalized[i]);

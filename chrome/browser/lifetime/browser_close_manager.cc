@@ -35,9 +35,11 @@ void ShowInProgressDownloads(Profile* profile) {
 
 }  // namespace
 
-BrowserCloseManager::BrowserCloseManager() : current_browser_(NULL) {}
+BrowserCloseManager::BrowserCloseManager() : current_browser_(nullptr) {
+}
 
-BrowserCloseManager::~BrowserCloseManager() {}
+BrowserCloseManager::~BrowserCloseManager() {
+}
 
 void BrowserCloseManager::StartClosingBrowsers() {
   // If the session is ending, skip straight to closing the browsers. There's no
@@ -87,11 +89,18 @@ void BrowserCloseManager::OnBrowserReportCloseable(bool proceed) {
 }
 
 void BrowserCloseManager::CheckForDownloadsInProgress() {
+#if defined(OS_MACOSX)
+  // Mac has its own in-progress downloads prompt in app_controller_mac.mm.
+  CloseBrowsers();
+  return;
+#endif
+
   int download_count = DownloadService::NonMaliciousDownloadCountAllProfiles();
   if (download_count == 0) {
     CloseBrowsers();
     return;
   }
+
   ConfirmCloseWithPendingDownloads(
       download_count,
       base::Bind(&BrowserCloseManager::OnReportDownloadsCancellable, this));

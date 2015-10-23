@@ -49,9 +49,6 @@ class SearchTermsData {
   // This implementation returns the empty string.
   virtual std::string GetSuggestRequestIdentifier() const;
 
-  // Returns true if the AnswersInSuggest feature should be enabled.
-  virtual bool EnableAnswersInSuggest() const;
-
   // Returns true if search terms are shown in the omnibox on search results
   // pages.
   virtual bool IsShowingSearchTermsOnSearchResultsPages() const;
@@ -76,6 +73,11 @@ class SearchTermsData {
   // Returns the value to use for replacements of type
   // GOOGLE_IMAGE_SEARCH_SOURCE.
   virtual std::string GoogleImageSearchSource() const;
+
+  // Returns a string with languages understood by the user.
+  // Determining this requires accessing the Profile, so this can only ever be
+  // non-empty for UIThreadSearchTermsData.
+  virtual std::string GetAcceptLanguages() const;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SearchTermsData);

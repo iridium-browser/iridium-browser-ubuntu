@@ -59,9 +59,11 @@ template<typename T> class EventSender;
 typedef EventSender<ImageLoader> ImageEventSender;
 
 class CORE_EXPORT ImageLoader : public NoBaseWillBeGarbageCollectedFinalized<ImageLoader>, public ImageResourceClient {
+    WILL_BE_USING_PRE_FINALIZER(ImageLoader, dispose);
 public:
     explicit ImageLoader(Element*);
-    virtual ~ImageLoader();
+    ~ImageLoader() override;
+
     DECLARE_TRACE();
 
     enum UpdateFromElementBehavior {
@@ -83,7 +85,7 @@ public:
         DoNotBypassMainWorldCSP
     };
 
-    void updateFromElement(UpdateFromElementBehavior = UpdateNormal);
+    void updateFromElement(UpdateFromElementBehavior = UpdateNormal, ReferrerPolicy = ReferrerPolicyDefault);
 
     void elementDidMoveToNewDocument();
 
@@ -111,19 +113,18 @@ public:
     void addClient(ImageLoaderClient*);
     void removeClient(ImageLoaderClient*);
 
-    virtual bool getImageAnimationPolicy(ImageResource*, ImageAnimationPolicy&) override final;
+    bool getImageAnimationPolicy(ImageResource*, ImageAnimationPolicy&) final;
 protected:
-    virtual void notifyFinished(Resource*) override;
+    void notifyFinished(Resource*) override;
 
 private:
     class Task;
 
     // Called from the task or from updateFromElement to initiate the load.
-    void doUpdateFromElement(BypassMainWorldBehavior, UpdateFromElementBehavior);
+    void doUpdateFromElement(BypassMainWorldBehavior, UpdateFromElementBehavior, ReferrerPolicy = ReferrerPolicyDefault);
 
     virtual void dispatchLoadEvent() = 0;
-    virtual String sourceURI(const AtomicString&) const = 0;
-    virtual void noImageResourceToLoad() { };
+    virtual void noImageResourceToLoad() { }
 
     void updatedHasPendingEvent();
 
@@ -138,7 +139,7 @@ private:
     void clearFailedLoadURL();
     void dispatchErrorEvent();
     void crossSiteOrCSPViolationOccurred(AtomicString);
-    void enqueueImageLoadingMicroTask(UpdateFromElementBehavior);
+    void enqueueImageLoadingMicroTask(UpdateFromElementBehavior, ReferrerPolicy);
 
     void timerFired(Timer<ImageLoader>*);
 
@@ -150,33 +151,26 @@ private:
 
     void willRemoveClient(ImageLoaderClient&);
 
+    // For Oilpan, we must run dispose() as a prefinalizer and call
+    // m_image->removeClient(this) (and more.) Otherwise, the ImageResource can invoke
+    // didAddClient() for the ImageLoader that is about to die in the current
+    // lazy sweeping, and the didAddClient() can access on-heap objects that
+    // have already been finalized in the current lazy sweeping.
+    void dispose();
+
+#if ENABLE(OILPAN)
+    void clearWeakMembers(Visitor*);
+#endif
+
     RawPtrWillBeMember<Element> m_element;
     ResourcePtr<ImageResource> m_image;
     // FIXME: Oilpan: We might be able to remove this Persistent hack when
     // ImageResourceClient is traceable.
     GC_PLUGIN_IGNORE("http://crbug.com/383741")
     RefPtrWillBePersistent<Element> m_keepAlive;
-#if ENABLE(OILPAN)
-    class ImageLoaderClientRemover {
-    public:
-        ImageLoaderClientRemover(ImageLoader& loader, ImageLoaderClient& client) : m_loader(loader), m_client(client) { }
-        ~ImageLoaderClientRemover();
 
-    private:
-        ImageLoader& m_loader;
-        ImageLoaderClient& m_client;
-    };
-    friend class ImageLoaderClientRemover;
-    // Oilpan: This ImageLoader object must outlive its clients because they
-    // need to call ImageLoader::willRemoveClient before they
-    // die. Non-Persistent HeapHashMap doesn't work well because weak processing
-    // for HeapHashMap is not triggered when both of ImageLoader and
-    // ImageLoaderClient are unreachable.
-    GC_PLUGIN_IGNORE("http://crbug.com/383742")
-    PersistentHeapHashMap<WeakMember<ImageLoaderClient>, OwnPtr<ImageLoaderClientRemover>> m_clients;
-#else
+    // Oilpan: the client references are weak, and managed as such via clearWeakMembers();
     HashSet<ImageLoaderClient*> m_clients;
-#endif
     Timer<ImageLoader> m_derefElementTimer;
     AtomicString m_failedLoadURL;
     WeakPtr<Task> m_pendingTask; // owned by Microtask

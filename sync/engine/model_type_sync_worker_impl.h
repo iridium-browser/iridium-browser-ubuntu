@@ -5,8 +5,9 @@
 #ifndef SYNC_ENGINE_MODEL_TYPE_SYNC_WORKER_IMPL_H_
 #define SYNC_ENGINE_MODEL_TYPE_SYNC_WORKER_IMPL_H_
 
+#include "base/containers/scoped_ptr_map.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/stl_util.h"
 #include "base/threading/non_thread_safe.h"
 #include "sync/base/sync_export.h"
 #include "sync/engine/commit_contributor.h"
@@ -23,7 +24,7 @@ namespace base {
 class SingleThreadTaskRunner;
 }
 
-namespace syncer {
+namespace syncer_v2 {
 
 class ModelTypeSyncProxy;
 class EntityTracker;
@@ -48,41 +49,42 @@ class EntityTracker;
 // example, if the sync server sends down an update for a sync entity that is
 // currently pending for commit, this object will detect this condition and
 // cancel the pending commit.
-class SYNC_EXPORT ModelTypeSyncWorkerImpl : public UpdateHandler,
-                                            public CommitContributor,
+class SYNC_EXPORT ModelTypeSyncWorkerImpl : public syncer::UpdateHandler,
+                                            public syncer::CommitContributor,
                                             public ModelTypeSyncWorker,
                                             public base::NonThreadSafe {
  public:
-  ModelTypeSyncWorkerImpl(ModelType type,
+  ModelTypeSyncWorkerImpl(syncer::ModelType type,
                           const DataTypeState& initial_state,
                           const UpdateResponseDataList& saved_pending_updates,
-                          scoped_ptr<Cryptographer> cryptographer,
-                          NudgeHandler* nudge_handler,
+                          scoped_ptr<syncer::Cryptographer> cryptographer,
+                          syncer::NudgeHandler* nudge_handler,
                           scoped_ptr<ModelTypeSyncProxy> type_sync_proxy);
   ~ModelTypeSyncWorkerImpl() override;
 
-  ModelType GetModelType() const;
+  syncer::ModelType GetModelType() const;
 
   bool IsEncryptionRequired() const;
-  void UpdateCryptographer(scoped_ptr<Cryptographer> cryptographer);
+  void UpdateCryptographer(scoped_ptr<syncer::Cryptographer> cryptographer);
 
   // UpdateHandler implementation.
   void GetDownloadProgress(
       sync_pb::DataTypeProgressMarker* progress_marker) const override;
   void GetDataTypeContext(sync_pb::DataTypeContext* context) const override;
-  SyncerError ProcessGetUpdatesResponse(
+  syncer::SyncerError ProcessGetUpdatesResponse(
       const sync_pb::DataTypeProgressMarker& progress_marker,
       const sync_pb::DataTypeContext& mutated_context,
       const SyncEntityList& applicable_updates,
-      sessions::StatusController* status) override;
-  void ApplyUpdates(sessions::StatusController* status) override;
-  void PassiveApplyUpdates(sessions::StatusController* status) override;
+      syncer::sessions::StatusController* status) override;
+  void ApplyUpdates(syncer::sessions::StatusController* status) override;
+  void PassiveApplyUpdates(syncer::sessions::StatusController* status) override;
 
   // ModelTypeSyncWorker implementation.
   void EnqueueForCommit(const CommitRequestDataList& request_list) override;
 
   // CommitContributor implementation.
-  scoped_ptr<CommitContribution> GetContribution(size_t max_entries) override;
+  scoped_ptr<syncer::CommitContribution> GetContribution(
+      size_t max_entries) override;
 
   // Callback for when our contribution gets a response.
   void OnCommitResponse(const CommitResponseDataList& response_list);
@@ -90,8 +92,7 @@ class SYNC_EXPORT ModelTypeSyncWorkerImpl : public UpdateHandler,
   base::WeakPtr<ModelTypeSyncWorkerImpl> AsWeakPtr();
 
  private:
-  typedef std::map<std::string, EntityTracker*> EntityMap;
-  typedef std::map<std::string, UpdateResponseData*> UpdateMap;
+  typedef base::ScopedPtrMap<std::string, scoped_ptr<EntityTracker>> EntityMap;
 
   // Stores a single commit request in this object's internal state.
   void StorePendingCommit(const CommitRequestData& request);
@@ -127,11 +128,11 @@ class SYNC_EXPORT ModelTypeSyncWorkerImpl : public UpdateHandler,
   // In theory, this should never fail.  Only corrupt or invalid entries could
   // cause this to fail, and no clients are known to create such entries.  The
   // failure case is an attempt to be defensive against bad input.
-  static bool DecryptSpecifics(Cryptographer* cryptographer,
+  static bool DecryptSpecifics(syncer::Cryptographer* cryptographer,
                                const sync_pb::EntitySpecifics& in,
                                sync_pb::EntitySpecifics* out);
 
-  ModelType type_;
+  syncer::ModelType type_;
 
   // State that applies to the entire model type.
   DataTypeState data_type_state_;
@@ -143,10 +144,10 @@ class SYNC_EXPORT ModelTypeSyncWorkerImpl : public UpdateHandler,
   // A private copy of the most recent cryptographer known to sync.
   // Initialized at construction time and updated with UpdateCryptographer().
   // NULL if encryption is not enabled for this type.
-  scoped_ptr<Cryptographer> cryptographer_;
+  scoped_ptr<syncer::Cryptographer> cryptographer_;
 
   // Interface used to access and send nudges to the sync scheduler.  Not owned.
-  NudgeHandler* nudge_handler_;
+  syncer::NudgeHandler* nudge_handler_;
 
   // A map of per-entity information known to this object.
   //
@@ -160,7 +161,6 @@ class SYNC_EXPORT ModelTypeSyncWorkerImpl : public UpdateHandler,
   // with the model thread, we could optimize this to reduce memory usage in
   // the steady state.
   EntityMap entities_;
-  STLValueDeleter<EntityMap> entities_deleter_;
 
   base::WeakPtrFactory<ModelTypeSyncWorkerImpl> weak_ptr_factory_;
 };

@@ -57,7 +57,6 @@ const wchar_t k7zaExe[] = L"7za.exe";
 const wchar_t k7zaPathRelative[] = L"..\\..\\third_party\\lzma_sdk\\Executable";
 const wchar_t kB7[] = L"B7";
 const wchar_t kBl[] = L"BL";
-const wchar_t kChrome7z[] = L"chrome.7z";
 const wchar_t kChromeBin[] = L"Chrome-bin";
 const wchar_t kChromePacked7z[] = L"chrome.packed.7z";
 const wchar_t kExe[] = L"exe";
@@ -245,8 +244,10 @@ bool GetFileVersion(const base::FilePath& pe_file, ChromeVersion* version) {
   std::pair<const uint8*, DWORD> version_info_data;
 
   if (pe_file_loader.Initialize(pe_file) &&
-      pe_file_loader.Load(VS_VERSION_INFO, reinterpret_cast<WORD>(RT_VERSION),
-                          &version_info_data)) {
+      pe_file_loader.Load(
+          VS_VERSION_INFO,
+          static_cast<WORD>(reinterpret_cast<uintptr_t>(RT_VERSION)),
+          &version_info_data)) {
     const VS_FIXEDFILEINFO* fixed_file_info;
     UINT ver_info_len;
     if (VerQueryValue(version_info_data.first, L"\\",

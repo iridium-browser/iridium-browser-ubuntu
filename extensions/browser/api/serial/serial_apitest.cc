@@ -83,7 +83,7 @@ class FakeEchoSerialIoHandler : public device::TestSerialIoHandler {
   DISALLOW_COPY_AND_ASSIGN(FakeEchoSerialIoHandler);
 };
 
-class FakeSerialConnectFunction : public core_api::SerialConnectFunction {
+class FakeSerialConnectFunction : public api::SerialConnectFunction {
  protected:
   SerialConnection* CreateSerialConnection(
       const std::string& port,
@@ -138,9 +138,8 @@ void CreateTestSerialServiceOnFileThread(
           content::BrowserThread::IO));
   scoped_ptr<device::SerialDeviceEnumerator> device_enumerator(
       new FakeSerialDeviceEnumerator);
-  mojo::BindToRequest(new device::SerialServiceImpl(connection_factory,
-                                                    device_enumerator.Pass()),
-                      &request);
+  new device::SerialServiceImpl(connection_factory, device_enumerator.Pass(),
+                                request.Pass());
 }
 
 void CreateTestSerialService(

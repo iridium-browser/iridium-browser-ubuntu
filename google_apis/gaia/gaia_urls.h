@@ -50,7 +50,11 @@ class GaiaUrls {
   const GURL& gaia_login_form_realm() const;
 
   GURL ListAccountsURLWithSource(const std::string& source);
+  GURL LogOutURLWithSource(const std::string& source);
   GURL GetCheckConnectionInfoURLWithSource(const std::string& source);
+
+  // Continue URL used to signal the completion of the signin flow.
+  GURL signin_completed_continue_url() const;
 
  private:
   GaiaUrls();

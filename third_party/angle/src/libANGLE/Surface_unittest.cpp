@@ -29,6 +29,7 @@ class MockSurfaceImpl : public rx::SurfaceImpl
     MOCK_CONST_METHOD0(getWidth, EGLint());
     MOCK_CONST_METHOD0(getHeight, EGLint());
     MOCK_CONST_METHOD0(isPostSubBufferSupported, EGLint(void));
+    MOCK_CONST_METHOD0(getSwapBehavior, EGLint(void));
     MOCK_METHOD2(getAttachmentRenderTarget, gl::Error(const gl::FramebufferAttachment::Target &, rx::FramebufferAttachmentRenderTarget **));
 
     MOCK_METHOD0(destroy, void());
@@ -40,13 +41,14 @@ class SurfaceTest : public testing::Test
     virtual void SetUp()
     {
         mImpl = new MockSurfaceImpl;
+        EXPECT_CALL(*mImpl, getSwapBehavior());
         EXPECT_CALL(*mImpl, destroy());
         mSurface = new egl::Surface(mImpl, EGL_WINDOW_BIT, &mConfig, egl::AttributeMap());
     }
 
     virtual void TearDown()
     {
-        mSurface->release();
+        mSurface->onDestroy();
     }
 
     MockSurfaceImpl *mImpl;
@@ -57,10 +59,11 @@ class SurfaceTest : public testing::Test
 TEST_F(SurfaceTest, DestructionDeletesImpl)
 {
     MockSurfaceImpl *impl = new MockSurfaceImpl;
+    EXPECT_CALL(*impl, getSwapBehavior());
     EXPECT_CALL(*impl, destroy()).Times(1).RetiresOnSaturation();
 
     egl::Surface *surface = new egl::Surface(impl, EGL_WINDOW_BIT, &mConfig, egl::AttributeMap());
-    surface->release();
+    surface->onDestroy();
 
     // Only needed because the mock is leaked if bugs are present,
     // which logs an error, but does not cause the test to fail.

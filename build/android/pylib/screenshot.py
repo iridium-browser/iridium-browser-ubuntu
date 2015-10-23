@@ -11,8 +11,6 @@ from pylib import cmd_helper
 from pylib import device_signal
 from pylib.device import device_errors
 
-# TODO(jbudorick) Remove once telemetry gets switched over.
-import pylib.android_commands
 import pylib.device.device_utils
 
 
@@ -30,9 +28,6 @@ class VideoRecorder(object):
   """
   def __init__(self, device, megabits_per_second=4, size=None,
                rotate=False):
-    # TODO(jbudorick) Remove once telemetry gets switched over.
-    if isinstance(device, pylib.android_commands.AndroidCommands):
-      device = pylib.device.device_utils.DeviceUtils(device)
     self._device = device
     self._device_file = (
         '%s/screen-recording.mp4' % device.GetExternalStoragePath())

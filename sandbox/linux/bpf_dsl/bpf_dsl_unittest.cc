@@ -23,9 +23,8 @@
 #include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/linux/bpf_dsl/policy_compiler.h"
 #include "sandbox/linux/bpf_dsl/seccomp_macros.h"
-#include "sandbox/linux/bpf_dsl/trap_registry.h"
+#include "sandbox/linux/bpf_dsl/test_trap_registry.h"
 #include "sandbox/linux/bpf_dsl/verifier.h"
-#include "sandbox/linux/seccomp-bpf/errorcode.h"
 #include "sandbox/linux/system_headers/linux_filter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -37,12 +36,12 @@ namespace {
 
 // Helper function to construct fake arch_seccomp_data objects.
 struct arch_seccomp_data FakeSyscall(int nr,
-                                     uint64_t p0 = 0,
-                                     uint64_t p1 = 0,
-                                     uint64_t p2 = 0,
-                                     uint64_t p3 = 0,
-                                     uint64_t p4 = 0,
-                                     uint64_t p5 = 0) {
+                                     uintptr_t p0 = 0,
+                                     uintptr_t p1 = 0,
+                                     uintptr_t p2 = 0,
+                                     uintptr_t p3 = 0,
+                                     uintptr_t p4 = 0,
+                                     uintptr_t p5 = 0) {
   // Made up program counter for syscall address.
   const uint64_t kFakePC = 0x543210;
 
@@ -56,57 +55,6 @@ struct arch_seccomp_data FakeSyscall(int nr,
   };
 
   return data;
-}
-
-class FakeTrapRegistry : public TrapRegistry {
- public:
-  FakeTrapRegistry() : map_() {}
-  virtual ~FakeTrapRegistry() {}
-
-  uint16_t Add(TrapFnc fnc, const void* aux, bool safe) override {
-    EXPECT_TRUE(safe);
-
-    const uint16_t next_id = map_.size() + 1;
-    return map_.insert(std::make_pair(Key(fnc, aux), next_id)).first->second;
-  }
-
-  bool EnableUnsafeTraps() override {
-    ADD_FAILURE() << "Unimplemented";
-    return false;
-  }
-
- private:
-  using Key = std::pair<TrapFnc, const void*>;
-
-  std::map<Key, uint16_t> map_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeTrapRegistry);
-};
-
-intptr_t FakeTrapFuncOne(const arch_seccomp_data& data, void* aux) { return 1; }
-intptr_t FakeTrapFuncTwo(const arch_seccomp_data& data, void* aux) { return 2; }
-
-// Test that FakeTrapRegistry correctly assigns trap IDs to trap handlers.
-TEST(FakeTrapRegistry, TrapIDs) {
-  struct {
-    TrapRegistry::TrapFnc fnc;
-    const void* aux;
-  } funcs[] = {
-      {FakeTrapFuncOne, nullptr},
-      {FakeTrapFuncTwo, nullptr},
-      {FakeTrapFuncOne, funcs},
-      {FakeTrapFuncTwo, funcs},
-  };
-
-  FakeTrapRegistry traps;
-
-  // Add traps twice to test that IDs are reused correctly.
-  for (int i = 0; i < 2; ++i) {
-    for (size_t j = 0; j < arraysize(funcs); ++j) {
-      // Trap IDs start at 1.
-      EXPECT_EQ(j + 1, traps.Add(funcs[j].fnc, funcs[j].aux, true));
-    }
-  }
 }
 
 class PolicyEmulator {
@@ -134,9 +82,13 @@ class PolicyEmulator {
     EXPECT_EQ(SECCOMP_RET_ERRNO | err, Emulate(data));
   }
 
+  void ExpectKill(const struct arch_seccomp_data& data) const {
+    EXPECT_EQ(SECCOMP_RET_KILL, Emulate(data));
+  }
+
  private:
   CodeGen::Program program_;
-  FakeTrapRegistry traps_;
+  TestTrapRegistry traps_;
 
   DISALLOW_COPY_AND_ASSIGN(PolicyEmulator);
 };
@@ -152,7 +104,7 @@ class BasicPolicy : public Policy {
     }
     if (sysno == __NR_setuid) {
       const Arg<uid_t> uid(0);
-      return If(uid != 42, Error(ESRCH)).Else(Error(ENOMEM));
+      return If(uid != 42, Kill()).Else(Allow());
     }
     return Allow();
   }
@@ -168,8 +120,8 @@ TEST(BPFDSL, Basic) {
   emulator.ExpectErrno(EPERM, FakeSyscall(__NR_getpgid, 0));
   emulator.ExpectErrno(EINVAL, FakeSyscall(__NR_getpgid, 1));
 
-  emulator.ExpectErrno(ENOMEM, FakeSyscall(__NR_setuid, 42));
-  emulator.ExpectErrno(ESRCH, FakeSyscall(__NR_setuid, 43));
+  emulator.ExpectAllow(FakeSyscall(__NR_setuid, 42));
+  emulator.ExpectKill(FakeSyscall(__NR_setuid, 43));
 }
 
 /* On IA-32, socketpair() is implemented via socketcall(). :-( */
@@ -282,6 +234,31 @@ TEST(BPFDSL, ArgSizeTest) {
 
   emulator.ExpectAllow(FakeSyscall(__NR_uname, 0));
   emulator.ExpectErrno(EPERM, FakeSyscall(__NR_uname, kDeadBeefAddr));
+}
+
+class NegativeConstantsPolicy : public Policy {
+ public:
+  NegativeConstantsPolicy() {}
+  ~NegativeConstantsPolicy() override {}
+  ResultExpr EvaluateSyscall(int sysno) const override {
+    if (sysno == __NR_fcntl) {
+      const Arg<int> fd(0);
+      return If(fd == -314, Error(EPERM)).Else(Allow());
+    }
+    return Allow();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NegativeConstantsPolicy);
+};
+
+TEST(BPFDSL, NegativeConstantsTest) {
+  NegativeConstantsPolicy policy;
+  PolicyEmulator emulator(&policy);
+
+  emulator.ExpectAllow(FakeSyscall(__NR_fcntl, -5, F_DUPFD));
+  emulator.ExpectAllow(FakeSyscall(__NR_fcntl, 20, F_DUPFD));
+  emulator.ExpectErrno(EPERM, FakeSyscall(__NR_fcntl, -314, F_DUPFD));
 }
 
 #if 0

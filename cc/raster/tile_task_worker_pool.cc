@@ -10,6 +10,7 @@
 #include "cc/playback/raster_source.h"
 #include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkDrawFilter.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
 namespace cc {
@@ -52,14 +53,14 @@ class TaskSetFinishedTaskImpl : public TileTask {
 
 // This allows a micro benchmark system to run tasks with highest priority,
 // since it should finish as quickly as possible.
-unsigned TileTaskWorkerPool::kBenchmarkTaskPriority = 0u;
+size_t TileTaskWorkerPool::kBenchmarkTaskPriority = 0u;
 // Task priorities that make sure task set finished tasks run before any
 // other remaining tasks. This is combined with the task set type to ensure
 // proper prioritization ordering between task set types.
-unsigned TileTaskWorkerPool::kTaskSetFinishedTaskPriorityBase = 1u;
+size_t TileTaskWorkerPool::kTaskSetFinishedTaskPriorityBase = 1u;
 // For correctness, |kTileTaskPriorityBase| must be greater than
 // |kTaskSetFinishedTaskPriorityBase + kNumberOfTaskSets|.
-unsigned TileTaskWorkerPool::kTileTaskPriorityBase = 10u;
+size_t TileTaskWorkerPool::kTileTaskPriorityBase = 10u;
 
 TileTaskWorkerPool::TileTaskWorkerPool() {
 }
@@ -96,7 +97,7 @@ void TileTaskWorkerPool::ScheduleTasksOnOriginThread(TileTaskClient* client,
 // static
 void TileTaskWorkerPool::InsertNodeForTask(TaskGraph* graph,
                                            TileTask* task,
-                                           unsigned priority,
+                                           size_t priority,
                                            size_t dependencies) {
   DCHECK(std::find_if(graph->nodes.begin(), graph->nodes.end(),
                       TaskGraph::Node::TaskComparator(task)) ==
@@ -109,7 +110,7 @@ void TileTaskWorkerPool::InsertNodesForRasterTask(
     TaskGraph* graph,
     RasterTask* raster_task,
     const ImageDecodeTask::Vector& decode_tasks,
-    unsigned priority) {
+    size_t priority) {
   size_t dependencies = 0u;
 
   // Insert image decode tasks.
@@ -153,14 +154,36 @@ static bool IsSupportedPlaybackToMemoryFormat(ResourceFormat format) {
   return false;
 }
 
+class SkipImageFilter : public SkDrawFilter {
+ public:
+  bool filter(SkPaint* paint, Type type) override {
+    if (type == kBitmap_Type)
+      return false;
+
+    SkShader* shader = paint->getShader();
+    if (!shader)
+      return true;
+    SkShader::BitmapType bitmap_type =
+        shader->asABitmap(nullptr, nullptr, nullptr);
+    // The kDefault_BitmapType is returned for images. Other bitmap types are
+    // simply bitmap representations of colors such as gradients. So, we can
+    // return true and draw for any case except kDefault_BitmapType.
+    return bitmap_type != SkShader::kDefault_BitmapType;
+  }
+};
+
 // static
 void TileTaskWorkerPool::PlaybackToMemory(void* memory,
                                           ResourceFormat format,
                                           const gfx::Size& size,
-                                          int stride,
+                                          size_t stride,
                                           const RasterSource* raster_source,
-                                          const gfx::Rect& rect,
-                                          float scale) {
+                                          const gfx::Rect& canvas_bitmap_rect,
+                                          const gfx::Rect& canvas_playback_rect,
+                                          float scale,
+                                          bool include_images) {
+  TRACE_EVENT0("cc", "TileTaskWorkerPool::PlaybackToMemory");
+
   DCHECK(IsSupportedPlaybackToMemoryFormat(format)) << format;
 
   // Uses kPremul_SkAlphaType since the result is not known to be opaque.
@@ -178,30 +201,45 @@ void TileTaskWorkerPool::PlaybackToMemory(void* memory,
 
   if (!stride)
     stride = info.minRowBytes();
-  DCHECK_GT(stride, 0);
+  DCHECK_GT(stride, 0u);
+
+  skia::RefPtr<SkDrawFilter> image_filter;
+  if (!include_images)
+    image_filter = skia::AdoptRef(new SkipImageFilter);
 
   if (!needs_copy) {
     skia::RefPtr<SkSurface> surface = skia::AdoptRef(
         SkSurface::NewRasterDirect(info, memory, stride, &surface_props));
     skia::RefPtr<SkCanvas> canvas = skia::SharePtr(surface->getCanvas());
-    raster_source->PlaybackToCanvas(canvas.get(), rect, scale);
+    canvas->setDrawFilter(image_filter.get());
+    raster_source->PlaybackToCanvas(canvas.get(), canvas_bitmap_rect,
+                                    canvas_playback_rect, scale);
     return;
   }
 
   skia::RefPtr<SkSurface> surface =
       skia::AdoptRef(SkSurface::NewRaster(info, &surface_props));
   skia::RefPtr<SkCanvas> canvas = skia::SharePtr(surface->getCanvas());
-  raster_source->PlaybackToCanvas(canvas.get(), rect, scale);
+  canvas->setDrawFilter(image_filter.get());
+  // TODO(reveman): Improve partial raster support by reducing the size of
+  // playback rect passed to PlaybackToCanvas. crbug.com/519070
+  raster_source->PlaybackToCanvas(canvas.get(), canvas_bitmap_rect,
+                                  canvas_bitmap_rect, scale);
 
-  SkImageInfo dst_info = info;
-  dst_info.fColorType = buffer_color_type;
-  // TODO(kaanb): The GL pipeline assumes a 4-byte alignment for the
-  // bitmap data. There will be no need to call SkAlign4 once crbug.com/293728
-  // is fixed.
-  const size_t dst_row_bytes = SkAlign4(dst_info.minRowBytes());
-  DCHECK_EQ(0u, dst_row_bytes % 4);
-  bool success = canvas->readPixels(dst_info, memory, dst_row_bytes, 0, 0);
-  DCHECK_EQ(true, success);
+  {
+    TRACE_EVENT0("cc", "TileTaskWorkerPool::PlaybackToMemory::ConvertPixels");
+
+    SkImageInfo dst_info =
+        SkImageInfo::Make(info.width(), info.height(), buffer_color_type,
+                          info.alphaType(), info.profileType());
+    // TODO(kaanb): The GL pipeline assumes a 4-byte alignment for the
+    // bitmap data. There will be no need to call SkAlign4 once crbug.com/293728
+    // is fixed.
+    const size_t dst_row_bytes = SkAlign4(dst_info.minRowBytes());
+    DCHECK_EQ(0u, dst_row_bytes % 4);
+    bool success = canvas->readPixels(dst_info, memory, dst_row_bytes, 0, 0);
+    DCHECK_EQ(true, success);
+  }
 }
 
 }  // namespace cc

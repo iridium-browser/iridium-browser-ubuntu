@@ -15,7 +15,7 @@ import org.chromium.content.browser.ContentViewCore;
  * 3. In javascript call notifyJava() when you want Java side know something is done.
  */
 public class JavascriptEventObserver {
-    private Object mEvent = new Object();
+    private final Object mEvent = new Object();
     private boolean mHappened;
 
     /**
@@ -35,7 +35,10 @@ public class JavascriptEventObserver {
     public boolean waitForEvent(long time) throws InterruptedException {
         synchronized (mEvent) {
             if (mHappened) return mHappened;
-            mEvent.wait(time);
+            long deadline = System.currentTimeMillis() + time;
+            while (!mHappened && System.currentTimeMillis() < deadline) {
+                mEvent.wait(deadline - System.currentTimeMillis());
+            }
             boolean happened = mHappened;
             mHappened = false;
             return happened;

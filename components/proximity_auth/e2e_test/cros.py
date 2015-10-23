@@ -15,15 +15,14 @@ telemetry_dir = os.path.realpath(
 if telemetry_dir not in sys.path:
   sys.path.append(telemetry_dir)
 
-from telemetry.core import browser_options
-from telemetry.core import browser_finder
-from telemetry.core import extension_to_load
+from telemetry.internal.browser import browser_options
+from telemetry.internal.browser import browser_finder
 from telemetry.core import exceptions
 from telemetry.core import util
-from telemetry.core.platform import cros_interface
+from telemetry.core import cros_interface
+from telemetry.internal.browser import extension_to_load
 
 logger = logging.getLogger('proximity_auth.%s' % __name__)
-
 
 class AccountPickerScreen(object):
   """ Wrapper for the ChromeOS account picker screen.
@@ -218,6 +217,7 @@ class SmartLockApp(object):
     PAIR = 'pair'
     CLICK_FOR_TRIAL_RUN = 'click_for_trial_run'
     TRIAL_RUN_COMPLETED = 'trial_run_completed'
+    PROMOTE_SMARTLOCK_FOR_ANDROID = 'promote-smart-lock-for-android'
 
   def __init__(self, app_page, chromeos):
     """
@@ -241,6 +241,8 @@ class SmartLockApp(object):
       return SmartLockApp.PairingState.SCAN
     elif state == 'pair':
       return SmartLockApp.PairingState.PAIR
+    elif state == 'promote-smart-lock-for-android':
+      return SmartLockApp.PairingState.PROMOTE_SMARTLOCK_FOR_ANDROID
     elif state == 'complete':
       button_text = self._app_page.EvaluateJavaScript(
           'document.getElementById("pairing-button").textContent')
@@ -283,6 +285,8 @@ class SmartLockApp(object):
     """
     assert(self.pairing_state == self.PairingState.PAIR)
     self._ClickPairingButton()
+    if self.pairing_state == self.PairingState.PROMOTE_SMARTLOCK_FOR_ANDROID:
+      self._ClickPairingButton()
     return self.pairing_state == self.PairingState.CLICK_FOR_TRIAL_RUN
 
   def StartTrialRun(self):
@@ -310,10 +314,14 @@ class SmartLockApp(object):
         'document.getElementById("pairing-button").click()')
 
   def _ClickPairingButton(self):
+    # Waits are needed because the clicks occur before the button label changes.
+    time.sleep(1)
     self._app_page.EvaluateJavaScript(
         'document.getElementById("pairing-button").click()')
+    time.sleep(1)
     util.WaitFor(lambda: self._app_page.EvaluateJavaScript(
         '!document.getElementById("pairing-button").disabled'), 60)
+    time.sleep(1)
     util.WaitFor(lambda: self._app_page.EvaluateJavaScript(
         '!document.getElementById("pairing-button-title")'
         '.classList.contains("animated-fade-out")'), 5)
@@ -347,7 +355,7 @@ class ChromeOS(object):
       password: The password of the account to test.
       ssh_port: The ssh port to connect to.
     """
-    self._remote_address = remote_address;
+    self._remote_address = remote_address
     self._username = username
     self._password = password
     self._ssh_port = ssh_port
@@ -522,6 +530,20 @@ class ChromeOS(object):
             'document.getElementById("pairing-button") != null'), 10)
       return SmartLockApp(app_page, self)
     return None
+
+  def SetCryptAuthStaging(self, cryptauth_staging_url):
+    logger.info('Setting CryptAuth to Staging')
+    try:
+      self._background_page.ExecuteJavaScript(
+              'var key = app.CryptAuthClient.GOOGLE_API_URL_OVERRIDE_;'
+              'var __complete = false;'
+              'chrome.storage.local.set({key: "%s"}, function() {'
+              '    __complete = true;'
+              '});' % cryptauth_staging_url)
+      util.WaitFor(lambda: self._background_page.EvaluateJavaScript(
+              '__complete == true'), 10)
+    except exceptions.TimeoutException:
+      logger.error('Failed to override CryptAuth to staging url.')
 
   def RunBtmon(self):
     """ Runs the btmon command.

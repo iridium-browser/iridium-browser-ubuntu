@@ -39,9 +39,13 @@ namespace WTF {
 
 class WTF_EXPORT Partitions {
 public:
-    static void initialize(HistogramEnumerationFunction = nullptr);
+    static void initialize();
+    // TODO(bashi): Remove this function and make initialize() take
+    // HistogramEnumerationFunction when we can make sure that WTF::initialize()
+    // is called before using this class.
+    static void setHistogramEnumeration(HistogramEnumerationFunction);
     static void shutdown();
-    ALWAYS_INLINE static PartitionRootGeneric* getBufferPartition()
+    ALWAYS_INLINE static PartitionRootGeneric* bufferPartition()
     {
         // TODO(haraken): This check is needed because some call sites allocate
         // Blink things before WTF::initialize(). We should fix those call sites
@@ -51,7 +55,7 @@ public:
         return m_bufferAllocator.root();
     }
 
-    ALWAYS_INLINE static PartitionRootGeneric* getFastMallocPartition()
+    ALWAYS_INLINE static PartitionRootGeneric* fastMallocPartition()
     {
         // TODO(haraken): This check is needed because some call sites allocate
         // Blink things before WTF::initialize(). We should fix those call sites
@@ -61,21 +65,21 @@ public:
         return m_fastMallocAllocator.root();
     }
 
-    ALWAYS_INLINE static PartitionRoot* getObjectModelPartition()
+    ALWAYS_INLINE static PartitionRoot* nodePartition()
     {
         ASSERT(s_initialized);
-        return m_objectModelAllocator.root();
+        return m_nodeAllocator.root();
     }
-    ALWAYS_INLINE static PartitionRoot* getRenderingPartition()
+    ALWAYS_INLINE static PartitionRoot* layoutPartition()
     {
         ASSERT(s_initialized);
-        return m_renderingAllocator.root();
+        return m_layoutAllocator.root();
     }
 
     static size_t currentDOMMemoryUsage()
     {
         ASSERT(s_initialized);
-        return m_objectModelAllocator.root()->totalSizeOfCommittedPages;
+        return m_nodeAllocator.root()->totalSizeOfCommittedPages;
     }
 
     static size_t totalSizeOfCommittedPages()
@@ -83,19 +87,59 @@ public:
         size_t totalSize = 0;
         totalSize += m_fastMallocAllocator.root()->totalSizeOfCommittedPages;
         totalSize += m_bufferAllocator.root()->totalSizeOfCommittedPages;
-        totalSize += m_objectModelAllocator.root()->totalSizeOfCommittedPages;
-        totalSize += m_renderingAllocator.root()->totalSizeOfCommittedPages;
+        totalSize += m_nodeAllocator.root()->totalSizeOfCommittedPages;
+        totalSize += m_layoutAllocator.root()->totalSizeOfCommittedPages;
         return totalSize;
     }
 
+    static void decommitFreeableMemory();
+
     static void reportMemoryUsageHistogram();
 
+    static void dumpMemoryStats(bool isLightDump, PartitionStatsDumper*);
+
+    ALWAYS_INLINE static void* bufferMalloc(size_t n)
+    {
+        return partitionAllocGeneric(bufferPartition(), n);
+    }
+
+    ALWAYS_INLINE static void* bufferRealloc(void* p, size_t n)
+    {
+        return partitionReallocGeneric(bufferPartition(), p, n);
+    }
+
+    ALWAYS_INLINE static void bufferFree(void* p)
+    {
+        partitionFreeGeneric(bufferPartition(), p);
+    }
+
+    ALWAYS_INLINE static size_t bufferActualSize(size_t n)
+    {
+        return partitionAllocActualSize(bufferPartition(), n);
+    }
+
 private:
+    static int s_initializationLock;
     static bool s_initialized;
+
+    // We have the following four partitions.
+    //   - Node partition: A partition to allocate Nodes. We prepare a
+    //     dedicated partition for Nodes because Nodes are likely to be
+    //     a source of use-after-frees. Another reason is for performance:
+    //     Since Nodes are guaranteed to be used only by the main
+    //     thread, we can bypass acquiring a lock. Also we can improve memory
+    //     locality by putting Nodes together.
+    //   - Layout object partition: A partition to allocate LayoutObjects.
+    //     we prepare a dedicated partition for the same reason as Nodes.
+    //   - Buffer partition: A partition to allocate objects that have a strong
+    //     risk where the length and/or the contents are exploited from user
+    //     scripts. Vectors, HashTables, ArrayBufferContents and Strings are
+    //     allocated in the buffer partition.
+    //   - Fast malloc partition: A partition to allocate all other objects.
     static PartitionAllocatorGeneric m_fastMallocAllocator;
     static PartitionAllocatorGeneric m_bufferAllocator;
-    static SizeSpecificPartitionAllocator<3328> m_objectModelAllocator;
-    static SizeSpecificPartitionAllocator<1024> m_renderingAllocator;
+    static SizeSpecificPartitionAllocator<3328> m_nodeAllocator;
+    static SizeSpecificPartitionAllocator<1024> m_layoutAllocator;
     static HistogramEnumerationFunction m_histogramEnumeration;
 };
 

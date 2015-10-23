@@ -40,7 +40,7 @@ class SuspiciousExtensionBubbleDelegate
   ~SuspiciousExtensionBubbleDelegate() override;
 
   // ExtensionMessageBubbleController::Delegate methods.
-  bool ShouldIncludeExtension(const std::string& extension_id) override;
+  bool ShouldIncludeExtension(const extensions::Extension* extension) override;
   void AcknowledgeExtension(
       const std::string& extension_id,
       ExtensionMessageBubbleController::BubbleAction user_action) override;
@@ -55,10 +55,13 @@ class SuspiciousExtensionBubbleDelegate
   base::string16 GetDismissButtonLabel() const override;
   bool ShouldShowExtensionList() const override;
   bool ShouldHighlightExtensions() const override;
+  bool ShouldLimitToEnabledExtensions() const override;
   void LogExtensionCount(size_t count) override;
   void LogAction(
       ExtensionMessageBubbleController::BubbleAction action) override;
+  std::set<Profile*>* GetProfileSet() override;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(SuspiciousExtensionBubbleDelegate);
 };
 
@@ -72,15 +75,15 @@ SuspiciousExtensionBubbleDelegate::~SuspiciousExtensionBubbleDelegate() {
 }
 
 bool SuspiciousExtensionBubbleDelegate::ShouldIncludeExtension(
-      const std::string& extension_id) {
+    const extensions::Extension* extension) {
   extensions::ExtensionPrefs* prefs = extensions::ExtensionPrefs::Get(
       profile());
-  if (!prefs->IsExtensionDisabled(extension_id))
+  if (!prefs->IsExtensionDisabled(extension->id()))
     return false;
 
-  int disable_reasons = prefs->GetDisableReasons(extension_id);
+  int disable_reasons = prefs->GetDisableReasons(extension->id());
   if (disable_reasons & extensions::Extension::DISABLE_NOT_VERIFIED)
-    return !HasBubbleInfoBeenAcknowledged(extension_id);
+    return !HasBubbleInfoBeenAcknowledged(extension->id());
 
   return false;
 }
@@ -140,6 +143,10 @@ bool SuspiciousExtensionBubbleDelegate::ShouldHighlightExtensions() const {
   return false;
 }
 
+bool SuspiciousExtensionBubbleDelegate::ShouldLimitToEnabledExtensions() const {
+  return false;
+}
+
 void SuspiciousExtensionBubbleDelegate::LogExtensionCount(
     size_t count) {
   UMA_HISTOGRAM_COUNTS_100(
@@ -151,6 +158,10 @@ void SuspiciousExtensionBubbleDelegate::LogAction(
   UMA_HISTOGRAM_ENUMERATION(
       "ExtensionBubble.WipeoutUserSelection",
       action, ExtensionMessageBubbleController::ACTION_BOUNDARY);
+}
+
+std::set<Profile*>* SuspiciousExtensionBubbleDelegate::GetProfileSet() {
+  return g_shown_for_profiles.Pointer();
 }
 
 }  // namespace
@@ -166,22 +177,16 @@ void SuspiciousExtensionBubbleController::ClearProfileListForTesting() {
 }
 
 SuspiciousExtensionBubbleController::SuspiciousExtensionBubbleController(
-    Profile* profile)
+    Browser* browser)
     : ExtensionMessageBubbleController(
-          new SuspiciousExtensionBubbleDelegate(profile),
-          profile),
-      profile_(profile) {}
+          new SuspiciousExtensionBubbleDelegate(browser->profile()),
+          browser) {}
 
 SuspiciousExtensionBubbleController::~SuspiciousExtensionBubbleController() {
 }
 
-bool SuspiciousExtensionBubbleController::ShouldShow() {
-  return !g_shown_for_profiles.Get().count(profile_->GetOriginalProfile()) &&
-      !GetExtensionList().empty();
-}
-
 void SuspiciousExtensionBubbleController::Show(ExtensionMessageBubble* bubble) {
-  g_shown_for_profiles.Get().insert(profile_->GetOriginalProfile());
+  g_shown_for_profiles.Get().insert(profile()->GetOriginalProfile());
   ExtensionMessageBubbleController::Show(bubble);
 }
 

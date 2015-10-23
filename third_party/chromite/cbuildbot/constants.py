@@ -21,22 +21,40 @@ def _FindSourceRoot():
     path = os.path.dirname(path)
   return source_root
 
+
 SOURCE_ROOT = _FindSourceRoot()
 CHROOT_SOURCE_ROOT = '/mnt/host/source'
 CHROOT_WORKSPACE_ROOT = '/mnt/host/workspace'
 CHROOT_CACHE_ROOT = '/var/cache/chromeos-cache'
 
 CROSUTILS_DIR = os.path.join(SOURCE_ROOT, 'src/scripts')
-CHROMITE_DIR = os.path.join(SOURCE_ROOT, 'chromite')
-BOOTSTRAP_DIR = os.path.join(SOURCE_ROOT, 'chromite/bootstrap')
+CHROMITE_DIR = os.path.realpath(os.path.join(
+    os.path.abspath(__file__), '..', '..'))
+BOOTSTRAP_DIR = os.path.join(CHROMITE_DIR, 'bootstrap')
 DEPOT_TOOLS_DIR = os.path.join(SOURCE_ROOT, 'chromium/tools/depot_tools')
 CHROMITE_BIN_SUBDIR = 'chromite/bin'
-CHROMITE_BIN_DIR = os.path.join(SOURCE_ROOT, CHROMITE_BIN_SUBDIR)
+CHROMITE_BIN_DIR = os.path.join(CHROMITE_DIR, 'bin')
 PATH_TO_CBUILDBOT = os.path.join(CHROMITE_BIN_SUBDIR, 'cbuildbot')
 DEFAULT_CHROOT_DIR = 'chroot'
+
+SITE_CONFIG_DIR = os.path.join(CHROMITE_DIR, 'config')
+SITE_CONFIG_FILE = os.path.join(SITE_CONFIG_DIR, 'config_dump.json')
+
+CHROMEOS_CONFIG_FILE = os.path.join(CHROMITE_DIR, 'cbuildbot',
+                                    'config_dump.json')
+
+# The following define the location for storing toolchain packages and
+# SDK overlay tarballs created during SDK builder runs. The paths are relative
+# to the build root's chroot, which guarantees that they are reachable from it
+# and get cleaned up when it is removed.
 SDK_TOOLCHAINS_OUTPUT = 'tmp/toolchain-pkgs'
+SDK_OVERLAYS_OUTPUT = 'tmp/sdk-overlays'
+
 AUTOTEST_BUILD_PATH = 'usr/local/build/autotest'
 CQ_CONFIG_FILENAME = 'COMMIT-QUEUE.ini'
+
+# Path to the lsb-release file on the device.
+LSB_RELEASE_PATH = '/etc/lsb-release'
 
 HOME_DIRECTORY = os.path.expanduser('~')
 
@@ -261,8 +279,6 @@ MANIFEST_INT_URL = '%s/%s' % (INTERNAL_GERRIT_URL, MANIFEST_INT_PROJECT)
 
 DEFAULT_MANIFEST = 'default.xml'
 OFFICIAL_MANIFEST = 'official.xml'
-PROJECT_MANIFEST = 'project_sdk.xml'
-LATEST_PROJECT_SDK_MANIFEST = 'project-sdk/latest.xml'
 LKGM_MANIFEST = 'LKGM/lkgm.xml'
 
 SHARED_CACHE_ENVVAR = 'CROS_CACHEDIR'
@@ -315,8 +331,6 @@ CHANGE_PREFIX = {
 # List of remotes that are ok to include in the external manifest.
 EXTERNAL_REMOTES = (EXTERNAL_REMOTE, CHROMIUM_REMOTE)
 
-PROJECT_SDK_GROUPS = ('project_sdk',)
-
 # Mapping 'remote name' -> regexp that matches names of repositories on that
 # remote that can be branched when creating CrOS branch. Branching script will
 # actually create a new git ref when branching these projects. It won't attempt
@@ -353,12 +367,10 @@ MANIFEST_VERSIONS_INT_GOB_URL = INTERNAL_GOB_URL + '/chromeos/manifest-versions'
 MANIFEST_VERSIONS_INT_GOB_URL_TEST = MANIFEST_VERSIONS_INT_GOB_URL + '-test'
 
 MANIFEST_VERSIONS_GS_URL = 'gs://chromeos-manifest-versions'
-TRASH_BUCKET = 'gs://chromeos-throw-away-bucket'
 
 # Standard directories under buildroot for cloning these repos.
 EXTERNAL_MANIFEST_VERSIONS_PATH = 'manifest-versions'
 INTERNAL_MANIFEST_VERSIONS_PATH = 'manifest-versions-internal'
-PROJECT_SDK_MANIFEST_VERSIONS_PATH = 'manifest-versions-project-sdk'
 
 STREAK_COUNTERS = 'streak_counters'
 
@@ -442,9 +454,6 @@ CANARY_TYPE = 'canary'
 # Generate payloads for an already built build/version.
 PAYLOADS_TYPE = 'payloads'
 
-# Generate a Project SDK build.
-PROJECT_SDK_TYPE = 'project-sdk'
-
 BRANCH_UTIL_CONFIG = 'branch-util'
 
 # Special build type for Chroot builders.  These builds focus on building
@@ -463,11 +472,7 @@ VALID_BUILD_TYPES = (
     PFQ_TYPE,
     PRE_CQ_LAUNCHER_TYPE,
     PAYLOADS_TYPE,
-    PROJECT_SDK_TYPE,
 )
-
-# The name of the standard pre-cq testing config.
-PRE_CQ_GROUP_CONFIG = 'pre-cq-group'
 
 # The default list of pre-cq configs to use.
 PRE_CQ_DEFAULT_CONFIGS = ['rambi-pre-cq', 'mixed-a-pre-cq', 'mixed-b-pre-cq',
@@ -494,6 +499,7 @@ HWTEST_PFQ_POOL = 'pfq'
 HWTEST_SUITES_POOL = 'suites'
 HWTEST_CHROME_PERF_POOL = 'chromeperf'
 HWTEST_TRYBOT_POOL = HWTEST_SUITES_POOL
+HWTEST_WIFICELL_PRE_CQ_POOL = 'wificell-pre-cq'
 
 
 # Master build timeouts in seconds. This is the overall timeout set by the
@@ -808,6 +814,24 @@ VM_DISK_PREFIX = 'chromiumos_qemu_disk.bin'
 VM_MEM_PREFIX = 'chromiumos_qemu_mem.bin'
 VM_TEST_RESULTS = 'vm_test_results_%(attempt)s'
 
+TEST_IMAGE_NAME = 'chromiumos_test_image'
+TEST_IMAGE_TAR = '%s.tar.xz' % TEST_IMAGE_NAME
+TEST_IMAGE_BIN = '%s.bin' % TEST_IMAGE_NAME
+
+DEV_IMAGE_NAME = 'chromiumos_image'
+DEV_IMAGE_BIN = '%s.bin' % DEV_IMAGE_NAME
+
+RECOVERY_IMAGE_NAME = 'recovery_image'
+RECOVERY_IMAGE_BIN = '%s.bin' % RECOVERY_IMAGE_NAME
+
+IMAGE_TYPE_TO_NAME = {
+    'base': BASE_IMAGE_BIN,
+    'dev': DEV_IMAGE_BIN,
+    'recovery': RECOVERY_IMAGE_BIN,
+    'test': TEST_IMAGE_BIN,
+}
+IMAGE_NAME_TO_TYPE = dict((v, k) for k, v in IMAGE_TYPE_TO_NAME.iteritems())
+
 METADATA_JSON = 'metadata.json'
 PARTIAL_METADATA_JSON = 'partial-metadata.json'
 DELTA_SYSROOT_TAR = 'delta_sysroot.tar.xz'
@@ -844,6 +868,7 @@ CQ_MASTER = 'master-paladin'
 CANARY_MASTER = 'master-release'
 PFQ_MASTER = 'master-chromium-pfq'
 BINHOST_PRE_CQ = 'binhost-pre-cq'
+WIFICELL_PRE_CQ = 'wificell-pre-cq'
 
 
 # Email validation regex. Not quite fully compliant with RFC 2822, but good
@@ -866,14 +891,10 @@ EXTRA_BUCKETS_FILES_BLACKLIST = [
 AFDO_GENERATE_TIMEOUT = 90 * 60
 
 # Stats dashboard elastic search and statsd constants.
-ELASTIC_SEARCH_HOST = '146.148.70.158'
-ELASTIC_SEARCH_PORT = 9200
+# Host and port information specified in topology.py.
 ELASTIC_SEARCH_INDEX = 'metadata_index'
-ELASTIC_SEARCH_UDP_PORT = 9700
 ELASTIC_SEARCH_USE_HTTP = False
 
-STATSD_HOST = '146.148.70.158'
-STATSD_PORT = 8125
 STATSD_PROD_PREFIX = 'chromite'
 STATSD_DEBUG_PREFIX = 'chromite_debug'
 

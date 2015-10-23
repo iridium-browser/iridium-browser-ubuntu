@@ -36,7 +36,7 @@ CacaWindow::CacaWindow(PlatformWindowDelegate* delegate,
       weak_ptr_factory_(this) {
   widget_ = manager_->AddWindow(this);
   ui::PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
-  delegate_->OnAcceleratedWidgetAvailable(widget_);
+  delegate_->OnAcceleratedWidgetAvailable(widget_, 1.f);
 }
 
 CacaWindow::~CacaWindow() {
@@ -135,6 +135,10 @@ void CacaWindow::SetCursor(PlatformCursor cursor) {}
 void CacaWindow::MoveCursorTo(const gfx::Point& location) {}
 
 void CacaWindow::ConfineCursorToBounds(const gfx::Rect& bounds) {}
+
+PlatformImeController* CacaWindow::GetPlatformImeController() {
+  return nullptr;
+}
 
 bool CacaWindow::CanDispatchEvent(const PlatformEvent& event) { return true; }
 

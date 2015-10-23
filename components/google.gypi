@@ -14,7 +14,8 @@
         '../url/url.gyp:url_lib',
         'components_strings.gyp:components_strings',
         'keyed_service_core',
-        'url_fixer',
+        'pref_registry',
+        'url_formatter/url_formatter.gyp:url_formatter',
       ],
       'include_dirs': [
         '..',

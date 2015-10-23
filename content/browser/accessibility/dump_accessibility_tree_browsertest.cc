@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/accessibility/accessibility_tree_formatter.h"
@@ -94,9 +95,9 @@ class DumpAccessibilityTreeTest : public DumpAccessibilityTestBase {
     base::string16 actual_contents_utf16;
     formatter.FormatAccessibilityTree(&actual_contents_utf16);
     std::string actual_contents = base::UTF16ToUTF8(actual_contents_utf16);
-    std::vector<std::string> actual_lines;
-    Tokenize(actual_contents, "\n", &actual_lines);
-    return actual_lines;
+    return base::SplitString(
+        actual_contents, "\n",
+        base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   }
 };
 
@@ -401,6 +402,14 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunAriaTest(FILE_PATH_LITERAL("aria-orientation.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaOwns) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-owns.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaOwnsList) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-owns-list.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaMath) {
   RunAriaTest(FILE_PATH_LITERAL("aria-math.html"));
 }
@@ -698,7 +707,13 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunHtmlTest(FILE_PATH_LITERAL("contenteditable-descendants.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityEm) {
+#if defined(OS_ANDROID)
+// Flaky failures: http://crbug.com/515053.
+#define MAYBE_AccessibilityEm DISABLED_AccessibilityEm
+#else
+#define MAYBE_AccessibilityEm AccessibilityEm
+#endif
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, MAYBE_AccessibilityEm) {
   RunHtmlTest(FILE_PATH_LITERAL("em.html"));
 }
 
@@ -803,15 +818,13 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputDateTime) {
   RunHtmlTest(FILE_PATH_LITERAL("input-datetime.html"));
 }
 
+// Fails on OS X 10.9 and higher <https://crbug.com/430622>.
+#if !defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
                        AccessibilityInputDateTimeLocal) {
-#if defined(OS_MACOSX)
-  // Fails on OS X 10.9 <https://crbug.com/430622>.
-  if (base::mac::IsOSMavericks())
-    return;
-#endif
   RunHtmlTest(FILE_PATH_LITERAL("input-datetime-local.html"));
 }
+#endif
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputEmail) {
   RunHtmlTest(FILE_PATH_LITERAL("input-email.html"));
@@ -902,7 +915,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputTextValue) {
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityInputTime) {
+                       AccessibilityInputTextValueChanged) {
+  RunHtmlTest(FILE_PATH_LITERAL("input-text-value-changed.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputTime) {
   RunHtmlTest(FILE_PATH_LITERAL("input-time.html"));
 }
 
@@ -1148,7 +1165,14 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityTitle) {
   RunHtmlTest(FILE_PATH_LITERAL("title.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityTransition) {
+#if defined(OS_WIN) || defined(OS_MACOSX)
+// Flaky on Win/Mac: crbug.com/508532
+#define MAYBE_AccessibilityTransition DISABLED_AccessibilityTransition
+#else
+#define MAYBE_AccessibilityTransition AccessibilityTransition
+#endif
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       MAYBE_AccessibilityTransition) {
   RunHtmlTest(FILE_PATH_LITERAL("transition.html"));
 }
 

@@ -37,14 +37,13 @@ class ComputedStyle;
 class StyleResolverState;
 
 class CachedMatchedProperties final : public NoBaseWillBeGarbageCollectedFinalized<CachedMatchedProperties> {
-
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(CachedMatchedProperties);
 public:
     WillBeHeapVector<MatchedProperties> matchedProperties;
-    MatchRanges ranges;
     RefPtr<ComputedStyle> computedStyle;
     RefPtr<ComputedStyle> parentComputedStyle;
 
-    void set(const ComputedStyle&, const ComputedStyle& parentStyle, const MatchResult&);
+    void set(const ComputedStyle&, const ComputedStyle& parentStyle, const MatchedPropertiesVector&);
     void clear();
     DEFINE_INLINE_TRACE()
     {
@@ -71,7 +70,7 @@ struct CachedMatchedPropertiesHashTraits : HashTraits<Member<CachedMatchedProper
             // in the CachedMatchedProperties value contain a dead "properties" field.
             // If there is a dead field the entire cache entry is removed.
             for (const auto& matchedProperties : cachedProperties->matchedProperties) {
-                if (!visitor->isHeapObjectAlive(matchedProperties.properties)) {
+                if (!Heap::isHeapObjectAlive(matchedProperties.properties)) {
                     // For now report the cache entry as dead. This might not
                     // be the final result if in a subsequent call for this entry,
                     // the "properties" field has been marked via another path.
@@ -83,7 +82,7 @@ struct CachedMatchedPropertiesHashTraits : HashTraits<Member<CachedMatchedProper
         // had a dead "properties" field so trace CachedMatchedProperties strongly.
         // FIXME: traceInCollection is also called from WeakProcessing to check if the entry is dead.
         // Avoid calling trace in that case by only calling trace when cachedProperties is not yet marked.
-        if (!visitor->isHeapObjectAlive(cachedProperties))
+        if (!Heap::isHeapObjectAlive(cachedProperties))
             visitor->trace(cachedProperties);
         return false;
     }
@@ -96,8 +95,8 @@ class MatchedPropertiesCache {
 public:
     MatchedPropertiesCache();
 
-    const CachedMatchedProperties* find(unsigned hash, const StyleResolverState&, const MatchResult&);
-    void add(const ComputedStyle&, const ComputedStyle& parentStyle, unsigned hash, const MatchResult&);
+    const CachedMatchedProperties* find(unsigned hash, const StyleResolverState&, const MatchedPropertiesVector&);
+    void add(const ComputedStyle&, const ComputedStyle& parentStyle, unsigned hash, const MatchedPropertiesVector&);
 
     void clear();
     void clearViewportDependent();

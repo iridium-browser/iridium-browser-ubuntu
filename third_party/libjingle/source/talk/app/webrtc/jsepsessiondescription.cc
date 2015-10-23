@@ -62,10 +62,11 @@ const int JsepSessionDescription::kDefaultVideoCodecId = 100;
 const int JsepSessionDescription::kDefaultVideoCodecFramerate = 60;
 const char JsepSessionDescription::kDefaultVideoCodecName[] = "VP8";
 // Used as default max video codec size before we have it in signaling.
-#if defined(ANDROID)
+#if defined(ANDROID) || defined(WEBRTC_IOS)
 // Limit default max video codec size for Android to avoid
 // HW VP8 codec initialization failure for resolutions higher
 // than 1280x720 or 720x1280.
+// Same patch for iOS to support 720P in portrait mode.
 const int JsepSessionDescription::kMaxVideoCodecWidth = 1280;
 const int JsepSessionDescription::kMaxVideoCodecHeight = 1280;
 #else
@@ -73,11 +74,6 @@ const int JsepSessionDescription::kMaxVideoCodecWidth = 1920;
 const int JsepSessionDescription::kMaxVideoCodecHeight = 1080;
 #endif
 const int JsepSessionDescription::kDefaultVideoCodecPreference = 1;
-
-SessionDescriptionInterface* CreateSessionDescription(const std::string& type,
-                                                      const std::string& sdp) {
-  return CreateSessionDescription(type, sdp, NULL);
-}
 
 SessionDescriptionInterface* CreateSessionDescription(const std::string& type,
                                                       const std::string& sdp,
@@ -129,7 +125,7 @@ bool JsepSessionDescription::AddCandidate(
   }
   if (mediasection_index >= number_of_mediasections())
     return false;
-  const std::string content_name =
+  const std::string& content_name =
       description_->contents()[mediasection_index].name;
   const cricket::TransportInfo* transport_info =
       description_->GetTransportInfoByName(content_name);

@@ -18,7 +18,6 @@ var VIEW_TYPES = [
   'AppView',
   'ExtensionOptions',
   'ExtensionView',
-  'SurfaceWorker',
   'WebView'
 ];
 
@@ -27,7 +26,7 @@ function registerGuestViewElement(viewType) {
   var proto = Object.create(HTMLElement.prototype);
 
   proto.createdCallback = function() {
-    window.console.error(ERROR_MESSAGE.replace('%1', viewType.toLowerCase()));
+    window.console.error(ERROR_MESSAGE.replace(/%1/g, viewType.toLowerCase()));
   };
 
   window[viewType] = DocumentNatives.RegisterElement(viewType.toLowerCase(),

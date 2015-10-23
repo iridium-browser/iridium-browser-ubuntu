@@ -7,7 +7,6 @@
 from __future__ import print_function
 
 import ConfigParser
-import mock
 import os
 import unittest
 
@@ -251,28 +250,6 @@ class TestFindSuspects(patch_unittest.MockPatchBase):
     self.assertTrue(
         triage_lib.CalculateSuspects.OnlyInfraFailures(messages, no_stat))
 
-  def testSkipInnocentOverlayPatches(self):
-    """Test that we don't blame innocent overlay patches."""
-    changes = self.GetPatches(4)
-    overlay_dir = os.path.join(constants.SOURCE_ROOT, 'src/overlays')
-    m = mock.MagicMock()
-    self.PatchObject(cros_patch.GitRepoPatch, 'GetCheckout', return_value=m)
-    self.PatchObject(m, 'GetPath', return_value=overlay_dir)
-    self.PatchObject(changes[0], 'GetDiffStatus',
-                     return_value={'overlay-x86-generic/make.conf': 'M'})
-    self.PatchObject(changes[1], 'GetDiffStatus',
-                     return_value={'make.conf': 'M'})
-    self.PatchObject(changes[2], 'GetDiffStatus',
-                     return_value={'overlay-daisy/make.conf': 'M'})
-    self.PatchObject(changes[3], 'GetDiffStatus',
-                     return_value={'overlay-daisy_spring/make.conf': 'M'})
-
-    message = GetFailedMessage([Exception()])
-    candidates = (
-        triage_lib.CalculateSuspects.FilterOutInnocentOverlayChanges(
-            constants.SOURCE_ROOT, changes, [message]))
-    self.assertEquals(candidates, changes[1:])
-
 
 class TestGetFullyVerifiedChanges(patch_unittest.MockPatchBase):
   """Tests GetFullyVerifiedChanges() and related functions."""
@@ -356,10 +333,10 @@ class TestGetFullyVerifiedChanges(patch_unittest.MockPatchBase):
         messages, change, self.build_root))
 
 
-class IgnoredStagesTest(patch_unittest.MockPatchBase):
-  """Tests for functions that calculate what stages to ignore."""
+class GetOptionsTest(patch_unittest.MockPatchBase):
+  """Tests for functions that get options from config file."""
 
-  def GetOption(self, path, section='GENERAL', option='ignored-stages'):
+  def GetOption(self, path, section='a', option='b'):
     # pylint: disable=protected-access
     return triage_lib._GetOptionFromConfigFile(path, section, option)
 
@@ -380,11 +357,37 @@ class IgnoredStagesTest(patch_unittest.MockPatchBase):
     """Test if we can handle a good config file."""
     with osutils.TempDir(set_global=True) as tempdir:
       path = os.path.join(tempdir, 'foo.ini')
-      osutils.WriteFile(path, '[GENERAL]\nignored-stages: bar baz\n')
+      osutils.WriteFile(path, '[a]\nb: bar baz\n')
       ignored = self.GetOption(path)
       self.assertEqual('bar baz', ignored)
 
+  def testGetIgnoredStages(self):
+    """Test if we can get the ignored stages from a good config file."""
+    with osutils.TempDir(set_global=True) as tempdir:
+      path = os.path.join(tempdir, 'foo.ini')
+      osutils.WriteFile(path, '[GENERAL]\nignored-stages: bar baz\n')
+      ignored = self.GetOption(path, section='GENERAL', option='ignored-stages')
+      self.assertEqual('bar baz', ignored)
 
+  def testGetSubsystem(self):
+    """Test if we can get the subsystem label from a good config file."""
+    with osutils.TempDir(set_global=True) as tempdir:
+      path = os.path.join(tempdir, 'foo.ini')
+      osutils.WriteFile(path, '[GENERAL]\nsubsystem: power light\n')
+      ignored = self.GetOption(path, section='GENERAL', option='subsystem')
+      self.assertEqual('power light', ignored)
+
+  def testResultForBadConfigFile(self):
+    """Test whether the return is None when handle a malformat config file."""
+    with osutils.TempDir(set_global=True) as tempdir:
+      path = os.path.join(tempdir, 'COMMIT-QUEUE.ini')
+      osutils.WriteFile(path, 'foo\n')
+      self.PatchObject(triage_lib, '_GetConfigFileForChange', return_value=path)
+
+      build_root = 'foo/build/root'
+      change = self.GetPatches(how_many=1)
+      result = triage_lib.GetOptionForChange(build_root, change, 'a', 'b')
+      self.assertEqual(None, result)
 
 
 class ConfigFileTest(cros_test_lib.MockTestCase):

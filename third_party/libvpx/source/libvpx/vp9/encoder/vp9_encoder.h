@@ -16,13 +16,13 @@
 #include "./vpx_config.h"
 #include "vpx/internal/vpx_codec_internal.h"
 #include "vpx/vp8cx.h"
+#include "vpx_util/vpx_thread.h"
 
 #include "vp9/common/vp9_alloccommon.h"
 #include "vp9/common/vp9_ppflags.h"
 #include "vp9/common/vp9_entropymode.h"
 #include "vp9/common/vp9_thread_common.h"
 #include "vp9/common/vp9_onyxc_int.h"
-#include "vp9/common/vp9_thread.h"
 
 #include "vp9/encoder/vp9_aq_cyclicrefresh.h"
 #include "vp9/encoder/vp9_context_tree.h"
@@ -40,7 +40,7 @@
 #include "vp9/encoder/vp9_speed_features.h"
 #include "vp9/encoder/vp9_svc_layercontext.h"
 #include "vp9/encoder/vp9_tokenize.h"
-#include "vp9/encoder/vp9_variance.h"
+#include "vpx_dsp/variance.h"
 
 #if CONFIG_VP9_TEMPORAL_DENOISING
 #include "vp9/encoder/vp9_denoiser.h"
@@ -50,14 +50,12 @@
 extern "C" {
 #endif
 
-#define DEFAULT_GF_INTERVAL         10
-
 typedef struct {
   int nmvjointcost[MV_JOINTS];
   int nmvcosts[2][MV_VALS];
   int nmvcosts_hp[2][MV_VALS];
 
-  vp9_prob segment_pred_probs[PREDICTION_PROBS];
+  vpx_prob segment_pred_probs[PREDICTION_PROBS];
 
   unsigned char *last_frame_seg_map_copy;
 
@@ -194,10 +192,10 @@ typedef struct VP9EncoderConfig {
   int ss_number_layers;  // Number of spatial layers.
   int ts_number_layers;  // Number of temporal layers.
   // Bitrate allocation for spatial layers.
+  int layer_target_bitrate[VPX_MAX_LAYERS];
   int ss_target_bitrate[VPX_SS_MAX_LAYERS];
   int ss_enable_auto_arf[VPX_SS_MAX_LAYERS];
   // Bitrate allocation (CBR mode) and framerate factor, for temporal layers.
-  int ts_target_bitrate[VPX_TS_MAX_LAYERS];
   int ts_rate_decimator[VPX_TS_MAX_LAYERS];
 
   int enable_auto_arf;
@@ -219,6 +217,9 @@ typedef struct VP9EncoderConfig {
   int arnr_max_frames;
   int arnr_strength;
 
+  int min_gf_interval;
+  int max_gf_interval;
+
   int tile_columns;
   int tile_rows;
 
@@ -237,6 +238,7 @@ typedef struct VP9EncoderConfig {
   int use_highbitdepth;
 #endif
   vpx_color_space_t color_space;
+  VP9E_TEMPORAL_LAYERING_MODE temporal_layering_mode;
 } VP9EncoderConfig;
 
 static INLINE int is_lossless_requested(const VP9EncoderConfig *cfg) {
@@ -253,7 +255,6 @@ typedef struct TileDataEnc {
 typedef struct RD_COUNTS {
   vp9_coeff_count coef_counts[TX_SIZES][PLANE_TYPES];
   int64_t comp_pred_diff[REFERENCE_MODES];
-  int64_t tx_select_diff[TX_MODES];
   int64_t filter_diff[SWITCHABLE_FILTER_CONTEXTS];
 } RD_COUNTS;
 
@@ -290,6 +291,7 @@ typedef struct IMAGE_STAT {
 typedef struct VP9_COMP {
   QUANTS quants;
   ThreadData td;
+  MB_MODE_INFO_EXT *mbmi_ext_base;
   DECLARE_ALIGNED(16, int16_t, y_dequant[QINDEX_RANGE][8]);
   DECLARE_ALIGNED(16, int16_t, uv_dequant[QINDEX_RANGE][8]);
   VP9_COMMON common;
@@ -305,6 +307,7 @@ typedef struct VP9_COMP {
   YV12_BUFFER_CONFIG scaled_last_source;
 
   TileDataEnc *tile_data;
+  int allocated_tiles;  // Keep track of memory allocated for tiles.
 
   // For a still frame, this flag is set to 1 to skip partition search.
   int partition_search_skippable_frame;
@@ -477,6 +480,12 @@ typedef struct VP9_COMP {
 #endif
 
   int resize_pending;
+  int resize_state;
+  int resize_scale_num;
+  int resize_scale_den;
+  int resize_avg_qp;
+  int resize_buffer_underflow;
+  int resize_count;
 
   // VAR_BASED_PARTITION thresholds
   // 0 - threshold_64x64; 1 - threshold_32x32;
@@ -488,7 +497,7 @@ typedef struct VP9_COMP {
 
   // Multi-threading
   int num_workers;
-  VP9Worker *workers;
+  VPxWorker *workers;
   struct EncWorkerData *tile_thr_data;
   VP9LfSync lf_row_sync;
 } VP9_COMP;
@@ -604,6 +613,10 @@ void vp9_update_reference_frames(VP9_COMP *cpi);
 
 void vp9_set_high_precision_mv(VP9_COMP *cpi, int allow_high_precision_mv);
 
+YV12_BUFFER_CONFIG *vp9_scale_if_required_fast(VP9_COMMON *cm,
+                                               YV12_BUFFER_CONFIG *unscaled,
+                                               YV12_BUFFER_CONFIG *scaled);
+
 YV12_BUFFER_CONFIG *vp9_scale_if_required(VP9_COMMON *cm,
                                           YV12_BUFFER_CONFIG *unscaled,
                                           YV12_BUFFER_CONFIG *scaled);
@@ -611,9 +624,11 @@ YV12_BUFFER_CONFIG *vp9_scale_if_required(VP9_COMMON *cm,
 void vp9_apply_encoding_flags(VP9_COMP *cpi, vpx_enc_frame_flags_t flags);
 
 static INLINE int is_two_pass_svc(const struct VP9_COMP *const cpi) {
-  return cpi->use_svc &&
-         ((cpi->svc.number_spatial_layers > 1) ||
-         (cpi->svc.number_temporal_layers > 1 && cpi->oxcf.pass != 0));
+  return cpi->use_svc && cpi->oxcf.pass != 0;
+}
+
+static INLINE int is_one_pass_cbr_svc(const struct VP9_COMP *const cpi) {
+  return (cpi->use_svc && cpi->oxcf.pass == 0);
 }
 
 static INLINE int is_altref_enabled(const VP9_COMP *const cpi) {
@@ -641,6 +656,8 @@ static INLINE int *cond_cost_list(const struct VP9_COMP *cpi, int *cost_list) {
 }
 
 void vp9_new_framerate(VP9_COMP *cpi, double framerate);
+
+#define LAYER_IDS_TO_IDX(sl, tl, num_tl) ((sl) * (num_tl) + (tl))
 
 #ifdef __cplusplus
 }  // extern "C"

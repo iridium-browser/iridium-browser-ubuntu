@@ -36,14 +36,18 @@ remoting.Viewport = {};
 remoting.Viewport.choosePluginSize = function(
     clientSizeDips, clientPixelRatio, desktopSize, desktopDpi, desktopScale,
     isFullscreen, shrinkToFit) {
-  base.debug.assert(clientSizeDips.width > 0);
-  base.debug.assert(clientSizeDips.height > 0);
-  base.debug.assert(clientPixelRatio >= 1.0);
-  base.debug.assert(desktopSize.width > 0);
-  base.debug.assert(desktopSize.height > 0);
-  base.debug.assert(desktopDpi.x > 0);
-  base.debug.assert(desktopDpi.y > 0);
-  base.debug.assert(desktopScale > 0);
+  console.assert(clientSizeDips.width > 0 && clientSizeDips.height > 0,
+                 'Bad |clientSizeDips|: ' + clientSizeDips.width + 'x' +
+                 clientSizeDips.height + '.');
+  console.assert(clientPixelRatio >= 1.0,
+                 'Bad |clientPixelRatio|: ' + clientPixelRatio + '.');
+  console.assert(desktopSize.width > 0 && desktopSize.height > 0,
+                 'Bad |desktopSize|: ' + desktopSize.width + 'x' +
+                 desktopSize.height + '.');
+  console.assert(desktopDpi.x > 0 && desktopDpi.y > 0,
+                 'Bad |desktopDpi|: ' + desktopDpi.x + 'x' + desktopDpi.y +
+                 '.');
+  console.assert(desktopScale > 0, 'Bad |desktopScale|: ' + desktopScale + '.');
 
   // We have the following goals in sizing the desktop display at the client:
   //  1. Avoid losing detail by down-scaling beyond 1:1 host:device pixels.
@@ -59,12 +63,9 @@ remoting.Viewport.choosePluginSize = function(
   //
   // To determine the ideal size we follow a four-stage process:
   //  1. Determine the "natural" size at which to display the desktop.
-  //    a. Initially assume 1:1 mapping of desktop to client device pixels.
+  //    a. Initially assume 1:1 mapping of desktop to client device pixels,
+  //       adjusting for the specified desktopScale.
   //    b. If host DPI is less than the client's then up-scale accordingly.
-  //    c. If desktopScale is configured for the host then allow that to
-  //       reduce the amount of up-scaling from (b). e.g. if the client:host
-  //       DPIs are 2:1 then a desktopScale of 1.5 would reduce the up-scale
-  //       to 4:3, while a desktopScale of 3.0 would result in no up-scaling.
   //  2. If the natural size of the desktop is smaller than the client device
   //     then apply up-scaling by an integer scale factor to avoid excessive
   //     letterboxing.
@@ -78,9 +79,10 @@ remoting.Viewport.choosePluginSize = function(
   //  4. If the overall scale factor is fractionally over an integer factor
   //     then reduce it to that integer factor, to avoid blurring.
 
-  // All calculations are performed in device pixels.
-  var clientWidth = clientSizeDips.width * clientPixelRatio;
-  var clientHeight = clientSizeDips.height * clientPixelRatio;
+  // All calculations are performed in client device pixels, but taking into
+  // account |desktopScale|.
+  var clientWidth = clientSizeDips.width * clientPixelRatio / desktopScale;
+  var clientHeight = clientSizeDips.height * clientPixelRatio / desktopScale;
 
   // 1. Determine a "natural" size at which to display the desktop.
   var scale = 1.0;
@@ -94,19 +96,15 @@ remoting.Viewport.choosePluginSize = function(
   // Allow up-scaling to account for DPI.
   scale = Math.max(scale, clientPixelRatio / hostPixelRatio);
 
-  // Allow some or all of the up-scaling to be cancelled by the desktopScale.
-  if (desktopScale > 1.0) {
-    scale = Math.max(1.0, scale / desktopScale);
-  }
-
   // 2. If the host is still much smaller than the client, then up-scale to
   //    avoid wasting space, but only by an integer factor, to avoid blurring.
+  //    Don't drop the scale below that determined based on DPI, though.
   if (desktopSize.width * scale <= clientWidth &&
       desktopSize.height * scale <= clientHeight) {
     var scaleX = Math.floor(clientWidth / desktopSize.width);
     var scaleY = Math.floor(clientHeight / desktopSize.height);
-    scale = Math.min(scaleX, scaleY);
-    base.debug.assert(scale >= 1.0);
+    scale = Math.max(scale, Math.min(scaleX, scaleY));
+    console.assert(scale >= 1.0, 'Bad scale: ' + scale + '.');
   }
 
   // 3. Apply shrink-to-fit, if configured.
@@ -145,6 +143,7 @@ remoting.Viewport.choosePluginSize = function(
 
   // Return the necessary plugin dimensions in DIPs.
   scale = scale / clientPixelRatio;
+  scale = scale * desktopScale;
   var pluginWidth = Math.round(desktopSize.width * scale);
   var pluginHeight = Math.round(desktopSize.height * scale);
   return { width: pluginWidth, height: pluginHeight };

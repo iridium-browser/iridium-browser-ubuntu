@@ -60,7 +60,7 @@ PassRefPtrWillBeRawPtr<HTMLProgressElement> HTMLProgressElement::create(Document
 
 LayoutObject* HTMLProgressElement::createLayoutObject(const ComputedStyle& style)
 {
-    if (!style.hasAppearance() || hasOpenShadowRoot())
+    if (!style.hasAppearance() || openShadowRoot())
         return LayoutObject::createObject(this, style);
     return new LayoutProgress(this);
 }
@@ -170,7 +170,7 @@ bool HTMLProgressElement::shouldAppearIndeterminate() const
     return !isDeterminate();
 }
 
-void HTMLProgressElement::willAddFirstOpenShadowRoot()
+void HTMLProgressElement::willAddFirstAuthorShadowRoot()
 {
     ASSERT(RuntimeEnabledFeatures::authorShadowDOMForAnyElementEnabled());
     lazyReattachIfAttached();

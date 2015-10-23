@@ -18,7 +18,7 @@ void AssertValueSourceFileString(const std::string& s) {
 #else
   DCHECK(s[0] == '/');
 #endif
-  DCHECK(!EndsWithSlash(s));
+  DCHECK(!EndsWithSlash(s)) << s;
 }
 
 }  // namespace
@@ -30,12 +30,14 @@ SourceFile::SourceFile(const base::StringPiece& p)
     : value_(p.data(), p.size()) {
   DCHECK(!value_.empty());
   AssertValueSourceFileString(value_);
+  NormalizePath(&value_);
 }
 
 SourceFile::SourceFile(SwapIn, std::string* value) {
   value_.swap(*value);
   DCHECK(!value_.empty());
   AssertValueSourceFileString(value_);
+  NormalizePath(&value_);
 }
 
 SourceFile::~SourceFile() {

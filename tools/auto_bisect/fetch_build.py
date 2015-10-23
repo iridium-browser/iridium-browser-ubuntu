@@ -23,7 +23,7 @@ import sys
 import zipfile
 
 # Telemetry (src/tools/telemetry) is expected to be in the PYTHONPATH.
-from telemetry.util import cloud_storage
+from catapult_base import cloud_storage
 
 import bisect_utils
 
@@ -123,7 +123,10 @@ class BuildArchive(object):
                extra_src=None):
     self._extra_src = extra_src
     if bisect_utils.IsLinuxHost() and target_platform == 'android':
-      self._platform = 'android'
+      if target_arch == 'arm64':
+        self._platform = 'android_arm64'
+      else:
+        self._platform = 'android'
     elif bisect_utils.IsLinuxHost() and target_platform == 'android-chrome':
       self._platform = 'android-chrome'
     elif bisect_utils.IsLinuxHost():
@@ -178,7 +181,7 @@ class BuildArchive(object):
     if self._platform in ('win', 'win64'):
       # Build archive for win64 is still stored with "win32" in the name.
       return 'win32'
-    if self._platform in ('linux', 'android'):
+    if self._platform in ('linux', 'android', 'android_arm64'):
       # Android builds are also stored with "linux" in the name.
       return 'linux'
     if self._platform == 'mac':
@@ -192,7 +195,8 @@ class BuildArchive(object):
     """Returns the time to wait for a build after requesting one."""
     if self._platform in ('win', 'win64'):
       return MAX_WIN_BUILD_TIME
-    if self._platform in ('linux', 'android', 'android-chrome'):
+    if self._platform in ('linux', 'android',
+                          'android_arm64', 'android-chrome'):
       return MAX_LINUX_BUILD_TIME
     if self._platform == 'mac':
       return MAX_MAC_BUILD_TIME
@@ -215,6 +219,7 @@ class PerfBuildArchive(BuildArchive):
     """Returns the directory name to download builds from."""
     platform_to_directory = {
         'android': 'android_perf_rel',
+        'android_arm64': 'android_perf_rel_arm64',
         'linux': 'Linux Builder',
         'mac': 'Mac Builder',
         'win64': 'Win x64 Builder',
@@ -233,6 +238,8 @@ class PerfBuildArchive(BuildArchive):
       return 'linux_perf_bisect_builder'
     elif self._platform == 'android':
       return 'android_perf_bisect_builder'
+    elif self._platform == 'android_arm64':
+      return 'android_arm64_perf_bisect_builder'
     elif self._platform == 'mac':
       return 'mac_perf_bisect_builder'
     raise NotImplementedError('Unsupported platform "%s".' % sys.platform)

@@ -32,6 +32,7 @@
 
 namespace blink {
 
+class AbstractAudioContext;
 class DynamicsCompressor;
 
 class MODULES_EXPORT DynamicsCompressorHandler final : public AudioHandler {
@@ -40,14 +41,14 @@ public:
     ~DynamicsCompressorHandler();
 
     // AudioHandler
-    virtual void process(size_t framesToProcess) override;
-    virtual void initialize() override;
-    virtual void clearInternalStateWhenDisabled() override;
+    void process(size_t framesToProcess) override;
+    void initialize() override;
+    void clearInternalStateWhenDisabled() override;
 
 private:
     DynamicsCompressorHandler(AudioNode&, float sampleRate, AudioParamHandler& threshold, AudioParamHandler& knee, AudioParamHandler& ratio, AudioParamHandler& reduction, AudioParamHandler& attack, AudioParamHandler& release);
-    virtual double tailTime() const override;
-    virtual double latencyTime() const override;
+    double tailTime() const override;
+    double latencyTime() const override;
 
     OwnPtr<DynamicsCompressor> m_dynamicsCompressor;
     RefPtr<AudioParamHandler> m_threshold;
@@ -64,7 +65,7 @@ private:
 class MODULES_EXPORT DynamicsCompressorNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static DynamicsCompressorNode* create(AudioContext&, float sampleRate);
+    static DynamicsCompressorNode* create(AbstractAudioContext&, float sampleRate);
     DECLARE_VIRTUAL_TRACE();
 
     AudioParam* threshold() const;
@@ -75,7 +76,7 @@ public:
     AudioParam* release() const;
 
 private:
-    DynamicsCompressorNode(AudioContext&, float sampleRate);
+    DynamicsCompressorNode(AbstractAudioContext&, float sampleRate);
     DynamicsCompressorHandler& dynamicsCompressorHandler() const;
 
     Member<AudioParam> m_threshold;

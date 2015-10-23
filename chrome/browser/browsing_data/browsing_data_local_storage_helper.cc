@@ -21,12 +21,9 @@ BrowsingDataLocalStorageHelper::LocalStorageInfo::LocalStorageInfo(
 
 BrowsingDataLocalStorageHelper::LocalStorageInfo::~LocalStorageInfo() {}
 
-BrowsingDataLocalStorageHelper::BrowsingDataLocalStorageHelper(
-    Profile* profile)
-    : dom_storage_context_(
-          BrowserContext::GetDefaultStoragePartition(profile)->
-              GetDOMStorageContext()),
-      is_fetching_(false) {
+BrowsingDataLocalStorageHelper::BrowsingDataLocalStorageHelper(Profile* profile)
+    : dom_storage_context_(BrowserContext::GetDefaultStoragePartition(profile)
+                               ->GetDOMStorageContext()) {
   DCHECK(dom_storage_context_);
 }
 
@@ -113,11 +110,8 @@ void CannedBrowsingDataLocalStorageHelper::StartFetching(
   DCHECK(!callback.is_null());
 
   std::list<LocalStorageInfo> result;
-  for (std::set<GURL>::iterator iter = pending_local_storage_info_.begin();
-       iter != pending_local_storage_info_.end(); ++iter) {
-    result.push_back(
-        LocalStorageInfo(*iter, 0,  base::Time()));
-  }
+  for (const GURL& url : pending_local_storage_info_)
+    result.push_back(LocalStorageInfo(url, 0, base::Time()));
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE, base::Bind(callback, result));

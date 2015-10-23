@@ -36,6 +36,7 @@
 #include "chrome/browser/chromeos/ui/accessibility_focus_ring_controller.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
@@ -56,9 +57,11 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/file_reader.h"
+#include "extensions/browser/script_executor.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_resource.h"
@@ -95,6 +98,34 @@ base::FilePath GetChromeVoxPath() {
     NOTREACHED();
   path = path.Append(extension_misc::kChromeVoxExtensionPath);
   return path;
+}
+
+// Uses the ScriptExecutor associated with the given |render_view_host| to
+// execute the given |code|.
+void ExecuteScriptHelper(
+    content::RenderViewHost* render_view_host,
+    const std::string& code,
+    const std::string& extension_id) {
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderViewHost(render_view_host);
+  if (!web_contents)
+    return;
+  if (!extensions::TabHelper::FromWebContents(web_contents))
+    extensions::TabHelper::CreateForWebContents(web_contents);
+  extensions::TabHelper::FromWebContents(web_contents)->script_executor()->
+      ExecuteScript(HostID(HostID::EXTENSIONS, extension_id),
+                    extensions::ScriptExecutor::JAVASCRIPT,
+                    code,
+                    extensions::ScriptExecutor::ALL_FRAMES,
+                    extensions::ScriptExecutor::DONT_MATCH_ABOUT_BLANK,
+                    extensions::UserScript::DOCUMENT_IDLE,
+                    extensions::ScriptExecutor::ISOLATED_WORLD,
+                    extensions::ScriptExecutor::DEFAULT_PROCESS,
+                    GURL(),  // No webview src.
+                    GURL(),  // No file url.
+                    false,  // Not user gesture.
+                    extensions::ScriptExecutor::NO_RESULT,
+                    extensions::ScriptExecutor::ExecuteScriptCallback());
 }
 
 // Helper class that directly loads an extension's content scripts into
@@ -134,22 +165,10 @@ class ContentScriptLoader {
  private:
   void OnFileLoaded(bool success, const std::string& data) {
     if (success) {
-      ExtensionMsg_ExecuteCode_Params params;
-      params.request_id = 0;
-      params.host_id = HostID(HostID::EXTENSIONS, extension_id_);
-      params.is_javascript = true;
-      params.code = data;
-      params.run_at = extensions::UserScript::DOCUMENT_IDLE;
-      params.all_frames = true;
-      params.match_about_blank = false;
-      params.in_main_world = false;
-
       RenderViewHost* render_view_host =
           RenderViewHost::FromID(render_process_id_, render_view_id_);
-      if (render_view_host) {
-        render_view_host->Send(new ExtensionMsg_ExecuteCode(
-            render_view_host->GetRoutingID(), params));
-      }
+      if (render_view_host)
+        ExecuteScriptHelper(render_view_host, data, extension_id_);
     }
     Run();
   }
@@ -203,17 +222,8 @@ void InjectChromeVoxContentScript(
 
   // Set a flag to tell ChromeVox that it's just been enabled,
   // so that it won't interrupt our speech feedback enabled message.
-  ExtensionMsg_ExecuteCode_Params params;
-  params.request_id = 0;
-  params.host_id = HostID(HostID::EXTENSIONS, extension->id());
-  params.is_javascript = true;
-  params.code = "window.INJECTED_AFTER_LOAD = true;";
-  params.run_at = extensions::UserScript::DOCUMENT_IDLE;
-  params.all_frames = true;
-  params.match_about_blank = false;
-  params.in_main_world = false;
-  render_view_host->Send(new ExtensionMsg_ExecuteCode(
-      render_view_host->GetRoutingID(), params));
+  ExecuteScriptHelper(render_view_host, "window.INJECTED_AFTER_LOAD = true;",
+                      extension->id());
 
   // Inject ChromeVox' content scripts.
   ContentScriptLoader* loader = new ContentScriptLoader(
@@ -817,10 +827,9 @@ void AccessibilityManager::UpdateBrailleImeState() {
   if (!profile_)
     return;
   PrefService* pref_service = profile_->GetPrefs();
-  std::vector<std::string> preload_engines;
-  base::SplitString(pref_service->GetString(prefs::kLanguagePreloadEngines),
-                    ',',
-                    &preload_engines);
+  std::vector<std::string> preload_engines =
+      base::SplitString(pref_service->GetString(prefs::kLanguagePreloadEngines),
+                        ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   std::vector<std::string>::iterator it =
       std::find(preload_engines.begin(),
                 preload_engines.end(),
@@ -835,7 +844,7 @@ void AccessibilityManager::UpdateBrailleImeState() {
   else
     preload_engines.erase(it);
   pref_service->SetString(prefs::kLanguagePreloadEngines,
-                          JoinString(preload_engines, ','));
+                          base::JoinString(preload_engines, ","));
   braille_ime_current_ = false;
 }
 
@@ -1087,21 +1096,21 @@ void AccessibilityManager::OnBrailleKeyEvent(const KeyEvent& event) {
 
 void AccessibilityManager::PostLoadChromeVox(Profile* profile) {
   // Do any setup work needed immediately after ChromeVox actually loads.
-  if (system_sounds_enabled_)
-    ash::PlaySystemSoundAlways(SOUND_SPOKEN_FEEDBACK_ENABLED);
+  ash::PlaySystemSoundAlways(SOUND_SPOKEN_FEEDBACK_ENABLED);
 
   if (chrome_vox_loaded_on_lock_screen_ ||
       should_speak_chrome_vox_announcements_on_user_screen_) {
-    extensions::ExtensionSystem* system =
-        extensions::ExtensionSystem::Get(profile);
-    CHECK(system);
+    extensions::EventRouter* event_router =
+        extensions::EventRouter::Get(profile);
+    CHECK(event_router);
 
     scoped_ptr<base::ListValue> event_args(new base::ListValue());
-    scoped_ptr<extensions::Event> event(
-        new extensions::Event(extensions::api::accessibility_private::
-                                  OnIntroduceChromeVox::kEventName,
-                              event_args.Pass()));
-    system->event_router()->DispatchEventWithLazyListener(
+    scoped_ptr<extensions::Event> event(new extensions::Event(
+        extensions::events::ACCESSIBILITY_PRIVATE_ON_INTRODUCE_CHROME_VOX,
+        extensions::api::accessibility_private::OnIntroduceChromeVox::
+            kEventName,
+        event_args.Pass()));
+    event_router->DispatchEventWithLazyListener(
         extension_misc::kChromeVoxExtensionId, event.Pass());
   }
 
@@ -1111,8 +1120,7 @@ void AccessibilityManager::PostLoadChromeVox(Profile* profile) {
 
 void AccessibilityManager::PostUnloadChromeVox(Profile* profile) {
   // Do any teardown work needed immediately after ChromeVox actually unloads.
-  if (system_sounds_enabled_)
-    ash::PlaySystemSoundAlways(SOUND_SPOKEN_FEEDBACK_DISABLED);
+  ash::PlaySystemSoundAlways(SOUND_SPOKEN_FEEDBACK_DISABLED);
   // Clear the accessibility focus ring.
   AccessibilityFocusRingController::GetInstance()->SetFocusRing(
       std::vector<gfx::Rect>());

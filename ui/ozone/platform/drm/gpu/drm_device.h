@@ -14,7 +14,6 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/overlay_transform.h"
@@ -45,11 +44,10 @@ class OZONE_EXPORT DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
                               unsigned int /* seconds */,
                               unsigned int /* useconds */)> PageFlipCallback;
 
-  DrmDevice(const base::FilePath& device_path);
   DrmDevice(const base::FilePath& device_path, base::File file);
 
   // Open device.
-  virtual bool Initialize();
+  virtual bool Initialize(bool use_atomic);
 
   // |task_runner| will be used to asynchronously page flip.
   virtual void InitializeTaskRunner(
@@ -160,6 +158,7 @@ class OZONE_EXPORT DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
   virtual bool CommitProperties(drmModePropertySet* properties,
                                 uint32_t flags,
                                 bool is_sync,
+                                bool test_only,
                                 const PageFlipCallback& callback);
 
   // Set the gamma ramp for |crtc_id| to reflect the ramps in |lut|.

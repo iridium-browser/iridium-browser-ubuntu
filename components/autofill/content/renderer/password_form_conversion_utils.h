@@ -8,11 +8,14 @@
 #include <map>
 
 #include "base/memory/scoped_ptr.h"
+#include "components/autofill/core/common/password_form_field_prediction_map.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
 #include "url/gurl.h"
 
 namespace blink {
 class WebDocument;
 class WebFormElement;
+class WebFormControlElement;
 class WebInputElement;
 class WebString;
 }
@@ -29,6 +32,14 @@ struct PasswordForm;
 GURL GetCanonicalActionForForm(const blink::WebFormElement& form);
 GURL GetCanonicalOriginForDocument(const blink::WebDocument& document);
 
+// Tests whether the given form is a GAIA reauthentication form. The form is
+// not passed directly as WebFormElement, but by specifying its |url| and
+// |control_elements|. This is for better performance and easier testing.
+// TODO(msramek): Move this logic to the browser.
+bool IsGaiaReauthenticationForm(
+    const GURL& origin,
+    const blink::WebVector<blink::WebFormControlElement>& control_elements);
+
 // Create a PasswordForm from DOM form. Webkit doesn't allow storing
 // custom metadata to DOM nodes, so we have to do this every time an event
 // happens with a given form and compare against previously Create'd forms
@@ -42,8 +53,8 @@ scoped_ptr<PasswordForm> CreatePasswordForm(
     const blink::WebFormElement& form,
     const std::map<const blink::WebInputElement, blink::WebString>*
         nonscript_modified_values,
-    const std::map<autofill::FormData, autofill::FormFieldData>*
-        form_predictions);
+    const std::map<autofill::FormData,
+                   autofill::PasswordFormFieldPredictionMap>* form_predictions);
 
 }  // namespace autofill
 

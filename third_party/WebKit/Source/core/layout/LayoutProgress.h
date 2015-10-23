@@ -31,21 +31,23 @@ class HTMLProgressElement;
 class CORE_EXPORT LayoutProgress final : public LayoutBlockFlow {
 public:
     explicit LayoutProgress(HTMLElement*);
-    virtual ~LayoutProgress();
-    virtual void destroy() override;
+    ~LayoutProgress() override;
 
     double position() const { return m_position; }
     double animationProgress() const;
 
     bool isDeterminate() const;
-    virtual void updateFromElement() override;
+    void updateFromElement() override;
 
     HTMLProgressElement* progressElement() const;
 
-    virtual const char* name() const override { return "LayoutProgress"; }
+    const char* name() const override { return "LayoutProgress"; }
+
+protected:
+    void willBeDestroyed() override;
 
 private:
-    virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectProgress || LayoutBlockFlow::isOfType(type); }
+    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectProgress || LayoutBlockFlow::isOfType(type); }
 
     void animationTimerFired(Timer<LayoutProgress>*);
     void updateAnimationState();

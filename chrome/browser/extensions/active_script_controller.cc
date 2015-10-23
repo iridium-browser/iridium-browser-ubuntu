@@ -141,10 +141,10 @@ ActiveScriptController::RequiresUserConsentForScriptInjection(
   switch (type) {
     case UserScript::CONTENT_SCRIPT:
       return extension->permissions_data()->GetContentScriptAccess(
-          extension, url, url, tab_id, -1, NULL);
+          extension, url, tab_id, -1, NULL);
     case UserScript::PROGRAMMATIC_SCRIPT:
       return extension->permissions_data()->GetPageAccess(
-          extension, url, url, tab_id, -1, NULL);
+          extension, url, tab_id, -1, NULL);
   }
 
   NOTREACHED();
@@ -264,12 +264,12 @@ void ActiveScriptController::OnRequestScriptInjectionPermission(
 void ActiveScriptController::PermitScriptInjection(int64 request_id) {
   // This only sends the response to the renderer - the process of adding the
   // extension to the list of |permitted_extensions_| is done elsewhere.
-  content::RenderViewHost* render_view_host =
-      web_contents()->GetRenderViewHost();
-  if (render_view_host) {
-    render_view_host->Send(new ExtensionMsg_PermitScriptInjection(
-        render_view_host->GetRoutingID(), request_id));
-  }
+  // TODO(devlin): Instead of sending this to all frames, we should include the
+  // routing_id in the permission request message, and send only to the proper
+  // frame (sending it to all frames doesn't hurt, but isn't as efficient).
+  web_contents()->SendToAllFrames(new ExtensionMsg_PermitScriptInjection(
+      MSG_ROUTING_NONE,  // Routing id is set by the |web_contents|.
+      request_id));
 }
 
 void ActiveScriptController::NotifyChange(const Extension* extension) {
@@ -301,7 +301,9 @@ void ActiveScriptController::LogUMA() const {
   }
 }
 
-bool ActiveScriptController::OnMessageReceived(const IPC::Message& message) {
+bool ActiveScriptController::OnMessageReceived(
+    const IPC::Message& message,
+    content::RenderFrameHost* render_frame_host) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ActiveScriptController, message)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_RequestScriptInjectionPermission,

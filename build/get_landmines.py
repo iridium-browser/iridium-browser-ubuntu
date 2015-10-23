@@ -55,6 +55,8 @@ def print_landmines():
     print "Switched win from VS2010 to VS2013."
     print "Update to VS2013 Update 2."
     print "Update to VS2013 Update 4."
+  if (platform() == 'win' and gyp_msvs_version().startswith('2015')):
+    print 'Switch to VS2015'
   print 'Need to clobber everything due to an IDL change in r154579 (blink)'
   print 'Need to clobber everything due to gen file moves in r175513 (Blink)'
   if (platform() != 'ios'):
@@ -71,6 +73,8 @@ def print_landmines():
   print 'Remove NaCl toolchains from the output dir (crbug.com/456902)'
   if platform() == 'ios':
     print 'Clobber iOS to workaround Xcode deps bug (crbug.com/485435)'
+  if platform() == 'win':
+    print 'Clobber to delete stale generated files (crbug.com/510086)'
 
 
 def main():

@@ -7,14 +7,18 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/metrics/histogram.h"
 #include "base/sync_socket.h"
 #include "base/trace_event/memory_dump_request_args.h"
 #include "base/trace_event/trace_event_impl.h"
+#include "components/tracing/tracing_export.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_platform_file.h"
 
+#undef IPC_MESSAGE_EXPORT
+#define IPC_MESSAGE_EXPORT TRACING_EXPORT
 #define IPC_MESSAGE_START TracingMsgStart
 
 IPC_STRUCT_TRAITS_BEGIN(base::trace_event::TraceLogStatus)
@@ -25,7 +29,16 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(base::trace_event::MemoryDumpRequestArgs)
 IPC_STRUCT_TRAITS_MEMBER(dump_guid)
 IPC_STRUCT_TRAITS_MEMBER(dump_type)
+IPC_STRUCT_TRAITS_MEMBER(dump_args)
 IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(base::trace_event::MemoryDumpArgs)
+  IPC_STRUCT_TRAITS_MEMBER(level_of_detail)
+IPC_STRUCT_TRAITS_END()
+
+IPC_ENUM_TRAITS_MAX_VALUE(
+    base::trace_event::MemoryDumpArgs::LevelOfDetail,
+    base::trace_event::MemoryDumpArgs::LevelOfDetail::LAST)
 
 IPC_ENUM_TRAITS_MAX_VALUE(
     base::trace_event::MemoryDumpType,
@@ -33,18 +46,20 @@ IPC_ENUM_TRAITS_MAX_VALUE(
 
 // Sent to all child processes to enable trace event recording.
 IPC_MESSAGE_CONTROL3(TracingMsg_BeginTracing,
-                     std::string /*  category_filter_str */,
-                     base::TimeTicks /* browser_time */,
-                     std::string /* base::trace_event::TraceOptions */)
+                     std::string /*  trace_config_str */,
+                     base::TraceTicks /* browser_time */,
+                     uint64 /* Tracing process id (hash of child id) */)
 
 // Sent to all child processes to disable trace event recording.
 IPC_MESSAGE_CONTROL0(TracingMsg_EndTracing)
 
+// Sent to all child processes to cancel trace event recording.
+IPC_MESSAGE_CONTROL0(TracingMsg_CancelTracing)
+
 // Sent to all child processes to start monitoring.
-IPC_MESSAGE_CONTROL3(TracingMsg_EnableMonitoring,
-                     std::string /*  category_filter_str */,
-                     base::TimeTicks /* browser_time */,
-                     std::string /* base::trace_event::TraceOptions */)
+IPC_MESSAGE_CONTROL2(TracingMsg_EnableMonitoring,
+                     std::string /*  trace_config_str */,
+                     base::TraceTicks /* browser_time */)
 
 // Sent to all child processes to stop monitoring.
 IPC_MESSAGE_CONTROL0(TracingMsg_DisableMonitoring)
@@ -72,6 +87,13 @@ IPC_MESSAGE_CONTROL1(TracingMsg_ProcessMemoryDumpRequest,
 IPC_MESSAGE_CONTROL2(TracingMsg_GlobalMemoryDumpResponse,
                      uint64 /* dump_guid */,
                      bool /* success */)
+
+IPC_MESSAGE_CONTROL2(TracingMsg_SetUMACallback,
+                     std::string /* histogram_name */,
+                     base::HistogramBase::Sample /* histogram_value */)
+
+IPC_MESSAGE_CONTROL1(TracingMsg_ClearUMACallback,
+                     std::string /* histogram_name */)
 
 // Sent everytime when a watch event is matched.
 IPC_MESSAGE_CONTROL0(TracingHostMsg_WatchEventMatched)
@@ -108,3 +130,6 @@ IPC_MESSAGE_CONTROL1(TracingHostMsg_GlobalMemoryDumpRequest,
 IPC_MESSAGE_CONTROL2(TracingHostMsg_ProcessMemoryDumpResponse,
                      uint64 /* dump_guid */,
                      bool /* success */)
+
+IPC_MESSAGE_CONTROL1(TracingHostMsg_TriggerBackgroundTrace,
+                     std::string /* name */)

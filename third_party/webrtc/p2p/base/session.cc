@@ -259,6 +259,13 @@ bool TransportProxy::OnRemoteCandidates(const Candidates& candidates,
   // TODO(juberti): Remove this once everybody calls SetLocalTD.
   CompleteNegotiation();
 
+  // Ignore candidates for if the proxy content_name doesn't match the content
+  // name of the actual transport. This stops video candidates from being sent
+  // down to the audio transport when BUNDLE is enabled.
+  if (content_name_ != transport_->get()->content_name()) {
+    return true;
+  }
+
   // Verify each candidate before passing down to transport layer.
   for (Candidates::const_iterator cand = candidates.begin();
        cand != candidates.end(); ++cand) {
@@ -335,8 +342,10 @@ BaseSession::BaseSession(rtc::Thread* signaling_thread,
       transport_type_(NS_GINGLE_P2P),
       initiator_(initiator),
       identity_(NULL),
+      ssl_max_version_(rtc::SSL_PROTOCOL_DTLS_10),
       ice_tiebreaker_(rtc::CreateRandomId64()),
-      role_switch_(false) {
+      role_switch_(false),
+      ice_receiving_timeout_(-1) {
   ASSERT(signaling_thread->IsCurrent());
 }
 
@@ -394,6 +403,15 @@ bool BaseSession::SetIdentity(rtc::SSLIdentity* identity) {
        iter != transports_.end(); ++iter) {
     iter->second->SetIdentity(identity_);
   }
+  return true;
+}
+
+bool BaseSession::SetSslMaxProtocolVersion(rtc::SSLProtocolVersion version) {
+  if (state_ != STATE_INIT) {
+    return false;
+  }
+
+  ssl_max_version_ = version;
   return true;
 }
 
@@ -460,6 +478,16 @@ bool BaseSession::PushdownRemoteTransportDescription(
   return true;
 }
 
+void BaseSession::SetIceConnectionReceivingTimeout(int timeout_ms) {
+  ice_receiving_timeout_ = timeout_ms;
+  for (const auto& kv : transport_proxies()) {
+    Transport* transport = kv.second->impl();
+    if (transport) {
+      transport->SetChannelReceivingTimeout(timeout_ms);
+    }
+  }
+}
+
 TransportChannel* BaseSession::CreateChannel(const std::string& content_name,
                                              int component) {
   // We create the proxy "on demand" here because we need to support
@@ -494,12 +522,15 @@ TransportProxy* BaseSession::GetOrCreateTransportProxy(
   Transport* transport = CreateTransport(content_name);
   transport->SetIceRole(initiator_ ? ICEROLE_CONTROLLING : ICEROLE_CONTROLLED);
   transport->SetIceTiebreaker(ice_tiebreaker_);
+  transport->SetSslMaxProtocolVersion(ssl_max_version_);
   // TODO: Connect all the Transport signals to TransportProxy
   // then to the BaseSession.
   transport->SignalConnecting.connect(
       this, &BaseSession::OnTransportConnecting);
   transport->SignalWritableState.connect(
       this, &BaseSession::OnTransportWritable);
+  transport->SignalReceivingState.connect(
+      this, &BaseSession::OnTransportReceiving);
   transport->SignalRequestSignaling.connect(
       this, &BaseSession::OnTransportRequestSignaling);
   transport->SignalRouteChange.connect(
@@ -546,12 +577,13 @@ void BaseSession::DestroyTransportProxy(
   }
 }
 
-cricket::Transport* BaseSession::CreateTransport(
-    const std::string& content_name) {
+Transport* BaseSession::CreateTransport(const std::string& content_name) {
   ASSERT(transport_type_ == NS_GINGLE_P2P);
-  return new cricket::DtlsTransport<P2PTransport>(
-      signaling_thread(), worker_thread(), content_name,
-      port_allocator(), identity_);
+  Transport* transport = new DtlsTransport<P2PTransport>(
+      signaling_thread(), worker_thread(), content_name, port_allocator(),
+      identity_);
+  transport->SetChannelReceivingTimeout(ice_receiving_timeout_);
+  return transport;
 }
 
 void BaseSession::SetState(State state) {
@@ -562,7 +594,6 @@ void BaseSession::SetState(State state) {
     SignalState(this, state_);
     signaling_thread_->Post(this, MSG_STATE);
   }
-  SignalNewDescription();
 }
 
 void BaseSession::SetError(Error error, const std::string& error_desc) {
@@ -764,54 +795,6 @@ bool BaseSession::GetTransportDescription(const SessionDescription* description,
     return false;
   }
   *tdesc = transport_info->description;
-  return true;
-}
-
-void BaseSession::SignalNewDescription() {
-  ContentAction action;
-  ContentSource source;
-  if (!GetContentAction(&action, &source)) {
-    return;
-  }
-  if (source == CS_LOCAL) {
-    SignalNewLocalDescription(this, action);
-  } else {
-    SignalNewRemoteDescription(this, action);
-  }
-}
-
-bool BaseSession::GetContentAction(ContentAction* action,
-                                   ContentSource* source) {
-  switch (state_) {
-    // new local description
-    case STATE_SENTINITIATE:
-      *action = CA_OFFER;
-      *source = CS_LOCAL;
-      break;
-    case STATE_SENTPRACCEPT:
-      *action = CA_PRANSWER;
-      *source = CS_LOCAL;
-      break;
-    case STATE_SENTACCEPT:
-      *action = CA_ANSWER;
-      *source = CS_LOCAL;
-      break;
-    // new remote description
-    case STATE_RECEIVEDINITIATE:
-      *action = CA_OFFER;
-      *source = CS_REMOTE;
-      break;
-    case STATE_RECEIVEDPRACCEPT:
-      *action = CA_PRANSWER;
-      *source = CS_REMOTE;
-      break;
-    case STATE_RECEIVEDACCEPT:
-      *action = CA_ANSWER;
-      *source = CS_REMOTE;
-      break;
-    default:
-      return false;
-  }
   return true;
 }
 

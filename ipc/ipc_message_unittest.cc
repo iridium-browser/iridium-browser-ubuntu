@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "ipc/ipc_message_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,6 +27,37 @@ IPC_SYNC_MESSAGE_CONTROL1_1(TestMsgClassIS, int, std::string)
 
 namespace {
 
+TEST(IPCMessageTest, BasicMessageTest) {
+  int v1 = 10;
+  std::string v2("foobar");
+  base::string16 v3(base::ASCIIToUTF16("hello world"));
+
+  IPC::Message m(0, 1, IPC::Message::PRIORITY_NORMAL);
+  EXPECT_TRUE(m.WriteInt(v1));
+  EXPECT_TRUE(m.WriteString(v2));
+  EXPECT_TRUE(m.WriteString16(v3));
+
+  base::PickleIterator iter(m);
+
+  int vi;
+  std::string vs;
+  base::string16 vs16;
+
+  EXPECT_TRUE(iter.ReadInt(&vi));
+  EXPECT_EQ(v1, vi);
+
+  EXPECT_TRUE(iter.ReadString(&vs));
+  EXPECT_EQ(v2, vs);
+
+  EXPECT_TRUE(iter.ReadString16(&vs16));
+  EXPECT_EQ(v3, vs16);
+
+  // should fail
+  EXPECT_FALSE(iter.ReadInt(&vi));
+  EXPECT_FALSE(iter.ReadString(&vs));
+  EXPECT_FALSE(iter.ReadString16(&vs16));
+}
+
 TEST(IPCMessageTest, ListValue) {
   base::ListValue input;
   input.Set(0, new base::FundamentalValue(42.42));
@@ -36,7 +68,7 @@ TEST(IPCMessageTest, ListValue) {
   IPC::WriteParam(&msg, input);
 
   base::ListValue output;
-  PickleIterator iter(msg);
+  base::PickleIterator iter(msg);
   EXPECT_TRUE(IPC::ReadParam(&msg, &iter, &output));
 
   EXPECT_TRUE(input.Equals(&output));
@@ -44,7 +76,7 @@ TEST(IPCMessageTest, ListValue) {
   // Also test the corrupt case.
   IPC::Message bad_msg(1, 2, IPC::Message::PRIORITY_NORMAL);
   bad_msg.WriteInt(99);
-  iter = PickleIterator(bad_msg);
+  iter = base::PickleIterator(bad_msg);
   EXPECT_FALSE(IPC::ReadParam(&bad_msg, &iter, &output));
 }
 
@@ -71,7 +103,7 @@ TEST(IPCMessageTest, DictionaryValue) {
   IPC::WriteParam(&msg, input);
 
   base::DictionaryValue output;
-  PickleIterator iter(msg);
+  base::PickleIterator iter(msg);
   EXPECT_TRUE(IPC::ReadParam(&msg, &iter, &output));
 
   EXPECT_TRUE(input.Equals(&output));
@@ -79,7 +111,7 @@ TEST(IPCMessageTest, DictionaryValue) {
   // Also test the corrupt case.
   IPC::Message bad_msg(1, 2, IPC::Message::PRIORITY_NORMAL);
   bad_msg.WriteInt(99);
-  iter = PickleIterator(bad_msg);
+  iter = base::PickleIterator(bad_msg);
   EXPECT_FALSE(IPC::ReadParam(&bad_msg, &iter, &output));
 }
 
@@ -134,7 +166,12 @@ TEST_F(IPCMessageParameterTest, EmptyDispatcherWithParam) {
   EXPECT_TRUE(called_);
 }
 
-TEST_F(IPCMessageParameterTest, OneIntegerWithParam) {
+#if defined(OS_ANDROID)
+#define MAYBE_OneIntegerWithParam DISABLED_OneIntegerWithParam
+#else
+#define MAYBE_OneIntegerWithParam OneIntegerWithParam
+#endif
+TEST_F(IPCMessageParameterTest, MAYBE_OneIntegerWithParam) {
   TestMsgClassI message(42);
   EXPECT_TRUE(OnMessageReceived(message));
   EXPECT_TRUE(called_);

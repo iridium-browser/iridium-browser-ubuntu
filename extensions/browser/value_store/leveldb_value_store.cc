@@ -48,9 +48,17 @@ class ScopedSnapshot {
 
 }  // namespace
 
-LeveldbValueStore::LeveldbValueStore(const base::FilePath& db_path)
-    : db_path_(db_path) {
+LeveldbValueStore::LeveldbValueStore(const std::string& uma_client_name,
+                                     const base::FilePath& db_path)
+    : db_path_(db_path), open_histogram_(nullptr) {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
+
+  // Used in lieu of UMA_HISTOGRAM_ENUMERATION because the histogram name is
+  // not a constant.
+  open_histogram_ = base::LinearHistogram::FactoryGet(
+      "Extensions.Database.Open." + uma_client_name, 1,
+      leveldb_env::LEVELDB_STATUS_MAX, leveldb_env::LEVELDB_STATUS_MAX + 1,
+      base::Histogram::kUmaTargetedHistogramFlag);
 }
 
 LeveldbValueStore::~LeveldbValueStore() {
@@ -146,12 +154,13 @@ ValueStore::ReadResult LeveldbValueStore::Get() {
   scoped_ptr<leveldb::Iterator> it(db_->NewIterator(options));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
     std::string key = it->key().ToString();
-    base::Value* value = json_reader.ReadToValue(it->value().ToString());
+    scoped_ptr<base::Value> value =
+        json_reader.ReadToValue(it->value().ToString());
     if (!value) {
       return MakeReadResult(
           Error::Create(CORRUPTION, kInvalidJson, util::NewKey(key)));
     }
-    settings->SetWithoutPathExpansion(key, value);
+    settings->SetWithoutPathExpansion(key, value.Pass());
   }
 
   if (it->status().IsNotFound()) {
@@ -330,6 +339,8 @@ scoped_ptr<ValueStore::Error> LeveldbValueStore::EnsureDbIsOpen() {
   leveldb::DB* db = NULL;
   leveldb::Status status =
       leveldb::DB::Open(options, db_path_.AsUTF8Unsafe(), &db);
+  if (open_histogram_)
+    open_histogram_->Add(leveldb_env::GetLevelDBStatusUMAValue(status));
   if (!status.ok())
     return ToValueStoreError(status, util::NoKey());
 
@@ -357,11 +368,11 @@ scoped_ptr<ValueStore::Error> LeveldbValueStore::ReadFromDb(
   if (!s.ok())
     return ToValueStoreError(s, util::NewKey(key));
 
-  base::Value* value = base::JSONReader().ReadToValue(value_as_json);
+  scoped_ptr<base::Value> value = base::JSONReader().ReadToValue(value_as_json);
   if (!value)
     return Error::Create(CORRUPTION, kInvalidJson, util::NewKey(key));
 
-  setting->reset(value);
+  *setting = value.Pass();
   return util::NoError();
 }
 
@@ -389,7 +400,7 @@ scoped_ptr<ValueStore::Error> LeveldbValueStore::AddToBatch(
 
   if (write_new_value) {
     std::string value_as_json;
-    if (!base::JSONWriter::Write(&value, &value_as_json))
+    if (!base::JSONWriter::Write(value, &value_as_json))
       return Error::Create(OTHER_ERROR, kCannotSerialize, util::NewKey(key));
     batch->Put(key, value_as_json);
   }
@@ -434,7 +445,8 @@ scoped_ptr<ValueStore::Error> LeveldbValueStore::ToValueStoreError(
   std::string message = status.ToString();
   // The message may contain |db_path_|, which may be considered sensitive
   // data, and those strings are passed to the extension, so strip it out.
-  ReplaceSubstringsAfterOffset(&message, 0u, db_path_.AsUTF8Unsafe(), "...");
+  base::ReplaceSubstringsAfterOffset(
+      &message, 0u, db_path_.AsUTF8Unsafe(), "...");
 
   return Error::Create(CORRUPTION, message, key.Pass());
 }

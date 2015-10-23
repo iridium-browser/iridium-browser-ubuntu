@@ -3,6 +3,10 @@
  * found in the LICENSE file. */
 
 /* Special attribute used in HTML to hide elements. */
+body:not([type]) [visibleif] {
+  display: none;
+}
+
 body[type='folder'] [invisibleif~='folder'],
 body[type='upload-folder'] [invisibleif~='upload-folder'],
 body[type='saveas-file'] [invisibleif~='saveas-file'],
@@ -202,6 +206,7 @@ div.splitter {
 #directory-tree .tree-row .label {
   display: block;
   flex: auto;
+  font-weight: 500;
   margin: 0 6px;
   overflow-x: hidden;
   text-overflow: ellipsis;
@@ -245,14 +250,13 @@ div.splitter {
 /* Breadcrumbs and things under the title but above the list view. */
 .dialog-header {
   align-items: center;
-  background: rgba(33, 150, 243, 1.0);
-  border-bottom: 1px solid rgb(56, 179, 244);
+  background: rgb(33, 150, 243);
+  box-sizing: border-box;
   color: white;
   display: flex;
   flex: none;
   flex-direction: row;
   height: 48px;
-  margin: 0;
   transition: background 220ms ease;
 }
 
@@ -266,9 +270,20 @@ body.check-select .dialog-header {
   flex: auto;
 }
 
+.dialog-header paper-button,
+.dialog-header button {
+  border-radius: 2px;
+  height: 32px;
+  margin: 0 8px;
+  min-width: 32px;
+  padding: 0;
+}
+
 .dialog-header button {
   cursor: pointer;
+  position: relative;
   text-transform: uppercase;
+  z-index: 1;
 }
 
 .dialog-header button,
@@ -281,21 +296,8 @@ body.check-select button:hover {
   color: rgb(90, 90, 90);
 }
 
-.dialog-header .icon-button {
-  -webkit-margin-end: 4px;
-  -webkit-margin-start: 12px;
-  background-color: transparent;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 16px 16px;
-  border: 0;
-  border-radius: 2px;
-  flex: none;
-  height: 32px;
-  line-height: 16px;
-  min-width: 32px;
-  padding: 0;
-  width: 32px;
+.dialog-header .icon-button > paper-ripple {
+  color: black;
 }
 
 body.check-select .dialog-header button paper-ripple {
@@ -316,14 +318,15 @@ body.check-select .dialog-header
   display: none !important;
 }
 
-.dialog-header core-icon,
+.dialog-header iron-icon,
 .dialog-header .icon {
   height: 16px;
   width: 16px;
 }
 
-.dialog-header paper-button::shadow > .button-content {
-  padding: 8px;
+.dialog-header paper-button::shadow > paper-material {
+  padding: 0 8px;
+  line-height: 32px;
 }
 
 .dialog-header button.icon-button {
@@ -334,65 +337,77 @@ body.check-select .dialog-header
   background-repeat: no-repeat;
   border: 0;
   box-shadow: none;
-  display: block;
-  height: 32px;
-  min-width: 0;
   outline: none;
-  padding: 0;
-  width: 32px;
+  position: relative;
 }
 
-.dialog-header button.icon-button > core-icon {
+.dialog-header button.icon-button > iron-icon {
   margin: 8px;
 }
 
-#search-button {
+.dialog-header button.icon-button > .icon {
+  background-position: center;
+  background-repeat: no-repeat;
+  height: 100%;
+  left: 0;
+  position: absolute;
+  width: 32px;
+  top: 0;
+}
+
+#search-button > .icon {
   background-image: -webkit-image-set(
       url(../images/files/ui/search_white.png) 1x,
       url(../images/files/ui/2x/search_white.png) 2x);
 }
 
-body.check-select #search-button {
+body.check-select #search-button > .icon {
   background-image: -webkit-image-set(
       url(../images/files/ui/search.png) 1x,
       url(../images/files/ui/2x/search.png) 2x);
 }
 
-#share-button {
+#share-button > .icon {
   background-image: -webkit-image-set(
       url(../images/files/ui/share_white.png) 1x,
       url(../images/files/ui/2x/share_white.png) 2x);
 }
 
-body.check-select #share-button {
+body.check-select #share-button > .icon {
   background-image: -webkit-image-set(
       url(../images/files/ui/share.png) 1x,
       url(../images/files/ui/2x/share.png) 2x);
 }
 
-#delete-button {
+#delete-button > .icon {
   background-image: -webkit-image-set(
       url(../images/files/ui/delete_white.png) 1x,
       url(../images/files/ui/2x/delete_white.png) 2x);
 }
 
-body.check-select #delete-button {
+body.check-select #delete-button > .icon {
   background-image: -webkit-image-set(
       url(../images/files/ui/delete.png) 1x,
       url(../images/files/ui/2x/delete.png) 2x);
 }
 
-#view-button {
+#view-button > .icon {
   background-image: -webkit-image-set(
       url(../images/files/ui/view_list_white.png) 1x,
       url(../images/files/ui/2x/view_list_white.png) 2x);
+}
+
+#refresh-button > .icon {
+  background-image: -webkit-image-set(
+      url(../images/files/ui/refresh_white.png) 1x,
+      url(../images/files/ui/2x/refresh_white.png) 2x);
 }
 
 body.check-select #view-button {
   display: none;
 }
 
-#view-button.thumbnail {
+#view-button.thumbnail > .icon {
   background-image: -webkit-image-set(
       url(../images/files/ui/view_thumbnail_white.png) 1x,
       url(../images/files/ui/2x/view_thumbnail_white.png) 2x);
@@ -402,7 +417,7 @@ body.check-select #view-button.thumbnail {
   display: none;
 }
 
-#sort-button {
+#sort-button > .icon {
   background-image: -webkit-image-set(
       url(../images/files/ui/sorting_white.png) 1x,
       url(../images/files/ui/2x/sorting_white.png) 2x);
@@ -412,7 +427,7 @@ body.check-select #sort-button {
   display: none;
 }
 
-#gear-button {
+#gear-button > .icon {
   background-image: -webkit-image-set(
       url(../images/files/ui/menu_white.png) 1x,
       url(../images/files/ui/2x/menu_white.png) 2x);
@@ -422,32 +437,57 @@ body.check-select #gear-button {
   display: none;
 }
 
+.cloud-import-combo-button {
+  height: 32px;
+  margin: 8px;
+  position: relative;
+}
+
+.cloud-import-combo-button > .buttons {
+  display: flex;
+}
+
+.cloud-import-combo-button > .buttons > #cloud-import-button {
+  margin: 0;
+}
+
+.cloud-import-combo-button > .buttons > #cloud-import-details-button {
+  -webkit-margin-end: 0;
+}
+
 #cloud-import-details-button {
-  -webkit-margin-start: -11px;
+  -webkit-margin-start: -10px;
   width: 24px;
 }
 
-#cloud-import-details-button core-icon {
+#cloud-import-details-button iron-icon {
   margin: 8px 4px;
 }
 
 #cloud-import-details {
   background-color: white;
   border-radius: 2px;
+  box-shadow: 0 4px 5px 0 rgba(0, 0, 0, 0.14),
+              0 1px 10px 0 rgba(0, 0, 0, 0.12),
+              0 2px 4px -1px rgba(0, 0, 0, 0.4);
   line-height: 1.5em;
   position: absolute;
-  top: 38px;  /* Positioned just overlapping the top of the toolbar */
+  top: 42px;  /* Positioned just overlapping the top of the toolbar */
   transition: all 0.2s ease;
   width: 270px;
   z-index: 5;
 }
 
+/* These horizontal positions for #cloud-import-details are fallback value.
+   Usually, these positions are calculated based on the position of dropdown.
+   These fallback values will be used when the cloud import penel is shown
+   before the toolbar buttons are fully laid out. */
 html[dir='ltr'] #cloud-import-details {
-  right: 13px;  /* Positioned in relation to the cloud-import toolbar button */
+  right: 148px;  /* Positioned in relation to the cloud-import toolbar button */
 }
 
 html[dir='rtl'] #cloud-import-details {
-  left: 13px;  /* Positioned in relation to the cloud-import toolbar button */
+  left: 148px;  /* Positioned in relation to the cloud-import toolbar button */
 }
 
 #cloud-import-details.hidden {
@@ -464,7 +504,7 @@ html[dir='rtl'] #cloud-import-details {
 
 #cloud-import-details .banner .title {
   font-size: 122%;
-  font-weight: bold;
+  font-weight: 500;
   margin-bottom: 5px;
 }
 
@@ -480,7 +520,7 @@ html[dir='rtl'] #cloud-import-details {
   margin-top: .2em;
 }
 
-#cloud-import-details .status core-icon {
+#cloud-import-details .status iron-icon {
   display: block;
   height: 16px;
   opacity: .6;
@@ -503,9 +543,26 @@ html[dir='rtl'] #cloud-import-details {
   cursor: pointer;
 }
 
+#cloud-import-details .progress {
+  height: 4px;
+  background-color: #E0E0E0;
+  border-radius: 2px;
+  margin-top: 14px;
+  width: 100%;
+}
+
+#cloud-import-details .progress .value {
+  background-color: #1AC222;
+  border-radius: 2px;
+  height: 4px;
+  transition: width 0.1s linear;
+  width: 0%;
+}
+
 #cloud-import-details paper-button {
   align-self: flex-end;
   color: white;
+  font-weight: 500;
   margin-top: 20px;
 }
 
@@ -518,8 +575,9 @@ html[dir='rtl'] #cloud-import-details {
 }
 
 #files-selected-label {
+  -webkit-margin-start: 20px;
   display: none;
-  margin: 0 10px;
+  font-weight: 500;
 }
 
 body.check-select #files-selected-label {
@@ -527,8 +585,13 @@ body.check-select #files-selected-label {
 }
 
 #cancel-selection-button {
-  margin: 0 8px;
   text-transform: none;
+}
+
+#cancel-selection-button > span {
+  display: inline-block;
+  font-weight: 500;
+  vertical-align: middle;
 }
 
 #cancel-selection-button .icon-arrow-back {
@@ -547,7 +610,7 @@ body.check-select #files-selected-label {
   width: 240px;  /* initial value, same as .dialog-navigation-list's width. */
 }
 
-#cancel-selection-button > core-icon {
+#cancel-selection-button > iron-icon {
   -webkit-margin-end: 6px;
 }
 
@@ -582,21 +645,28 @@ body.check-select #search-box {
   -webkit-appearance: none;
 }
 
-#search-box paper-input-decorator {
+#search-box paper-input-container {
   margin-top: -4px;
 }
 
-#search-box paper-input-decorator /deep/ ::-webkit-input-placeholder {
+#search-box paper-input-container /deep/ ::-webkit-input-placeholder {
   color: rgba(255, 255, 255, 0.5);
 }
 
-#search-box paper-input-decorator /deep/ .unfocused-underline {
+#search-box paper-input-container /deep/ .unfocused-line {
   background-color: rgba(255, 255, 255, 0.3);
 }
 
-#search-box paper-input-decorator /deep/ .focused-underline {
+#search-box paper-input-container /deep/ .focused-line {
   background-color: white;
   height: 1px;
+}
+
+#search-box paper-input-container /deep/ .input-content ::content input {
+  color: inherit;
+  font: inherit;
+  margin: 0.5em 0 0.25em;
+  padding: 0;
 }
 
 #search-box.has-cursor,
@@ -698,8 +768,7 @@ html[dir='rtl'] #search-box .clear {
 }
 
 .dialog-footer button {
-  /* Use bold until we get Roboto medium. crbug.com/368442. */
-  font-weight: bold;
+  font-weight: 500;
 }
 
 .dialog-footer button:hover {
@@ -736,22 +805,29 @@ html[dir='rtl'] #search-box .clear {
 }
 
 .dialog-footer input {
-  color: red;
   margin: 3px 0 !important;
 }
 
-.dialog-footer paper-input-decorator {
+.dialog-footer select {
+  min-height: 21px;
+}
+
+.dialog-footer paper-input-container {
   color: rgb(51, 51, 51);
   padding: 4px 0;
   width: 100%;
 }
 
-.dialog-footer paper-input-decorator /deep/ .unfocused-underline {
+.dialog-footer paper-input-container /deep/ .unfocused-line {
   background-color: rgb(207, 207, 207);
 }
 
-.dialog-footer paper-input-decorator /deep/ .focused-underline {
+.dialog-footer paper-input-container /deep/ .focused-line {
   background-color: rgb(33, 150, 243);
+}
+
+.dialog-footer paper-input-container /deep/ .input-content ::content input {
+  font: inherit;
 }
 
 .dialog-footer select {
@@ -804,22 +880,27 @@ html[dir='rtl'] #search-box .clear {
 
 /* The container for breadcrumb elements. */
 .breadcrumbs {
-  -webkit-margin-start: 12px;
   align-items: center;
   display: flex;
-  flex: auto;
   flex-direction: row;
-  line-height: 20px;
+  flex: auto;
   overflow: hidden;
-  padding-top: 1px;
 }
 
 body.check-select .breadcrumbs {
   display: none;
 }
 
+.breadcrumbs button > paper-ripple {
+  color: black;
+}
+
 .breadcrumbs > [collapsed]::before {
   content: '...';
+}
+
+.breadcrumbs > [collapsed] .name {
+  display: none;
 }
 
 .breadcrumbs > [collapsed] {
@@ -829,24 +910,32 @@ body.check-select .breadcrumbs {
 
 /* A single directory name in the list of path breadcrumbs. */
 .breadcrumbs .breadcrumb-path {
+  -webkit-margin-end: 0;  /* An arrow is used as a spacer instead. */
   box-sizing: border-box;
   cursor: pointer;
   flex: none;
   font-size: 14px;
-  /* Use bold until we get Roboto medium. crbug.com/368442. */
-  font-weight: bold;
-  margin-left: 0;
-  margin-right: 0;
+  font-weight: 500;
   min-width: 0;
-  padding-left: 9px;
-  padding-right: 9px;
-  text-overflow: ellipsis;
+  padding: 0 9px;
   text-transform: none;
   white-space: nowrap;
 }
 
+.breadcrumbs .breadcrumb-path:not(:first-child) {
+  -webkit-margin-start: 0;  /* An arrow is used as a spacer instead. */
+}
+
 .breadcrumbs .breadcrumb-path:active {
   color: inherit;
+}
+
+.breadcrumbs .breadcrumb-path > .name {
+  overflow: hidden;
+  position: relative;
+  text-align: initial;
+  text-overflow: ellipsis;
+  z-index: 1;
 }
 
 /* The final breadcrumb, representing the current directory. */
@@ -944,21 +1033,32 @@ html[dir='rtl'] .breadcrumbs .separator {
 
 .downloads-warning {
   align-items: center;
-  background-color: #f0f0f0;
-  background-image: -webkit-image-set(
-    url(../images/files/ui/warning_icon_square.png) 1x,
-    url(../images/files/ui/2x/warning_icon_square.png) 2x);
-  background-position: 15px center;
-  background-repeat: no-repeat;
-  color: #666;
+  background-color: rgb(49, 102, 212);
+  color: white;
   display: flex;
   flex: none;
   flex-direction: row;
-  font-size: 13px;
-  height: 44px;
+  font-size: 14px;
+  height: 64px;
   overflow: hidden;
-  padding-left: 57px;  /* Make space for the icon. */
   transition: height 70ms linear;
+}
+
+.downloads-warning a:link,
+.volume-warning a:link {
+  color: white;
+  flex: none;
+}
+
+.downloads-warning .warning-icon {
+  background-image: -webkit-image-set(
+      url(../images/files/ui/warning_white.png) 1x,
+      url(../images/files/ui/2x/warning_white.png) 2x);
+  background-size: 16px 16px;
+  flex: none;
+  height: 16px;
+  margin: 0 14px;
+  width: 16px;
 }
 
 .downloads-warning[hidden] {
@@ -977,15 +1077,13 @@ html[dir='rtl'] .breadcrumbs .separator {
 .volume-warning {
   -webkit-animation: heightAnimation 70ms linear;
   align-items: center;
-  background-image: url(chrome://resources/images/clouds.png);
-  background-repeat: repeat-x;
-  background-size: 150px 44px;
-  color: #333;
+  background-color: rgb(49, 102, 212);
+  color: white;
   display: flex;
   flex: none;
   flex-direction: row;
   font-size: 13px;
-  height: 44px;
+  height: 64px;
   overflow: hidden;
   position: relative;
 }
@@ -996,20 +1094,58 @@ html[dir='rtl'] .breadcrumbs .separator {
 }
 
 .volume-warning .drive-icon {
-  background-image: -webkit-image-set(
-    url(../images/files/ui/drive_logo.png) 1x,
-    url(../images/files/ui/2x/drive_logo.png) 2x);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 25px 22px;
+  background: white -webkit-image-set(
+      url(../images/files/ui/drive_logo.png) 1x,
+      url(../images/files/ui/2x/drive_logo.png) 2x) no-repeat center;
+  background-size: 29px 29px;
+  border-radius: 2px;
   flex: none;
-  height: 44px;
-  width: 50px;
+  height: 36px;
+  margin: 0 14px;
+  width: 36px;
 }
 
 .volume-warning .drive-text {
+  -webkit-margin-end: 51px;
   flex: none;
-  margin-right: 11px;
+  font-size: 16px;
+}
+
+.volume-warning .imitate-paper-button {
+  background-color: white;
+  border-radius: 2px;
+  color: rgb(49, 102, 212);
+  font-size: 13px;
+  font-weight: 500;
+  height: 32px;
+}
+
+.banner-close {
+  background: -webkit-image-set(
+      url(../images/files/ui/close_button_white.png) 1x,
+      url(../images/files/ui/2x/close_button_white.png) 2x) no-repeat center;
+  cursor: pointer;
+  display: inline-block;
+  height: 40px;
+  position: absolute;
+  top: 12px;
+  width: 40px;
+}
+
+html[dir='ltr'] .banner-close {
+  right: 0;
+}
+
+html[dir='rtl'] .banner-close {
+  left: 0;
+}
+
+.banner-cloud-bg {
+  background-image: -webkit-image-set(
+      url(../images/files/ui/drive_banner_clouds.png) 1x,
+      url(../images/files/ui/2x/drive_banner_clouds.png) 2x);
+  background-position: bottom left;
+  background-repeat: repeat-x;
 }
 
 /* The cr.ui.Grid representing the detailed file list. */
@@ -1055,6 +1191,7 @@ body[type='full-page'] .detail-name .detail-icon {
 .thumbnail-bottom .filename-label {
   -webkit-padding-end: 6px;
   flex: auto;
+  font-weight: 500;
 }
 
 /* Styles specific for the grid view. */
@@ -1290,12 +1427,13 @@ html[dir='rtl'] .badge {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre;
 }
 
 /* Text box used for renaming in the detail list. */
 .table-row-cell input.rename {
   border-width: 0;
+  min-width: 0;
   padding: 2px 0;
 }
 
@@ -1414,6 +1552,7 @@ li[renaming=''] .badge {
 /* Text label in a table header. */
 .table-header-label {
   color: rgb(100, 100, 100);
+  font-weight: 500;
   line-height: 40px;
   margin: 0 10px;
 }
@@ -1458,6 +1597,7 @@ li[renaming=''] .badge {
 }
 
 .status-icon {
+  -webkit-margin-end: 10px;
   height: 24px;
   width: 24px;
 }
@@ -1527,11 +1667,6 @@ body.check-select #list-container list li[selected] .detail-thumbnail
 #tasks-menu cr-menu-item:not(.change-default) {
   background-position: left 10px center;
   padding-left: 32px;
-}
-
-#share-button {
-  display: block;
-  min-width: 0;  /* overrride */
 }
 
 .detail-name > * {
@@ -1790,7 +1925,7 @@ list.autocomplete-suggestions {
   flex: none;
   margin-top: 10px;
   overflow: hidden;
-  padding: 0;
+  padding: 8px 0;
   position: fixed;
   width: 260px !important; /* This overrides the value specified by script. */
   z-index: 550;
@@ -1799,17 +1934,17 @@ list.autocomplete-suggestions {
 list.autocomplete-suggestions > li {
   align-items: center;
   display: flex;
-  height: 40px;
+  height: 32px;
 }
 
 list.autocomplete-suggestions > li > div.detail-icon {
-  margin: 0 3px;
+  height: 32px;
+  width: 32px;
   flex: none;
 }
 
 list.autocomplete-suggestions > li > div.detail-text {
   flex: auto;
-  margin: 0 4px;
   overflow-x: hidden;
   text-overflow: ellipsis;
 }
@@ -1827,11 +1962,13 @@ list.autocomplete-suggestions > li > div[search-icon] {
 
 list.autocomplete-suggestions > [selected],
 list.autocomplete-suggestions > [lead] {
-  background-color: rgb(222, 243, 254);
+  background-color: rgba(0, 0, 0, 0.08);
 }
 
-#gear-menu {
-  margin-top: 8px;
+#gear-menu,
+#sort-menu,
+#tasks-menu {
+  margin-top: 2px;
 }
 
 #gear-menu > cr-menu-item:not(.menuitem-button),
@@ -1849,7 +1986,7 @@ list.autocomplete-suggestions > [lead] {
 .suggest-apps-dialog-title.cr-dialog-title {
   /* Entire height: 44px (content-box 22px + padding 11px * 2) */
   font-size: 16px;
-  height: 22px;
+  line-height: 22px;
   margin: 0;
   padding: 11px 18px;
 }
@@ -1988,6 +2125,7 @@ list.autocomplete-suggestions > [lead] {
 #progress-center label {
   color: rgb(76, 76, 76);
   display: block;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2046,10 +2184,6 @@ list.autocomplete-suggestions > [lead] {
   width: 16px;
 }
 
-#progress-center li.error.single .button-frame {
-  display: none;
-}
-
 #progress-center button.close {
   -webkit-margin-end: 12px;
   -webkit-margin-start: auto;
@@ -2070,6 +2204,7 @@ list.autocomplete-suggestions > [lead] {
   margin-bottom: 14px;
 }
 
+#progress-center button.dismiss,
 #progress-center button.cancel {
   background: -webkit-image-set(
       url(../images/files/ui/cancel.png) 1x,
@@ -2080,6 +2215,20 @@ list.autocomplete-suggestions > [lead] {
 #progress-center li.error button.open,
 #progress-center li.quiet button.open {
   margin-bottom: 0;
+}
+
+#progress-center button.dismiss {
+  display: none;
+}
+
+/*
+ * Dismiss button is shown only when
+ * - Single error in close view.
+ * - Error items in open view.
+ */
+li#progress-center-close-view.error.single button.dismiss,
+#progress-center-open-view li.error button.dismiss {
+  display: block;
 }
 
 #progress-center-close-view:not(.single) button.cancel {
@@ -2110,4 +2259,35 @@ list.autocomplete-suggestions > [lead] {
   top: 0;
   visibility: hidden;
   z-index: -1;
+}
+
+files-toggle-ripple {
+  bottom: 0;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+#tooltip {
+  opacity: 0;
+  padding: 4px 6px 0;
+  pointer-events: none;
+  position: absolute;
+  transition: opacity 300ms;
+  z-index: 1000;
+}
+
+#tooltip[visible] {
+  opacity: .9;
+}
+
+#tooltip-label {
+  background-color: #323232;
+  border-radius: 2px;
+  color: white;
+  font-size: 12px;
+  line-height: 28px;
+  padding: 0 14px;
+  white-space: nowrap;
 }

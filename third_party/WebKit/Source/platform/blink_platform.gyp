@@ -148,6 +148,7 @@
             'WebScrollbarPainterDelegate=ChromiumWebCoreObjCWebScrollbarPainterDelegate',
             'WebScrollbarPartAnimation=ChromiumWebCoreObjCWebScrollbarPartAnimation',
             'WebCoreFlippedView=ChromiumWebCoreObjCWebCoreFlippedView',
+            'WebCoreScrollbarObserver=ChromiumWebCoreObjCWebCoreScrollbarObserver',
             'WebCoreTextFieldCell=ChromiumWebCoreObjCWebCoreTextFieldCell',
           ],
           'postbuilds': [
@@ -246,6 +247,11 @@
     # compiler optimizations, see crbug.com/237063
     'msvs_disabled_warnings': [ 4267, 4334, 4724 ],
     'conditions': [
+      ['target_arch == "ia32" or target_arch == "x64"', {
+        'sources/': [
+          ['include', 'graphics/cpu/x86/WebGLImageConversionSSE\\.h$'],
+        ],
+      }],
       ['OS=="linux" or OS=="android" or OS=="win"', {
         'sources/': [
           # Cherry-pick files excluded by the broader regular expressions above.
@@ -309,9 +315,11 @@
           ['include', 'mac/ScrollAnimatorMac\\.mm$'],
           ['include', 'mac/ThemeMac\\.h$'],
           ['include', 'mac/ThemeMac\\.mm$'],
+          ['include', 'mac/VersionUtilMac\\.h$'],
+          ['include', 'mac/VersionUtilMac\\.mm$'],
           ['include', 'mac/WebCoreNSCellExtras\\.h$'],
           ['include', 'mac/WebCoreNSCellExtras\\.mm$'],
- 
+
           # Mac uses only ScrollAnimatorMac.
           ['exclude', 'scroll/ScrollbarThemeNonMacCommon\\.(cpp|h)$'],
           ['exclude', 'scroll/ScrollAnimatorNone\\.cpp$'],

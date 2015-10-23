@@ -35,9 +35,6 @@ const char kTopControlsShowThreshold[] = "top-controls-show-threshold";
 // complete, such as --slow-down-raster-scale-factor=25.
 const char kSlowDownRasterScaleFactor[] = "slow-down-raster-scale-factor";
 
-// Max tiles allowed for each tilings interest area.
-const char kMaxTilesForInterestArea[] = "max-tiles-for-interest-area";
-
 // The amount of unused resource memory compositor is allowed to keep around.
 const char kMaxUnusedResourceMemoryUsagePercentage[] =
     "max-unused-resource-memory-usage-percentage";
@@ -51,10 +48,6 @@ const char kCompositeToMailbox[] = "composite-to-mailbox";
 const char kStrictLayerPropertyChangeChecking[] =
     "strict-layer-property-change-checking";
 
-// Virtual viewport for fixed-position elements, scrollbars during pinch.
-const char kEnablePinchVirtualViewport[] = "enable-pinch-virtual-viewport";
-const char kDisablePinchVirtualViewport[] = "disable-pinch-virtual-viewport";
-
 // Ensures that the draw properties computed via the property trees match those
 // computed by CalcDrawProperties.
 const char kEnablePropertyTreeVerification[] =
@@ -62,6 +55,9 @@ const char kEnablePropertyTreeVerification[] =
 
 // Disable partial swap which is needed for some OpenGL drivers / emulators.
 const char kUIDisablePartialSwap[] = "ui-disable-partial-swap";
+
+// Use a BeginFrame signal from browser to renderer to schedule rendering.
+const char kEnableBeginFrameScheduling[] = "enable-begin-frame-scheduling";
 
 // Enables the GPU benchmarking extension
 const char kEnableGpuBenchmarking[] = "enable-gpu-benchmarking";

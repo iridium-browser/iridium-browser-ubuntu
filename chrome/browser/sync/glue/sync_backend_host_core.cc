@@ -5,13 +5,14 @@
 #include "chrome/browser/sync/glue/sync_backend_host_core.h"
 
 #include "base/files/file_util.h"
+#include "base/location.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/sync/glue/invalidation_adapter.h"
+#include "base/single_thread_task_runner.h"
 #include "chrome/browser/sync/glue/local_device_info_provider_impl.h"
 #include "chrome/browser/sync/glue/sync_backend_registrar.h"
-#include "chrome/common/chrome_version_info.h"
-#include "components/invalidation/invalidation_util.h"
-#include "components/invalidation/object_id_invalidation_map.h"
+#include "components/invalidation/public/invalidation_util.h"
+#include "components/invalidation/public/object_id_invalidation_map.h"
+#include "components/sync_driver/invalidation_adapter.h"
 #include "sync/internal_api/public/events/protocol_event.h"
 #include "sync/internal_api/public/http_post_provider_factory.h"
 #include "sync/internal_api/public/internal_components_factory.h"
@@ -56,10 +57,11 @@ DoInitializeOptions::DoInitializeOptions(
     base::MessageLoop* sync_loop,
     SyncBackendRegistrar* registrar,
     const syncer::ModelSafeRoutingInfo& routing_info,
-    const std::vector<scoped_refptr<syncer::ModelSafeWorker> >& workers,
+    const std::vector<scoped_refptr<syncer::ModelSafeWorker>>& workers,
     const scoped_refptr<syncer::ExtensionsActivity>& extensions_activity,
     const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
     const GURL& service_url,
+    const std::string& sync_user_agent,
     scoped_ptr<syncer::HttpPostProviderFactory> http_bridge_factory,
     const syncer::SyncCredentials& credentials,
     const std::string& invalidator_client_id,
@@ -68,9 +70,12 @@ DoInitializeOptions::DoInitializeOptions(
     const std::string& restored_key_for_bootstrapping,
     const std::string& restored_keystore_key_for_bootstrapping,
     scoped_ptr<syncer::InternalComponentsFactory> internal_components_factory,
-    scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
-    syncer::ReportUnrecoverableErrorFunction
-        report_unrecoverable_error_function)
+    const syncer::WeakHandle<syncer::UnrecoverableErrorHandler>&
+        unrecoverable_error_handler,
+    const base::Closure& report_unrecoverable_error_function,
+    scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state,
+    syncer::PassphraseTransitionClearDataOption clear_data_option,
+    const std::map<syncer::ModelType, int64>& invalidation_versions)
     : sync_loop(sync_loop),
       registrar(registrar),
       routing_info(routing_info),
@@ -78,6 +83,7 @@ DoInitializeOptions::DoInitializeOptions(
       extensions_activity(extensions_activity),
       event_handler(event_handler),
       service_url(service_url),
+      sync_user_agent(sync_user_agent),
       http_bridge_factory(http_bridge_factory.Pass()),
       credentials(credentials),
       invalidator_client_id(invalidator_client_id),
@@ -87,9 +93,11 @@ DoInitializeOptions::DoInitializeOptions(
       restored_keystore_key_for_bootstrapping(
           restored_keystore_key_for_bootstrapping),
       internal_components_factory(internal_components_factory.Pass()),
-      unrecoverable_error_handler(unrecoverable_error_handler.Pass()),
-      report_unrecoverable_error_function(report_unrecoverable_error_function) {
-}
+      unrecoverable_error_handler(unrecoverable_error_handler),
+      report_unrecoverable_error_function(report_unrecoverable_error_function),
+      saved_nigori_state(saved_nigori_state.Pass()),
+      clear_data_option(clear_data_option),
+      invalidation_versions(invalidation_versions) {}
 
 DoInitializeOptions::~DoInitializeOptions() {}
 
@@ -158,9 +166,9 @@ void SyncBackendHostCore::OnInitializationComplete(
 
   // Sync manager initialization is complete, so we can schedule recurring
   // SaveChanges.
-  sync_loop_->PostTask(FROM_HERE,
-                       base::Bind(&SyncBackendHostCore::StartSavingChanges,
-                                  weak_ptr_factory_.GetWeakPtr()));
+  sync_loop_->task_runner()->PostTask(
+      FROM_HERE, base::Bind(&SyncBackendHostCore::StartSavingChanges,
+                            weak_ptr_factory_.GetWeakPtr()));
 
   // Hang on to these for a while longer.  We're not ready to hand them back to
   // the UI thread yet.
@@ -298,6 +306,14 @@ void SyncBackendHostCore::OnPassphraseTypeChanged(
       type, passphrase_time);
 }
 
+void SyncBackendHostCore::OnLocalSetPassphraseEncryption(
+    const syncer::SyncEncryptionHandler::NigoriState& nigori_state) {
+  host_.Call(
+      FROM_HERE,
+      &SyncBackendHostImpl::HandleLocalSetPassphraseEncryptionOnFrontendLoop,
+      nigori_state);
+}
+
 void SyncBackendHostCore::OnCommitCountersUpdated(
     syncer::ModelType type,
     const syncer::CommitCounters& counters) {
@@ -367,26 +383,38 @@ void SyncBackendHostCore::DoOnIncomingInvalidation(
   DCHECK_EQ(base::MessageLoop::current(), sync_loop_);
 
   syncer::ObjectIdSet ids = invalidation_map.GetObjectIds();
-  for (syncer::ObjectIdSet::const_iterator ids_it = ids.begin();
-       ids_it != ids.end();
-       ++ids_it) {
+  for (const invalidation::ObjectId& object_id : ids) {
     syncer::ModelType type;
-    if (!NotificationTypeToRealModelType(ids_it->name(), &type)) {
+    if (!NotificationTypeToRealModelType(object_id.name(), &type)) {
       DLOG(WARNING) << "Notification has invalid id: "
-                    << syncer::ObjectIdToString(*ids_it);
+                    << syncer::ObjectIdToString(object_id);
     } else {
       syncer::SingleObjectInvalidationSet invalidation_set =
-          invalidation_map.ForObject(*ids_it);
-      for (syncer::SingleObjectInvalidationSet::const_iterator inv_it =
-               invalidation_set.begin();
-           inv_it != invalidation_set.end();
-           ++inv_it) {
+          invalidation_map.ForObject(object_id);
+      for (syncer::Invalidation invalidation : invalidation_set) {
+        auto last_invalidation = last_invalidation_versions_.find(type);
+        if (!invalidation.is_unknown_version() &&
+            last_invalidation != last_invalidation_versions_.end() &&
+            invalidation.version() <= last_invalidation->second) {
+          DVLOG(1) << "Ignoring redundant invalidation for "
+                   << syncer::ModelTypeToString(type) << " with version "
+                   << invalidation.version() << ", last seen version was "
+                   << last_invalidation->second;
+          continue;
+        }
         scoped_ptr<syncer::InvalidationInterface> inv_adapter(
-            new InvalidationAdapter(*inv_it));
+            new InvalidationAdapter(invalidation));
         sync_manager_->OnIncomingInvalidation(type, inv_adapter.Pass());
+        if (!invalidation.is_unknown_version())
+          last_invalidation_versions_[type] = invalidation.version();
       }
     }
   }
+
+  host_.Call(
+      FROM_HERE,
+      &SyncBackendHostImpl::UpdateInvalidationVersions,
+      last_invalidation_versions_);
 }
 
 void SyncBackendHostCore::DoInitialize(
@@ -397,9 +425,7 @@ void SyncBackendHostCore::DoInitialize(
 
   // Finish initializing the HttpBridgeFactory.  We do this here because
   // building the user agent may block on some platforms.
-  chrome::VersionInfo version_info;
-  options->http_bridge_factory->Init(
-      LocalDeviceInfoProviderImpl::MakeUserAgentForSyncApi(version_info));
+  options->http_bridge_factory->Init(options->sync_user_agent);
 
   // Blow away the partial or corrupt sync data folder before doing any more
   // initialization, if necessary.
@@ -412,6 +438,9 @@ void SyncBackendHostCore::DoInitialize(
   if (!base::CreateDirectory(sync_data_folder_path_)) {
     DLOG(FATAL) << "Sync Data directory creation failed.";
   }
+
+  // Load the previously persisted set of invalidation versions into memory.
+  last_invalidation_versions_ = options->invalidation_versions;
 
   DCHECK(!registrar_);
   registrar_ = options->registrar;
@@ -436,11 +465,12 @@ void SyncBackendHostCore::DoInitialize(
   args.internal_components_factory =
       options->internal_components_factory.Pass();
   args.encryptor = &encryptor_;
-  args.unrecoverable_error_handler =
-      options->unrecoverable_error_handler.Pass();
+  args.unrecoverable_error_handler = options->unrecoverable_error_handler;
   args.report_unrecoverable_error_function =
       options->report_unrecoverable_error_function;
   args.cancelation_signal = &stop_syncing_signal_;
+  args.saved_nigori_state = options->saved_nigori_state.Pass();
+  args.clear_data_option = options->clear_data_option;
   sync_manager_->Init(&args);
 }
 
@@ -728,5 +758,22 @@ void SyncBackendHostCore::SaveChanges() {
   DCHECK_EQ(base::MessageLoop::current(), sync_loop_);
   sync_manager_->SaveChanges();
 }
+
+void SyncBackendHostCore::DoClearServerData(
+    const syncer::SyncManager::ClearServerDataCallback& frontend_callback) {
+  DCHECK_EQ(base::MessageLoop::current(), sync_loop_);
+  const syncer::SyncManager::ClearServerDataCallback callback =
+      base::Bind(&SyncBackendHostCore::ClearServerDataDone,
+                 weak_ptr_factory_.GetWeakPtr(), frontend_callback);
+  sync_manager_->ClearServerData(callback);
+}
+
+void SyncBackendHostCore::ClearServerDataDone(
+    const base::Closure& frontend_callback) {
+  DCHECK_EQ(base::MessageLoop::current(), sync_loop_);
+  host_.Call(FROM_HERE, &SyncBackendHostImpl::ClearServerDataDoneOnFrontendLoop,
+             frontend_callback);
+}
+
 
 }  // namespace browser_sync

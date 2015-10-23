@@ -44,9 +44,10 @@ VALID_TARGETS := \
                  debugger \
                  dm \
                  everything \
+                 lua_app \
+                 lua_pictures \
                  most \
                  pathops_unittest \
-                 pdfviewer \
                  SampleApp \
                  SampleApp_APK \
                  skhello \

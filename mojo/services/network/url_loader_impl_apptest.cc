@@ -7,12 +7,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "mojo/application/application_test_base_chromium.h"
-#include "mojo/common/message_pump_mojo.h"
+#include "mojo/application/public/cpp/application_test_base.h"
+#include "mojo/message_pump/message_pump_mojo.h"
 #include "mojo/services/network/network_context.h"
 #include "mojo/services/network/url_loader_impl.h"
+#include "net/base/net_errors.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_factory_impl.h"
+#include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/mojo/src/mojo/public/cpp/bindings/interface_request.h"
@@ -59,7 +61,8 @@ class TestURLRequestJob : public net::URLRequestJob {
   void NotifyReadComplete(int bytes_read) {
     if (bytes_read < 0) {
       status_ = COMPLETED;
-      NotifyDone(net::URLRequestStatus(net::URLRequestStatus::FAILED, 0));
+      NotifyDone(net::URLRequestStatus(
+          net::URLRequestStatus::FromError(net::ERR_FAILED)));
       net::URLRequestJob::NotifyReadComplete(0);
     } else if (bytes_read == 0) {
       status_ = COMPLETED;
@@ -114,7 +117,9 @@ class UrlLoaderImplTest : public test::ApplicationTestBase {
     url_request_context->Init();
     network_context_.reset(new NetworkContext(url_request_context.Pass()));
     MessagePipe pipe;
-    new URLLoaderImpl(network_context_.get(), GetProxy(&url_loader_proxy_));
+    new URLLoaderImpl(network_context_.get(),
+                      GetProxy(&url_loader_proxy_),
+                      make_scoped_ptr<mojo::AppRefCount>(nullptr));
     EXPECT_TRUE(IsUrlLoaderValid());
   }
 

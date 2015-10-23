@@ -121,9 +121,6 @@ void SystemTrayDelegate::ShowSetTimeDialog() {
 void SystemTrayDelegate::ShowNetworkSettingsForGuid(const std::string& guid) {
 }
 
-void SystemTrayDelegate::ShowBluetoothSettings() {
-}
-
 void SystemTrayDelegate::ShowDisplaySettings() {
 }
 
@@ -221,6 +218,10 @@ bool SystemTrayDelegate::GetBluetoothDiscovering() {
 }
 
 void SystemTrayDelegate::ChangeProxySettings() {
+}
+
+CastConfigDelegate* SystemTrayDelegate::GetCastConfigDelegate() const {
+  return nullptr;
 }
 
 NetworkingConfigDelegate* SystemTrayDelegate::GetNetworkingConfigDelegate()

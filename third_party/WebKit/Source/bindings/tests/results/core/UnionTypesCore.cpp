@@ -24,6 +24,7 @@
 #include "bindings/tests/idls/core/TestImplements3Implementation.h"
 #include "bindings/tests/idls/core/TestPartialInterface.h"
 #include "bindings/tests/idls/core/TestPartialInterfaceImplementation.h"
+#include "core/dom/FlexibleArrayBufferView.h"
 #include "core/dom/NameNodeList.h"
 #include "core/dom/NodeList.h"
 #include "core/dom/StaticNodeList.h"
@@ -99,6 +100,10 @@ ArrayBufferOrArrayBufferViewOrDictionary ArrayBufferOrArrayBufferViewOrDictionar
 ArrayBufferOrArrayBufferViewOrDictionary::ArrayBufferOrArrayBufferViewOrDictionary(const ArrayBufferOrArrayBufferViewOrDictionary&) = default;
 ArrayBufferOrArrayBufferViewOrDictionary::~ArrayBufferOrArrayBufferViewOrDictionary() = default;
 ArrayBufferOrArrayBufferViewOrDictionary& ArrayBufferOrArrayBufferViewOrDictionary::operator=(const ArrayBufferOrArrayBufferViewOrDictionary&) = default;
+
+DEFINE_TRACE(ArrayBufferOrArrayBufferViewOrDictionary)
+{
+}
 
 void V8ArrayBufferOrArrayBufferViewOrDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, ArrayBufferOrArrayBufferViewOrDictionary& impl, ExceptionState& exceptionState)
 {
@@ -221,6 +226,10 @@ BooleanOrStringOrUnrestrictedDouble::BooleanOrStringOrUnrestrictedDouble(const B
 BooleanOrStringOrUnrestrictedDouble::~BooleanOrStringOrUnrestrictedDouble() = default;
 BooleanOrStringOrUnrestrictedDouble& BooleanOrStringOrUnrestrictedDouble::operator=(const BooleanOrStringOrUnrestrictedDouble&) = default;
 
+DEFINE_TRACE(BooleanOrStringOrUnrestrictedDouble)
+{
+}
+
 void V8BooleanOrStringOrUnrestrictedDouble::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, BooleanOrStringOrUnrestrictedDouble& impl, ExceptionState& exceptionState)
 {
     if (v8Value.IsEmpty())
@@ -321,6 +330,10 @@ DoubleOrString DoubleOrString::fromString(String value)
 DoubleOrString::DoubleOrString(const DoubleOrString&) = default;
 DoubleOrString::~DoubleOrString() = default;
 DoubleOrString& DoubleOrString::operator=(const DoubleOrString&) = default;
+
+DEFINE_TRACE(DoubleOrString)
+{
+}
 
 void V8DoubleOrString::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, DoubleOrString& impl, ExceptionState& exceptionState)
 {
@@ -641,6 +654,10 @@ StringOrArrayBufferOrArrayBufferView::StringOrArrayBufferOrArrayBufferView(const
 StringOrArrayBufferOrArrayBufferView::~StringOrArrayBufferOrArrayBufferView() = default;
 StringOrArrayBufferOrArrayBufferView& StringOrArrayBufferOrArrayBufferView::operator=(const StringOrArrayBufferOrArrayBufferView&) = default;
 
+DEFINE_TRACE(StringOrArrayBufferOrArrayBufferView)
+{
+}
+
 void V8StringOrArrayBufferOrArrayBufferView::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, StringOrArrayBufferOrArrayBufferView& impl, ExceptionState& exceptionState)
 {
     if (v8Value.IsEmpty())
@@ -741,6 +758,10 @@ StringOrDouble::StringOrDouble(const StringOrDouble&) = default;
 StringOrDouble::~StringOrDouble() = default;
 StringOrDouble& StringOrDouble::operator=(const StringOrDouble&) = default;
 
+DEFINE_TRACE(StringOrDouble)
+{
+}
+
 void V8StringOrDouble::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, StringOrDouble& impl, ExceptionState& exceptionState)
 {
     if (v8Value.IsEmpty())
@@ -834,6 +855,10 @@ StringOrStringSequence StringOrStringSequence::fromStringSequence(const Vector<S
 StringOrStringSequence::StringOrStringSequence(const StringOrStringSequence&) = default;
 StringOrStringSequence::~StringOrStringSequence() = default;
 StringOrStringSequence& StringOrStringSequence::operator=(const StringOrStringSequence&) = default;
+
+DEFINE_TRACE(StringOrStringSequence)
+{
+}
 
 void V8StringOrStringSequence::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, StringOrStringSequence& impl, ExceptionState& exceptionState)
 {
@@ -940,6 +965,10 @@ TestEnumOrDouble::TestEnumOrDouble(const TestEnumOrDouble&) = default;
 TestEnumOrDouble::~TestEnumOrDouble() = default;
 TestEnumOrDouble& TestEnumOrDouble::operator=(const TestEnumOrDouble&) = default;
 
+DEFINE_TRACE(TestEnumOrDouble)
+{
+}
+
 void V8TestEnumOrDouble::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, TestEnumOrDouble& impl, ExceptionState& exceptionState)
 {
     if (v8Value.IsEmpty())
@@ -1041,6 +1070,10 @@ TestInterface2OrUint8Array TestInterface2OrUint8Array::fromUint8Array(PassRefPtr
 TestInterface2OrUint8Array::TestInterface2OrUint8Array(const TestInterface2OrUint8Array&) = default;
 TestInterface2OrUint8Array::~TestInterface2OrUint8Array() = default;
 TestInterface2OrUint8Array& TestInterface2OrUint8Array::operator=(const TestInterface2OrUint8Array&) = default;
+
+DEFINE_TRACE(TestInterface2OrUint8Array)
+{
+}
 
 void V8TestInterface2OrUint8Array::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, TestInterface2OrUint8Array& impl, ExceptionState& exceptionState)
 {
@@ -1230,6 +1263,10 @@ TestInterfaceOrLong::TestInterfaceOrLong(const TestInterfaceOrLong&) = default;
 TestInterfaceOrLong::~TestInterfaceOrLong() = default;
 TestInterfaceOrLong& TestInterfaceOrLong::operator=(const TestInterfaceOrLong&) = default;
 
+DEFINE_TRACE(TestInterfaceOrLong)
+{
+}
+
 void V8TestInterfaceOrLong::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, TestInterfaceOrLong& impl, ExceptionState& exceptionState)
 {
     if (v8Value.IsEmpty())
@@ -1329,6 +1366,10 @@ TestInterfaceOrTestInterfaceEmpty TestInterfaceOrTestInterfaceEmpty::fromTestInt
 TestInterfaceOrTestInterfaceEmpty::TestInterfaceOrTestInterfaceEmpty(const TestInterfaceOrTestInterfaceEmpty&) = default;
 TestInterfaceOrTestInterfaceEmpty::~TestInterfaceOrTestInterfaceEmpty() = default;
 TestInterfaceOrTestInterfaceEmpty& TestInterfaceOrTestInterfaceEmpty::operator=(const TestInterfaceOrTestInterfaceEmpty&) = default;
+
+DEFINE_TRACE(TestInterfaceOrTestInterfaceEmpty)
+{
+}
 
 void V8TestInterfaceOrTestInterfaceEmpty::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, TestInterfaceOrTestInterfaceEmpty& impl, ExceptionState& exceptionState)
 {
@@ -1520,6 +1561,10 @@ UnrestrictedDoubleOrString UnrestrictedDoubleOrString::fromString(String value)
 UnrestrictedDoubleOrString::UnrestrictedDoubleOrString(const UnrestrictedDoubleOrString&) = default;
 UnrestrictedDoubleOrString::~UnrestrictedDoubleOrString() = default;
 UnrestrictedDoubleOrString& UnrestrictedDoubleOrString::operator=(const UnrestrictedDoubleOrString&) = default;
+
+DEFINE_TRACE(UnrestrictedDoubleOrString)
+{
+}
 
 void V8UnrestrictedDoubleOrString::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, UnrestrictedDoubleOrString& impl, ExceptionState& exceptionState)
 {

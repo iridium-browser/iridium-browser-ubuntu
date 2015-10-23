@@ -7,17 +7,21 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/shared_memory.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "cc/blink/context_provider_web_context.h"
 #include "components/scheduler/child/web_scheduler_impl.h"
 #include "components/scheduler/renderer/renderer_scheduler.h"
 #include "components/scheduler/renderer/webthread_impl_for_renderer_scheduler.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/child/database_util.h"
 #include "content/child/file_info_util.h"
 #include "content/child/fileapi/webfilesystem_impl.h"
@@ -63,10 +67,9 @@
 #include "media/audio/audio_output_device.h"
 #include "media/base/audio_hardware_config.h"
 #include "media/base/key_systems.h"
+#include "media/base/mime_util.h"
 #include "media/blink/webcontentdecryptionmodule_impl.h"
 #include "media/filters/stream_parser_factory.h"
-#include "net/base/mime_util.h"
-#include "net/base/net_util.h"
 #include "storage/common/database/database_identifier.h"
 #include "storage/common/quota/quota_types.h"
 #include "third_party/WebKit/public/platform/WebBatteryStatusListener.h"
@@ -412,7 +415,7 @@ RendererBlinkPlatformImpl::MimeRegistry::supportsMediaMIMEType(
     const WebString& key_system) {
   const std::string mime_type_ascii = ToASCIIOrEmpty(mime_type);
   // Not supporting the container is a flat-out no.
-  if (!net::IsSupportedMediaMimeType(mime_type_ascii))
+  if (!media::IsSupportedMediaMimeType(mime_type_ascii))
     return IsNotSupported;
 
   if (!key_system.isEmpty()) {
@@ -423,9 +426,10 @@ RendererBlinkPlatformImpl::MimeRegistry::supportsMediaMIMEType(
       return IsNotSupported;
 
     std::string key_system_ascii =
-        media::GetUnprefixedKeySystemName(base::UTF16ToASCII(key_system));
+        media::GetUnprefixedKeySystemName(base::UTF16ToASCII(
+            base::StringPiece16(key_system)));
     std::vector<std::string> strict_codecs;
-    net::ParseCodecString(ToASCIIOrEmpty(codecs), &strict_codecs, true);
+    media::ParseCodecString(ToASCIIOrEmpty(codecs), &strict_codecs, true);
 
     if (!media::PrefixedIsSupportedKeySystemWithMediaMimeType(
             mime_type_ascii, strict_codecs, key_system_ascii)) {
@@ -436,18 +440,18 @@ RendererBlinkPlatformImpl::MimeRegistry::supportsMediaMIMEType(
   }
 
   // Check list of strict codecs to see if it is supported.
-  if (net::IsStrictMediaMimeType(mime_type_ascii)) {
+  if (media::IsStrictMediaMimeType(mime_type_ascii)) {
     // Check if the codecs are a perfect match.
     std::vector<std::string> strict_codecs;
-    net::ParseCodecString(ToASCIIOrEmpty(codecs), &strict_codecs, false);
+    media::ParseCodecString(ToASCIIOrEmpty(codecs), &strict_codecs, false);
     return static_cast<WebMimeRegistry::SupportsType> (
-        net::IsSupportedStrictMediaMimeType(mime_type_ascii, strict_codecs));
+        media::IsSupportedStrictMediaMimeType(mime_type_ascii, strict_codecs));
   }
 
   // If we don't recognize the codec, it's possible we support it.
   std::vector<std::string> parsed_codecs;
-  net::ParseCodecString(ToASCIIOrEmpty(codecs), &parsed_codecs, true);
-  if (!net::AreSupportedMediaCodecs(parsed_codecs))
+  media::ParseCodecString(ToASCIIOrEmpty(codecs), &parsed_codecs, true);
+  if (!media::AreSupportedMediaCodecs(parsed_codecs))
     return MayBeSupported;
 
   // Otherwise we have a perfect match.
@@ -459,7 +463,7 @@ bool RendererBlinkPlatformImpl::MimeRegistry::supportsMediaSourceMIMEType(
     const WebString& codecs) {
   const std::string mime_type_ascii = ToASCIIOrEmpty(mime_type);
   std::vector<std::string> parsed_codec_ids;
-  net::ParseCodecString(ToASCIIOrEmpty(codecs), &parsed_codec_ids, false);
+  media::ParseCodecString(ToASCIIOrEmpty(codecs), &parsed_codec_ids, false);
   if (mime_type_ascii.empty())
     return false;
   return media::StreamParserFactory::IsTypeSupported(
@@ -626,6 +630,14 @@ bool RendererBlinkPlatformImpl::databaseSetFileSize(
 }
 
 bool RendererBlinkPlatformImpl::canAccelerate2dCanvas() {
+#if defined(OS_ANDROID)
+  SynchronousCompositorFactory* factory =
+      SynchronousCompositorFactory::GetInstance();
+  if (factory && factory->OverrideWithFactory()) {
+    return factory->GetGPUInfo().SupportsAccelerated2dCanvas();
+  }
+#endif
+
   RenderThreadImpl* thread = RenderThreadImpl::current();
   GpuChannelHost* host = thread->EstablishGpuChannelSync(
       CAUSE_FOR_GPU_LAUNCH_CANVAS_2D);
@@ -638,7 +650,12 @@ bool RendererBlinkPlatformImpl::canAccelerate2dCanvas() {
 bool RendererBlinkPlatformImpl::isThreadedCompositingEnabled() {
   RenderThreadImpl* thread = RenderThreadImpl::current();
   // thread can be NULL in tests.
-  return thread && thread->compositor_message_loop_proxy().get();
+  return thread && thread->compositor_task_runner().get();
+}
+
+bool RendererBlinkPlatformImpl::isThreadedAnimationEnabled() {
+  RenderThreadImpl* thread = RenderThreadImpl::current();
+  return thread ? thread->IsThreadedAnimationEnabled() : true;
 }
 
 double RendererBlinkPlatformImpl::audioHardwareSampleRate() {
@@ -676,8 +693,6 @@ WebAudioDevice* RendererBlinkPlatformImpl::createAudioDevice(
   // The |channels| does not exactly identify the channel layout of the
   // device. The switch statement below assigns a best guess to the channel
   // layout based on number of channels.
-  // TODO(crogers): WebKit should give the channel layout instead of the hard
-  // channel count.
   media::ChannelLayout layout = media::CHANNEL_LAYOUT_UNSUPPORTED;
   switch (channels) {
     case 1:
@@ -705,21 +720,26 @@ WebAudioDevice* RendererBlinkPlatformImpl::createAudioDevice(
       layout = media::CHANNEL_LAYOUT_7_1;
       break;
     default:
-      layout = media::CHANNEL_LAYOUT_STEREO;
+      // If the layout is not supported (more than 9 channels), falls back to
+      // discrete mode.
+      layout = media::CHANNEL_LAYOUT_DISCRETE;
   }
 
   int session_id = 0;
   if (input_device_id.isNull() ||
-      !base::StringToInt(base::UTF16ToUTF8(input_device_id), &session_id)) {
+      !base::StringToInt(base::UTF16ToUTF8(
+          base::StringPiece16(input_device_id)), &session_id)) {
     if (input_channels > 0)
       DLOG(WARNING) << "createAudioDevice(): request for audio input ignored";
 
     input_channels = 0;
   }
 
+  // For CHANNEL_LAYOUT_DISCRETE, pass the explicit channel count along with
+  // the channel layout when creating an |AudioParameters| object.
   media::AudioParameters params(
       media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
-      layout, static_cast<int>(sample_rate), 16, buffer_size,
+      layout, channels, static_cast<int>(sample_rate), 16, buffer_size,
       media::AudioParameters::NO_EFFECTS);
 
   return new RendererWebAudioDeviceImpl(params, callback, session_id);
@@ -937,13 +957,13 @@ RendererBlinkPlatformImpl::createOffscreenGraphicsContext3D(
     return NULL;
 
 #if defined(OS_ANDROID)
-  if (SynchronousCompositorFactory* factory =
-      SynchronousCompositorFactory::GetInstance()) {
+  SynchronousCompositorFactory* factory =
+      SynchronousCompositorFactory::GetInstance();
+  if (factory && factory->OverrideWithFactory()) {
     scoped_ptr<gpu_blink::WebGraphicsContext3DInProcessCommandBufferImpl>
         in_process_context(
             factory->CreateOffscreenGraphicsContext3D(attributes));
-    if (!in_process_context ||
-        !in_process_context->InitializeOnCurrentThread())
+    if (!in_process_context || !in_process_context->InitializeOnCurrentThread())
       return NULL;
     return in_process_context.release();
   }
@@ -1018,7 +1038,7 @@ blink::WebCompositorSupport* RendererBlinkPlatformImpl::compositorSupport() {
 blink::WebString RendererBlinkPlatformImpl::convertIDNToUnicode(
     const blink::WebString& host,
     const blink::WebString& languages) {
-  return net::IDNToUnicode(host.utf8(), languages.utf8());
+  return url_formatter::IDNToUnicode(host.utf8(), languages.utf8());
 }
 
 //------------------------------------------------------------------------------
@@ -1072,8 +1092,8 @@ void RendererBlinkPlatformImpl::cancelVibration() {
 device::VibrationManagerPtr&
 RendererBlinkPlatformImpl::GetConnectedVibrationManagerService() {
   if (!vibration_manager_) {
-    RenderThread::Get()->GetServiceRegistry()
-        ->ConnectToRemoteService(&vibration_manager_);
+    RenderThread::Get()->GetServiceRegistry()->ConnectToRemoteService(
+        mojo::GetProxy(&vibration_manager_));
   }
   return vibration_manager_;
 }
@@ -1188,10 +1208,9 @@ void RendererBlinkPlatformImpl::SendFakeDeviceEventDataForTesting(
   if (!data)
     return;
 
-  base::MessageLoopProxy::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&PlatformEventObserverBase::SendFakeDataForTesting,
-                 base::Unretained(observer), data));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&PlatformEventObserverBase::SendFakeDataForTesting,
+                            base::Unretained(observer), data));
 }
 
 void RendererBlinkPlatformImpl::stopListening(

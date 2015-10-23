@@ -15,6 +15,7 @@
 #include <assert.h>
 #include "vpx_config.h"
 #include "vp8_rtcd.h"
+#include "./vpx_dsp_rtcd.h"
 #include "tokenize.h"
 #include "treewriter.h"
 #include "onyx_int.h"
@@ -28,7 +29,7 @@
 #include "vp8/common/quant_common.h"
 #include "encodemb.h"
 #include "quantize.h"
-#include "vp8/common/variance.h"
+#include "vpx_dsp/variance.h"
 #include "mcomp.h"
 #include "rdopt.h"
 #include "vpx_mem/vpx_mem.h"
@@ -499,17 +500,17 @@ int VP8_UVSSE(MACROBLOCK *x)
 
     if ((mv_row | mv_col) & 7)
     {
-        vp8_sub_pixel_variance8x8(uptr, pre_stride,
+        vpx_sub_pixel_variance8x8(uptr, pre_stride,
             mv_col & 7, mv_row & 7, upred_ptr, uv_stride, &sse2);
-        vp8_sub_pixel_variance8x8(vptr, pre_stride,
+        vpx_sub_pixel_variance8x8(vptr, pre_stride,
             mv_col & 7, mv_row & 7, vpred_ptr, uv_stride, &sse1);
         sse2 += sse1;
     }
     else
     {
-        vp8_variance8x8(uptr, pre_stride,
+        vpx_variance8x8(uptr, pre_stride,
             upred_ptr, uv_stride, &sse2);
-        vp8_variance8x8(vptr, pre_stride,
+        vpx_variance8x8(vptr, pre_stride,
             vpred_ptr, uv_stride, &sse1);
         sse2 += sse1;
     }
@@ -1783,7 +1784,7 @@ static int evaluate_inter_mode_rd(int mdcounts[4],
         if(threshold < x->encode_breakout)
             threshold = x->encode_breakout;
 
-        var = vp8_variance16x16
+        var = vpx_variance16x16
                 (*(b->base_src), b->src_stride,
                 x->e_mbd.predictor, 16, &sse);
 

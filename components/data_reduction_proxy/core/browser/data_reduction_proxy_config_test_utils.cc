@@ -13,6 +13,10 @@
 
 using testing::_;
 
+namespace net {
+class NetworkQualityEstimator;
+}
+
 namespace data_reduction_proxy {
 
 TestDataReductionProxyConfig::TestDataReductionProxyConfig(
@@ -38,11 +42,18 @@ TestDataReductionProxyConfig::TestDataReductionProxyConfig(
     : DataReductionProxyConfig(net_log,
                                config_values.Pass(),
                                configurator,
-                               event_creator) {
+                               event_creator),
+      auto_lofi_enabled_group_(false),
+      network_quality_prohibitively_slow_(false) {
   network_interfaces_.reset(new net::NetworkInterfaceList());
 }
 
 TestDataReductionProxyConfig::~TestDataReductionProxyConfig() {
+}
+
+bool TestDataReductionProxyConfig::IsNetworkQualityProhibitivelySlow(
+    const net::NetworkQualityEstimator* network_quality_estimator) {
+  return network_quality_prohibitively_slow_;
 }
 
 void TestDataReductionProxyConfig::GetNetworkList(
@@ -57,13 +68,15 @@ void TestDataReductionProxyConfig::EnableQuic(bool enable) {
 }
 
 void TestDataReductionProxyConfig::ResetParamFlagsForTest(int flags) {
-  config_values_ = make_scoped_ptr(
-                new TestDataReductionProxyParams(
-                    flags,
-                    TestDataReductionProxyParams::HAS_EVERYTHING &
-                        ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-                        ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN))
-                .Pass();
+  config_values_ =
+      make_scoped_ptr(
+          new TestDataReductionProxyParams(
+              flags,
+              TestDataReductionProxyParams::HAS_EVERYTHING &
+                  ~TestDataReductionProxyParams::HAS_SSL_ORIGIN &
+                  ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+                  ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN))
+          .Pass();
 }
 
 TestDataReductionProxyParams* TestDataReductionProxyConfig::test_params() {
@@ -76,11 +89,27 @@ DataReductionProxyConfigValues* TestDataReductionProxyConfig::config_values() {
 
 void TestDataReductionProxyConfig::SetStateForTest(
     bool enabled_by_user,
-    bool alternative_enabled_by_user,
     bool secure_proxy_allowed) {
   enabled_by_user_ = enabled_by_user;
-  alternative_enabled_by_user_ = alternative_enabled_by_user;
   secure_proxy_allowed_ = secure_proxy_allowed;
+}
+
+void TestDataReductionProxyConfig::ResetLoFiStatusForTest() {
+  lofi_status_ = LoFiStatus::LOFI_STATUS_TEMPORARILY_OFF;
+}
+
+bool TestDataReductionProxyConfig::IsIncludedInLoFiEnabledFieldTrial() const {
+  return auto_lofi_enabled_group_;
+}
+
+void TestDataReductionProxyConfig::SetIncludedInLoFiEnabledFieldTrial(
+    bool auto_lofi_enabled_group) {
+  auto_lofi_enabled_group_ = auto_lofi_enabled_group;
+}
+
+void TestDataReductionProxyConfig::SetNetworkProhibitivelySlow(
+    bool network_quality_prohibitively_slow) {
+  network_quality_prohibitively_slow_ = network_quality_prohibitively_slow;
 }
 
 MockDataReductionProxyConfig::MockDataReductionProxyConfig(
@@ -97,14 +126,14 @@ MockDataReductionProxyConfig::MockDataReductionProxyConfig(
 MockDataReductionProxyConfig::~MockDataReductionProxyConfig() {
 }
 
-void MockDataReductionProxyConfig::UpdateConfigurator(bool enabled,
-                                                      bool alternative_enabled,
-                                                      bool secure_proxy_allowed,
-                                                      bool at_startup) {
-  EXPECT_CALL(*this, LogProxyState(enabled, secure_proxy_allowed, at_startup))
-      .Times(1);
-  DataReductionProxyConfig::UpdateConfigurator(
-      enabled, alternative_enabled, secure_proxy_allowed, at_startup);
+void MockDataReductionProxyConfig::UpdateConfigurator(
+    bool enabled,
+    bool secure_proxy_allowed) {
+  DataReductionProxyConfig::UpdateConfigurator(enabled, secure_proxy_allowed);
+}
+
+void MockDataReductionProxyConfig::ResetLoFiStatusForTest() {
+  lofi_status_ = LoFiStatus::LOFI_STATUS_TEMPORARILY_OFF;
 }
 
 }  // namespace data_reduction_proxy

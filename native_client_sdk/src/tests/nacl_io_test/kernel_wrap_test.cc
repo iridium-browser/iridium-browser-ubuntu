@@ -159,6 +159,14 @@ class KernelWrapTest : public ::testing::Test {
     ON_CALL(mock, write(_, _, _))
         .WillByDefault(Invoke(this, &KernelWrapTest::DefaultWrite));
     EXPECT_CALL(mock, write(_, _, _)).Times(AnyNumber());
+
+    // Ignore calls to munmap.  These can be generated from within the standard
+    // library malloc implementation so can be expected at pretty much any time.
+    // Returning zero is fine since the real munmap see also run.
+    // See kernel_wrap_newlib.cc.
+    ON_CALL(mock, munmap(_, _))
+        .WillByDefault(Return(0));
+    EXPECT_CALL(mock, munmap(_, _)).Times(AnyNumber());
   }
 
   void TearDown() {
@@ -344,11 +352,10 @@ TEST_F(KernelWrapTest, getdents) {
   // It looks like the only way to exercise it is to call readdir(2).
   // There is an internal glibc function __getdents that will call the
   // IRT but that cannot be accessed from here as glibc does not export it.
-  int dummy_val;
-  void* void_ptr = &dummy_val;
-  EXPECT_CALL(mock, getdents(kDummyInt, void_ptr, kDummyInt2))
+  struct dirent dirent;
+  EXPECT_CALL(mock, getdents(kDummyInt, &dirent, kDummyInt2))
       .WillOnce(Return(kDummyInt2));
-  EXPECT_EQ(kDummyInt2, getdents(kDummyInt, void_ptr, kDummyInt2));
+  EXPECT_EQ(kDummyInt2, getdents(kDummyInt, &dirent, kDummyInt2));
 #endif
 }
 

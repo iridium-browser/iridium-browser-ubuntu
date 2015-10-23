@@ -106,6 +106,12 @@ class SharedAudioRenderer : public MediaStreamAudioRenderer {
     on_play_state_changed_.Run(media_stream_, &playing_state_);
   }
 
+  media::OutputDevice* GetOutputDevice() override {
+    DVLOG(1) << __FUNCTION__;
+    DCHECK(thread_checker_.CalledOnValidThread());
+    return delegate_->GetOutputDevice();
+  }
+
   base::TimeDelta GetCurrentRenderTime() const override {
     DCHECK(thread_checker_.CalledOnValidThread());
     return delegate_->GetCurrentRenderTime();
@@ -404,6 +410,13 @@ void WebRtcAudioRenderer::SetVolume(float volume) {
 
   playing_state_.set_volume(volume);
   OnPlayStateChanged(media_stream_, &playing_state_);
+}
+
+media::OutputDevice* WebRtcAudioRenderer::GetOutputDevice() {
+  DVLOG(1) << __FUNCTION__;
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(sink_);
+  return sink_->GetOutputDevice();
 }
 
 base::TimeDelta WebRtcAudioRenderer::GetCurrentRenderTime() const {

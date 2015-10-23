@@ -14,20 +14,18 @@
 #include <algorithm>  // NOLINT
 
 #include "base/i18n/bidi_line_iterator.h"
-#include "base/memory/scoped_vector.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/bitmap_fetcher/bitmap_fetcher_service_factory.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_contents_view.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/omnibox/suggestion_answer.h"
+#include "components/omnibox/browser/omnibox_popup_model.h"
 #include "grit/components_scaled_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
@@ -40,38 +38,6 @@
 using ui::NativeTheme;
 
 namespace {
-
-// The minimum distance between the top and bottom of the icon and the
-// top or bottom of the row.
-const int kMinimumIconVerticalPadding = 2;
-
-// Calls back to the OmniboxResultView when the requested image is downloaded.
-// This is a separate class instead of being implemented on OmniboxResultView
-// because BitmapFetcherService currently takes ownership of this object.
-// TODO(dschuyler): Make BitmapFetcherService use the more typical non-owning
-// ObserverList pattern and have OmniboxResultView implement the Observer call
-// directly.
-class AnswerImageObserver : public BitmapFetcherService::Observer {
- public:
-  explicit AnswerImageObserver(
-      const base::WeakPtr<OmniboxResultView>& view)
-      : view_(view) {}
-
-  void OnImageChanged(BitmapFetcherService::RequestId request_id,
-                      const SkBitmap& image) override;
-
- private:
-  const base::WeakPtr<OmniboxResultView> view_;
-  DISALLOW_COPY_AND_ASSIGN(AnswerImageObserver);
-};
-
-void AnswerImageObserver::OnImageChanged(
-    BitmapFetcherService::RequestId request_id,
-    const SkBitmap& image) {
-  DCHECK(!image.empty());
-  if (view_)
-    view_->SetAnswerImage(gfx::ImageSkia::CreateFrom1xBitmap(image));
-}
 
 // A mapping from OmniboxResultView's ResultViewState/ColorKind types to
 // NativeTheme colors.
@@ -154,11 +120,11 @@ struct TextStyle {
       NativeTheme::kColorId_ResultsTablePositiveSelectedText},
      gfx::INFERIOR},
     // 7  MORE_INFO_TEXT
-    {ui::ResourceBundle::SmallFont,
+    {ui::ResourceBundle::BaseFont,
      {NativeTheme::kColorId_ResultsTableNormalDimmedText,
       NativeTheme::kColorId_ResultsTableHoveredDimmedText,
       NativeTheme::kColorId_ResultsTableSelectedDimmedText},
-     gfx::NORMAL_BASELINE},
+     gfx::INFERIOR},
     // 8  SUGGESTION_TEXT
     {ui::ResourceBundle::BaseFont,
      {NativeTheme::kColorId_ResultsTableNormalText,
@@ -249,22 +215,16 @@ OmniboxResultView::OmniboxResultView(OmniboxPopupContentsView* model,
                                      int model_index,
                                      LocationBarView* location_bar_view,
                                      const gfx::FontList& font_list)
-    : edge_item_padding_(LocationBarView::kItemPadding),
-      item_padding_(LocationBarView::kItemPadding),
-      model_(model),
+    : model_(model),
       model_index_(model_index),
       location_bar_view_(location_bar_view),
-      image_service_(BitmapFetcherServiceFactory::GetForBrowserContext(
-          location_bar_view_->profile())),
       font_list_(font_list),
       font_height_(
           std::max(font_list.GetHeight(),
                    font_list.DeriveWithStyle(gfx::Font::BOLD).GetHeight())),
       mirroring_context_(new MirroringContext()),
       keyword_icon_(new views::ImageView()),
-      animation_(new gfx::SlideAnimation(this)),
-      request_id_(BitmapFetcherService::REQUEST_ID_INVALID),
-      weak_ptr_factory_(this) {
+      animation_(new gfx::SlideAnimation(this)) {
   CHECK_GE(model_index, 0);
   if (default_icon_size_ == 0) {
     default_icon_size_ =
@@ -279,8 +239,6 @@ OmniboxResultView::OmniboxResultView(OmniboxPopupContentsView* model,
 }
 
 OmniboxResultView::~OmniboxResultView() {
-  if (image_service_)
-    image_service_->CancelRequest(request_id_);
 }
 
 SkColor OmniboxResultView::GetColor(
@@ -299,18 +257,10 @@ SkColor OmniboxResultView::GetColor(
 
 void OmniboxResultView::SetMatch(const AutocompleteMatch& match) {
   match_ = match;
+  match_.PossiblySwapContentsAndDescriptionForDisplay();
   ResetRenderTexts();
   animation_->Reset();
-
   answer_image_ = gfx::ImageSkia();
-  if (image_service_) {
-    image_service_->CancelRequest(request_id_);
-    if (match_.answer) {
-      request_id_ = image_service_->RequestImage(
-          match_.answer->second_line().image_url(),
-          new AnswerImageObserver(weak_ptr_factory_.GetWeakPtr()));
-    }
-}
 
   AutocompleteMatch* associated_keyword_match = match_.associated_keyword.get();
   if (associated_keyword_match) {
@@ -321,7 +271,8 @@ void OmniboxResultView::SetMatch(const AutocompleteMatch& match) {
     RemoveChildView(keyword_icon_.get());
   }
 
-  Layout();
+  if (GetWidget())
+    Layout();
 }
 
 void OmniboxResultView::ShowKeyword(bool show_keyword) {
@@ -400,7 +351,10 @@ void OmniboxResultView::PaintMatch(const AutocompleteMatch& match,
             answer_image_,
             0, 0, answer_image_.width(), answer_image_.height(),
             GetMirroredXInView(x), y, answer_icon_size, answer_icon_size, true);
-        x += answer_icon_size + LocationBarView::kIconInternalPadding;
+        // See TODO in Layout().
+        x += answer_icon_size +
+             location_bar_view_->GetThemeProvider()->GetDisplayProperty(
+                 ThemeProperties::PROPERTY_ICON_LABEL_VIEW_TRAILING_PADDING);
       }
     } else {
       x = DrawRenderText(match, separator_rendertext_.get(), false, canvas,
@@ -596,7 +550,8 @@ gfx::ImageSkia OmniboxResultView::GetIcon() const {
 
   int icon = model_->IsStarredMatch(match_) ?
       IDR_OMNIBOX_STAR : AutocompleteMatch::TypeToIcon(match_.type);
-  if (GetState() == SELECTED) {
+  if (GetState() == SELECTED &&
+      !ui::MaterialDesignController::IsModeMaterial()) {
     switch (icon) {
       case IDR_OMNIBOX_CALCULATOR:
         icon = IDR_OMNIBOX_CALCULATOR_SELECTED;
@@ -624,8 +579,11 @@ gfx::ImageSkia OmniboxResultView::GetIcon() const {
 const gfx::ImageSkia* OmniboxResultView::GetKeywordIcon() const {
   // NOTE: If we ever begin returning icons of varying size, then callers need
   // to ensure that |keyword_icon_| is resized each time its image is reset.
-  return location_bar_view_->GetThemeProvider()->GetImageSkiaNamed(
-      (GetState() == SELECTED) ? IDR_OMNIBOX_TTS_SELECTED : IDR_OMNIBOX_TTS);
+  int icon = IDR_OMNIBOX_TTS;
+  if (GetState() == SELECTED && !ui::MaterialDesignController::IsModeMaterial())
+    icon = IDR_OMNIBOX_TTS_SELECTED;
+
+  return location_bar_view_->GetThemeProvider()->GetImageSkiaNamed(icon);
 }
 
 bool OmniboxResultView::ShowOnlyKeywordMatch() const {
@@ -651,29 +609,41 @@ void OmniboxResultView::InitContentsRenderTextIfNecessary() const {
 
 void OmniboxResultView::Layout() {
   const gfx::ImageSkia icon = GetIcon();
+  // TODO(jonross): Currently |location_bar_view_| provides the correct
+  // ThemeProvider, as it is loaded on the BrowserFrame widget. The root widget
+  // for OmniboxResultView is AutocompletePopupWidget, which is not loading the
+  // theme. We should update the omnibox code to also track its own
+  // ThemeProvider in order to reduce dependancy on LocationBarView.
+  ui::ThemeProvider* theme_provider = location_bar_view_->GetThemeProvider();
+  // |theme_provider| can be null when animations are running during shutdown,
+  // after OmniboxResultView has been removed from the tree of Views.
+  if (!theme_provider)
+    return;
+  const int horizontal_padding = theme_provider->GetDisplayProperty(
+      ThemeProperties::PROPERTY_LOCATION_BAR_HORIZONTAL_PADDING);
+  const int trailing_padding = theme_provider->GetDisplayProperty(
+      ThemeProperties::PROPERTY_ICON_LABEL_VIEW_TRAILING_PADDING);
 
   icon_bounds_.SetRect(
-      edge_item_padding_ + ((icon.width() == default_icon_size_)
-                                ? 0
-                                : LocationBarView::kIconInternalPadding),
+      horizontal_padding +
+          ((icon.width() == default_icon_size_) ? 0 : trailing_padding),
       (GetContentLineHeight() - icon.height()) / 2, icon.width(),
       icon.height());
 
-  int text_x = edge_item_padding_ + default_icon_size_ + item_padding_;
-  int text_width = width() - text_x - edge_item_padding_;
+  int text_x = (2 * horizontal_padding) + default_icon_size_;
+  int text_width = width() - text_x - horizontal_padding;
 
   if (match_.associated_keyword.get()) {
-    const int kw_collapsed_size =
-        keyword_icon_->width() + edge_item_padding_;
+    const int kw_collapsed_size = keyword_icon_->width() + horizontal_padding;
     const int max_kw_x = width() - kw_collapsed_size;
     const int kw_x =
-        animation_->CurrentValueBetween(max_kw_x, edge_item_padding_);
-    const int kw_text_x = kw_x + keyword_icon_->width() + item_padding_;
+        animation_->CurrentValueBetween(max_kw_x, horizontal_padding);
+    const int kw_text_x = kw_x + keyword_icon_->width() + horizontal_padding;
 
-    text_width = kw_x - text_x - item_padding_;
+    text_width = kw_x - text_x - horizontal_padding;
     keyword_text_bounds_.SetRect(
-        kw_text_x, 0,
-        std::max(width() - kw_text_x - edge_item_padding_, 0), height());
+        kw_text_x, 0, std::max(width() - kw_text_x - horizontal_padding, 0),
+        height());
     keyword_icon_->SetPosition(
         gfx::Point(kw_x, (height() - keyword_icon_->height()) / 2));
   }
@@ -701,18 +671,12 @@ void OmniboxResultView::OnPaint(gfx::Canvas* canvas) {
 
     if (!description_rendertext_) {
       if (match_.answer) {
-        base::string16 text;
-        description_rendertext_ = CreateRenderText(text);
-        for (const SuggestionAnswer::TextField& text_field :
-             match_.answer->second_line().text_fields())
-          AppendAnswerText(text_field.text(), text_field.type());
-        const base::char16 space(' ');
-        const auto* text_field = match_.answer->second_line().additional_text();
-        if (text_field)
-          AppendAnswerText(space + text_field->text(), text_field->type());
-        text_field = match_.answer->second_line().status_text();
-        if (text_field)
-          AppendAnswerText(space + text_field->text(), text_field->type());
+        contents_rendertext_ =
+            CreateAnswerLine(match_.answer->first_line(), font_list_);
+        description_rendertext_ = CreateAnswerLine(
+            match_.answer->second_line(),
+            ui::ResourceBundle::GetSharedInstance().GetFontList(
+                ui::ResourceBundle::LargeFont));
       } else if (!match_.description.empty()) {
         description_rendertext_ = CreateClassifiedRenderText(
             match_.description, match_.description_class, true);
@@ -758,21 +722,80 @@ int OmniboxResultView::GetAnswerLineHeight() const {
 }
 
 int OmniboxResultView::GetContentLineHeight() const {
-  return std::max(default_icon_size_ + (kMinimumIconVerticalPadding * 2),
-                  GetTextHeight() + (kMinimumTextVerticalPadding * 2));
+  ui::ThemeProvider* theme_provider = location_bar_view_->GetThemeProvider();
+  const int min_icon_vertical_padding = theme_provider->GetDisplayProperty(
+      ThemeProperties::PROPERTY_OMNIBOX_DROPDOWN_MIN_ICON_VERTICAL_PADDING);
+  const int min_text_vertical_padding = theme_provider->GetDisplayProperty(
+      ThemeProperties::PROPERTY_OMNIBOX_DROPDOWN_MIN_TEXT_VERTICAL_PADDING);
+
+  return std::max(default_icon_size_ + (min_icon_vertical_padding * 2),
+                  GetTextHeight() + (min_text_vertical_padding * 2));
 }
 
-void OmniboxResultView::AppendAnswerText(const base::string16& text,
+scoped_ptr<gfx::RenderText> OmniboxResultView::CreateAnswerLine(
+    const SuggestionAnswer::ImageLine& line,
+    gfx::FontList font_list) {
+  scoped_ptr<gfx::RenderText> destination = CreateRenderText(base::string16());
+  destination->SetFontList(font_list);
+
+  for (const SuggestionAnswer::TextField& text_field : line.text_fields())
+    AppendAnswerText(destination.get(), text_field.text(), text_field.type());
+  const base::char16 space(' ');
+  const auto* text_field = line.additional_text();
+  if (text_field) {
+    AppendAnswerText(destination.get(), space + text_field->text(),
+                     text_field->type());
+  }
+  text_field = line.status_text();
+  if (text_field) {
+    AppendAnswerText(destination.get(), space + text_field->text(),
+                     text_field->type());
+  }
+  return destination.Pass();
+}
+
+void OmniboxResultView::AppendAnswerText(gfx::RenderText* destination,
+                                         const base::string16& text,
                                          int text_type) {
-  int offset = description_rendertext_->text().length();
+  // TODO(dschuyler): make this better.  Right now this only supports unnested
+  // bold tags.  In the future we'll need to flag unexpected tags while adding
+  // support for b, i, u, sub, and sup.  We'll also need to support HTML
+  // entities (&lt; for '<', etc.).
+  const base::string16 begin_tag = base::ASCIIToUTF16("<b>");
+  const base::string16 end_tag = base::ASCIIToUTF16("</b>");
+  size_t begin = 0;
+  while (true) {
+    size_t end = text.find(begin_tag, begin);
+    if (end == base::string16::npos) {
+      AppendAnswerTextHelper(destination, text.substr(begin), text_type, false);
+      break;
+    }
+    AppendAnswerTextHelper(destination, text.substr(begin, end - begin),
+                           text_type, false);
+    begin = end + begin_tag.length();
+    end = text.find(end_tag, begin);
+    if (end == base::string16::npos)
+      break;
+    AppendAnswerTextHelper(destination, text.substr(begin, end - begin),
+                           text_type, true);
+    begin = end + end_tag.length();
+  }
+}
+
+void OmniboxResultView::AppendAnswerTextHelper(gfx::RenderText* destination,
+                                               const base::string16& text,
+                                               int text_type,
+                                               bool is_bold) {
+  if (text.empty())
+    return;
+  int offset = destination->text().length();
   gfx::Range range(offset, offset + text.length());
-  description_rendertext_->AppendText(text);
+  destination->AppendText(text);
   const TextStyle& text_style = GetTextStyle(text_type);
   // TODO(dschuyler): follow up on the problem of different font sizes within
-  // one RenderText.
-  description_rendertext_->SetFontList(
-      ui::ResourceBundle::GetSharedInstance().GetFontList(text_style.font));
-  description_rendertext_->ApplyColor(
+  // one RenderText.  Maybe with destination->SetFontList(...).
+  destination->ApplyStyle(gfx::BOLD, is_bold, range);
+  destination->ApplyColor(
       GetNativeTheme()->GetSystemColor(text_style.colors[GetState()]), range);
-  description_rendertext_->ApplyBaselineStyle(text_style.baseline, range);
+  destination->ApplyBaselineStyle(text_style.baseline, range);
 }

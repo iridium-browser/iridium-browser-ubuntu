@@ -10,7 +10,6 @@
 #include "base/compiler_specific.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window_delegate.h"
-#include "ui/base/ime/dummy_text_input_client.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -47,7 +46,6 @@ class TestWindowDelegate : public WindowDelegate {
   gfx::Size GetMaximumSize() const override;
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override;
-  ui::TextInputClient* GetFocusedTextInputClient() override;
   gfx::NativeCursor GetCursor(const gfx::Point& point) override;
   int GetNonClientComponent(const gfx::Point& point) const override;
   bool ShouldDescendIntoChildForEventHandling(
@@ -68,7 +66,6 @@ class TestWindowDelegate : public WindowDelegate {
   bool delete_on_destroyed_;
   gfx::Size minimum_size_;
   gfx::Size maximum_size_;
-  ui::DummyTextInputClient text_input_client_;
   bool can_focus_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWindowDelegate);
@@ -84,6 +81,8 @@ class ColorTestWindowDelegate : public TestWindowDelegate {
   ui::KeyboardCode last_key_code() const { return last_key_code_; }
 
   // Overridden from TestWindowDelegate:
+  void OnBoundsChanged(const gfx::Rect& old_bounds,
+                       const gfx::Rect& new_bounds) override;
   void OnKeyEvent(ui::KeyEvent* event) override;
   void OnWindowDestroyed(Window* window) override;
   void OnPaint(const ui::PaintContext& context) override;
@@ -91,6 +90,7 @@ class ColorTestWindowDelegate : public TestWindowDelegate {
  private:
   SkColor color_;
   ui::KeyboardCode last_key_code_;
+  gfx::Size window_size_;
 
   DISALLOW_COPY_AND_ASSIGN(ColorTestWindowDelegate);
 };

@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
+#include "src/runtime/runtime-utils.h"
 
 #include "src/arguments.h"
 #include "src/conversions.h"
-#include "src/runtime/runtime-utils.h"
+#include "src/objects-inl.h"
 #include "src/string-search.h"
 #include "src/utils.h"
-
 
 namespace v8 {
 namespace internal {
@@ -284,5 +283,5 @@ RUNTIME_FUNCTION(Runtime_URIUnescape) {
                            : URIUnescape::Unescape<uc16>(isolate, source));
   return *result;
 }
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

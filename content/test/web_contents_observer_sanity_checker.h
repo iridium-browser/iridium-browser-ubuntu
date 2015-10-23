@@ -40,6 +40,10 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
   void RenderFrameHostChanged(RenderFrameHost* old_host,
                               RenderFrameHost* new_host) override;
   void FrameDeleted(RenderFrameHost* render_frame_host) override;
+  void DidStartNavigation(NavigationHandle* navigation_handle) override;
+  void DidRedirectNavigation(NavigationHandle* navigation_handle) override;
+  void DidCommitNavigation(NavigationHandle* navigation_handle) override;
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
   void DidStartProvisionalLoadForFrame(RenderFrameHost* render_frame_host,
                                        const GURL& validated_url,
                                        bool is_error_page,
@@ -51,7 +55,8 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
   void DidFailProvisionalLoad(RenderFrameHost* render_frame_host,
                               const GURL& validated_url,
                               int error_code,
-                              const base::string16& error_description) override;
+                              const base::string16& error_description,
+                              bool was_ignored_by_handler) override;
   void DidNavigateMainFrame(const LoadCommittedDetails& details,
                             const FrameNavigateParams& params) override;
   void DidNavigateAnyFrame(RenderFrameHost* render_frame_host,
@@ -65,7 +70,8 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
   void DidFailLoad(RenderFrameHost* render_frame_host,
                    const GURL& validated_url,
                    int error_code,
-                   const base::string16& error_description) override;
+                   const base::string16& error_description,
+                   bool was_ignored_by_handler) override;
   void DidGetRedirectForResourceRequest(
       RenderFrameHost* render_frame_host,
       const ResourceRedirectDetails& details) override;
@@ -87,9 +93,15 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
   void AssertRenderFrameExists(RenderFrameHost* render_frame_host);
   void AssertMainFrameExists();
 
+  bool NavigationIsOngoing(NavigationHandle* navigation_handle);
+  bool NavigationIsOngoingAndCommitted(NavigationHandle* navigation_handle);
+
   std::set<std::pair<int, int>> current_hosts_;
   std::set<std::pair<int, int>> live_routes_;
   std::set<std::pair<int, int>> deleted_routes_;
+
+  std::set<NavigationHandle*> ongoing_navigations_;
+  std::set<NavigationHandle*> ongoing_committed_navigations_;
 
   bool web_contents_destroyed_;
 

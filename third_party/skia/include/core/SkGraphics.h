@@ -10,12 +10,15 @@
 
 #include "SkTypes.h"
 
+class SkData;
+class SkImageGenerator;
+
 class SK_API SkGraphics {
 public:
     /**
      *  Call this at process initialization time if your environment does not
-     *  permit static global initializers that execute code. Note that
-     *  Init() is not thread-safe.
+     *  permit static global initializers that execute code.
+     *  Init() is thread-safe and idempotent.
      */
     static void Init();
 
@@ -140,6 +143,18 @@ public:
      *  global font cache.
      */
     static void SetTLSFontCacheLimit(size_t bytes);
+
+    typedef SkImageGenerator* (*ImageGeneratorFromEncodedFactory)(SkData*);
+
+    /**
+     *  To instantiate images from encoded data, first looks at this runtime function-ptr. If it
+     *  exists, it is called to create an SkImageGenerator from SkData. If there is no function-ptr
+     *  or there is, but it returns NULL, then skia will call its internal default implementation.
+     *
+     *  Returns the previous factory (which could be NULL).
+     */
+    static ImageGeneratorFromEncodedFactory
+           SetImageGeneratorFromEncodedFactory(ImageGeneratorFromEncodedFactory);
 };
 
 class SkAutoGraphics {

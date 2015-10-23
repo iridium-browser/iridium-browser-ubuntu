@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2015 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+<link rel="import" href="/tracing/base/base.html">
+<link rel="import" href="/tracing/core/test_utils.html">
+<link rel="import" href="/tracing/extras/chrome/chrome_process_helper.html">
+<link rel="import" href="/tracing/model/model.html">
+
+<script>
+'use strict';
+
+/**
+ * @fileoverview Base class for trace data Auditors.
+ */
+tr.exportTo('tr.e.audits', function() {
+  function newChromeModel(customizeModelCallback) {
+    return tr.c.test_utils.newModel(function(model) {
+      console.log(model);
+      model.browserProcess = model.getOrCreateProcess(1);
+      model.browserMain = model.browserProcess.getOrCreateThread(2);
+      model.browserMain.name = 'CrBrowserMain';
+
+      model.rendererProcess = model.getOrCreateProcess(2);
+      model.rendererMain = model.rendererProcess.getOrCreateThread(3);
+      model.rendererMain.name = 'CrRendererMain';
+
+      model.rendererCompositor = model.rendererProcess.getOrCreateThread(4);
+      model.rendererCompositor.name = 'Compositor';
+
+      model.rasterWorker1 = model.rendererProcess.getOrCreateThread(5);
+      model.rasterWorker1.name = 'CompositorTileWorker1';
+
+      customizeModelCallback(model);
+    });
+  }
+
+  function addEvent(thread, dict) {
+    var slice = tr.c.test_utils.newAsyncSliceEx(dict);
+    thread.asyncSliceGroup.push(slice);
+    return slice;
+  }
+
+  function addInputEvent(model, typeName, dict) {
+    dict.title = 'InputLatency::' + typeName;
+    dict.isTopLevel = (dict.isTopLevel === undefined);
+    dict.startThread = model.browserMain;
+    var slice = tr.c.test_utils.newAsyncSliceEx(dict);
+    model.rendererMain.asyncSliceGroup.push(slice);
+    return slice;
+  }
+
+  function addFlingAnimationEvent(model, dict) {
+    dict.title = 'InputHandlerProxy::HandleGestureFling::started';
+    var slice = tr.c.test_utils.newAsyncSliceEx(dict);
+    model.rendererCompositor.asyncSliceGroup.push(slice);
+    return slice;
+  }
+
+  function addFrameEvent(model, dict) {
+    dict.title = tr.e.audits.IMPL_RENDERING_STATS;
+    dict.type = tr.model.ThreadSlice;
+    var slice = tr.c.test_utils.newSliceEx(dict);
+    model.rendererMain.asyncSliceGroup.push(slice);
+    return slice;
+  }
+
+  function addLoadingEvent(model, dict) {
+    dict.title = 'WebContentsImpl Loading';
+    var slice = tr.c.test_utils.newAsyncSliceEx(dict);
+    model.rendererMain.asyncSliceGroup.push(slice);
+    return slice;
+  }
+
+  function addNetworkEvent(model, dict) {
+    dict.cat = 'netlog';
+    dict.title = 'Generic Network event';
+    var slice = tr.c.test_utils.newAsyncSliceEx(dict);
+    model.browserMain.asyncSliceGroup.push(slice);
+    return slice;
+  }
+
+  function addCommitLoadEvent(model, dict) {
+    dict.title = 'RenderFrameImpl::didCommitProvisionalLoad';
+    var slice = tr.c.test_utils.newAsyncSliceEx(dict);
+    model.rendererMain.asyncSliceGroup.push(slice);
+    return slice;
+  }
+
+  function addStartProvisionalLoadEvent(model, dict) {
+    dict.title = 'RenderFrameImpl::didStartProvisionalLoad';
+    var slice = tr.c.test_utils.newAsyncSliceEx(dict);
+    model.rendererMain.asyncSliceGroup.push(slice);
+    return slice;
+  }
+
+  function addFailProvisionalLoadEvent(model, dict) {
+    dict.title = 'RenderFrameImpl::didFailProvisionalLoad';
+    var slice = tr.c.test_utils.newAsyncSliceEx(dict);
+    model.rendererMain.asyncSliceGroup.push(slice);
+    return slice;
+  }
+
+  function addMainRunnerEvent(model, dict) {
+    dict.title = 'ContentMainRunnerImpl::Initialize';
+    var slice = tr.c.test_utils.newAsyncSliceEx(dict);
+    model.rendererMain.asyncSliceGroup.push(slice);
+  }
+
+  return {
+    newChromeModel: newChromeModel,
+    addEvent: addEvent,
+    addInputEvent: addInputEvent,
+    addFlingAnimationEvent: addFlingAnimationEvent,
+    addFrameEvent: addFrameEvent,
+    addLoadingEvent: addLoadingEvent,
+    addNetworkEvent: addNetworkEvent,
+    addCommitLoadEvent: addCommitLoadEvent,
+    addStartProvisionalLoadEvent: addStartProvisionalLoadEvent,
+    addFailProvisionalLoadEvent: addFailProvisionalLoadEvent,
+    addMainRunnerEvent: addMainRunnerEvent
+  };
+});
+</script>

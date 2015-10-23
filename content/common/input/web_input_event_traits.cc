@@ -110,10 +110,8 @@ void ApppendEventDetails(const WebTouchEvent& event, std::string* result) {
   StringAppendF(result,
                 "{\n Touches: %u, Cancelable: %d, CausesScrolling: %d,"
                 " uniqueTouchEventId: %u\n[\n",
-                event.touchesLength,
-                event.cancelable,
-                event.causesScrollingIfUncanceled,
-                static_cast<uint32>(event.uniqueTouchEventId));
+                event.touchesLength, event.cancelable,
+                event.causesScrollingIfUncanceled, event.uniqueTouchEventId);
   for (unsigned i = 0; i < event.touchesLength; ++i)
     ApppendTouchPointDetails(event.touches[i], result);
   result->append(" ]\n}");
@@ -187,8 +185,6 @@ void Coalesce(const WebMouseWheelEvent& event_to_coalesce,
       GetAccelerationRatio(event->deltaX, unaccelerated_x);
   event->accelerationRatioY =
       GetAccelerationRatio(event->deltaY, unaccelerated_y);
-  DCHECK_GE(event_to_coalesce.timeStampSeconds, event->timeStampSeconds);
-  event->timeStampSeconds = event_to_coalesce.timeStampSeconds;
 }
 
 // Returns |kInvalidTouchIndex| iff |event| lacks a touch with an ID of |id|.
@@ -346,8 +342,12 @@ struct WebInputEventCoalesce {
   template <class EventType>
   bool Execute(const WebInputEvent& event_to_coalesce,
                WebInputEvent* event) const {
+    // New events get coalesced into older events, and the newer timestamp
+    // should always be preserved.
+    const double time_stamp_seconds = event_to_coalesce.timeStampSeconds;
     Coalesce(static_cast<const EventType&>(event_to_coalesce),
              static_cast<EventType*>(event));
+    event->timeStampSeconds = time_stamp_seconds;
     return true;
   }
 };
@@ -463,7 +463,8 @@ void WebInputEventTraits::Coalesce(const WebInputEvent& event_to_coalesce,
   Apply(WebInputEventCoalesce(), event->type, event_to_coalesce, event);
 }
 
-bool WebInputEventTraits::IgnoresAckDisposition(const WebInputEvent& event) {
+bool WebInputEventTraits::WillReceiveAckFromRenderer(
+    const WebInputEvent& event) {
   switch (event.type) {
     case WebInputEvent::MouseDown:
     case WebInputEvent::MouseUp:
@@ -479,14 +480,20 @@ bool WebInputEventTraits::IgnoresAckDisposition(const WebInputEvent& event) {
     case WebInputEvent::GesturePinchBegin:
     case WebInputEvent::GesturePinchEnd:
     case WebInputEvent::TouchCancel:
-      return true;
-    case WebInputEvent::TouchStart:
-    case WebInputEvent::TouchMove:
-    case WebInputEvent::TouchEnd:
-      return !static_cast<const WebTouchEvent&>(event).cancelable;
-    default:
       return false;
+    case WebInputEvent::TouchStart:
+    case WebInputEvent::TouchEnd:
+      return static_cast<const WebTouchEvent&>(event).cancelable;
+    default:
+      return true;
   }
+}
+
+uint32 WebInputEventTraits::GetUniqueTouchEventId(const WebInputEvent& event) {
+  if (WebInputEvent::isTouchEventType(event.type)) {
+    return static_cast<const WebTouchEvent&>(event).uniqueTouchEventId;
+  }
+  return 0U;
 }
 
 }  // namespace content

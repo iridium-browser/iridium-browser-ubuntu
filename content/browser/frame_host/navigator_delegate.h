@@ -18,6 +18,7 @@ struct FrameHostMsg_DidFailProvisionalLoadWithError_Params;
 namespace content {
 
 class FrameTreeNode;
+class NavigationHandle;
 class RenderFrameHostImpl;
 struct LoadCommittedDetails;
 struct OpenURLParams;
@@ -26,6 +27,23 @@ struct OpenURLParams;
 // related events.
 class CONTENT_EXPORT NavigatorDelegate {
  public:
+  // Called when a navigation started. The same NavigationHandle will be
+  // provided for events related to the same navigation.
+  virtual void DidStartNavigation(NavigationHandle* navigation_handle) {}
+
+  // Called when a navigation was redirected.
+  virtual void DidRedirectNavigation(NavigationHandle* navigation_handle) {}
+
+  // Called when a navigation committed.
+  virtual void DidCommitNavigation(NavigationHandle* navigation_handle) {}
+
+  // Called when a document load resulting from the navigation stopped. Note
+  // that |navigation_handle| will be destroyed at the end of this call.
+  virtual void DidFinishNavigation(NavigationHandle* navigation_handle) {}
+
+  // TODO(clamy): all methods below that are related to navigation
+  // events should go away in favor of the ones above.
+
   // The RenderFrameHost started a provisional load for the frame
   // represented by |render_frame_host|.
   virtual void DidStartProvisionalLoad(
@@ -33,10 +51,6 @@ class CONTENT_EXPORT NavigatorDelegate {
       const GURL& validated_url,
       bool is_error_page,
       bool is_iframe_srcdoc) {}
-
-  // The |render_frame_host| started a transition-flagged navigation.
-  virtual void DidStartNavigationTransition(
-      RenderFrameHostImpl* render_frame_host) {}
 
   // A provisional load in |render_frame_host| failed.
   virtual void DidFailProvisionalLoadWithError(
@@ -48,7 +62,8 @@ class CONTENT_EXPORT NavigatorDelegate {
       RenderFrameHostImpl* render_frame_host,
       const GURL& url,
       int error_code,
-      const base::string16& error_description) {}
+      const base::string16& error_description,
+      bool was_ignored_by_handler) {}
 
   // A navigation was committed in |render_frame_host|.
   virtual void DidCommitProvisionalLoad(

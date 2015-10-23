@@ -7,6 +7,7 @@
 #include "base/android/jni_string.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
+#include "chrome/browser/android/shortcut_info.h"
 #include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "chrome/browser/browser_process.h"
 #include "components/rappor/rappor_utils.h"
@@ -27,12 +28,12 @@ bool RegisterLaunchMetrics(JNIEnv* env) {
 }
 
 static void RecordLaunch(JNIEnv* env, jclass caller, jboolean standalone,
-                         jstring jurl, jobject jweb_contents) {
+                         jstring jurl, int source, jobject jweb_contents) {
   GURL url(base::android::ConvertJavaStringToUTF8(env, jurl));
 
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(jweb_contents);
-  if (web_contents) {
+  if (web_contents && source == ShortcutInfo::SOURCE_APP_BANNER) {
     // What a user has installed on the Home screen can become disconnected from
     // what Chrome believes is on the Home screen if the user clears their data.
     // Use the launch as a signal that the shortcut still exists.
@@ -42,16 +43,34 @@ static void RecordLaunch(JNIEnv* env, jclass caller, jboolean standalone,
         base::Time::Now());
   }
 
+  std::string rappor_metric_source;
+  if (source == ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN)
+    rappor_metric_source = "Launch.HomeScreenSource.AddToHomeScreen";
+  else if (source == ShortcutInfo::SOURCE_APP_BANNER)
+    rappor_metric_source = "Launch.HomeScreenSource.AppBanner";
+  else if (source == ShortcutInfo::SOURCE_BOOKMARK_NAVIGATOR_WIDGET)
+    rappor_metric_source = "Launch.HomeScreenSource.BookmarkNavigatorWidget";
+  else if (source == ShortcutInfo::SOURCE_BOOKMARK_SHORTCUT_WIDGET)
+    rappor_metric_source = "Launch.HomeScreenSource.BookmarkShortcutWidget";
+  else
+    rappor_metric_source = "Launch.HomeScreenSource.Unknown";
+
+  UMA_HISTOGRAM_ENUMERATION("Launch.HomeScreenSource", source,
+                            ShortcutInfo::SOURCE_COUNT);
+
+  rappor::SampleDomainAndRegistryFromGURL(g_browser_process->rappor_service(),
+                                          rappor_metric_source, url);
+
   int action = standalone ? HOME_SCREEN_LAUNCH_STANDALONE
                           : HOME_SCREEN_LAUNCH_SHORTCUT;
-  std::string rappor_metric = standalone ? "Launch.HomeScreen.Standalone"
-                                         : "Launch.HomeScreen.Shortcut";
+  std::string rappor_metric_action = standalone ? "Launch.HomeScreen.Standalone"
+                                                : "Launch.HomeScreen.Shortcut";
 
   UMA_HISTOGRAM_ENUMERATION("Launch.HomeScreen", action,
                             HOME_SCREEN_LAUNCH_COUNT);
 
   rappor::SampleDomainAndRegistryFromGURL(g_browser_process->rappor_service(),
-                                          rappor_metric, url);
+                                          rappor_metric_action, url);
 }
 
 };  // namespace metrics

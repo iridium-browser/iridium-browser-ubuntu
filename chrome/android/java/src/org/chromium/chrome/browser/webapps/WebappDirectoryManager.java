@@ -13,6 +13,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
+import android.os.StrictMode;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -75,9 +76,12 @@ public class WebappDirectoryManager extends AsyncTask<Void, Void, Void> {
         for (File directory : mDirectoriesToDelete) {
             if (isCancelled()) return null;
 
-            // Delete all the files in the directory.
-            for (File file : directory.listFiles()) {
-                if (!file.delete()) Log.e(TAG, "Failed to delete file: " + file.getPath());
+            File[] files = directory.listFiles();
+            if (files != null) {
+                // Delete all the files in the directory.
+                for (File file : files) {
+                    if (!file.delete()) Log.e(TAG, "Failed to delete file: " + file.getPath());
+                }
             }
 
             // Delete the directory itself.
@@ -99,9 +103,15 @@ public class WebappDirectoryManager extends AsyncTask<Void, Void, Void> {
     private void cleanUpOldWebappDirectories(
             HashSet<File> directoriesToDelete, String baseDirectory) {
         Context context = ApplicationStatus.getApplicationContext();
+        File webappBaseDirectory = null;
 
-        String webappDirectoryAppBaseName =
-                context.getDir(WEBAPP_DIRECTORY_NAME, Context.MODE_PRIVATE).getName();
+        // Temporarily allowing disk access while fixing. TODO: http://crbug.com/525781
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
+        try {
+            webappBaseDirectory = context.getDir(WEBAPP_DIRECTORY_NAME, Context.MODE_PRIVATE);
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
+        }
 
         // Figure out what WebappActivities are still listed in Android's recents menu.
         HashSet<String> liveWebapps = new HashSet<String>();
@@ -132,20 +142,28 @@ public class WebappDirectoryManager extends AsyncTask<Void, Void, Void> {
             }
         }
 
-        // Delete all webapp directories in the main directory.
-        File dataDirectory = new File(baseDirectory);
-        for (File file : dataDirectory.listFiles()) {
-            String filename = file.getName();
-            if (!filename.startsWith(webappDirectoryAppBaseName)) continue;
-            if (filename.length() == webappDirectoryAppBaseName.length()) continue;
-            directoriesToDelete.add(file);
-        }
+        if (webappBaseDirectory != null) {
+            // Delete all webapp directories in the main directory.
+            String webappDirectoryAppBaseName = webappBaseDirectory.getName();
+            File dataDirectory = new File(baseDirectory);
+            File[] files = dataDirectory.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    String filename = file.getName();
+                    if (!filename.startsWith(webappDirectoryAppBaseName)) continue;
+                    if (filename.length() == webappDirectoryAppBaseName.length()) continue;
+                    directoriesToDelete.add(file);
+                }
+            }
 
-        // Clean out webapp directories no longer corresponding to tasks in Recents.
-        File webappBaseDirectory = context.getDir(WEBAPP_DIRECTORY_NAME, Context.MODE_PRIVATE);
-        if (webappBaseDirectory.exists()) {
-            for (File file : webappBaseDirectory.listFiles()) {
-                if (!liveWebapps.contains(file.getName())) directoriesToDelete.add(file);
+            // Clean out webapp directories no longer corresponding to tasks in Recents.
+            if (webappBaseDirectory.exists()) {
+                files = webappBaseDirectory.listFiles();
+                if (files != null) {
+                    for (File file : files) {
+                        if (!liveWebapps.contains(file.getName())) directoriesToDelete.add(file);
+                    }
+                }
             }
         }
     }
@@ -157,11 +175,17 @@ public class WebappDirectoryManager extends AsyncTask<Void, Void, Void> {
      */
     public static File getWebappDirectory(String identifier) {
         Context context = ApplicationStatus.getApplicationContext();
-        File baseDirectory = context.getDir(WEBAPP_DIRECTORY_NAME, Context.MODE_PRIVATE);
-        File webappDirectory = new File(baseDirectory, identifier);
-        if (!webappDirectory.exists() && !webappDirectory.mkdir()) {
-            Log.e(TAG, "Failed to create webapp directory.");
+        // Temporarily allowing disk access while fixing. TODO: http://crbug.com/525781
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
+        try {
+            File baseDirectory = context.getDir(WEBAPP_DIRECTORY_NAME, Context.MODE_PRIVATE);
+            File webappDirectory = new File(baseDirectory, identifier);
+            if (!webappDirectory.exists() && !webappDirectory.mkdir()) {
+                Log.e(TAG, "Failed to create webapp directory.");
+            }
+            return webappDirectory;
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
         }
-        return webappDirectory;
     }
 }

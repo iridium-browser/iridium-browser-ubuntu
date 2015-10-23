@@ -33,6 +33,10 @@
 #include "ppapi/shared_impl/private/net_address_private_impl.h"
 #include "ppapi/shared_impl/socket_option_data.h"
 
+#if defined(OS_CHROMEOS)
+#include "chromeos/network/firewall_hole.h"
+#endif  // defined(OS_CHROMEOS)
+
 using ppapi::NetAddressPrivateImpl;
 using ppapi::host::NetErrorToPepperError;
 using ppapi::proxy::UDPSocketFilter;
@@ -72,7 +76,9 @@ PepperUDPSocketMessageFilter::PepperUDPSocketMessageFilter(
       external_plugin_(host->external_plugin()),
       private_api_(private_api),
       render_process_id_(0),
-      render_frame_id_(0) {
+      render_frame_id_(0),
+      is_potentially_secure_plugin_context_(
+          host->IsPotentiallySecurePluginContext(instance)) {
   ++g_num_instances;
   DCHECK(host);
 
@@ -490,11 +496,50 @@ void PepperUDPSocketMessageFilter::DoBind(
     return;
   }
 
+#if defined(OS_CHROMEOS)
+  OpenFirewallHole(
+      bound_address,
+      base::Bind(&PepperUDPSocketMessageFilter::OnBindComplete, this,
+                 base::Passed(&socket), context, net_address));
+#else
+  OnBindComplete(socket.Pass(), context, net_address);
+#endif
+}
+
+void PepperUDPSocketMessageFilter::OnBindComplete(
+    scoped_ptr<net::UDPSocket> socket,
+    const ppapi::host::ReplyMessageContext& context,
+    const PP_NetAddress_Private& net_address) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   socket_.swap(socket);
   SendBindReply(context, PP_OK, net_address);
 
   DoRecvFrom();
 }
+
+#if defined(OS_CHROMEOS)
+void PepperUDPSocketMessageFilter::OpenFirewallHole(
+    const net::IPEndPoint& local_address,
+    base::Closure bind_complete) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  pepper_socket_utils::FirewallHoleOpenCallback callback = base::Bind(
+      &PepperUDPSocketMessageFilter::OnFirewallHoleOpened, this, bind_complete);
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::Bind(&pepper_socket_utils::OpenUDPFirewallHole,
+                                     local_address, callback));
+}
+
+void PepperUDPSocketMessageFilter::OnFirewallHoleOpened(
+    base::Closure bind_complete,
+    scoped_ptr<chromeos::FirewallHole> hole) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  LOG_IF(WARNING, !hole.get()) << "Firewall hole could not be opened.";
+  firewall_hole_.reset(hole.release());
+
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, bind_complete);
+}
+#endif  // defined(OS_CHROMEOS)
 
 void PepperUDPSocketMessageFilter::DoRecvFrom() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -647,9 +692,8 @@ void PepperUDPSocketMessageFilter::SendBindReply(
     const ppapi::host::ReplyMessageContext& context,
     int32_t result,
     const PP_NetAddress_Private& addr) {
-  UMA_HISTOGRAM_BOOLEAN(
-      "Pepper.PluginContextSecurity.UDPBind",
-      host_->IsPotentiallySecurePluginContext(resource_host()->pp_instance()));
+  UMA_HISTOGRAM_BOOLEAN("Pepper.PluginContextSecurity.UDPBind",
+                        is_potentially_secure_plugin_context_);
 
   ppapi::host::ReplyMessageContext reply_context(context);
   reply_context.params.set_result(result);
@@ -696,15 +740,6 @@ void PepperUDPSocketMessageFilter::SendSendToError(
 
 int32_t PepperUDPSocketMessageFilter::CanUseMulticastAPI(
     const PP_NetAddress_Private& addr) {
-  // Check for Dev API.
-  // TODO(etrunko): remove check when Multicast API reaches beta/stable.
-  // https://crbug.com/464452
-  ContentBrowserClient* content_browser_client = GetContentClient()->browser();
-  if (!content_browser_client->IsPluginAllowedToUseDevChannelAPIs(nullptr,
-                                                                  GURL())) {
-    return PP_ERROR_NOTSUPPORTED;
-  }
-
   // Check for plugin permissions.
   SocketPermissionRequest request =
       pepper_socket_utils::CreateSocketPermissionRequest(

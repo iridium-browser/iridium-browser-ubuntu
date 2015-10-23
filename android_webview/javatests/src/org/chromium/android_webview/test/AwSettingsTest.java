@@ -35,6 +35,7 @@ import org.chromium.base.test.util.TestFileUtil;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.HistoryUtils;
+import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.net.test.util.TestWebServer;
 import org.chromium.ui.gfx.DeviceDisplayInfo;
@@ -1453,15 +1454,16 @@ public class AwSettingsTest extends AwTestBase {
 
         @Override
         protected void doEnsureSettingHasValue(Boolean value) throws Throwable {
-            DeviceDisplayInfo deviceInfo = DeviceDisplayInfo.create(mContext);
-            int displayWidth = (int) (deviceInfo.getDisplayWidth() / deviceInfo.getDIPScale());
-
             loadDataSync(getData());
-            int width = Integer.parseInt(getTitleOnUiThread());
+            final int reportedClientWidth = Integer.parseInt(getTitleOnUiThread());
             if (value) {
-                assertEquals(displayWidth, width);
+                final DeviceDisplayInfo deviceInfo = DeviceDisplayInfo.create(mContext);
+                // The clientWidth is subject to pixel snapping.
+                final int displayWidth = (int) Math.ceil(
+                        deviceInfo.getDisplayWidth() / deviceInfo.getDIPScale());
+                assertEquals(displayWidth, reportedClientWidth);
             } else {
-                assertEquals(3000, width);
+                assertEquals(3000, reportedClientWidth);
             }
         }
 
@@ -2833,6 +2835,44 @@ public class AwSettingsTest extends AwTestBase {
         }
     }
 
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testUpdatingUserAgentWhileLoadingCausesReload() throws Throwable {
+        final TestAwContentsClient contentClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        final AwSettings awSettings = getAwSettingsOnUiThread(awContents);
+
+        TestWebServer httpServer = null;
+        try {
+            httpServer = TestWebServer.start();
+
+            String url = httpServer.setResponseWithRunnableAction(
+                    "/about.html", "Hello, World!", null,
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            // This will update the UA string on the UI thread synchronously.
+                            awSettings.setUserAgentString("UA Override");
+                        }
+                    }
+            );
+
+            TestCallbackHelperContainer.OnPageFinishedHelper onPageFinishedHelper =
+                    contentClient.getOnPageFinishedHelper();
+            int initialCallCount = onPageFinishedHelper.getCallCount();
+            loadUrlSync(awContents, onPageFinishedHelper, url);
+            // loadUrlSync only waits for a single onPageFinished, now wait for another one.
+            onPageFinishedHelper.waitForCallback(initialCallCount + 1, 1, WAIT_TIMEOUT_MS,
+                    TimeUnit.MILLISECONDS);
+            assertEquals(url, onPageFinishedHelper.getUrl());
+        } finally {
+            if (httpServer != null) {
+                httpServer.shutdown();
+            }
+        }
+    }
 
     static class ViewPair {
         private final AwTestContainerView mContainer0;

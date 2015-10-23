@@ -30,6 +30,7 @@
 #ifndef InspectorInspectorAgent_h
 #define InspectorInspectorAgent_h
 
+#include "core/CoreExport.h"
 #include "core/InspectorFrontend.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "wtf/PassOwnPtr.h"
@@ -43,7 +44,7 @@ class JSONObject;
 
 typedef String ErrorString;
 
-class InspectorInspectorAgent final : public InspectorBaseAgent<InspectorInspectorAgent, InspectorFrontend::Inspector>, public InspectorBackendDispatcher::InspectorCommandHandler {
+class CORE_EXPORT InspectorInspectorAgent final : public InspectorBaseAgent<InspectorInspectorAgent, InspectorFrontend::Inspector>, public InspectorBackendDispatcher::InspectorCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorInspectorAgent);
 public:
     static PassOwnPtrWillBeRawPtr<InspectorInspectorAgent> create(InjectedScriptManager* injectedScriptManager)
@@ -51,7 +52,7 @@ public:
         return adoptPtrWillBeNoop(new InspectorInspectorAgent(injectedScriptManager));
     }
 
-    virtual ~InspectorInspectorAgent();
+    ~InspectorInspectorAgent() override;
     DECLARE_VIRTUAL_TRACE();
 
     // Inspector front-end API.

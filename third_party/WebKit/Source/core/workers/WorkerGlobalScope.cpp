@@ -72,7 +72,7 @@ WorkerGlobalScope::WorkerGlobalScope(const KURL& url, const String& userAgent, W
     : m_url(url)
     , m_userAgent(userAgent)
     , m_v8CacheOptions(V8CacheOptionsDefault)
-    , m_script(adoptPtr(new WorkerScriptController(*this, thread->isolate())))
+    , m_script(WorkerScriptController::create(this, thread->isolate()))
     , m_thread(thread)
     , m_workerInspectorController(adoptRefWillBeNoop(new WorkerInspectorController(this)))
     , m_closing(false)
@@ -86,7 +86,9 @@ WorkerGlobalScope::WorkerGlobalScope(const KURL& url, const String& userAgent, W
     if (starterOrigin)
         securityOrigin()->transferPrivilegesFrom(*starterOrigin);
 
-    m_workerClients->reattachThread();
+    if (m_workerClients)
+        m_workerClients->reattachThread();
+
     m_thread->setWorkerInspectorController(m_workerInspectorController.get());
 }
 
@@ -96,13 +98,15 @@ WorkerGlobalScope::~WorkerGlobalScope()
     ASSERT(!m_workerInspectorController);
 }
 
-void WorkerGlobalScope::applyContentSecurityPolicyFromString(const String& policy, ContentSecurityPolicyHeaderType contentSecurityPolicyType)
+void WorkerGlobalScope::applyContentSecurityPolicyFromVector(const Vector<CSPHeaderAndType>& headers)
 {
-    // FIXME: This doesn't match the CSP2 spec's Worker behavior (see https://w3c.github.io/webappsec/specs/content-security-policy/#processing-model-workers)
-    RefPtr<ContentSecurityPolicy> csp = ContentSecurityPolicy::create();
-    csp->didReceiveHeader(policy, contentSecurityPolicyType, ContentSecurityPolicyHeaderSourceHTTP);
-    csp->bindToExecutionContext(executionContext());
-    setContentSecurityPolicy(csp);
+    if (!contentSecurityPolicy()) {
+        RefPtrWillBeRawPtr<ContentSecurityPolicy> csp = ContentSecurityPolicy::create();
+        setContentSecurityPolicy(csp);
+    }
+    for (const auto& policyAndType : headers)
+        contentSecurityPolicy()->didReceiveHeader(policyAndType.first, policyAndType.second, ContentSecurityPolicyHeaderSourceHTTP);
+    contentSecurityPolicy()->bindToExecutionContext(executionContext());
 }
 
 ExecutionContext* WorkerGlobalScope::executionContext() const
@@ -182,6 +186,13 @@ void WorkerGlobalScope::postTask(const WebTraceLocation& location, PassOwnPtr<Ex
     thread()->postTask(location, task);
 }
 
+void WorkerGlobalScope::clearScript()
+{
+    ASSERT(m_script);
+    m_script->dispose();
+    m_script.clear();
+}
+
 void WorkerGlobalScope::clearInspector()
 {
     ASSERT(m_workerInspectorController);
@@ -252,7 +263,7 @@ void WorkerGlobalScope::importScripts(const Vector<String>& urls, ExceptionState
 
         RefPtrWillBeRawPtr<ErrorEvent> errorEvent = nullptr;
         OwnPtr<Vector<char>> cachedMetaData(scriptLoader->releaseCachedMetadata());
-        OwnPtr<CachedMetadataHandler> handler(createWorkerScriptCachedMetadataHandler(completeURL, cachedMetaData.get()));
+        OwnPtrWillBeRawPtr<CachedMetadataHandler> handler(createWorkerScriptCachedMetadataHandler(completeURL, cachedMetaData.get()));
         m_script->evaluate(ScriptSourceCode(scriptLoader->script(), scriptLoader->responseURL()), &errorEvent, handler.get(), m_v8CacheOptions);
         if (errorEvent) {
             m_script->rethrowExceptionFromImportedScript(errorEvent.release(), exceptionState);
@@ -322,7 +333,7 @@ void WorkerGlobalScope::countDeprecation(UseCounter::Feature feature) const
 {
     // FIXME: How should we count features for shared/service workers?
 
-    ASSERT(isSharedWorkerGlobalScope() || isServiceWorkerGlobalScope());
+    ASSERT(isSharedWorkerGlobalScope() || isServiceWorkerGlobalScope() || isCompositorWorkerGlobalScope());
     // For each deprecated feature, send console message at most once
     // per worker lifecycle.
     if (!m_deprecationWarningBits.hasRecordedMeasurement(feature)) {
@@ -386,6 +397,7 @@ DEFINE_TRACE(WorkerGlobalScope)
     visitor->trace(m_console);
     visitor->trace(m_location);
     visitor->trace(m_navigator);
+    visitor->trace(m_script);
     visitor->trace(m_workerInspectorController);
     visitor->trace(m_eventQueue);
     visitor->trace(m_workerClients);
@@ -396,6 +408,7 @@ DEFINE_TRACE(WorkerGlobalScope)
 #endif
     ExecutionContext::trace(visitor);
     EventTargetWithInlineData::trace(visitor);
+    SecurityContext::trace(visitor);
 }
 
 } // namespace blink

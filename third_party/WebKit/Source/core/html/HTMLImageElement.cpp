@@ -40,17 +40,18 @@
 #include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLImageFallbackHelper.h"
 #include "core/html/HTMLSourceElement.h"
-#include "core/html/canvas/CanvasRenderingContext.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/parser/HTMLSrcsetParser.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutImage.h"
 #include "core/page/Page.h"
+#include "core/style/ContentData.h"
 #include "platform/ContentType.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/MIMETypeRegistry.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "platform/weborigin/SecurityPolicy.h"
 
 namespace blink {
 
@@ -63,7 +64,7 @@ public:
         return adoptRefWillBeNoop(new ViewportChangeListener(element));
     }
 
-    virtual void notifyMediaQueryChanged() override
+    void notifyMediaQueryChanged() override
     {
         if (m_element)
             m_element->notifyViewportChanged();
@@ -91,6 +92,7 @@ HTMLImageElement::HTMLImageElement(Document& document, HTMLFormElement* form, bo
     , m_intrinsicSizingViewportDependant(false)
     , m_useFallbackContent(false)
     , m_isFallbackImage(false)
+    , m_referrerPolicy(ReferrerPolicyDefault)
 {
     setHasCustomStyleCallbacks();
     if (form && form->inDocument()) {
@@ -176,24 +178,25 @@ bool HTMLImageElement::isPresentationAttribute(const QualifiedName& name) const
 
 void HTMLImageElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStylePropertySet* style)
 {
-    if (name == widthAttr)
+    if (name == widthAttr) {
         addHTMLLengthToStyle(style, CSSPropertyWidth, value);
-    else if (name == heightAttr)
+    } else if (name == heightAttr) {
         addHTMLLengthToStyle(style, CSSPropertyHeight, value);
-    else if (name == borderAttr)
+    } else if (name == borderAttr) {
         applyBorderAttributeToStyle(value, style);
-    else if (name == vspaceAttr) {
+    } else if (name == vspaceAttr) {
         addHTMLLengthToStyle(style, CSSPropertyMarginTop, value);
         addHTMLLengthToStyle(style, CSSPropertyMarginBottom, value);
     } else if (name == hspaceAttr) {
         addHTMLLengthToStyle(style, CSSPropertyMarginLeft, value);
         addHTMLLengthToStyle(style, CSSPropertyMarginRight, value);
-    } else if (name == alignAttr)
+    } else if (name == alignAttr) {
         applyAlignmentAttributeToStyle(value, style);
-    else if (name == valignAttr)
+    } else if (name == valignAttr) {
         addPropertyToPresentationAttributeStyle(style, CSSPropertyVerticalAlign, value);
-    else
+    } else {
         HTMLElement::collectStyleForPresentationAttribute(name, value, style);
+    }
 }
 
 const AtomicString HTMLImageElement::imageSourceURL() const
@@ -267,6 +270,10 @@ void HTMLImageElement::parseAttribute(const QualifiedName& name, const AtomicStr
         selectSourceURL(ImageLoader::UpdateIgnorePreviousError);
     } else if (name == usemapAttr) {
         setIsLink(!value.isNull());
+    } else if (RuntimeEnabledFeatures::referrerPolicyAttributeEnabled() && name == referrerpolicyAttr) {
+        m_referrerPolicy = ReferrerPolicyDefault;
+        if (!value.isNull())
+            SecurityPolicy::referrerPolicyFromString(value, &m_referrerPolicy);
     } else {
         HTMLElement::parseAttribute(name, value);
     }
@@ -330,11 +337,16 @@ ImageCandidate HTMLImageElement::findBestFitImageFromPictureParent()
 
 LayoutObject* HTMLImageElement::createLayoutObject(const ComputedStyle& style)
 {
+    const ContentData* contentData = style.contentData();
+    if (contentData && contentData->isImage()) {
+        const StyleImage* contentImage = toImageContentData(contentData)->image();
+        bool errorOccurred = contentImage && contentImage->cachedImage() && contentImage->cachedImage()->errorOccurred();
+        if (!errorOccurred)
+            return LayoutObject::createObject(this, style);
+    }
+
     if (m_useFallbackContent)
         return new LayoutBlockFlow(this);
-
-    if (style.hasContent())
-        return LayoutObject::createObject(this, style);
 
     LayoutImage* image = new LayoutImage(this);
     image->setImageResource(LayoutImageResource::create());
@@ -383,7 +395,7 @@ Node::InsertionNotificationRequest HTMLImageElement::insertedInto(ContainerNode*
     // If we have been inserted from a layoutObject-less document,
     // our loader may have not fetched the image, so do it now.
     if ((insertionPoint->inDocument() && !imageLoader().image()) || imageWasModified)
-        imageLoader().updateFromElement(ImageLoader::UpdateNormal);
+        imageLoader().updateFromElement(ImageLoader::UpdateNormal, m_referrerPolicy);
 
     return HTMLElement::insertedInto(insertionPoint);
 }
@@ -397,8 +409,11 @@ void HTMLImageElement::removedFrom(ContainerNode* insertionPoint)
     HTMLElement::removedFrom(insertionPoint);
 }
 
-int HTMLImageElement::width(bool ignorePendingStylesheets)
+int HTMLImageElement::width()
 {
+    if (inActiveDocument())
+        document().updateLayoutIgnorePendingStylesheets();
+
     if (!layoutObject()) {
         // check the attribute first for an explicit pixel value
         bool ok;
@@ -411,17 +426,15 @@ int HTMLImageElement::width(bool ignorePendingStylesheets)
             return imageLoader().image()->imageSizeForLayoutObject(layoutObject(), 1.0f).width();
     }
 
-    if (ignorePendingStylesheets)
-        document().updateLayoutIgnorePendingStylesheets();
-    else
-        document().updateLayout();
-
     LayoutBox* box = layoutBox();
     return box ? adjustForAbsoluteZoom(box->contentBoxRect().pixelSnappedWidth(), box) : 0;
 }
 
-int HTMLImageElement::height(bool ignorePendingStylesheets)
+int HTMLImageElement::height()
 {
+    if (inActiveDocument())
+        document().updateLayoutIgnorePendingStylesheets();
+
     if (!layoutObject()) {
         // check the attribute first for an explicit pixel value
         bool ok;
@@ -434,11 +447,6 @@ int HTMLImageElement::height(bool ignorePendingStylesheets)
             return imageLoader().image()->imageSizeForLayoutObject(layoutObject(), 1.0f).height();
     }
 
-    if (ignorePendingStylesheets)
-        document().updateLayoutIgnorePendingStylesheets();
-    else
-        document().updateLayout();
-
     LayoutBox* box = layoutBox();
     return box ? adjustForAbsoluteZoom(box->contentBoxRect().pixelSnappedHeight(), box) : 0;
 }
@@ -448,7 +456,7 @@ int HTMLImageElement::naturalWidth() const
     if (!imageLoader().image())
         return 0;
 
-    return imageLoader().image()->imageSizeForLayoutObject(layoutObject(), 1.0f, ImageResource::IntrinsicSize).width();
+    return imageLoader().image()->imageSizeForLayoutObject(layoutObject(), m_imageDevicePixelRatio, ImageResource::IntrinsicCorrectedToDPR).width();
 }
 
 int HTMLImageElement::naturalHeight() const
@@ -456,7 +464,7 @@ int HTMLImageElement::naturalHeight() const
     if (!imageLoader().image())
         return 0;
 
-    return imageLoader().image()->imageSizeForLayoutObject(layoutObject(), 1.0f, ImageResource::IntrinsicSize).height();
+    return imageLoader().image()->imageSizeForLayoutObject(layoutObject(), m_imageDevicePixelRatio, ImageResource::IntrinsicCorrectedToDPR).height();
 }
 
 const String& HTMLImageElement::currentSrc() const
@@ -579,7 +587,7 @@ bool HTMLImageElement::isInteractiveContent() const
     return fastHasAttribute(usemapAttr);
 }
 
-PassRefPtr<Image> HTMLImageElement::getSourceImageForCanvas(SourceImageMode, SourceImageStatus* status) const
+PassRefPtr<Image> HTMLImageElement::getSourceImageForCanvas(SourceImageStatus* status) const
 {
     if (!complete() || !cachedImage()) {
         *status = IncompleteSourceImageStatus;
@@ -630,17 +638,35 @@ FloatSize HTMLImageElement::defaultDestinationSize() const
     return FloatSize(size);
 }
 
-float HTMLImageElement::sourceSize(Element& element)
+static bool sourceSizeValue(Element& element, Document& currentDocument, float& sourceSize)
 {
     String sizes = element.fastGetAttribute(sizesAttr);
-    if (!sizes.isNull())
-        UseCounter::count(document(), UseCounter::Sizes);
-    return SizesAttributeParser(MediaValuesDynamic::create(document()), sizes).length();
+    bool exists = !sizes.isNull();
+    if (exists)
+        UseCounter::count(currentDocument, UseCounter::Sizes);
+    sourceSize = SizesAttributeParser(MediaValuesDynamic::create(currentDocument), sizes).length();
+    return exists;
+}
+
+FetchRequest::ResourceWidth HTMLImageElement::resourceWidth()
+{
+    FetchRequest::ResourceWidth resourceWidth;
+    resourceWidth.isSet = sourceSizeValue(*this, document(), resourceWidth.width);
+    return resourceWidth;
+}
+
+float HTMLImageElement::sourceSize(Element& element)
+{
+    float value;
+    // We don't care here if the sizes attribute exists, so we ignore the return value.
+    // If it doesn't exist, we just return the default.
+    sourceSizeValue(element, document(), value);
+    return value;
 }
 
 void HTMLImageElement::forceReload() const
 {
-    imageLoader().updateFromElement(ImageLoader::UpdateForcedReload);
+    imageLoader().updateFromElement(ImageLoader::UpdateForcedReload, m_referrerPolicy);
 }
 
 void HTMLImageElement::selectSourceURL(ImageLoader::UpdateFromElementBehavior behavior)
@@ -663,7 +689,7 @@ void HTMLImageElement::selectSourceURL(ImageLoader::UpdateFromElementBehavior be
         m_listener = ViewportChangeListener::create(this);
         document().mediaQueryMatcher().addViewportListener(m_listener);
     }
-    imageLoader().updateFromElement(behavior);
+    imageLoader().updateFromElement(behavior, m_referrerPolicy);
 
     if (imageLoader().image() || (imageLoader().hasPendingActivity() && !imageSourceURL().isEmpty()))
         ensurePrimaryContent();
@@ -679,6 +705,12 @@ const KURL& HTMLImageElement::sourceURL() const
 void HTMLImageElement::didAddUserAgentShadowRoot(ShadowRoot&)
 {
     HTMLImageFallbackHelper::createAltTextShadowTree(*this);
+}
+
+void HTMLImageElement::ensureFallbackForGeneratedContent()
+{
+    setUseFallbackContent();
+    reattachFallbackContent();
 }
 
 void HTMLImageElement::ensureFallbackContent()

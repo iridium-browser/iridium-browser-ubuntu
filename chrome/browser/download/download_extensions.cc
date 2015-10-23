@@ -144,6 +144,8 @@ const struct FileType {
     // Microsoft ClickOnce depolyment manifest. By default, opens with
     // dfshim.dll which should prompt the user before running untrusted code.
     {"application", ALLOW_ON_USER_GESTURE, ALLOW_AUTO_OPEN},
+    // ClickOnce application reference. Basically a .lnk for ClickOnce apps.
+    {"appref-ms", ALLOW_ON_USER_GESTURE, DISALLOW_AUTO_OPEN},
 
     // Active Server Pages source file.
     {"asp", ALLOW_ON_USER_GESTURE, ALLOW_AUTO_OPEN},
@@ -180,8 +182,19 @@ const struct FileType {
     {"drv", DANGEROUS, DISALLOW_AUTO_OPEN},
     {"exe", ALLOW_ON_USER_GESTURE, DISALLOW_AUTO_OPEN},
 
+    // Font file, uses Portable Executable or New Executable format. Not
+    // supposed to contain executable code.
+    {"fon", ALLOW_ON_USER_GESTURE, DISALLOW_AUTO_OPEN},
+
     // Microsoft FoxPro Compiled Source.
     {"fxp", ALLOW_ON_USER_GESTURE, ALLOW_AUTO_OPEN},
+
+    // Windows Sidebar Gadget (Vista & Win 7). ZIP archive containing html + js.
+    // Deprecated by Microsoft. Can run arbitrary code with user privileges.
+    // (https://technet.microsoft.com/library/security/2719662)
+    {"gadget", DANGEROUS, DISALLOW_AUTO_OPEN},
+
+    // MSProgramGroup (?).
     {"grp", DANGEROUS, ALLOW_AUTO_OPEN},
 
     // Windows legacy help file format.
@@ -359,13 +372,16 @@ const struct FileType {
     {"jnlp", DANGEROUS, DISALLOW_AUTO_OPEN},
 #endif
 
-  // Scripting languages. (Shells are handled below.)
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+    // Scripting languages. (Shells are handled below.)
     {"pl", ALLOW_ON_USER_GESTURE, DISALLOW_AUTO_OPEN},
     {"py", ALLOW_ON_USER_GESTURE, DISALLOW_AUTO_OPEN},
     {"pyc", ALLOW_ON_USER_GESTURE, DISALLOW_AUTO_OPEN},
     {"pyw", ALLOW_ON_USER_GESTURE, DISALLOW_AUTO_OPEN},
     {"rb", ALLOW_ON_USER_GESTURE, DISALLOW_AUTO_OPEN},
+
+    // Extensible Firmware Interface executable.
+    {"efi", ALLOW_ON_USER_GESTURE, DISALLOW_AUTO_OPEN},
 #endif
 
   // Shell languages. (OS_ANDROID is OS_POSIX.) OS_WIN shells are handled above.
@@ -417,7 +433,7 @@ const FileType& GetFileType(const base::FilePath& path) {
     ascii_extension.erase(0, 1);
 
   for (const auto& file_type : kDownloadFileTypes) {
-    if (LowerCaseEqualsASCII(ascii_extension, file_type.extension))
+    if (base::LowerCaseEqualsASCII(ascii_extension, file_type.extension))
       return file_type;
   }
 
@@ -432,39 +448,6 @@ DownloadDangerLevel GetFileDangerLevel(const base::FilePath& path) {
 
 bool IsAllowedToOpenAutomatically(const base::FilePath& path) {
   return GetFileType(path).auto_open_hint == ALLOW_AUTO_OPEN;
-}
-
-static const char* kExecutableWhiteList[] = {
-  // JavaScript is just as powerful as EXE.
-  "text/javascript",
-  "text/javascript;version=*",
-  "text/html",
-  // Registry files can cause critical changes to the MS OS behavior.
-  // Addition of this mimetype also addresses bug 7337.
-  "text/x-registry",
-  "text/x-sh",
-  // Some sites use binary/octet-stream to mean application/octet-stream.
-  // See http://code.google.com/p/chromium/issues/detail?id=1573
-  "binary/octet-stream"
-};
-
-static const char* kExecutableBlackList[] = {
-  // These application types are not executable.
-  "application/*+xml",
-  "application/xml"
-};
-
-bool IsExecutableMimeType(const std::string& mime_type) {
-  for (size_t i = 0; i < arraysize(kExecutableWhiteList); ++i) {
-    if (net::MatchesMimeType(kExecutableWhiteList[i], mime_type))
-      return true;
-  }
-  for (size_t i = 0; i < arraysize(kExecutableBlackList); ++i) {
-    if (net::MatchesMimeType(kExecutableBlackList[i], mime_type))
-      return false;
-  }
-  // We consider only other application types to be executable.
-  return net::MatchesMimeType("application/*", mime_type);
 }
 
 }  // namespace download_util

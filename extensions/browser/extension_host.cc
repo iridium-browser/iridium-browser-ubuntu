@@ -27,6 +27,7 @@
 #include "extensions/browser/extension_host_queue.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_web_contents_observer.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/load_monitoring_extension_host_queue.h"
 #include "extensions/browser/notification_types.h"
@@ -59,10 +60,10 @@ ExtensionHost::ExtensionHost(const Extension* extension,
       extension_id_(extension->id()),
       browser_context_(site_instance->GetBrowserContext()),
       render_view_host_(nullptr),
+      is_render_view_creation_pending_(false),
       has_loaded_once_(false),
       document_element_available_(false),
       initial_url_(url),
-      extension_function_dispatcher_(browser_context_, this),
       extension_host_type_(host_type) {
   // Not used for panels, see PanelHost.
   DCHECK(host_type == VIEW_TYPE_EXTENSION_BACKGROUND_PAGE ||
@@ -82,6 +83,9 @@ ExtensionHost::ExtensionHost(const Extension* extension,
 
   // Set up web contents observers and pref observers.
   delegate_->OnExtensionHostCreated(host_contents());
+
+  ExtensionWebContentsObserver::GetForWebContents(host_contents())->
+      dispatcher()->set_delegate(this);
 }
 
 ExtensionHost::~ExtensionHost() {
@@ -145,6 +149,13 @@ void ExtensionHost::CreateRenderViewNow() {
   tracked_objects::ScopedTracker tracking_profile1(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "464206 ExtensionHost::CreateRenderViewNow1"));
+  if (!ExtensionRegistry::Get(browser_context_)
+           ->ready_extensions()
+           .Contains(extension_->id())) {
+    is_render_view_creation_pending_ = true;
+    return;
+  }
+  is_render_view_creation_pending_ = false;
   LoadInitialURL();
   if (IsBackgroundPage()) {
     // TODO(robliao): Remove ScopedTracker below once crbug.com/464206 is fixed.
@@ -228,6 +239,12 @@ void ExtensionHost::LoadInitialURL() {
 bool ExtensionHost::IsBackgroundPage() const {
   DCHECK_EQ(extension_host_type_, VIEW_TYPE_EXTENSION_BACKGROUND_PAGE);
   return true;
+}
+
+void ExtensionHost::OnExtensionReady(content::BrowserContext* browser_context,
+                                     const Extension* extension) {
+  if (is_render_view_creation_pending_)
+    CreateRenderViewNow();
 }
 
 void ExtensionHost::OnExtensionUnloaded(
@@ -321,10 +338,10 @@ void ExtensionHost::CloseContents(WebContents* contents) {
   Close();
 }
 
-bool ExtensionHost::OnMessageReceived(const IPC::Message& message) {
+bool ExtensionHost::OnMessageReceived(const IPC::Message& message,
+                                      content::RenderFrameHost* host) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExtensionHost, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_EventAck, OnEventAck)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_IncrementLazyKeepaliveCount,
                         OnIncrementLazyKeepaliveCount)
@@ -333,10 +350,6 @@ bool ExtensionHost::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
-}
-
-void ExtensionHost::OnRequest(const ExtensionHostMsg_Request_Params& params) {
-  extension_function_dispatcher_.Dispatch(params, render_view_host());
 }
 
 void ExtensionHost::OnEventAck(int event_id) {

@@ -34,6 +34,8 @@ remoting.Settings.prototype.OAUTH2_API_BASE_URL = 'OAUTH2_API_BASE_URL';
 remoting.Settings.prototype.DIRECTORY_API_BASE_URL = 'DIRECTORY_API_BASE_URL';
 /** @type {string} URL for the talk gadget web service. */
 remoting.Settings.prototype.TALK_GADGET_URL = 'TALK_GADGET_URL';
+/** @type {string} Base URL for the telemetry REST API. */
+remoting.Settings.prototype.TELEMETRY_API_BASE_URL = 'TELEMETRY_API_BASE_URL';
 
 /**
  * @return {string} OAuth2 redirect URI. Note that this needs to be a function
@@ -49,18 +51,6 @@ remoting.Settings.prototype.OAUTH2_REDIRECT_URL = function() {
 remoting.Settings.prototype.APP_REMOTING_API_BASE_URL =
     'APP_REMOTING_API_BASE_URL';
 
-/**
- * Return this app's Application ID.
- *
- * This is a function rather than a constant because the build script may
- * replace this string with code to calculate the app id dynamically.
- *
- * @return {string} The Application ID.
- */
-remoting.Settings.prototype.getAppRemotingApplicationId = function() {
-  return 'APP_REMOTING_APPLICATION_ID';
-};
-
 /** @type {string} XMPP JID for the remoting directory server bot. */
 remoting.Settings.prototype.DIRECTORY_BOT_JID = 'DIRECTORY_BOT_JID';
 
@@ -75,9 +65,6 @@ remoting.Settings.prototype.XMPP_SERVER_USE_TLS =
 /** @type {string} The third party auth redirect URI. */
 remoting.Settings.prototype.THIRD_PARTY_AUTH_REDIRECT_URI =
     'THIRD_PARTY_AUTH_REDIRECT_URL';
-
-// 'native', 'nacl' or 'pnacl'.
-remoting.Settings.prototype.CLIENT_PLUGIN_TYPE = 'CLIENT_PLUGIN_TYPE';
 
 /** @const {boolean} If true, use GCD instead of Chromoting registry. */
 remoting.Settings.prototype.USE_GCD = !!'USE_GCD';

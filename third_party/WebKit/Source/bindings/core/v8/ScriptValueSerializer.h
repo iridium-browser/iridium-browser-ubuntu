@@ -21,6 +21,7 @@ namespace blink {
 class CompositorProxy;
 class DOMArrayBuffer;
 class DOMArrayBufferView;
+class DOMSharedArrayBuffer;
 class File;
 class FileList;
 
@@ -35,6 +36,7 @@ typedef Vector<WTF::ArrayBufferContents, 1> ArrayBufferContentsArray;
 //     map.set(obj, 42);
 template<typename GCObject, typename T>
 class V8ObjectMap {
+    STACK_ALLOCATED();
 public:
     bool contains(const v8::Local<GCObject>& handle)
     {
@@ -69,6 +71,7 @@ private:
     // need to rehash after every garbage collection because a key object may have been moved.
     template<typename G>
     struct V8HandlePtrHash {
+        STATIC_ONLY(V8HandlePtrHash);
         static v8::Local<G> unsafeHandleFromRawValue(const G* value)
         {
             const v8::Local<G>* handle = reinterpret_cast<const v8::Local<G>*>(&value);
@@ -134,6 +137,7 @@ public:
     void writeRegExp(v8::Local<v8::String> pattern, v8::RegExp::Flags);
     void writeTransferredMessagePort(uint32_t index);
     void writeTransferredArrayBuffer(uint32_t index);
+    void writeTransferredSharedArrayBuffer(uint32_t index);
     void writeObjectReference(uint32_t reference);
     void writeObject(uint32_t numProperties);
     void writeSparseArray(uint32_t numProperties, uint32_t length);
@@ -143,6 +147,10 @@ public:
     void writeGenerateFreshObject();
     void writeGenerateFreshSparseArray(uint32_t length);
     void writeGenerateFreshDenseArray(uint32_t length);
+    void writeGenerateFreshMap();
+    void writeGenerateFreshSet();
+    void writeMap(uint32_t length);
+    void writeSet(uint32_t length);
 
 protected:
     void doWriteFile(const File&);
@@ -203,6 +211,7 @@ public:
 
 protected:
     class StateBase {
+        WTF_MAKE_FAST_ALLOCATED(StateBase);
         WTF_MAKE_NONCOPYABLE(StateBase);
     public:
         virtual ~StateBase() { }
@@ -238,7 +247,7 @@ protected:
         {
         }
 
-        virtual StateBase* advance(ScriptValueSerializer&) override
+        StateBase* advance(ScriptValueSerializer&) override
         {
             delete this;
             return 0;
@@ -287,10 +296,10 @@ protected:
         {
         }
 
-        virtual StateBase* advance(ScriptValueSerializer&) override;
+        StateBase* advance(ScriptValueSerializer&) override;
 
     protected:
-        virtual StateBase* objectDone(unsigned numProperties, ScriptValueSerializer&) override;
+        StateBase* objectDone(unsigned numProperties, ScriptValueSerializer&) override;
     };
 
     class DenseArrayState final : public AbstractObjectState {
@@ -303,10 +312,10 @@ protected:
             m_propertyNames = v8::Local<v8::Array>::New(isolate, propertyNames);
         }
 
-        virtual StateBase* advance(ScriptValueSerializer&) override;
+        StateBase* advance(ScriptValueSerializer&) override;
 
     protected:
-        virtual StateBase* objectDone(unsigned numProperties, ScriptValueSerializer&) override;
+        StateBase* objectDone(unsigned numProperties, ScriptValueSerializer&) override;
 
     private:
         uint32_t m_arrayIndex;
@@ -321,11 +330,33 @@ protected:
             m_propertyNames = v8::Local<v8::Array>::New(isolate, propertyNames);
         }
 
-        virtual StateBase* advance(ScriptValueSerializer&) override;
+        StateBase* advance(ScriptValueSerializer&) override;
 
     protected:
-        virtual StateBase* objectDone(unsigned numProperties, ScriptValueSerializer&) override;
+        StateBase* objectDone(unsigned numProperties, ScriptValueSerializer&) override;
     };
+
+    template <typename T>
+    class CollectionState : public State<T> {
+    public:
+        CollectionState(v8::Local<T> collection, StateBase* next)
+            : State<T>(collection, next)
+            , m_entries(collection->AsArray())
+            , m_index(0)
+            , m_length(m_entries->Length())
+        {
+        }
+
+        StateBase* advance(ScriptValueSerializer&) override;
+
+    private:
+        v8::Local<v8::Array> m_entries;
+        uint32_t m_index;
+        uint32_t m_length;
+    };
+
+    typedef CollectionState<v8::Map> MapState;
+    typedef CollectionState<v8::Set> SetState;
 
     // Functions used by serialization states.
     virtual StateBase* doSerializeValue(v8::Local<v8::Value>, StateBase* next);
@@ -337,6 +368,8 @@ private:
     StateBase* writeObject(uint32_t numProperties, StateBase*);
     StateBase* writeSparseArray(uint32_t numProperties, uint32_t length, StateBase*);
     StateBase* writeDenseArray(uint32_t numProperties, uint32_t length, StateBase*);
+
+    template <typename T> StateBase* writeCollection(uint32_t length, StateBase*);
 
     StateBase* push(StateBase* state)
     {
@@ -368,10 +401,13 @@ private:
     StateBase* writeAndGreyArrayBufferView(v8::Local<v8::Object>, StateBase* next);
     StateBase* writeArrayBuffer(v8::Local<v8::Value>, StateBase* next);
     StateBase* writeTransferredArrayBuffer(v8::Local<v8::Value>, uint32_t index, StateBase* next);
+    StateBase* writeTransferredSharedArrayBuffer(v8::Local<v8::Value>, uint32_t index, StateBase* next);
     static bool shouldSerializeDensely(uint32_t length, uint32_t propertyCount);
 
     StateBase* startArrayState(v8::Local<v8::Array>, StateBase* next);
     StateBase* startObjectState(v8::Local<v8::Object>, StateBase* next);
+    StateBase* startMapState(v8::Local<v8::Map>, StateBase* next);
+    StateBase* startSetState(v8::Local<v8::Set>, StateBase* next);
 
     bool appendBlobInfo(const String& uuid, const String& type, unsigned long long size, int* index);
     bool appendFileInfo(const File*, int* index);
@@ -416,12 +452,17 @@ public:
     virtual bool tryGetObjectFromObjectReference(uint32_t reference, v8::Local<v8::Value>*) = 0;
     virtual bool tryGetTransferredMessagePort(uint32_t index, v8::Local<v8::Value>*) = 0;
     virtual bool tryGetTransferredArrayBuffer(uint32_t index, v8::Local<v8::Value>*) = 0;
+    virtual bool tryGetTransferredSharedArrayBuffer(uint32_t index, v8::Local<v8::Value>*) = 0;
     virtual bool newSparseArray(uint32_t length) = 0;
     virtual bool newDenseArray(uint32_t length) = 0;
+    virtual bool newMap() = 0;
+    virtual bool newSet() = 0;
     virtual bool newObject() = 0;
     virtual bool completeObject(uint32_t numProperties, v8::Local<v8::Value>*) = 0;
     virtual bool completeSparseArray(uint32_t numProperties, uint32_t length, v8::Local<v8::Value>*) = 0;
     virtual bool completeDenseArray(uint32_t numProperties, uint32_t length, v8::Local<v8::Value>*) = 0;
+    virtual bool completeMap(uint32_t length, v8::Local<v8::Value>*) = 0;
+    virtual bool completeSet(uint32_t length, v8::Local<v8::Value>*) = 0;
 };
 
 // SerializedScriptValueReader is responsible for deserializing primitive types and
@@ -540,18 +581,23 @@ public:
     }
 
     v8::Local<v8::Value> deserialize();
-    virtual bool newSparseArray(uint32_t) override;
-    virtual bool newDenseArray(uint32_t length) override;
-    virtual bool consumeTopOfStack(v8::Local<v8::Value>*) override;
-    virtual bool newObject() override;
-    virtual bool completeObject(uint32_t numProperties, v8::Local<v8::Value>*) override;
-    virtual bool completeSparseArray(uint32_t numProperties, uint32_t length, v8::Local<v8::Value>*) override;
-    virtual bool completeDenseArray(uint32_t numProperties, uint32_t length, v8::Local<v8::Value>*) override;
-    virtual void pushObjectReference(const v8::Local<v8::Value>&) override;
-    virtual bool tryGetTransferredMessagePort(uint32_t index, v8::Local<v8::Value>*) override;
-    virtual bool tryGetTransferredArrayBuffer(uint32_t index, v8::Local<v8::Value>*) override;
-    virtual bool tryGetObjectFromObjectReference(uint32_t reference, v8::Local<v8::Value>*) override;
-    virtual uint32_t objectReferenceCount() override;
+    bool newSparseArray(uint32_t) override;
+    bool newDenseArray(uint32_t length) override;
+    bool newMap() override;
+    bool newSet() override;
+    bool consumeTopOfStack(v8::Local<v8::Value>*) override;
+    bool newObject() override;
+    bool completeObject(uint32_t numProperties, v8::Local<v8::Value>*) override;
+    bool completeSparseArray(uint32_t numProperties, uint32_t length, v8::Local<v8::Value>*) override;
+    bool completeDenseArray(uint32_t numProperties, uint32_t length, v8::Local<v8::Value>*) override;
+    bool completeMap(uint32_t length, v8::Local<v8::Value>*) override;
+    bool completeSet(uint32_t length, v8::Local<v8::Value>*) override;
+    void pushObjectReference(const v8::Local<v8::Value>&) override;
+    bool tryGetTransferredMessagePort(uint32_t index, v8::Local<v8::Value>*) override;
+    bool tryGetTransferredArrayBuffer(uint32_t index, v8::Local<v8::Value>*) override;
+    bool tryGetTransferredSharedArrayBuffer(uint32_t index, v8::Local<v8::Value>*) override;
+    bool tryGetObjectFromObjectReference(uint32_t reference, v8::Local<v8::Value>*) override;
+    uint32_t objectReferenceCount() override;
 
 protected:
     SerializedScriptValueReader& reader() { return m_reader; }
@@ -576,7 +622,7 @@ private:
     Vector<v8::Local<v8::Value>> m_stack;
     Vector<v8::Local<v8::Value>> m_objectPool;
     Vector<uint32_t> m_openCompositeReferenceStack;
-    RawPtrWillBeMember<MessagePortArray> m_transferredMessagePorts;
+    MessagePortArray* m_transferredMessagePorts;
     ArrayBufferContentsArray* m_arrayBufferContents;
     Vector<v8::Local<v8::Value>> m_arrayBuffers;
     uint32_t m_version;

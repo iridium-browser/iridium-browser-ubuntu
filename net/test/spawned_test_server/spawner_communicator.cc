@@ -13,7 +13,7 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "net/base/elements_upload_data_stream.h"
-#include "net/base/net_util.h"
+#include "net/base/port_util.h"
 #include "net/base/request_priority.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/http/http_response_headers.h"
@@ -336,7 +336,7 @@ bool SpawnerCommunicator::StartServer(const std::string& arguments,
     return false;
 
   // Check whether the data returned from spawner server is JSON-formatted.
-  scoped_ptr<base::Value> value(base::JSONReader::Read(server_return_data));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(server_return_data);
   if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY)) {
     LOG(ERROR) << "Invalid server data: " << server_return_data.c_str();
     return false;

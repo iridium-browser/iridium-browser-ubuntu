@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 
 #include "base/metrics/histogram.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/launch_util.h"
@@ -25,10 +24,11 @@
 #include "ui/app_list/app_list_folder_item.h"
 #include "ui/app_list/app_list_item.h"
 #include "ui/app_list/app_list_model.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/gfx/geometry/rect.h"
 
 #if defined(ENABLE_RLZ)
-#include "chrome/browser/rlz/rlz.h"
+#include "components/rlz/rlz_tracker.h"
 #endif
 
 using extensions::ExtensionRegistry;
@@ -37,10 +37,9 @@ namespace {
 
 const extensions::Extension* GetExtension(Profile* profile,
                                           const std::string& extension_id) {
-  const ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
+  const ExtensionRegistry* registry = ExtensionRegistry::Get(profile);
   const extensions::Extension* extension =
-      service->GetInstalledExtension(extension_id);
+      registry->GetInstalledExtension(extension_id);
   return extension;
 }
 
@@ -86,6 +85,11 @@ bool AppListControllerDelegate::UserMayModifySettings(
 }
 
 bool AppListControllerDelegate::CanDoShowAppInfoFlow() {
+#if defined(OS_MACOSX)
+  // Cocoa app list doesn't yet support the app info dialog.
+  if (!app_list::switches::IsMacViewsAppListEnabled())
+    return false;
+#endif
   return CanShowAppInfoDialog();
 }
 
@@ -93,11 +97,7 @@ void AppListControllerDelegate::DoShowAppInfoFlow(
     Profile* profile,
     const std::string& extension_id) {
   DCHECK(CanDoShowAppInfoFlow());
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  DCHECK(service);
-  const extensions::Extension* extension = service->GetInstalledExtension(
-      extension_id);
+  const extensions::Extension* extension = GetExtension(profile, extension_id);
   DCHECK(extension);
 
   OnShowChildDialog();
@@ -213,6 +213,6 @@ void AppListControllerDelegate::GetApps(Profile* profile,
 
 void AppListControllerDelegate::OnSearchStarted() {
 #if defined(ENABLE_RLZ)
-  RLZTracker::RecordAppListSearch();
+  rlz::RLZTracker::RecordAppListSearch();
 #endif
 }

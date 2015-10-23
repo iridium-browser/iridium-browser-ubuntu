@@ -36,6 +36,7 @@ class SyncChromeStage(generic_stages.BuilderStage,
     # PerformStage() will fill this out for us.
     # TODO(mtennant): Replace with a run param.
     self.chrome_version = None
+    self.chrome_uprevved = False
 
   def HandleSkip(self):
     """Set run.attrs.chrome_version to chrome version in buildroot now."""
@@ -52,6 +53,7 @@ class SyncChromeStage(generic_stages.BuilderStage,
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
+    chrome_atom_to_build = None
     if self._chrome_rev:
       if (self._chrome_rev == constants.CHROME_REV_SPEC and
           self._run.options.chrome_version):
@@ -65,7 +67,6 @@ class SyncChromeStage(generic_stages.BuilderStage,
                        self.chrome_version)
 
       # Perform chrome uprev.
-      chrome_atom_to_build = None
       chrome_atom_to_build = commands.MarkChromeAsStable(
           self._build_root, self._run.manifest_branch,
           self._chrome_rev, self._boards,
@@ -88,8 +89,12 @@ class SyncChromeStage(generic_stages.BuilderStage,
     if (self._chrome_rev and not chrome_atom_to_build and
         self._run.options.buildbot and
         self._run.config.build_type == constants.CHROME_PFQ_TYPE):
-      logging.info('Chrome already uprevved')
+      logging.info('Chrome already uprevved. Nothing else to do.')
       sys.exit(0)
+
+    if chrome_atom_to_build:
+      self.chrome_uprevved = True
+
 
   def _WriteChromeVersionToMetadata(self):
     """Write chrome version to metadata and upload partial json file."""
@@ -104,6 +109,8 @@ class SyncChromeStage(generic_stages.BuilderStage,
     # means something.  In other words, this stage tried to run.
     self._run.attrs.chrome_version = self.chrome_version
     self._WriteChromeVersionToMetadata()
+    self._run.attrs.metadata.UpdateWithDict(
+        {'chrome_was_uprevved': self.chrome_uprevved})
     super(SyncChromeStage, self)._Finish()
 
 

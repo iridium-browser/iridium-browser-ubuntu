@@ -15,6 +15,9 @@ const char kDisableCreditCardScan[]         = "disable-credit-card-scan";
 // selection, rather than autofilling on page load.
 const char kDisableFillOnAccountSelect[]    = "disable-fill-on-account-select";
 
+// Disables the experimental Full Form Autofill on iOS feature.
+const char kDisableFullFormAutofillIOS[]    = "disable-full-form-autofill-ios";
+
 // Force hiding the local save checkbox in the autofill dialog box for getting
 // the full credit card number for a wallet card. The card will never be stored
 // locally.
@@ -45,6 +48,9 @@ const char kEnableFillOnAccountSelect[]     = "enable-fill-on-account-select";
 const char kEnableFillOnAccountSelectNoHighlighting[] =
     "enable-fill-on-account-select-no-highlighting";
 
+// Enables the experimental Full Form Autofill on iOS feature.
+const char kEnableFullFormAutofillIOS[]     = "enable-full-form-autofill-ios";
+
 // Force showing the local save checkbox in the autofill dialog box for getting
 // the full credit card number for a wallet card.
 const char kEnableOfferStoreUnmaskedWalletCards[] =
@@ -54,12 +60,16 @@ const char kEnableOfferStoreUnmaskedWalletCards[] =
 // account creation.
 const char kEnablePasswordGeneration[]      = "enable-password-generation";
 
-// Enable showing password save prompt on in-page navigations
-const char kEnablePasswordSaveOnInPageNavigation[] =
-    "enable-password-save-in-page-navigation";
-
 // Enables/disables suggestions without typing anything (on first click).
 const char kEnableSingleClickAutofill[]     = "enable-single-click-autofill";
+
+// Enables suggestions with substring matching instead of prefix matching.
+const char kEnableSuggestionsWithSubstringMatch[] =
+    "enable-suggestions-with-substring-match";
+
+// Enables syncing usage counts and last use dates of Wallet addresses and
+// cards.
+const char kEnableWalletMetadataSync[]      = "enable-wallet-metadata-sync";
 
 // Ignores autocomplete="off" for Autofill data (profiles + credit cards).
 const char kIgnoreAutocompleteOffForAutofill[] =

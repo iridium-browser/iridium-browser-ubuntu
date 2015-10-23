@@ -87,7 +87,7 @@ void TranslateBubbleView::ShowBubble(
     bool is_user_gesture) {
   if (translate_bubble_view_) {
     // When the user reads the advanced setting panel, the bubble should not be
-    // changed because he/she is focusing on the bubble.
+    // changed because they are focusing on the bubble.
     if (translate_bubble_view_->web_contents() == web_contents &&
         translate_bubble_view_->model()->GetViewState() ==
         TranslateBubbleModel::VIEW_STATE_ADVANCED) {
@@ -478,10 +478,12 @@ views::View* TranslateBubbleView::CreateViewBeforeTranslate() {
   layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   layout->StartRow(0, COLUMN_SET_ID_CONTENT);
-  layout->AddView(CreateLabelButton(
+  views::LabelButton* accept_button = CreateLabelButton(
       this,
       l10n_util::GetStringUTF16(IDS_TRANSLATE_BUBBLE_ACCEPT),
-      BUTTON_ID_TRANSLATE));
+      BUTTON_ID_TRANSLATE);
+  layout->AddView(accept_button);
+  accept_button->SetIsDefault(true);
   layout->AddView(denial_combobox_);
 
   return view;

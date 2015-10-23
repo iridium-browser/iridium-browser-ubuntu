@@ -35,6 +35,8 @@ source_set("browser") {
     "bookmark_utils.h",
     "scoped_group_bookmark_actions.cc",
     "scoped_group_bookmark_actions.h",
+    "startup_task_runner_service.cc",
+    "startup_task_runner_service.h",
   ]
 
   deps = [
@@ -48,6 +50,7 @@ source_set("browser") {
     "//components/query_parser",
     "//components/startup_metric_utils",
     "//components/strings",
+    "//components/url_formatter",
     "//net",
     "//third_party/icu",
     "//ui/base",
@@ -57,6 +60,7 @@ source_set("browser") {
 
   if (toolkit_views) {
     sources += [ "bookmark_node_data_views.cc" ]
+    deps += [ "//ui/views" ]
   }
 }
 
@@ -70,6 +74,10 @@ source_set("unit_tests") {
     "bookmark_utils_unittest.cc",
   ]
 
+  if (toolkit_views) {
+    sources += [ "bookmark_node_data_unittest.cc" ]
+  }
+
   configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   deps = [
@@ -78,6 +86,7 @@ source_set("unit_tests") {
     "//base:prefs_test_support",
     "//components/bookmarks/common",
     "//components/bookmarks/test",
+    "//components/favicon_base",
     "//components/pref_registry",
     "//testing/gtest",
     "//ui/base",

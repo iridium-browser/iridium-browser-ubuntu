@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/win/visual_studio_version.gni")
 
 # Compiler setup for the Windows SDK. Applied to all targets.
@@ -51,7 +52,7 @@ config("sdk_link") {
       "$visual_studio_path\VC\lib",
       "$visual_studio_path\VC\atlmfc\lib",
     ]
-    if (!is_asan) {
+    if (!is_syzyasan) {
       ldflags += [ "/largeaddressaware" ]
     }
   }
@@ -103,8 +104,8 @@ if (current_cpu == "x64") {
   # 5.02 = Windows Server 2003.
   subsystem_version_suffix = ",5.02"
 } else {
-  # Don't specify a min version on x86.
-  subsystem_version_suffix = ""
+  # 5.01 = Windows XP.
+  subsystem_version_suffix = ",5.01"
 }
 
 config("console") {
@@ -178,4 +179,19 @@ config("lean_and_mean") {
 
 config("nominmax") {
   defines = [ "NOMINMAX" ]
+}
+
+# Target WinRT ----------------------------------------------------------------
+
+# When targeting Windows Runtime, certain compiler/linker flags are necessary.
+
+config("target_winrt") {
+  defines = [
+    "WINRT",
+    "WINAPI_FAMILY=WINAPI_FAMILY_PC_APP",
+  ]
+  cflags_cc = [
+    "/ZW",
+    "/EHsc",
+  ]
 }

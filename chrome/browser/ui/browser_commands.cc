@@ -20,13 +20,11 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_delegate.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/accelerator_utils.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
@@ -52,17 +50,18 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/content_restriction.h"
 #include "chrome/common/pref_names.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/signin/core/browser/signin_header_helper.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/ui/zoom/page_zoom.h"
 #include "components/ui/zoom/zoom_controller.h"
-#include "components/web_modal/popup_manager.h"
+#include "components/version_info/version_info.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -103,6 +102,10 @@
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
 #endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
+
+#if defined(ENABLE_RLZ)
+#include "components/rlz/rlz_tracker.h"
+#endif
 
 namespace {
 const char kOsOverrideForTabletSite[] = "Linux; Android 4.0.3";
@@ -213,6 +216,13 @@ void ReloadInternal(Browser* browser,
   new_tab->UserGestureDone();
   if (!new_tab->FocusLocationBarByDefault())
     new_tab->Focus();
+
+  if (DevToolsWindow* devtools =
+      DevToolsWindow::GetInstanceForInspectedWebContents(new_tab)) {
+    devtools->ReloadInspectedWebContents(ignore_cache);
+    return;
+  }
+
   if (ignore_cache)
     new_tab->GetController().ReloadIgnoringCache(true);
   else
@@ -225,15 +235,13 @@ bool IsShowingWebContentsModalDialog(Browser* browser) {
   if (!web_contents)
     return false;
 
-  // In test code we may not have a popup manager.
-  if (!browser->popup_manager())
-    return false;
-
   // TODO(gbillock): This is currently called in production by the CanPrint
   // method, and may be too restrictive if we allow print preview to overlap.
   // Re-assess how to queue print preview after we know more about popup
   // management policy.
-  return browser->popup_manager()->IsWebModalDialogActive(web_contents);
+  const web_modal::WebContentsModalDialogManager* manager =
+      web_modal::WebContentsModalDialogManager::FromWebContents(web_contents);
+  return manager && manager->IsDialogActive();
 }
 
 #if defined(ENABLE_BASIC_PRINTING)
@@ -433,8 +441,8 @@ void Home(Browser* browser, WindowOpenDisposition disposition) {
   if (pref_service) {
     if (google_util::IsGoogleHomePageUrl(
         GURL(pref_service->GetString(prefs::kHomePage)))) {
-      extra_headers = RLZTracker::GetAccessPointHttpHeader(
-          RLZTracker::ChromeHomePage());
+      extra_headers = rlz::RLZTracker::GetAccessPointHttpHeader(
+          rlz::RLZTracker::ChromeHomePage());
     }
   }
 #endif  // defined(ENABLE_RLZ) && !defined(OS_IOS)
@@ -634,8 +642,7 @@ void DuplicateTab(Browser* browser) {
 }
 
 bool CanDuplicateTab(const Browser* browser) {
-  WebContents* contents = browser->tab_strip_model()->GetActiveWebContents();
-  return contents && contents->GetController().GetLastCommittedEntry();
+  return CanDuplicateTabAt(browser, browser->tab_strip_model()->active_index());
 }
 
 WebContents* DuplicateTabAt(Browser* browser, int index) {
@@ -692,10 +699,13 @@ WebContents* DuplicateTabAt(Browser* browser, int index) {
   return contents_dupe;
 }
 
-bool CanDuplicateTabAt(Browser* browser, int index) {
-  content::NavigationController& nc =
-      browser->tab_strip_model()->GetWebContentsAt(index)->GetController();
-  return nc.GetWebContents() && nc.GetLastCommittedEntry();
+bool CanDuplicateTabAt(const Browser* browser, int index) {
+  WebContents* contents = browser->tab_strip_model()->GetWebContentsAt(index);
+  // If an interstitial is showing, do not allow tab duplication, since
+  // the last committed entry is what would get duplicated and is not
+  // what the user expects to duplicate.
+  return contents && !contents->ShowingInterstitialPage() &&
+         contents->GetController().GetLastCommittedEntry();
 }
 
 void ConvertPopupToTabbedBrowser(Browser* browser) {
@@ -1117,8 +1127,7 @@ void ToggleRequestTabletSite(Browser* browser) {
     entry->SetIsOverridingUserAgent(false);
   } else {
     entry->SetIsOverridingUserAgent(true);
-    chrome::VersionInfo version_info;
-    std::string product = version_info.ProductNameAndVersionForUserAgent();
+    std::string product = version_info::GetProductNameAndVersionForUserAgent();
     current_tab->SetUserAgentOverride(content::BuildUserAgentFromOSAndProduct(
         kOsOverrideForTabletSite, product));
   }

@@ -45,7 +45,7 @@ func (c *Conn) clientHandshake() error {
 
 	nextProtosLength := 0
 	for _, proto := range c.config.NextProtos {
-		if l := len(proto); l == 0 || l > 255 {
+		if l := len(proto); l > 255 {
 			return errors.New("tls: invalid NextProtos value")
 		} else {
 			nextProtosLength += 1 + l
@@ -73,6 +73,7 @@ func (c *Conn) clientHandshake() error {
 		extendedMasterSecret:    c.config.maxVersion() >= VersionTLS10,
 		srtpProtectionProfiles:  c.config.SRTPProtectionProfiles,
 		srtpMasterKeyIdentifier: c.config.Bugs.SRTPMasterKeyIdentifer,
+		customExtension:         c.config.Bugs.CustomExtension,
 	}
 
 	if c.config.Bugs.SendClientVersion != 0 {
@@ -115,12 +116,16 @@ NextCipherSuite:
 				continue
 			}
 			// Don't advertise non-DTLS cipher suites on DTLS.
-			if c.isDTLS && suite.flags&suiteNoDTLS != 0 {
+			if c.isDTLS && suite.flags&suiteNoDTLS != 0 && !c.config.Bugs.EnableAllCiphersInDTLS {
 				continue
 			}
 			hello.cipherSuites = append(hello.cipherSuites, suiteId)
 			continue NextCipherSuite
 		}
+	}
+
+	if c.config.Bugs.SendRenegotiationSCSV {
+		hello.cipherSuites = append(hello.cipherSuites, renegotiationSCSV)
 	}
 
 	if c.config.Bugs.SendFallbackSCSV {
@@ -133,7 +138,7 @@ NextCipherSuite:
 		return errors.New("tls: short read from Rand: " + err.Error())
 	}
 
-	if hello.vers >= VersionTLS12 && !c.config.Bugs.NoSignatureAndHashes && (c.cipherSuite == nil || !c.config.Bugs.NoSignatureAlgorithmsOnRenego) {
+	if hello.vers >= VersionTLS12 && !c.config.Bugs.NoSignatureAndHashes {
 		hello.signatureAndHashes = c.config.signatureAndHashesForClient()
 	}
 
@@ -272,6 +277,10 @@ NextCipherSuite:
 		return fmt.Errorf("tls: server selected an unsupported cipher suite")
 	}
 
+	if c.config.Bugs.RequireRenegotiationInfo && serverHello.secureRenegotiation == nil {
+		return errors.New("tls: renegotiation extension missing")
+	}
+
 	if len(c.clientVerify) > 0 && !c.config.Bugs.NoRenegotiationInfo {
 		var expectedRenegInfo []byte
 		expectedRenegInfo = append(expectedRenegInfo, c.clientVerify...)
@@ -279,6 +288,12 @@ NextCipherSuite:
 		if !bytes.Equal(serverHello.secureRenegotiation, expectedRenegInfo) {
 			c.sendAlert(alertHandshakeFailure)
 			return fmt.Errorf("tls: renegotiation mismatch")
+		}
+	}
+
+	if expected := c.config.Bugs.ExpectedCustomExtension; expected != nil {
+		if serverHello.customExtension != *expected {
+			return fmt.Errorf("tls: bad custom extension contents %q", serverHello.customExtension)
 		}
 	}
 
@@ -313,10 +328,10 @@ NextCipherSuite:
 		if err := hs.readSessionTicket(); err != nil {
 			return err
 		}
-		if err := hs.readFinished(); err != nil {
+		if err := hs.readFinished(c.firstFinished[:]); err != nil {
 			return err
 		}
-		if err := hs.sendFinished(isResume); err != nil {
+		if err := hs.sendFinished(nil, isResume); err != nil {
 			return err
 		}
 	} else {
@@ -326,7 +341,7 @@ NextCipherSuite:
 		if err := hs.establishKeys(); err != nil {
 			return err
 		}
-		if err := hs.sendFinished(isResume); err != nil {
+		if err := hs.sendFinished(c.firstFinished[:], isResume); err != nil {
 			return err
 		}
 		// Most retransmits are triggered by a timeout, but the final
@@ -341,7 +356,7 @@ NextCipherSuite:
 		if err := hs.readSessionTicket(); err != nil {
 			return err
 		}
-		if err := hs.readFinished(); err != nil {
+		if err := hs.readFinished(nil); err != nil {
 			return err
 		}
 	}
@@ -607,6 +622,9 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 			c.sendAlert(alertInternalError)
 			return err
 		}
+		if c.config.Bugs.InvalidCertVerifySignature {
+			digest[0] ^= 0x80
+		}
 
 		switch key := c.config.Certificates[0].PrivateKey.(type) {
 		case *ecdsa.PrivateKey:
@@ -740,7 +758,7 @@ func (hs *clientHandshakeState) processServerHello() (bool, error) {
 	return false, nil
 }
 
-func (hs *clientHandshakeState) readFinished() error {
+func (hs *clientHandshakeState) readFinished(out []byte) error {
 	c := hs.c
 
 	c.readRecord(recordTypeChangeCipherSpec)
@@ -767,6 +785,7 @@ func (hs *clientHandshakeState) readFinished() error {
 		}
 	}
 	c.serverVerify = append(c.serverVerify[:0], serverFinished.verifyData...)
+	copy(out, serverFinished.verifyData)
 	hs.writeServerHash(serverFinished.marshal())
 	return nil
 }
@@ -785,6 +804,9 @@ func (hs *clientHandshakeState) readSessionTicket() error {
 	}
 
 	if !hs.serverHello.ticketSupported {
+		if c.config.Bugs.ExpectNewTicket {
+			return errors.New("tls: expected new ticket")
+		}
 		if hs.session == nil && len(hs.serverHello.sessionId) > 0 {
 			session.sessionId = hs.serverHello.sessionId
 			hs.session = session
@@ -810,7 +832,7 @@ func (hs *clientHandshakeState) readSessionTicket() error {
 	return nil
 }
 
-func (hs *clientHandshakeState) sendFinished(isResume bool) error {
+func (hs *clientHandshakeState) sendFinished(out []byte, isResume bool) error {
 	c := hs.c
 
 	var postCCSBytes []byte
@@ -862,6 +884,7 @@ func (hs *clientHandshakeState) sendFinished(isResume bool) error {
 	} else {
 		finished.verifyData = hs.finishedHash.clientSum(hs.masterSecret)
 	}
+	copy(out, finished.verifyData)
 	if c.config.Bugs.BadFinished {
 		finished.verifyData[0]++
 	}

@@ -10,14 +10,16 @@
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/chromeos/drive/file_errors.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/drive/job_scheduler.h"
-#include "chrome/browser/drive/drive_notification_observer.h"
+#include "components/drive/drive_notification_observer.h"
+#include "components/drive/file_errors.h"
+#include "components/drive/file_system_core_util.h"
+#include "components/drive/job_scheduler.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+
+class Profile;
 
 namespace base {
 class FilePath;
@@ -168,6 +170,7 @@ class DriveIntegrationService : public KeyedService,
   base::FilePath cache_root_directory_;
   scoped_ptr<EventLogger> logger_;
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> file_task_runner_;
   scoped_ptr<internal::ResourceMetadataStorage,
              util::DestroyHelper> metadata_storage_;
   scoped_ptr<internal::FileCache, util::DestroyHelper> cache_;
@@ -180,7 +183,7 @@ class DriveIntegrationService : public KeyedService,
   scoped_ptr<DownloadHandler> download_handler_;
   scoped_ptr<DebugInfoCollector> debug_info_collector_;
 
-  ObserverList<DriveIntegrationServiceObserver> observers_;
+  base::ObserverList<DriveIntegrationServiceObserver> observers_;
   scoped_ptr<PreferenceWatcher> preference_watcher_;
   scoped_ptr<content::NotificationRegistrar> profile_notification_registrar_;
 

@@ -121,6 +121,12 @@ class ASH_EXPORT ShelfLayoutManager
   // Returns the docked area bounds.
   const gfx::Rect& dock_bounds() const { return dock_bounds_; }
 
+  // Returns the bounds within the root window not occupied by the shelf nor the
+  // virtual keyboard.
+  const gfx::Rect& user_work_area_bounds() const {
+    return user_work_area_bounds_;
+  }
+
   // Stops any animations and sets the bounds of the shelf and status
   // widgets.
   void LayoutShelf();
@@ -170,8 +176,10 @@ class ASH_EXPORT ShelfLayoutManager
   void OnLockStateChanged(bool locked) override;
 
   // Overriden from aura::client::ActivationChangeObserver:
-  void OnWindowActivated(aura::Window* gained_active,
-                         aura::Window* lost_active) override;
+  void OnWindowActivated(
+      aura::client::ActivationChangeObserver::ActivationReason reason,
+      aura::Window* gained_active,
+      aura::Window* lost_active) override;
 
   // Overridden from ash::LockStateObserver:
   void OnLockStateEvent(LockStateObserver::EventType event) override;
@@ -214,6 +222,7 @@ class ASH_EXPORT ShelfLayoutManager
  private:
   class AutoHideEventFilter;
   class UpdateShelfObserver;
+  friend class AshPopupAlignmentDelegateTest;
   friend class ash::ScreenAsh;
   friend class PanelLayoutManagerTest;
   friend class ShelfLayoutManagerTest;
@@ -369,7 +378,7 @@ class ASH_EXPORT ShelfLayoutManager
   // EventFilter used to detect when user issues a gesture on a bezel sensor.
   scoped_ptr<ShelfBezelEventFilter> bezel_event_filter_;
 
-  ObserverList<ShelfLayoutManagerObserver> observers_;
+  base::ObserverList<ShelfLayoutManagerObserver> observers_;
 
   // The shelf reacts to gesture-drags, and can be set to auto-hide for certain
   // gestures. Some shelf behaviour (e.g. visibility state, background color
@@ -398,6 +407,10 @@ class ASH_EXPORT ShelfLayoutManager
 
   // The bounds of the dock.
   gfx::Rect dock_bounds_;
+
+  // The bounds within the root window not occupied by the shelf nor the virtual
+  // keyboard.
+  gfx::Rect user_work_area_bounds_;
 
   // The show hide animation duration override or 0 for default.
   int duration_override_in_ms_;

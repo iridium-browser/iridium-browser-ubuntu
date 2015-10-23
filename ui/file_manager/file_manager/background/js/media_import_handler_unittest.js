@@ -359,16 +359,16 @@ function testTagsEntriesAfterImport(callback) {
             });
       });
 
-  var taggedUrls = [];
+  var taggedEntries = [];
   // Replace chrome.fileManagerPrivate.setEntryTag with a listener.
-  chrome.fileManagerPrivate.setEntryTag = function(url) {
-    taggedUrls.push(url);
+  chrome.fileManagerPrivate.setEntryTag = function(entry) {
+    taggedEntries.push(entry);
   };
 
   reportPromise(
       whenImportDone.then(
           function() {
-            assertEquals(entries.length, taggedUrls.length);
+            assertEquals(entries.length, taggedEntries.length);
           }),
       callback);
 
@@ -493,8 +493,8 @@ function testImportWithErrors(callback) {
 }
 
 /**
- * @param {!Array.<string>} fileNames
- * @return {!Array.<!Entry>}
+ * @param {!Array<string>} fileNames
+ * @return {!Array<!Entry>}
  */
 function setupFileSystem(fileNames) {
   // Set up a filesystem with some files.

@@ -5,7 +5,9 @@
 #include "chrome/utility/profile_import_handler.h"
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
+#include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "chrome/common/importer/profile_import_process_messages.h"
@@ -42,6 +44,7 @@ void ProfileImportHandler::OnImportStart(
     const importer::SourceProfile& source_profile,
     uint16 items,
     const base::DictionaryValue& localized_strings) {
+  content::UtilityThread::Get()->EnsureBlinkInitialized();
   bridge_ = new ExternalProcessImporterBridge(
       localized_strings,
       content::UtilityThread::Get(),
@@ -64,7 +67,7 @@ void ProfileImportHandler::OnImportStart(
     NOTREACHED();
     ImporterCleanup();
   }
-  import_thread_->message_loop()->PostTask(
+  import_thread_->task_runner()->PostTask(
       FROM_HERE, base::Bind(&Importer::StartImport, importer_.get(),
                             source_profile, items, bridge_));
 }

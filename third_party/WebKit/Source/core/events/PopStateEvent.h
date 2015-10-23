@@ -28,6 +28,7 @@
 #define PopStateEvent_h
 
 #include "core/events/Event.h"
+#include "core/events/PopStateEventInit.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -35,16 +36,15 @@ namespace blink {
 class History;
 class SerializedScriptValue;
 
-typedef EventInit PopStateEventInit;
-
 class PopStateEvent final : public Event {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    virtual ~PopStateEvent();
+    ~PopStateEvent() override;
     static PassRefPtrWillBeRawPtr<PopStateEvent> create();
     static PassRefPtrWillBeRawPtr<PopStateEvent> create(PassRefPtr<SerializedScriptValue>, History*);
     static PassRefPtrWillBeRawPtr<PopStateEvent> create(const AtomicString&, const PopStateEventInit&);
 
+    ScriptValue state() const { return m_state; }
     SerializedScriptValue* serializedState() const { return m_serializedState.get(); }
     void setSerializedState(PassRefPtr<SerializedScriptValue> state)
     {
@@ -53,7 +53,7 @@ public:
     }
     History* history() const { return m_history.get(); }
 
-    virtual const AtomicString& interfaceName() const override;
+    const AtomicString& interfaceName() const override;
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -63,6 +63,7 @@ private:
     PopStateEvent(PassRefPtr<SerializedScriptValue>, History*);
 
     RefPtr<SerializedScriptValue> m_serializedState;
+    ScriptValue m_state;
     PersistentWillBeMember<History> m_history;
 };
 

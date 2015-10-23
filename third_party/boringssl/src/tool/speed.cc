@@ -36,15 +36,8 @@
 #endif
 
 #include "../crypto/test/scoped_types.h"
+#include "internal.h"
 
-
-extern "C" {
-// These values are DER encoded, RSA private keys.
-extern const uint8_t kDERRSAPrivate2048[];
-extern size_t kDERRSAPrivate2048Len;
-extern const uint8_t kDERRSAPrivate4096[];
-extern size_t kDERRSAPrivate4096Len;
-}
 
 // TimeResults represents the results of benchmarking a function.
 struct TimeResults {
@@ -414,9 +407,9 @@ bool Speed(const std::vector<std::string> &args) {
     selected = args[0];
   }
 
-  RSA *key = NULL;
-  const uint8_t *inp = kDERRSAPrivate2048;
-  if (NULL == d2i_RSAPrivateKey(&key, &inp, kDERRSAPrivate2048Len)) {
+  RSA *key = RSA_private_key_from_bytes(kDERRSAPrivate2048,
+                                        kDERRSAPrivate2048Len);
+  if (key == NULL) {
     fprintf(stderr, "Failed to parse RSA key.\n");
     ERR_print_errors_fp(stderr);
     return false;
@@ -427,10 +420,22 @@ bool Speed(const std::vector<std::string> &args) {
   }
 
   RSA_free(key);
-  key = NULL;
+  key = RSA_private_key_from_bytes(kDERRSAPrivate3Prime2048,
+                                   kDERRSAPrivate3Prime2048Len);
+  if (key == NULL) {
+    fprintf(stderr, "Failed to parse RSA key.\n");
+    ERR_print_errors_fp(stderr);
+    return false;
+  }
 
-  inp = kDERRSAPrivate4096;
-  if (NULL == d2i_RSAPrivateKey(&key, &inp, kDERRSAPrivate4096Len)) {
+  if (!SpeedRSA("RSA 2048 (3 prime, e=3)", key, selected)) {
+    return false;
+  }
+
+  RSA_free(key);
+  key = RSA_private_key_from_bytes(kDERRSAPrivate4096,
+                                   kDERRSAPrivate4096Len);
+  if (key == NULL) {
     fprintf(stderr, "Failed to parse 4096-bit RSA key.\n");
     ERR_print_errors_fp(stderr);
     return 1;

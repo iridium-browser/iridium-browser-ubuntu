@@ -6,12 +6,13 @@
 
 #include "base/location.h"
 #include "base/metrics/histogram.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/glue/typed_url_model_associator.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "components/history/core/browser/history_backend.h"
+#include "components/sync_driver/glue/typed_url_model_associator.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/read_node.h"
@@ -165,17 +166,6 @@ bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
     // This URL has no TYPED visits, don't sync it.
     return false;
 
-  syncer::ReadNode typed_url_root(trans);
-  if (typed_url_root.InitTypeRoot(syncer::TYPED_URLS) !=
-          syncer::BaseNode::INIT_OK) {
-    syncer::SyncError error(FROM_HERE,
-                            syncer::SyncError::DATATYPE_ERROR,
-                            "No top level folder",
-                            syncer::TYPED_URLS);
-    error_handler()->OnSingleDataTypeUnrecoverableError(error);
-    return false;
-  }
-
   if (model_associator_->ShouldIgnoreUrl(url.url()))
     return true;
 
@@ -196,8 +186,7 @@ bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
   } else {
     syncer::WriteNode create_node(trans);
     syncer::WriteNode::InitUniqueByCreationResult result =
-        create_node.InitUniqueByCreation(syncer::TYPED_URLS,
-                                         typed_url_root, tag);
+        create_node.InitUniqueByCreation(syncer::TYPED_URLS, tag);
     if (result != syncer::WriteNode::INIT_SUCCESS) {
 
       syncer::SyncError error(FROM_HERE,
@@ -275,8 +264,6 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
       return;
     }
 
-    // Check that the changed node is a child of the typed_urls folder.
-    DCHECK(typed_url_root.GetId() == sync_node.GetParentId());
     DCHECK(syncer::TYPED_URLS == sync_node.GetModelType());
 
     const sync_pb::TypedUrlSpecifics& typed_url(
@@ -334,9 +321,9 @@ void TypedUrlChangeProcessor::StartImpl() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(history_backend_);
   DCHECK(backend_loop_);
-  backend_loop_->PostTask(FROM_HERE,
-                          base::Bind(&TypedUrlChangeProcessor::StartObserving,
-                                     base::Unretained(this)));
+  backend_loop_->task_runner()->PostTask(
+      FROM_HERE, base::Bind(&TypedUrlChangeProcessor::StartObserving,
+                            base::Unretained(this)));
 }
 
 void TypedUrlChangeProcessor::StartObserving() {

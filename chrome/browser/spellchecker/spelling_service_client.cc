@@ -4,6 +4,8 @@
 
 #include "chrome/browser/spellchecker/spelling_service_client.h"
 
+#include <algorithm>
+
 #include "base/json/json_reader.h"
 #include "base/json/string_escape.h"
 #include "base/logging.h"
@@ -35,6 +37,9 @@ const char kMisspellingsPath[] = "result.spellingCheckResponse.misspellings";
 // The location of error messages in JSON response from spelling service.
 const char kErrorPath[] = "error";
 
+// Languages currently supported by SPELLCHECK.
+const char* const kValidLanguages[] = {"en", "es", "fi", "da"};
+
 }  // namespace
 
 SpellingServiceClient::SpellingServiceClient() {
@@ -59,15 +64,24 @@ bool SpellingServiceClient::RequestTextCheck(
   const PrefService* pref = user_prefs::UserPrefs::Get(context);
   DCHECK(pref);
 
+  std::string dictionary;
+  pref->GetList(prefs::kSpellCheckDictionaries)->GetString(0, &dictionary);
+
   std::string language_code;
   std::string country_code;
   chrome::spellcheck_common::GetISOLanguageCountryCodeFromLocale(
-      pref->GetString(prefs::kSpellCheckDictionary),
-      &language_code,
-      &country_code);
+      dictionary, &language_code, &country_code);
+
+  // Replace typographical apostrophes with typewriter apostrophes, so that
+  // server word breaker behaves correctly.
+  const base::char16 kApostrophe = 0x27;
+  const base::char16 kRightSingleQuotationMark = 0x2019;
+  base::string16 text_copy = text;
+  std::replace(text_copy.begin(), text_copy.end(), kRightSingleQuotationMark,
+               kApostrophe);
 
   // Format the JSON request to be sent to the Spelling service.
-  std::string encoded_text = base::GetQuotedJSONString(text);
+  std::string encoded_text = base::GetQuotedJSONString(text_copy);
 
   static const char kSpellingRequest[] =
       "{"
@@ -105,8 +119,9 @@ bool SpellingServiceClient::IsAvailable(
     ServiceType type) {
   const PrefService* pref = user_prefs::UserPrefs::Get(context);
   DCHECK(pref);
-  // If prefs don't allow spellchecking or if the context is off the record,
-  // the spelling service should be unavailable.
+  // If prefs don't allow spellchecking, if the context is off the record, or if
+  // multilingual spellchecking is enabled the spelling service should be
+  // unavailable.
   if (!pref->GetBoolean(prefs::kEnableContinuousSpellcheck) ||
       !pref->GetBoolean(prefs::kSpellCheckUseSpellingService) ||
       context->IsOffTheRecord())
@@ -114,22 +129,21 @@ bool SpellingServiceClient::IsAvailable(
 
   // If the locale for spelling has not been set, the user has not decided to
   // use spellcheck so we don't do anything remote (suggest or spelling).
-  std::string locale = pref->GetString(prefs::kSpellCheckDictionary);
+  std::string locale;
+  pref->GetList(prefs::kSpellCheckDictionaries)->GetString(0, &locale);
   if (locale.empty())
     return false;
 
   // Finally, if all options are available, we only enable only SUGGEST
   // if SPELLCHECK is not available for our language because SPELLCHECK results
   // are a superset of SUGGEST results.
-  // TODO(rlp): Only available for English right now. Fix this line to include
-  // all languages SPELLCHECK covers.
-  bool language_available = !locale.compare(0, 2, "en");
-  if (language_available) {
-    return type == SPELLCHECK;
-  } else {
-    // Only SUGGEST is allowed.
-    return type == SUGGEST;
+  for (const char* language : kValidLanguages) {
+    if (!locale.compare(0, 2, language))
+      return type == SPELLCHECK;
   }
+
+  // Only SUGGEST is allowed.
+  return type == SUGGEST;
 }
 
 bool SpellingServiceClient::ParseResponse(
@@ -176,8 +190,8 @@ bool SpellingServiceClient::ParseResponse(
   //   }
   // }
   scoped_ptr<base::DictionaryValue> value(
-      static_cast<base::DictionaryValue*>(
-          base::JSONReader::Read(data, base::JSON_ALLOW_TRAILING_COMMAS)));
+      static_cast<base::DictionaryValue*>(base::JSONReader::DeprecatedRead(
+          data, base::JSON_ALLOW_TRAILING_COMMAS)));
   if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY))
     return false;
 

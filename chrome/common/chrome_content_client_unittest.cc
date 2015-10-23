@@ -4,10 +4,18 @@
 
 #include "chrome/common/chrome_content_client.h"
 
+#include <string.h>
+
 #include "base/command_line.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/strings/string_split.h"
 #include "content/public/common/content_switches.h"
+#include "extensions/common/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
+#include "url/origin.h"
+#include "url/url_util.h"
 
 namespace {
 
@@ -79,6 +87,56 @@ TEST(ChromeContentClientTest, Basic) {
   ASSERT_TRUE(command_line->HasSwitch(switches::kUseMobileUserAgent));
   CheckUserAgentStringOrdering(true);
 #endif
+}
+
+#if defined(ENABLE_PLUGINS)
+TEST(ChromeContentClientTest, FindMostRecent) {
+  ScopedVector<content::PepperPluginInfo> vector1;
+  // Test an empty vector.
+  EXPECT_EQ(ChromeContentClient::FindMostRecentPlugin(vector1.get()), nullptr);
+
+  // Now test the vector with one element.
+  content::PepperPluginInfo* info1 = new content::PepperPluginInfo();
+  info1->version = "1.0.0.0";
+  vector1.push_back(info1);
+  EXPECT_EQ(ChromeContentClient::FindMostRecentPlugin(vector1.get()), info1);
+
+  // Now do the generic test of a complex vector.
+  content::PepperPluginInfo* info2 = new content::PepperPluginInfo();
+  info2->version = "2.0.0.1";
+  content::PepperPluginInfo* info3 = new content::PepperPluginInfo();
+  info3->version = "3.5.6.7";
+  content::PepperPluginInfo* info4 = new content::PepperPluginInfo();
+  info4->version = "4.0.0.153";
+  content::PepperPluginInfo* info5 = new content::PepperPluginInfo();
+  info5->version = "5.0.12.1";
+  content::PepperPluginInfo* info6_12 = new content::PepperPluginInfo();
+  info6_12->version = "6.0.0.12";
+  content::PepperPluginInfo* info6_13 = new content::PepperPluginInfo();
+  info6_13->version = "6.0.0.13";
+
+  ScopedVector<content::PepperPluginInfo> vector2;
+  vector2.push_back(info4);
+  vector2.push_back(info2);
+  vector2.push_back(info6_13);
+  vector2.push_back(info3);
+  vector2.push_back(info5);
+  vector2.push_back(info6_12);
+
+  EXPECT_EQ(ChromeContentClient::FindMostRecentPlugin(vector2.get()), info6_13);
+}
+#endif  // defined(ENABLE_PLUGINS)
+
+TEST(ChromeContentClientTest, AdditionalSchemes) {
+  EXPECT_TRUE(url::IsStandard(
+      extensions::kExtensionScheme,
+      url::Component(0, strlen(extensions::kExtensionScheme))));
+
+  GURL extension_url(
+      "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef/foo.html");
+  url::Origin origin(extension_url);
+  EXPECT_EQ("chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
+            origin.Serialize());
 }
 
 }  // namespace chrome_common

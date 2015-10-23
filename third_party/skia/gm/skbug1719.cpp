@@ -6,8 +6,9 @@
  */
 
 #include "gm.h"
-#include "SkColorFilter.h"
 #include "SkBlurMaskFilter.h"
+#include "SkColorFilter.h"
+#include "SkPath.h"
 
 namespace skiagm {
 
@@ -34,7 +35,7 @@ protected:
 
     void onDrawBackground(SkCanvas* canvas) override {
         SkPaint bgPaint;
-        bgPaint.setColor(0xFF303030);
+        bgPaint.setColor(sk_tool_utils::color_to_565(0xFF303030));
         canvas->drawPaint(bgPaint);
     }
 

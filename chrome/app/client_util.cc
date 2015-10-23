@@ -187,7 +187,9 @@ int MainDllLoader::Launch(HINSTANCE instance) {
 
     base::win::ScopedHandle parent_process;
     base::win::ScopedHandle on_initialized_event;
+    DWORD main_thread_id = 0;
     if (!InterpretChromeWatcherCommandLine(cmd_line, &parent_process,
+                                           &main_thread_id,
                                            &on_initialized_event)) {
       return chrome::RESULT_CODE_UNSUPPORTED_PARAM;
     }
@@ -218,7 +220,8 @@ int MainDllLoader::Launch(HINSTANCE instance) {
         reinterpret_cast<ChromeWatcherMainFunction>(
             ::GetProcAddress(watcher_dll, kChromeWatcherDLLEntrypoint));
     return watcher_main(chrome::kBrowserExitCodesRegistryPath,
-                        parent_process.Take(), on_initialized_event.Take(),
+                        parent_process.Take(), main_thread_id,
+                        on_initialized_event.Take(),
                         watcher_data_directory.value().c_str(),
                         message_window_name.c_str(), channel_name.c_str());
   }
@@ -325,6 +328,13 @@ void ChromeDllLoader::OnBeforeLaunch(const std::string& process_type,
         }
       }
     }
+  } else {
+    // Set non-browser processes up to be killed by the system after the browser
+    // goes away. The browser uses the default shutdown order, which is 0x280.
+    // Note that lower numbers here denote "kill later" and higher numbers mean
+    // "kill sooner".
+    // This gets rid of most of those unsighly sad tabs on logout and shutdown.
+    ::SetProcessShutdownParameters(0x280 - 1, SHUTDOWN_NORETRY);
   }
 }
 

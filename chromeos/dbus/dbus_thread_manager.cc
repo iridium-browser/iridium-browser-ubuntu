@@ -32,9 +32,7 @@
 #include "chromeos/dbus/gsm_sms_client.h"
 #include "chromeos/dbus/image_burner_client.h"
 #include "chromeos/dbus/introspectable_client.h"
-#include "chromeos/dbus/leadership_daemon_manager_client.h"
 #include "chromeos/dbus/lorgnette_manager_client.h"
-#include "chromeos/dbus/metronome_client.h"
 #include "chromeos/dbus/modem_messaging_client.h"
 #include "chromeos/dbus/nfc_adapter_client.h"
 #include "chromeos/dbus/nfc_device_client.h"
@@ -79,7 +77,7 @@ DBusThreadManager::DBusThreadManager(scoped_ptr<DBusClientBundle> client_bundle)
     dbus::Bus::Options system_bus_options;
     system_bus_options.bus_type = dbus::Bus::SYSTEM;
     system_bus_options.connection_type = dbus::Bus::PRIVATE;
-    system_bus_options.dbus_task_runner = dbus_thread_->message_loop_proxy();
+    system_bus_options.dbus_task_runner = dbus_thread_->task_runner();
     system_bus_ = new dbus::Bus(system_bus_options);
   }
 }
@@ -205,18 +203,9 @@ EasyUnlockClient* DBusThreadManager::GetEasyUnlockClient() {
   return client_bundle_->easy_unlock_client();
 }
 
-LeadershipDaemonManagerClient*
-DBusThreadManager::GetLeadershipDaemonManagerClient() {
-  return client_bundle_->leadership_daemon_manager_client();
-}
-
 LorgnetteManagerClient*
 DBusThreadManager::GetLorgnetteManagerClient() {
   return client_bundle_->lorgnette_manager_client();
-}
-
-MetronomeClient* DBusThreadManager::GetMetronomeClient() {
-  return client_bundle_->metronome_client();
 }
 
 ShillDeviceClient*
@@ -341,9 +330,7 @@ void DBusThreadManager::InitializeClients() {
   GetGsmSMSClient()->Init(GetSystemBus());
   GetImageBurnerClient()->Init(GetSystemBus());
   GetIntrospectableClient()->Init(GetSystemBus());
-  GetLeadershipDaemonManagerClient()->Init(GetSystemBus());
   GetLorgnetteManagerClient()->Init(GetSystemBus());
-  GetMetronomeClient()->Init(GetSystemBus());
   GetModemMessagingClient()->Init(GetSystemBus());
   GetPermissionBrokerClient()->Init(GetSystemBus());
   GetPeerDaemonManagerClient()->Init(GetSystemBus());
@@ -587,21 +574,10 @@ void DBusThreadManagerSetter::SetEasyUnlockClient(
   DBusThreadManager::Get()->client_bundle_->easy_unlock_client_ = client.Pass();
 }
 
-void DBusThreadManagerSetter::SetLeadershipDaemonManagerClient(
-    scoped_ptr<LeadershipDaemonManagerClient> client) {
-  DBusThreadManager::Get()->client_bundle_->leadership_daemon_manager_client_ =
-      client.Pass();
-}
-
 void DBusThreadManagerSetter::SetLorgnetteManagerClient(
     scoped_ptr<LorgnetteManagerClient> client) {
   DBusThreadManager::Get()->client_bundle_->lorgnette_manager_client_ =
       client.Pass();
-}
-
-void DBusThreadManagerSetter::SetMetronomeClient(
-    scoped_ptr<MetronomeClient> client) {
-  DBusThreadManager::Get()->client_bundle_->metronome_client_ = client.Pass();
 }
 
 void DBusThreadManagerSetter::SetShillDeviceClient(

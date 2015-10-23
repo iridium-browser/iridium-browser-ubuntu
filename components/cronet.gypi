@@ -53,6 +53,18 @@
           'includes': [ '../build/android/java_cpp_template.gypi' ],
         },
         {
+          'target_name': 'load_states_list',
+          'type': 'none',
+          'sources': [
+            'cronet/android/java/src/org/chromium/net/LoadState.template',
+          ],
+          'variables': {
+            'package_name': 'org/chromium/cronet',
+            'template_deps': ['../net/base/load_states_list.h'],
+          },
+          'includes': [ '../build/android/java_cpp_template.gypi' ],
+        },
+        {
           'target_name': 'cronet_version',
           'type': 'none',
           'variables': {
@@ -99,9 +111,45 @@
           ],
         },
         {
+          'target_name': 'cronet_version_header',
+          'type': 'none',
+          # Need to set hard_depency flag because cronet_version generates a
+          # header.
+          'hard_dependency': 1,
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '<(SHARED_INTERMEDIATE_DIR)/',
+            ],
+          },
+          'actions': [
+            {
+              'action_name': 'version_header',
+              'message': 'Generating version header file: <@(_outputs)',
+              'inputs': [
+                '<(version_path)',
+                'cronet/version.h.in',
+              ],
+              'outputs': [
+                '<(SHARED_INTERMEDIATE_DIR)/components/cronet/version.h',
+              ],
+              'action': [
+                'python',
+                '<(version_py_path)',
+                '-e', 'VERSION_FULL="<(version_full)"',
+                'cronet/version.h.in',
+                '<@(_outputs)',
+              ],
+              'includes': [
+                '../build/util/version.gypi',
+              ],
+            },
+          ],
+        },
+        {
           # cronet_static_small target has reduced binary size through using
           # ICU alternatives which requires file and ftp support be disabled.
           'target_name': 'cronet_static_small',
+          'type': 'static_library',
           'defines': [
             'USE_ICU_ALTERNATIVES_ON_ANDROID=1',
             'DISABLE_FILE_SUPPORT=1',
@@ -110,7 +158,6 @@
           'dependencies': [
             '../net/net.gyp:net_small',
           ],
-          'includes': [ 'cronet/cronet_static.gypi' ],
           'conditions': [
             ['enable_data_reduction_proxy_support==1',
               {
@@ -120,15 +167,16 @@
               },
             ],
           ],
+          'includes': [ 'cronet/cronet_static.gypi' ],
         },
         {
           # cronet_static target depends on ICU and includes file and ftp support.
           'target_name': 'cronet_static',
+          'type': 'static_library',
           'dependencies': [
             '../base/base.gyp:base_i18n',
             '../net/net.gyp:net',
           ],
-          'includes': [ 'cronet/cronet_static.gypi' ],
           'conditions': [
             ['enable_data_reduction_proxy_support==1',
               {
@@ -138,6 +186,7 @@
               },
             ],
           ],
+          'includes': [ 'cronet/cronet_static.gypi' ],
         },
         {
           'target_name': 'libcronet',
@@ -152,13 +201,14 @@
             '../url/url.gyp:url_lib_use_icu_alternatives_on_android',
           ],
         },
-        { # cronet_stub.jar defines HttpUrlRequest interface and provides its
-          # its implementation using HttpUrlConnection (not the Chromium stack).
-          'target_name': 'cronet_stub',
+        { # cronet_api.jar defines Cronet API and provides implementation of
+          # legacy api using HttpUrlConnection (not the Chromium stack).
+          'target_name': 'cronet_api',
           'type': 'none',
           'dependencies': [
             'cronet_url_request_context_config_list',
             'cronet_version',
+            'load_states_list',
           ],
           'variables': {
             'java_in_dir': 'cronet/android/java',
@@ -168,8 +218,11 @@
               '**/HistogramManager.java',
               '**/HttpUrlConnection*.java',
               '**/HttpUrlRequest*.java',
+              '**/LoadState.java',
+              '**/RequestStatus.java',
               '**/ResponseInfo.java',
               '**/ResponseTooLargeException.java',
+              '**/StatusListener.java',
               '**/UploadDataProvider.java',
               '**/UploadDataSink.java',
               '**/UrlRequest.java',
@@ -190,7 +243,7 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base',
-            'cronet_stub',
+            'cronet_api',
             'cronet_url_request_java',
             'libcronet',
             'net_request_priority_java',
@@ -213,6 +266,7 @@
               '**/CronetUrlRequestFactory.java',
               '**/RequestPriority.java',
               '**/urlconnection/CronetBufferedOutputStream.java',
+              '**/urlconnection/CronetChunkedOutputStream.java',
               '**/urlconnection/CronetFixedModeOutputStream.java',
               '**/urlconnection/CronetInputStream.java',
               '**/urlconnection/CronetHttpURLConnection.java',
@@ -229,7 +283,7 @@
           'type': 'none',
           'dependencies': [
             'cronet_java',
-            'cronet_stub',
+            'cronet_api',
           ],
           'variables': {
             'apk_name': 'CronetSample',
@@ -263,13 +317,12 @@
           'dependencies': [
             'cronet_java',
             'cronet_sample_apk_java',
-            'cronet_stub',
+            'cronet_api',
             '../base/base.gyp:base_java_test_support',
           ],
           'variables': {
             'apk_name': 'CronetSampleTest',
             'java_in_dir': 'cronet/android/sample/javatests',
-            'resource_dir': 'cronet/android/sample/res',
             'is_test_apk': 1,
           },
           'includes': [ '../build/java_apk.gypi' ],
@@ -283,6 +336,7 @@
             'cronet/android/test/src/org/chromium/net/NativeTestServer.java',
             'cronet/android/test/src/org/chromium/net/NetworkChangeNotifierUtil.java',
             'cronet/android/test/src/org/chromium/net/QuicTestServer.java',
+            'cronet/android/test/src/org/chromium/net/SdchObserver.java',
             'cronet/android/test/src/org/chromium/net/TestUploadDataStreamHandler.java',
           ],
           'variables': {
@@ -301,13 +355,14 @@
             'cronet/android/test/native_test_server.h',
             'cronet/android/test/quic_test_server.cc',
             'cronet/android/test/quic_test_server.h',
+            'cronet/android/test/sdch_test_util.cc',
+            'cronet/android/test/sdch_test_util.h',
             'cronet/android/test/test_upload_data_stream_handler.cc',
             'cronet/android/test/test_upload_data_stream_handler.h',
             'cronet/android/test/network_change_notifier_util.cc',
             'cronet/android/test/network_change_notifier_util.h',
           ],
           'dependencies': [
-            'cronet_static',
             'cronet_tests_jni_headers',
             '../base/base.gyp:base',
             '../net/net.gyp:net',
@@ -319,15 +374,19 @@
             '../third_party/icu/icu.gyp:icui18n',
             '../third_party/icu/icu.gyp:icuuc',
           ],
-          'conditions' : [
+          'defines': [
+            'CRONET_TEST=1',
+          ],
+          'conditions': [
             ['enable_data_reduction_proxy_support==1',
               {
-                'defines' : [
-                  'DATA_REDUCTION_PROXY_SUPPORT'
+                'dependencies': [
+                  '../components/components.gyp:data_reduction_proxy_core_browser',
                 ],
               },
             ],
           ],
+          'includes': [ 'cronet/cronet_static.gypi' ],
         },
         {
           'target_name': 'cronet_test_apk',
@@ -374,18 +433,37 @@
           'includes': [ '../build/java_apk.gypi' ],
         },
         {
+          'target_name': 'cronet_perf_test_apk',
+          'type': 'none',
+          'dependencies': [
+            'cronet_java',
+            'cronet_api',
+          ],
+          'variables': {
+            'apk_name': 'CronetPerfTest',
+            'java_in_dir': 'cronet/android/test/javaperftests',
+            'is_test_apk': 1,
+            'native_lib_target': 'libcronet',
+            'proguard_enabled': 'true',
+            'proguard_flags_paths': [
+              'cronet/android/proguard.cfg',
+            ],
+          },
+          'includes': [ '../build/java_apk.gypi' ],
+        },
+        {
           'target_name': 'cronet_package',
           'type': 'none',
           'dependencies': [
             'libcronet',
             'cronet_java',
-            'cronet_stub',
+            'cronet_api',
             '../net/net.gyp:net_unittests_apk',
           ],
           'variables': {
             'native_lib': 'libcronet.>(android_product_extension)',
             'java_lib': 'cronet.jar',
-            'java_stub_lib': 'cronet_stub.jar',
+            'java_api_lib': 'cronet_api.jar',
             'java_src_lib': 'cronet-src.jar',
             'java_sample_src_lib': 'cronet-sample-src.jar',
             'lib_java_dir': '<(PRODUCT_DIR)/lib.java',
@@ -478,6 +556,20 @@
                 '<@(_outputs)',
               ],
             },
+            {
+              'action_name': 'generate javadoc',
+              'inputs': ['cronet/tools/generate_javadoc.py'] ,
+              'outputs': ['<(package_dir)/javadoc'],
+              'action': [
+                'python',
+                '<@(_inputs)',
+                '--output-dir=<(package_dir)',
+                '--input-dir=cronet/',
+                '--overview-file=<(package_dir)/README.md.html',
+                '--readme-file=cronet/README.md',
+              ],
+              'message': 'Generating Javadoc',
+            },
           ],
           'copies': [
             {
@@ -486,7 +578,7 @@
                 '../AUTHORS',
                 '../chrome/VERSION',
                 'cronet/android/proguard.cfg',
-                '<(lib_java_dir)/<(java_stub_lib)'
+                '<(lib_java_dir)/<(java_api_lib)'
               ],
             },
             {

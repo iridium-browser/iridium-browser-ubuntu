@@ -70,7 +70,7 @@ bool HTMLFrameElementBase::isURLAllowed() const
     return true;
 }
 
-void HTMLFrameElementBase::openURL(bool lockBackForwardList)
+void HTMLFrameElementBase::openURL(bool replaceCurrentItem)
 {
     if (!isURLAllowed())
         return;
@@ -90,7 +90,7 @@ void HTMLFrameElementBase::openURL(bool lockBackForwardList)
         url = blankURL();
     }
 
-    if (!loadOrRedirectSubframe(url, m_frameName, lockBackForwardList))
+    if (!loadOrRedirectSubframe(url, m_frameName, replaceCurrentItem))
         return;
     if (!contentFrame() || scriptURL.isEmpty() || !contentFrame()->isLocalFrame())
         return;
@@ -99,11 +99,17 @@ void HTMLFrameElementBase::openURL(bool lockBackForwardList)
 
 void HTMLFrameElementBase::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    if (name == srcdocAttr)
-        setLocation("about:srcdoc");
-    else if (name == srcAttr && !fastHasAttribute(srcdocAttr))
+    if (name == srcdocAttr) {
+        if (!value.isNull()) {
+            setLocation("about:srcdoc");
+        } else {
+            const AtomicString& srcValue = fastGetAttribute(srcAttr);
+            if (!srcValue.isNull())
+                setLocation(stripLeadingAndTrailingHTMLSpaces(srcValue));
+        }
+    } else if (name == srcAttr && !fastHasAttribute(srcdocAttr)) {
         setLocation(stripLeadingAndTrailingHTMLSpaces(value));
-    else if (isIdAttributeName(name)) {
+    } else if (name == idAttr) {
         // Important to call through to base for the id attribute so the hasID bit gets set.
         HTMLFrameOwnerElement::parseAttribute(name, value);
         m_frameName = value;
@@ -128,8 +134,9 @@ void HTMLFrameElementBase::parseAttribute(const QualifiedName& name, const Atomi
     } else if (name == onbeforeunloadAttr) {
         // FIXME: should <frame> elements have beforeunload handlers?
         setAttributeEventListener(EventTypeNames::beforeunload, createAttributeEventListener(this, name, value, eventParameterName()));
-    } else
+    } else {
         HTMLFrameOwnerElement::parseAttribute(name, value);
+    }
 }
 
 void HTMLFrameElementBase::setNameAndOpenURL()

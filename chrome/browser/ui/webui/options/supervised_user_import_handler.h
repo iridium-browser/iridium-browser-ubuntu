@@ -22,6 +22,7 @@ class ListValue;
 }
 
 class ProfileInfoCache;
+class SupervisedUserSyncService;
 
 namespace options {
 
@@ -50,6 +51,7 @@ class SupervisedUserImportHandler : public OptionsPageUIHandler,
   void OnProfileWillBeRemoved(const base::FilePath& profile_path) override;
   void OnProfileWasRemoved(const base::FilePath& profile_path,
                            const base::string16& profile_name) override;
+  void OnProfileIsOmittedChanged(const base::FilePath& profile_path) override;
 
   // SupervisedUserSyncServiceObserver implementation.
   void OnSupervisedUserAcknowledged(
@@ -100,6 +102,8 @@ class SupervisedUserImportHandler : public OptionsPageUIHandler,
       profile_observer_;
   ScopedObserver<SigninErrorController, SupervisedUserImportHandler>
       signin_error_observer_;
+  ScopedObserver<SupervisedUserSyncService, SupervisedUserImportHandler>
+      supervised_user_sync_service_observer_;
 
   bool removed_profile_is_supervised_;
 

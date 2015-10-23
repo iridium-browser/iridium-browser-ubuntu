@@ -11,11 +11,6 @@
 #
 {
     'sources': [
-        # Classes for a threadpool.
-        '<(skia_src_path)/utils/SkCondVar.h',
-        '<(skia_src_path)/utils/SkRunnable.h',
-        '<(skia_src_path)/utils/SkCondVar.cpp',
-
         '<(skia_include_path)/utils/SkBoundaryPatch.h',
         '<(skia_include_path)/utils/SkFrontBufferedStream.h',
         '<(skia_include_path)/utils/SkCamera.h',
@@ -23,7 +18,6 @@
         '<(skia_include_path)/utils/SkCubicInterval.h',
         '<(skia_include_path)/utils/SkCullPoints.h',
         '<(skia_include_path)/utils/SkDebugUtils.h',
-        '<(skia_include_path)/utils/SkDeferredCanvas.h',
         '<(skia_include_path)/utils/SkDumpCanvas.h',
         '<(skia_include_path)/utils/SkEventTracer.h',
         '<(skia_include_path)/utils/SkInterpolator.h',
@@ -59,10 +53,10 @@
         '<(skia_src_path)/utils/SkCullPoints.cpp',
         '<(skia_src_path)/utils/SkDashPath.cpp',
         '<(skia_src_path)/utils/SkDashPathPriv.h',
-        '<(skia_src_path)/utils/SkDeferredCanvas.cpp',
         '<(skia_src_path)/utils/SkDumpCanvas.cpp',
         '<(skia_src_path)/utils/SkEventTracer.cpp',
         '<(skia_src_path)/utils/SkFloatUtils.h',
+        '<(skia_src_path)/utils/SkImageGeneratorUtils.cpp',
         '<(skia_src_path)/utils/SkInterpolator.cpp',
         '<(skia_src_path)/utils/SkLayer.cpp',
         '<(skia_src_path)/utils/SkMatrix22.cpp',
@@ -79,7 +73,6 @@
         '<(skia_src_path)/utils/SkParse.cpp',
         '<(skia_src_path)/utils/SkParseColor.cpp',
         '<(skia_src_path)/utils/SkParsePath.cpp',
-        '<(skia_src_path)/utils/SkPictureUtils.cpp',
         '<(skia_src_path)/utils/SkPatchGrid.cpp',
         '<(skia_src_path)/utils/SkPatchGrid.h',
         '<(skia_src_path)/utils/SkPatchUtils.cpp',
@@ -107,7 +100,6 @@
         '<(skia_src_path)/utils/SkThreadUtils_win.cpp',
         '<(skia_src_path)/utils/SkThreadUtils_win.h',
         '<(skia_src_path)/utils/SkTFitsIn.h',
-        '<(skia_src_path)/utils/SkTLogic.h',
 
         #mac
         '<(skia_include_path)/utils/mac/SkCGUtils.h',
@@ -134,7 +126,7 @@
         '<(skia_src_path)/fonts/SkGScalerContext.cpp',
         '<(skia_src_path)/fonts/SkGScalerContext.h',
         '<(skia_src_path)/fonts/SkRandomScalerContext.cpp',
-        '<(skia_src_path)/fonts/SkRandomScalerContext.cpp',
+        '<(skia_src_path)/fonts/SkRandomScalerContext.h',
         '<(skia_src_path)/fonts/SkTestScalerContext.cpp',
         '<(skia_src_path)/fonts/SkTestScalerContext.h',
     ],

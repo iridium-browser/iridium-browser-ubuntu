@@ -16,9 +16,12 @@ struct WebRect;
 
 class WebRemoteFrameClient {
 public:
+    // Specifies the reason for the detachment.
+    enum class DetachType { Remove, Swap };
+
     // Notify the embedder that it should remove this frame from the frame tree
     // and release any resources associated with it.
-    virtual void frameDetached() { }
+    virtual void frameDetached(DetachType) { }
 
     // Notifies the embedder that a postMessage was issued to a remote frame.
     virtual void postMessageEvent(
@@ -40,6 +43,11 @@ public:
     // FIXME: Remove this method once we have input routing in the browser
     // process. See http://crbug.com/339659.
     virtual void forwardInputEvent(const WebInputEvent*) { }
+
+    virtual void frameRectsChanged(const WebRect&) { }
+
+    // This frame updated its opener to another frame.
+    virtual void didChangeOpener(WebFrame* opener) { }
 };
 
 } // namespace blink

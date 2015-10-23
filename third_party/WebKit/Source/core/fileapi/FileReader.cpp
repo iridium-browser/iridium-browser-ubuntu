@@ -319,7 +319,7 @@ void FileReader::executePendingRead()
     ASSERT(m_loadingState == LoadingStatePending);
     m_loadingState = LoadingStateLoading;
 
-    m_loader = adoptPtr(new FileReaderLoader(m_readType, this));
+    m_loader = FileReaderLoader::create(m_readType, this);
     m_loader->setEncoding(m_encoding);
     m_loader->setDataType(m_blobType);
     m_loader->start(executionContext(), m_blobDataHandle);
@@ -395,9 +395,9 @@ void FileReader::didReceiveData()
 {
     // Fire the progress event at least every 50ms.
     double now = currentTimeMS();
-    if (!m_lastProgressNotificationTimeMS)
+    if (!m_lastProgressNotificationTimeMS) {
         m_lastProgressNotificationTimeMS = now;
-    else if (now - m_lastProgressNotificationTimeMS > progressNotificationIntervalMS) {
+    } else if (now - m_lastProgressNotificationTimeMS > progressNotificationIntervalMS) {
         fireEvent(EventTypeNames::progress);
         m_lastProgressNotificationTimeMS = now;
     }

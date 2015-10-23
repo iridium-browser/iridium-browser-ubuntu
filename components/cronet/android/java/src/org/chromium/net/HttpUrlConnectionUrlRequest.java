@@ -28,7 +28,9 @@ import java.util.zip.GZIPInputStream;
 
 /**
  * Network request using the HttpUrlConnection implementation.
+ * @deprecated Use {@link UrlRequest} instead.
  */
+@Deprecated
 class HttpUrlConnectionUrlRequest implements HttpUrlRequest {
 
     private static final int MAX_CHUNK_SIZE = 8192;
@@ -191,7 +193,7 @@ class HttpUrlConnectionUrlRequest implements HttpUrlRequest {
     @Override
     public void disableRedirects() {
         validateNotStarted();
-        mConnection.setFollowRedirects(false);
+        HttpURLConnection.setFollowRedirects(false);
     }
 
     @Override

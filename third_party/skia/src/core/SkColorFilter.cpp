@@ -7,8 +7,13 @@
 
 #include "SkColorFilter.h"
 #include "SkReadBuffer.h"
+#include "SkRefCnt.h"
 #include "SkString.h"
+#include "SkTDArray.h"
+#include "SkUnPreMultiply.h"
 #include "SkWriteBuffer.h"
+
+class GrFragmentProcessor;
 
 bool SkColorFilter::asColorMode(SkColor* color, SkXfermode::Mode* mode) const {
     return false;
@@ -62,10 +67,10 @@ public:
 #endif
 
 #if SK_SUPPORT_GPU
-    bool asFragmentProcessors(GrContext* context,
+    bool asFragmentProcessors(GrContext* context, GrProcessorDataManager* procDataManager,
                               SkTDArray<GrFragmentProcessor*>* array) const override {
-        bool hasFrags = fInner->asFragmentProcessors(context, array);
-        hasFrags |= fOuter->asFragmentProcessors(context, array);
+        bool hasFrags = fInner->asFragmentProcessors(context, procDataManager, array);
+        hasFrags |= fOuter->asFragmentProcessors(context, procDataManager, array);
         return hasFrags;
     }
 #endif

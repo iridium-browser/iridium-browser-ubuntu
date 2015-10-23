@@ -4,9 +4,9 @@
 
 package org.chromium.android_webview;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.components.web_contents_delegate_android.WebContentsDelegateAndroid;
 
 /**
@@ -41,4 +41,9 @@ public abstract class AwWebContentsDelegate extends WebContentsDelegateAndroid {
     @Override
     @CalledByNative
     public abstract void navigationStateChanged(int flags);
+
+    // Not an override, because WebContentsDelegateAndroid maps this call
+    // into onLoad{Started|Stopped}.
+    @CalledByNative
+    public abstract void loadingStateChanged();
 }

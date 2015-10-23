@@ -51,6 +51,10 @@ class ASH_EXPORT AshWindowTreeHostX11 : public AshWindowTreeHost,
   void OnWindowInitialized(aura::Window* window) override;
   void OnHostInitialized(aura::WindowTreeHost* host) override;
 
+  // ui::internal::InputMethodDelegate:
+  ui::EventDispatchDetails DispatchKeyEventPostIME(
+      ui::KeyEvent* event) override;
+
 #if defined(OS_CHROMEOS)
   // Set the CrOS touchpad "tap paused" property. It is used to temporarily
   // turn off the Tap-to-click feature when the mouse pointer is invisible.

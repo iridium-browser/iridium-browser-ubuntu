@@ -58,7 +58,7 @@ private:
  //////////////////////////////////////////////////////////////////////////////
 
 
-GrResourceCache::GrResourceCache()
+GrResourceCache::GrResourceCache(const GrCaps* caps)
     : fTimestamp(0)
     , fMaxCount(kDefaultMaxCount)
     , fMaxBytes(kDefaultMaxSize)
@@ -75,7 +75,8 @@ GrResourceCache::GrResourceCache()
     , fOverBudgetCB(NULL)
     , fOverBudgetData(NULL)
     , fFlushTimestamps(NULL)
-    , fLastFlushTimestampIndex(0){
+    , fLastFlushTimestampIndex(0)
+    , fPreferVRAMUseOverFlushes(caps->preferVRAMUseOverFlushes()) {
     SkDEBUGCODE(fCount = 0;)
     SkDEBUGCODE(fNewlyPurgeableResourceForValidation = NULL;)
     this->resetFlushTimestamps();
@@ -146,7 +147,7 @@ void GrResourceCache::insertResource(GrGpuResource* resource) {
 #endif
     }
     if (resource->resourcePriv().getScratchKey().isValid()) {
-        SkASSERT(!resource->cacheAccess().isWrapped());
+        SkASSERT(!resource->cacheAccess().isExternal());
         fScratchMap.insert(resource->resourcePriv().getScratchKey(), resource);
     }
 
@@ -246,6 +247,7 @@ private:
 };
 
 GrGpuResource* GrResourceCache::findAndRefScratchResource(const GrScratchKey& scratchKey,
+                                                          size_t resourceSize,
                                                           uint32_t flags) {
     SkASSERT(scratchKey.isValid());
 
@@ -259,8 +261,14 @@ GrGpuResource* GrResourceCache::findAndRefScratchResource(const GrScratchKey& sc
         } else if (flags & kRequireNoPendingIO_ScratchFlag) {
             return NULL;
         }
-        // TODO: fail here when kPrefer is specified, we didn't find a resource without pending io,
-        // but there is still space in our budget for the resource.
+        // We would prefer to consume more available VRAM rather than flushing
+        // immediately, but on ANGLE this can lead to starving of the GPU.
+        if (fPreferVRAMUseOverFlushes && this->wouldFit(resourceSize)) {
+            // kPrefer is specified, we didn't find a resource without pending io,
+            // but there is still space in our budget for the resource so force
+            // the caller to allocate a new resource.
+            return NULL;
+        }
     }
     resource = fScratchMap.find(scratchKey, AvailableForScratchUse(false));
     if (resource) {
@@ -369,7 +377,7 @@ void GrResourceCache::notifyCntReachedZero(GrGpuResource* resource, uint32_t fla
 
     if (!resource->resourcePriv().isBudgeted()) {
         // Check whether this resource could still be used as a scratch resource.
-        if (!resource->cacheAccess().isWrapped() &&
+        if (!resource->cacheAccess().isExternal() &&
             resource->resourcePriv().getScratchKey().isValid()) {
             // We won't purge an existing resource to make room for this one.
             if (fBudgetedCount < fMaxCount &&
@@ -645,19 +653,19 @@ void GrResourceCache::validate() const {
                 SkASSERT(!resource->getUniqueKey().isValid());
                 ++fScratch;
                 SkASSERT(fScratchMap->countForKey(resource->resourcePriv().getScratchKey()));
-                SkASSERT(!resource->cacheAccess().isWrapped());
+                SkASSERT(!resource->cacheAccess().isExternal());
             } else if (resource->resourcePriv().getScratchKey().isValid()) {
                 SkASSERT(!resource->resourcePriv().isBudgeted() ||
                          resource->getUniqueKey().isValid());
                 ++fCouldBeScratch;
                 SkASSERT(fScratchMap->countForKey(resource->resourcePriv().getScratchKey()));
-                SkASSERT(!resource->cacheAccess().isWrapped());
+                SkASSERT(!resource->cacheAccess().isExternal());
             }
             const GrUniqueKey& uniqueKey = resource->getUniqueKey();
             if (uniqueKey.isValid()) {
                 ++fContent;
                 SkASSERT(fUniqueHash->find(uniqueKey) == resource);
-                SkASSERT(!resource->cacheAccess().isWrapped());
+                SkASSERT(!resource->cacheAccess().isExternal());
                 SkASSERT(resource->resourcePriv().isBudgeted());
             }
 

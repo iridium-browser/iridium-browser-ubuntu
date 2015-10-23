@@ -64,10 +64,18 @@ class VideoSender : public FrameSender,
   base::TimeDelta GetInFlightMediaDuration() const final;
   void OnAck(uint32 frame_id) final;
 
+  // Return the maximum target bitrate that should be used for the given video
+  // |frame|.  This will be provided to CongestionControl as a soft maximum
+  // limit, and should be interpreted as "the point above which the extra
+  // encoder CPU time + network bandwidth usage isn't warranted for the amount
+  // of further quality improvement to be gained."
+  static int GetMaximumTargetBitrateForFrame(const media::VideoFrame& frame);
+
  private:
   // Called by the |video_encoder_| with the next EncodedFrame to send.
-  void OnEncodedVideoFrame(int encoder_bitrate,
-                           scoped_ptr<EncodedFrame> encoded_frame);
+  void OnEncodedVideoFrame(const scoped_refptr<media::VideoFrame>& video_frame,
+                           int encoder_bitrate,
+                           scoped_ptr<SenderEncodedFrame> encoded_frame);
 
   // Encodes media::VideoFrame images into EncodedFrames.  Per configuration,
   // this will point to either the internal software-based encoder or a proxy to
@@ -86,9 +94,15 @@ class VideoSender : public FrameSender,
 
   // Remember what we set the bitrate to before, no need to set it again if
   // we get the same value.
-  uint32 last_bitrate_;
+  int last_bitrate_;
 
   PlayoutDelayChangeCB playout_delay_change_cb_;
+
+  // The video encoder's performance metrics as of the last call to
+  // OnEncodedVideoFrame().  See header file comments for SenderEncodedFrame for
+  // an explanation of these values.
+  double last_reported_deadline_utilization_;
+  double last_reported_lossy_utilization_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<VideoSender> weak_factory_;

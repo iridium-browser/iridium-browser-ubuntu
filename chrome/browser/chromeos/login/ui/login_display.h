@@ -93,6 +93,9 @@ class LoginDisplay {
     // Restarts the public-session auto-login timer if it is running.
     virtual void ResetPublicSessionAutoLoginTimer() = 0;
 
+    // Returns true if user is allowed to log in by domain policy.
+    virtual bool IsUserWhitelisted(const std::string& user_id) = 0;
+
    protected:
     virtual ~Delegate();
   };
@@ -127,9 +130,6 @@ class LoginDisplay {
 
   // Displays detailed error screen for error with ID |error_id|.
   virtual void ShowErrorScreen(LoginDisplay::SigninError error_id) = 0;
-
-  // Proceed with Gaia flow because password has changed.
-  virtual void ShowGaiaPasswordChanged(const std::string& username) = 0;
 
   // Show password changed dialog. If |show_password_error| is not null
   // user already tried to enter old password but it turned out to be incorrect.

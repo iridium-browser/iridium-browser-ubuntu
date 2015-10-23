@@ -6,23 +6,28 @@
  */
 
 #include "SkImageGenerator.h"
+#include "SkNextID.h"
 
-SkImageGenerator::Result SkImageGenerator::getPixels(const SkImageInfo& info, void* pixels,
-                                                     size_t rowBytes, const Options* options,
-                                                     SkPMColor ctable[], int* ctableCount) {
+SkImageGenerator::SkImageGenerator(const SkImageInfo& info)
+    : fInfo(info)
+    , fUniqueID(SkNextID::ImageID())
+{}
+
+bool SkImageGenerator::getPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
+                                 SkPMColor ctable[], int* ctableCount) {
     if (kUnknown_SkColorType == info.colorType()) {
-        return kInvalidConversion;
+        return false;
     }
     if (NULL == pixels) {
-        return kInvalidParameters;
+        return false;
     }
     if (rowBytes < info.minRowBytes()) {
-        return kInvalidParameters;
+        return false;
     }
 
     if (kIndex_8_SkColorType == info.colorType()) {
         if (NULL == ctable || NULL == ctableCount) {
-            return kInvalidParameters;
+            return false;
         }
     } else {
         if (ctableCount) {
@@ -32,26 +37,19 @@ SkImageGenerator::Result SkImageGenerator::getPixels(const SkImageInfo& info, vo
         ctable = NULL;
     }
 
-    // Default options.
-    Options optsStorage;
-    if (NULL == options) {
-        options = &optsStorage;
-    }
-    const Result result = this->onGetPixels(info, pixels, rowBytes, *options, ctable, ctableCount);
-
-    if ((kIncompleteInput == result || kSuccess == result) && ctableCount) {
+    const bool success = this->onGetPixels(info, pixels, rowBytes, ctable, ctableCount);
+    if (success && ctableCount) {
         SkASSERT(*ctableCount >= 0 && *ctableCount <= 256);
     }
-    return result;
+    return success;
 }
 
-SkImageGenerator::Result SkImageGenerator::getPixels(const SkImageInfo& info, void* pixels,
-                                                     size_t rowBytes) {
+bool SkImageGenerator::getPixels(const SkImageInfo& info, void* pixels, size_t rowBytes) {
     SkASSERT(kIndex_8_SkColorType != info.colorType());
     if (kIndex_8_SkColorType == info.colorType()) {
-        return kInvalidConversion;
+        return false;
     }
-    return this->getPixels(info, pixels, rowBytes, NULL, NULL, NULL);
+    return this->getPixels(info, pixels, rowBytes, NULL, NULL);
 }
 
 bool SkImageGenerator::getYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3],
@@ -106,25 +104,47 @@ bool SkImageGenerator::onGetYUV8Planes(SkISize sizes[3], void* planes[3], size_t
     return this->onGetYUV8Planes(sizes, planes, rowBytes);
 }
 
+GrTexture* SkImageGenerator::generateTexture(GrContext* ctx, SkImageUsageType usage,
+                                             const SkIRect* subset) {
+    if (subset && !SkIRect::MakeWH(fInfo.width(), fInfo.height()).contains(*subset)) {
+        return nullptr;
+    }
+    return this->onGenerateTexture(ctx, usage, subset);
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////
 
 SkData* SkImageGenerator::onRefEncodedData() {
     return NULL;
 }
 
-#ifdef SK_SUPPORT_LEGACY_OPTIONLESS_GET_PIXELS
-SkImageGenerator::Result SkImageGenerator::onGetPixels(const SkImageInfo&, void*, size_t,
-                                                       SkPMColor*, int*) {
-    return kUnimplemented;
+bool SkImageGenerator::onGetPixels(const SkImageInfo& info, void* dst, size_t rb,
+                                   SkPMColor* colors, int* colorCount) {
+    return false;
 }
-#endif
 
-SkImageGenerator::Result SkImageGenerator::onGetPixels(const SkImageInfo& info, void* dst,
-                                                       size_t rb, const Options& options,
-                                                       SkPMColor* colors, int* colorCount) {
-#ifdef SK_SUPPORT_LEGACY_OPTIONLESS_GET_PIXELS
-    return this->onGetPixels(info, dst, rb, colors, colorCount);
-#else
-    return kUnimplemented;
-#endif
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+#include "SkGraphics.h"
+
+static SkGraphics::ImageGeneratorFromEncodedFactory gFactory;
+
+SkGraphics::ImageGeneratorFromEncodedFactory
+SkGraphics::SetImageGeneratorFromEncodedFactory(ImageGeneratorFromEncodedFactory factory)
+{
+    ImageGeneratorFromEncodedFactory prev = gFactory;
+    gFactory = factory;
+    return prev;
+}
+
+SkImageGenerator* SkImageGenerator::NewFromEncoded(SkData* data) {
+    if (NULL == data) {
+        return NULL;
+    }
+    if (gFactory) {
+        if (SkImageGenerator* generator = gFactory(data)) {
+            return generator;
+        }
+    }
+    return SkImageGenerator::NewFromEncodedImpl(data);
 }

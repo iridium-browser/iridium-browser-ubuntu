@@ -19,6 +19,7 @@
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_resource_throttle.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/task_management/web_contents_tags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
@@ -90,11 +91,11 @@ class PrerenderContents::WebContentsDelegateImpl
                               const OpenURLParams& params) override {
     // |OpenURLFromTab| is typically called when a frame performs a navigation
     // that requires the browser to perform the transition instead of WebKit.
-    // Examples include prerendering a site that redirects to an app URL,
-    // or if --enable-strict-site-isolation is specified and the prerendered
-    // frame redirects to a different origin.
-    // TODO(cbentzel): Consider supporting this if it is a common case during
-    // prerenders.
+    // Examples include prerendering a site that redirects to an app URL, or if
+    // --site-per-process is specified and the prerendered frame redirects to a
+    // different origin.
+    // TODO(cbentzel): Consider supporting this for CURRENT_TAB dispositions, if
+    // it is a common case during prerenders.
     prerender_contents_->Destroy(FINAL_STATUS_OPEN_URL);
     return NULL;
   }
@@ -103,8 +104,7 @@ class PrerenderContents::WebContentsDelegateImpl
     prerender_contents_->Destroy(FINAL_STATUS_CLOSED);
   }
 
-  void CanDownload(RenderViewHost* render_view_host,
-                   const GURL& url,
+  void CanDownload(const GURL& url,
                    const std::string& request_method,
                    const base::Callback<void(bool)>& callback) override {
     prerender_contents_->Destroy(FINAL_STATUS_DOWNLOAD);
@@ -117,7 +117,7 @@ class PrerenderContents::WebContentsDelegateImpl
       int route_id,
       int main_frame_route_id,
       WindowContainerType window_container_type,
-      const base::string16& frame_name,
+      const std::string& frame_name,
       const GURL& target_url,
       const std::string& partition_id,
       SessionStorageNamespace* session_storage_namespace) override {
@@ -195,7 +195,6 @@ PrerenderContents::PrerenderContents(
       prerender_url_(url),
       referrer_(referrer),
       profile_(profile),
-      page_id_(0),
       has_stopped_loading_(false),
       has_finished_loading_(false),
       final_status_(FINAL_STATUS_MAX),
@@ -279,6 +278,11 @@ void PrerenderContents::StartPrerendering(
   prerender_contents_.reset(CreateWebContents(session_storage_namespace));
   TabHelpers::AttachTabHelpers(prerender_contents_.get());
   content::WebContentsObserver::Observe(prerender_contents_.get());
+
+  // Tag the prerender contents with the task manager specific prerender tag, so
+  // that it shows up in the task manager.
+  task_management::WebContentsTags::CreateForPrerenderContents(
+      prerender_contents_.get());
 
   web_contents_delegate_.reset(new WebContentsDelegateImpl(this));
   prerender_contents_.get()->SetDelegate(web_contents_delegate_.get());
@@ -672,6 +676,11 @@ void PrerenderContents::DestroyWhenUsingTooManyResources() {
 WebContents* PrerenderContents::ReleasePrerenderContents() {
   prerender_contents_->SetDelegate(NULL);
   content::WebContentsObserver::Observe(NULL);
+
+  // Clear the task manager tag we added earlier to our
+  // WebContents since it's no longer a prerender contents.
+  task_management::WebContentsTags::ClearTag(prerender_contents_.get());
+
   return prerender_contents_.release();
 }
 

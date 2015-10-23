@@ -60,6 +60,7 @@ class CORE_EXPORT Animation final
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(Animation);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Animation);
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(Animation);
 public:
     enum AnimationPlayState {
         Idle,
@@ -110,11 +111,10 @@ public:
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(finish);
 
-    virtual const AtomicString& interfaceName() const override;
-    virtual ExecutionContext* executionContext() const override;
-    virtual bool hasPendingActivity() const override;
-    virtual void stop() override;
-    virtual bool dispatchEvent(PassRefPtrWillBeRawPtr<Event>) override;
+    const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override;
+    bool hasPendingActivity() const override;
+    void stop() override;
 
     double playbackRate() const;
     void setPlaybackRate(double);
@@ -133,13 +133,20 @@ public:
     void setStartTime(double);
     void setStartTimeInternal(double);
 
-    const AnimationEffect* source() const { return m_content.get(); }
-    AnimationEffect* source() { return m_content.get(); }
-    void setSource(AnimationEffect*);
+    double startClip() const { return startClipInternal() * 1000; }
+    double endClip() const { return endClipInternal() * 1000; }
+    void setStartClip(double t) { setStartClipInternal(t / 1000); }
+    void setEndClip(double t) { setEndClipInternal(t / 1000); }
+
+    const AnimationEffect* effect() const { return m_content.get(); }
+    AnimationEffect* effect() { return m_content.get(); }
+    void setEffect(AnimationEffect*);
 
     // Pausing via this method is not reflected in the value returned by
     // paused() and must never overlap with pausing via pause().
     void pauseForTesting(double pauseTime);
+    void disableCompositedAnimationForTesting();
+
     // This should only be used for CSS
     void unpause();
 
@@ -153,7 +160,7 @@ public:
     void restartAnimationOnCompositor();
     void cancelIncompatibleAnimationsOnCompositor();
     bool hasActiveAnimationsOnCompositor();
-    void setCompositorPending(bool sourceChanged = false);
+    void setCompositorPending(bool effectChanged = false);
     void notifyCompositorStartTime(double timelineTime);
     void notifyStartTime(double timelineTime);
     // WebCompositorAnimationPlayerClient implementation.
@@ -172,14 +179,19 @@ public:
         return animation1->sequenceNumber() < animation2->sequenceNumber();
     }
 
-    virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) override;
+    bool addEventListener(const AtomicString& eventType, PassRefPtrWillBeRawPtr<EventListener>, bool useCapture = false) override;
 
     DECLARE_VIRTUAL_TRACE();
+
+protected:
+    bool dispatchEventInternal(PassRefPtrWillBeRawPtr<Event>) override;
 
 private:
     Animation(ExecutionContext*, AnimationTimeline&, AnimationEffect*);
 
-    double sourceEnd() const;
+    void clearOutdated();
+
+    double effectEnd() const;
     bool limited(double currentTime) const;
 
     AnimationPlayState calculatePlayState();
@@ -202,10 +214,19 @@ private:
     void notifyAnimationStarted(double monotonicTime, int group) override;
     void notifyAnimationFinished(double monotonicTime, int group) override { }
 
+    double startClipInternal() const { return m_startClip; }
+    double endClipInternal() const { return m_endClip; }
+    void setStartClipInternal(double t) { m_startClip = t; }
+    void setEndClipInternal(double t) { m_endClip = t; }
+    bool clipped(double);
+    double clipTimeToEffectChange(double) const;
+
     AnimationPlayState m_playState;
     double m_playbackRate;
     double m_startTime;
     double m_holdTime;
+    double m_startClip;
+    double m_endClip;
 
     unsigned m_sequenceNumber;
 
@@ -219,6 +240,7 @@ private:
     bool m_paused;
     bool m_held;
     bool m_isPausedForTesting;
+    bool m_isCompositedAnimationDisabledForTesting;
 
     // This indicates timing information relevant to the animation's effect
     // has changed by means other than the ordinary progression of time
@@ -238,24 +260,26 @@ private:
     };
 
     class CompositorState {
+        WTF_MAKE_FAST_ALLOCATED(CompositorState);
+        WTF_MAKE_NONCOPYABLE(CompositorState);
     public:
         CompositorState(Animation& animation)
             : startTime(animation.m_startTime)
             , holdTime(animation.m_holdTime)
             , playbackRate(animation.m_playbackRate)
-            , sourceChanged(false)
+            , effectChanged(false)
             , pendingAction(Start)
         { }
         double startTime;
         double holdTime;
         double playbackRate;
-        bool sourceChanged;
+        bool effectChanged;
         CompositorAction pendingAction;
     };
 
     enum CompositorPendingChange {
         SetCompositorPending,
-        SetCompositorPendingWithSourceChanged,
+        SetCompositorPendingWithEffectChanged,
         DoNotSetCompositorPending,
     };
 

@@ -8,6 +8,7 @@
 #include <limits>
 #include <vector>
 
+#include "cc/base/histograms.h"
 #include "cc/base/region.h"
 #include "cc/playback/picture_pile_impl.h"
 #include "skia/ext/analysis_canvas.h"
@@ -17,9 +18,6 @@ namespace {
 // picture that intersects the visible layer rect expanded by this distance
 // will be recorded.
 const int kPixelDistanceToRecord = 8000;
-// We don't perform solid color analysis on images that have more than 10 skia
-// operations.
-const int kOpCountThatIsOkToAnalyze = 10;
 
 // Dimensions of the tiles in this picture pile as well as the dimensions of
 // the base picture in each tile.
@@ -149,6 +147,11 @@ const bool kDefaultClearCanvasSetting = false;
 const bool kDefaultClearCanvasSetting = true;
 #endif
 
+DEFINE_SCOPED_UMA_HISTOGRAM_AREA_TIMER(
+    ScopedPicturePileUpdateTimer,
+    "Compositing.%s.PicturePile.UpdateUs",
+    "Compositing.%s.PicturePile.UpdateInvalidatedAreaPerMs");
+
 }  // namespace
 
 namespace cc {
@@ -181,6 +184,8 @@ bool PicturePile::UpdateAndExpandInvalidation(
     const gfx::Rect& visible_layer_rect,
     int frame_number,
     RecordingSource::RecordingMode recording_mode) {
+  ScopedPicturePileUpdateTimer timer;
+
   gfx::Rect interest_rect = visible_layer_rect;
   interest_rect.Inset(-pixel_record_distance_, -pixel_record_distance_);
   recorded_viewport_ = interest_rect;
@@ -188,6 +193,13 @@ bool PicturePile::UpdateAndExpandInvalidation(
 
   bool updated = ApplyInvalidationAndResize(interest_rect, invalidation,
                                             layer_size, frame_number);
+
+  // Count the area that is being invalidated.
+  Region recorded_invalidation(*invalidation);
+  recorded_invalidation.Intersect(recorded_viewport_);
+  for (Region::Iterator it(recorded_invalidation); it.has_rect(); it.next())
+    timer.AddArea(it.rect().size().GetArea());
+
   std::vector<gfx::Rect> invalid_tiles;
   GetInvalidTileRects(interest_rect, &invalid_tiles);
   std::vector<gfx::Rect> record_rects;
@@ -499,27 +511,25 @@ void PicturePile::CreatePictures(ContentLayerClient* painter,
   for (const auto& record_rect : record_rects) {
     gfx::Rect padded_record_rect = PadRect(record_rect);
 
-    int repeat_count = std::max(1, slow_down_raster_scale_factor_for_debug_);
-    scoped_refptr<Picture> picture;
+    // TODO(vmpstr): Add a slow_down_recording_scale_factor_for_debug_ to be
+    // able to slow down recording.
+    scoped_refptr<Picture> picture =
+        Picture::Create(padded_record_rect, painter, tile_grid_size_,
+                        gather_pixel_refs_, recording_mode);
+    // Note the '&&' with previous is-suitable state.
+    // This means that once a picture-pile becomes unsuitable for gpu
+    // rasterization due to some content, it will continue to be unsuitable even
+    // if that content is replaced by gpu-friendly content. This is an
+    // optimization to avoid iterating though all pictures in the pile after
+    // each invalidation.
+    if (is_suitable_for_gpu_rasterization_) {
+      const char* reason = nullptr;
+      is_suitable_for_gpu_rasterization_ &=
+          picture->IsSuitableForGpuRasterization(&reason);
 
-    for (int i = 0; i < repeat_count; i++) {
-      picture = Picture::Create(padded_record_rect, painter, tile_grid_size_,
-                                gather_pixel_refs_, recording_mode);
-      // Note the '&&' with previous is-suitable state.
-      // This means that once a picture-pile becomes unsuitable for gpu
-      // rasterization due to some content, it will continue to be unsuitable
-      // even if that content is replaced by gpu-friendly content.
-      // This is an optimization to avoid iterating though all pictures in
-      // the pile after each invalidation.
-      if (is_suitable_for_gpu_rasterization_) {
-        const char* reason = nullptr;
-        is_suitable_for_gpu_rasterization_ &=
-            picture->IsSuitableForGpuRasterization(&reason);
-
-        if (!is_suitable_for_gpu_rasterization_) {
-          TRACE_EVENT_INSTANT1("cc", "GPU Rasterization Veto",
-                               TRACE_EVENT_SCOPE_THREAD, "reason", reason);
-        }
+      if (!is_suitable_for_gpu_rasterization_) {
+        TRACE_EVENT_INSTANT1("cc", "GPU Rasterization Veto",
+                             TRACE_EVENT_SCOPE_THREAD, "reason", reason);
       }
     }
 
@@ -638,7 +648,7 @@ void PicturePile::DetermineIfSolidColor() {
     return;
 
   // Don't bother doing more work if the first image is too complicated.
-  if (picture->ApproximateOpCount() > kOpCountThatIsOkToAnalyze)
+  if (!picture->ShouldBeAnalyzedForSolidColor())
     return;
 
   // Make sure all of the mapped images point to the same picture.

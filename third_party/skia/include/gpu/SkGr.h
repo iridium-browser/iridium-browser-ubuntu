@@ -14,8 +14,9 @@
 #include <stddef.h>
 
 // Gr headers
-#include "GrTypes.h"
 #include "GrContext.h"
+#include "GrTextureAccess.h"
+#include "GrTypes.h"
 
 // skia headers
 #include "SkBitmap.h"
@@ -71,6 +72,7 @@ static inline GrColor SkColor2GrColorJustAlpha(SkColor c) {
 bool GrIsBitmapInCache(const GrContext*, const SkBitmap&, const GrTextureParams*);
 
 GrTexture* GrRefCachedBitmapTexture(GrContext*, const SkBitmap&, const GrTextureParams*);
+GrTexture* GrRefCachedBitmapTexture(GrContext*, const SkBitmap&, SkImageUsageType);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -94,7 +96,13 @@ bool SkPaint2GrPaint(GrContext* context, GrRenderTarget*, const SkPaint& skPaint
 SkImageInfo GrMakeInfoFromTexture(GrTexture* tex, int w, int h, bool isOpaque);
 
 // Using the dreaded SkGrPixelRef ...
-void GrWrapTextureInBitmap(GrTexture* src, int w, int h, bool isOpaque, SkBitmap* dst);
+SK_API void GrWrapTextureInBitmap(GrTexture* src, int w, int h, bool isOpaque,
+                                  SkBitmap* dst);
+
+GrTextureParams::FilterMode GrSkFilterQualityToGrFilterMode(SkFilterQuality paintFilterQuality,
+                                                            const SkMatrix& viewM,
+                                                            const SkMatrix& localM,
+                                                            bool* doBicubic);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Classes

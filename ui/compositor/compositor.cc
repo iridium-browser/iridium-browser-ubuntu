@@ -11,7 +11,6 @@
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
 #include "base/trace_event/trace_event.h"
@@ -31,7 +30,6 @@
 #include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator_collection.h"
-#include "ui/gfx/frame_time.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_switches.h"
 
@@ -81,28 +79,40 @@ Compositor::Compositor(gfx::AcceleratedWidget widget,
       compositor_lock_(NULL),
       layer_animator_collection_(this),
       weak_ptr_factory_(this) {
-  root_web_layer_ = cc::Layer::Create();
+  root_web_layer_ = cc::Layer::Create(Layer::UILayerSettings());
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   cc::LayerTreeSettings settings;
-  // When impl-side painting is enabled, this will ensure PictureLayers always
-  // can have LCD text, to match the previous behaviour with ContentLayers,
-  // where LCD-not-allowed notifications were ignored.
+
+  // This will ensure PictureLayers always can have LCD text, to match the
+  // previous behaviour with ContentLayers, where LCD-not-allowed notifications
+  // were ignored.
   settings.layers_always_allowed_lcd_text = true;
+  // Use occlusion to allow more overlapping windows to take less memory.
+  settings.use_occlusion_for_tile_prioritization = true;
   settings.renderer_settings.refresh_rate =
       context_factory_->DoesCreateTestContexts() ? kTestRefreshRate
                                                  : kDefaultRefreshRate;
   settings.main_frame_before_activation_enabled = false;
-  settings.throttle_frame_production =
-      !command_line->HasSwitch(switches::kDisableGpuVsync);
+  if (command_line->HasSwitch(switches::kDisableGpuVsync)) {
+    std::string display_vsync_string =
+        command_line->GetSwitchValueASCII(switches::kDisableGpuVsync);
+    if (display_vsync_string == "gpu") {
+      settings.renderer_settings.disable_display_vsync = true;
+    } else if (display_vsync_string == "beginframe") {
+      settings.wait_for_beginframe_interval = false;
+    } else {
+      settings.renderer_settings.disable_display_vsync = true;
+      settings.wait_for_beginframe_interval = false;
+    }
+  }
   settings.renderer_settings.partial_swap_enabled =
       !command_line->HasSwitch(cc::switches::kUIDisablePartialSwap);
-#if defined(OS_CHROMEOS)
-  settings.per_tile_painting_enabled = true;
-#endif
 #if defined(OS_WIN)
   settings.renderer_settings.finish_rendering_on_resize = true;
+#elif defined(OS_MACOSX)
+  settings.renderer_settings.delay_releasing_overlay_resources = true;
 #endif
 
   // These flags should be mirrored by renderer versions in content/renderer/.
@@ -126,12 +136,27 @@ Compositor::Compositor(gfx::AcceleratedWidget widget,
   settings.initial_debug_state.SetRecordRenderingStats(
       command_line->HasSwitch(cc::switches::kEnableGpuBenchmarking));
 
-  settings.impl_side_painting = IsUIImplSidePaintingEnabled();
-  settings.use_display_lists = IsUISlimmingPaintEnabled();
-  settings.use_cached_picture_in_display_list = false;
+  settings.use_display_lists = true;
+
   settings.use_zero_copy = IsUIZeroCopyEnabled();
   settings.use_one_copy = IsUIOneCopyEnabled();
-  settings.use_image_texture_target = context_factory_->GetImageTextureTarget();
+
+  settings.renderer_settings.use_rgba_4444_textures =
+      command_line->HasSwitch(switches::kUIEnableRGBA4444Textures);
+
+  // Use PERSISTENT_MAP memory buffers to support partial tile raster for
+  // software raster into GpuMemoryBuffers.
+  gfx::BufferUsage usage = gfx::BufferUsage::PERSISTENT_MAP;
+  settings.use_persistent_map_for_gpu_memory_buffers = true;
+
+  for (size_t format = 0;
+      format < static_cast<size_t>(gfx::BufferFormat::LAST) + 1; format++) {
+    DCHECK_GT(settings.use_image_texture_targets.size(), format);
+    settings.use_image_texture_targets[format] =
+        context_factory_->GetImageTextureTarget(
+            static_cast<gfx::BufferFormat>(format), usage);
+  }
+
   // Note: gathering of pixel refs is only needed when using multiple
   // raster threads.
   settings.gather_pixel_refs = false;
@@ -166,10 +191,13 @@ Compositor::~Compositor() {
   FOR_EACH_OBSERVER(CompositorObserver, observer_list_,
                     OnCompositingShuttingDown(this));
 
+  FOR_EACH_OBSERVER(CompositorAnimationObserver, animation_observer_list_,
+                    OnCompositingShuttingDown(this));
+
   DCHECK(begin_frame_observer_list_.empty());
 
   if (root_layer_)
-    root_layer_->SetCompositor(NULL);
+    root_layer_->ResetCompositor();
 
   // Stop all outstanding draws before telling the ContextFactory to tear
   // down any contexts that the |host_| may rely upon.
@@ -191,13 +219,11 @@ void Compositor::SetRootLayer(Layer* root_layer) {
   if (root_layer_ == root_layer)
     return;
   if (root_layer_)
-    root_layer_->SetCompositor(NULL);
+    root_layer_->ResetCompositor();
   root_layer_ = root_layer;
-  if (root_layer_ && !root_layer_->GetCompositor())
-    root_layer_->SetCompositor(this);
   root_web_layer_->RemoveAllChildren();
   if (root_layer_)
-    root_web_layer_->AddChild(root_layer_->cc_layer());
+    root_layer_->SetCompositor(this, root_web_layer_);
 }
 
 void Compositor::SetHostHasTransparentBackground(
@@ -262,6 +288,17 @@ void Compositor::SetVisible(bool visible) {
 
 bool Compositor::IsVisible() {
   return host_->visible();
+}
+
+void Compositor::SetAuthoritativeVSyncInterval(
+    const base::TimeDelta& interval) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+         cc::switches::kEnableBeginFrameScheduling)) {
+    host_->SetAuthoritativeVSyncInterval(interval);
+    return;
+  }
+
+  vsync_manager_->SetAuthoritativeVSyncInterval(interval);
 }
 
 scoped_refptr<CompositorVSyncManager> Compositor::vsync_manager() const {
@@ -346,12 +383,6 @@ void Compositor::Layout() {
 }
 
 void Compositor::RequestNewOutputSurface() {
-  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/466870
-  // is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "466870 Compositor::RequestNewOutputSurface"));
-
   context_factory_->CreateOutputSurface(weak_ptr_factory_.GetWeakPtr());
 }
 
@@ -380,7 +411,7 @@ void Compositor::DidCompleteSwapBuffers() {
 }
 
 void Compositor::DidPostSwapBuffers() {
-  base::TimeTicks start_time = gfx::FrameTime::Now();
+  base::TimeTicks start_time = base::TimeTicks::Now();
   FOR_EACH_OBSERVER(CompositorObserver, observer_list_,
                     OnCompositingStarted(this, start_time));
 }

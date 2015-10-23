@@ -17,13 +17,11 @@ class StyleSheetContents;
 // FIXME: We should consider building CSSSelectors directly instead of using
 // the intermediate CSSParserSelector.
 class CORE_EXPORT CSSSelectorParser {
+    STACK_ALLOCATED();
 public:
     static void parseSelector(CSSParserTokenRange, const CSSParserContext&, const AtomicString& defaultNamespace, StyleSheetContents*, CSSSelectorList&);
 
     static bool consumeANPlusB(CSSParserTokenRange&, std::pair<int, int>&);
-
-    // FIXME: This shouldn't be in the header once the Bison parser is removed
-    static void recordSelectorStats(const CSSParserContext&, const CSSSelectorList&);
 
 private:
     CSSSelectorParser(const CSSParserContext&, const AtomicString& defaultNamespace, StyleSheetContents*);
@@ -58,7 +56,7 @@ private:
 
     const CSSParserContext& m_context;
     AtomicString m_defaultNamespace;
-    StyleSheetContents* m_styleSheet; // FIXME: Should be const
+    RawPtrWillBeMember<StyleSheetContents> m_styleSheet; // FIXME: Should be const
 
     bool m_failedParsing;
 };

@@ -317,13 +317,8 @@ uint32_t MediaOptimization::SetTargetRates(
   return target_bit_rate_;
 }
 
-void MediaOptimization::EnableProtectionMethod(bool enable,
-                                               VCMProtectionMethodEnum method) {
+void MediaOptimization::SetProtectionMethod(VCMProtectionMethodEnum method) {
   CriticalSectionScoped lock(crit_sect_.get());
-  if (!enable && loss_prot_logic_->SelectedType() != method)
-    return;
-  if (!enable)
-    method = kNone;
   loss_prot_logic_->SetMethod(method);
 }
 
@@ -631,8 +626,9 @@ void MediaOptimization::ProcessIncomingFrameRate(int64_t now) {
     }
   }
   if (num > 1) {
-    const int64_t diff = now - incoming_frame_times_[num - 1];
-    incoming_frame_rate_ = 1.0;
+    const int64_t diff =
+        incoming_frame_times_[0] - incoming_frame_times_[num - 1];
+    incoming_frame_rate_ = 0.0;  // No frame rate estimate available.
     if (diff > 0) {
       incoming_frame_rate_ = nr_of_frames * 1000.0f / static_cast<float>(diff);
     }

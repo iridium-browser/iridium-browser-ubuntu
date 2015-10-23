@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
-#include "mojo/common/message_pump_mojo.h"
+#include "mojo/message_pump/message_pump_mojo.h"
 #include "mojo/runner/context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,7 +21,7 @@ namespace {
 class TestChildProcessHost : public ChildProcessHost {
  public:
   explicit TestChildProcessHost(Context* context)
-      : ChildProcessHost(context, "test") {}
+      : ChildProcessHost(context, false, base::FilePath(), false) {}
   ~TestChildProcessHost() override {}
 
   void DidStart(bool success) override {

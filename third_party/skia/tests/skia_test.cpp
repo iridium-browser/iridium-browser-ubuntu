@@ -8,15 +8,14 @@
 #include "CrashHandler.h"
 #include "OverwriteLine.h"
 #include "Resources.h"
+#include "SkAtomics.h"
 #include "SkCommonFlags.h"
 #include "SkGraphics.h"
-#include "SkInstCnt.h"
 #include "SkOSFile.h"
 #include "SkRunnable.h"
 #include "SkTArray.h"
 #include "SkTaskGroup.h"
 #include "SkTemplates.h"
-#include "SkThread.h"
 #include "SkTime.h"
 #include "Test.h"
 
@@ -131,12 +130,6 @@ int test_main();
 int test_main() {
     SetupCrashHandler();
 
-#if SK_ENABLE_INST_COUNT
-    if (FLAGS_leaks) {
-        gPrintInstCount = true;
-    }
-#endif
-
     SkAutoGraphics ag;
 
     {
@@ -160,7 +153,6 @@ int test_main() {
 #else
         header.append(" SK_RELEASE");
 #endif
-        header.appendf(" skia_arch_width=%d", (int)sizeof(void*) * 8);
         if (FLAGS_veryVerbose) {
             header.appendf("\n");
         }

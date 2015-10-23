@@ -16,7 +16,7 @@
 class InjectionHost;
 
 namespace blink {
-class WebFrame;
+class WebLocalFrame;
 }
 
 namespace extensions {
@@ -37,7 +37,6 @@ class UserScriptInjector : public ScriptInjector,
 
   // ScriptInjector implementation.
   UserScript::InjectionType script_type() const override;
-  bool ShouldExecuteInChildFrames() const override;
   bool ShouldExecuteInMainWorld() const override;
   bool IsUserGesture() const override;
   bool ExpectsResults() const override;
@@ -45,16 +44,15 @@ class UserScriptInjector : public ScriptInjector,
   bool ShouldInjectCss(UserScript::RunLocation run_location) const override;
   PermissionsData::AccessType CanExecuteOnFrame(
       const InjectionHost* injection_host,
-      blink::WebFrame* web_frame,
-      int tab_id,
-      const GURL& top_url) const override;
+      blink::WebLocalFrame* web_frame,
+      int tab_id) const override;
   std::vector<blink::WebScriptSource> GetJsSources(
       UserScript::RunLocation run_location) const override;
   std::vector<std::string> GetCssSources(
       UserScript::RunLocation run_location) const override;
   void GetRunInfo(ScriptsRunInfo* scripts_run_info,
                   UserScript::RunLocation run_location) const override;
-  void OnInjectionComplete(scoped_ptr<base::ListValue> execution_results,
+  void OnInjectionComplete(scoped_ptr<base::Value> execution_result,
                            UserScript::RunLocation run_location) override;
   void OnWillNotInject(InjectFailureReason reason) override;
 

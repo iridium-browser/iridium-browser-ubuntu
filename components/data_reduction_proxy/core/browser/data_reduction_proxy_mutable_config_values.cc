@@ -22,13 +22,10 @@ DataReductionProxyMutableConfigValues::CreateFromParams(
 }
 
 DataReductionProxyMutableConfigValues::DataReductionProxyMutableConfigValues()
-    : empty_origin_(),
-      promo_allowed_(false),
+    : promo_allowed_(false),
       holdback_(false),
       allowed_(false),
-      fallback_allowed_(false),
-      origin_(empty_origin_),
-      fallback_origin_(empty_origin_) {
+      fallback_allowed_(false) {
   // Constructed on the UI thread, but should be checked on the IO thread.
   thread_checker_.DetachFromThread();
 }
@@ -53,72 +50,21 @@ bool DataReductionProxyMutableConfigValues::fallback_allowed() const {
   return fallback_allowed_;
 }
 
-bool DataReductionProxyMutableConfigValues::alternative_allowed() const {
-  return false;
-}
-
-bool DataReductionProxyMutableConfigValues::alternative_fallback_allowed()
-    const {
-  return false;
-}
-
 bool DataReductionProxyMutableConfigValues::UsingHTTPTunnel(
     const net::HostPortPair& proxy_server) const {
   return false;
 }
 
-bool DataReductionProxyMutableConfigValues::IsDataReductionProxy(
-    const net::HostPortPair& host_port_pair,
-    DataReductionProxyTypeInfo* proxy_info) const {
-  // TODO(jeremyim): Rework as part of ConfigValues interface changes.
-  if (allowed() && origin().is_valid() &&
-      origin().host_port_pair().Equals(host_port_pair)) {
-    if (proxy_info) {
-      proxy_info->proxy_servers.first = origin();
-      if (fallback_allowed())
-        proxy_info->proxy_servers.second = fallback_origin();
-    }
-    return true;
-  }
-
-  if (!fallback_allowed() || !fallback_origin().is_valid() ||
-      !fallback_origin().host_port_pair().Equals(host_port_pair))
-    return false;
-
-  if (proxy_info) {
-    proxy_info->proxy_servers.first = fallback_origin();
-    proxy_info->proxy_servers.second = net::ProxyServer::FromURI(
-        std::string(), net::ProxyServer::SCHEME_HTTP);
-    proxy_info->is_fallback = true;
-  }
-
-  return true;
-}
-
-const net::ProxyServer& DataReductionProxyMutableConfigValues::origin() const {
+const std::vector<net::ProxyServer>&
+DataReductionProxyMutableConfigValues::proxies_for_http() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return origin_;
+  return proxies_for_http_;
 }
 
-const net::ProxyServer& DataReductionProxyMutableConfigValues::fallback_origin()
-    const {
+const std::vector<net::ProxyServer>&
+DataReductionProxyMutableConfigValues::proxies_for_https() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return fallback_origin_;
-}
-
-const net::ProxyServer& DataReductionProxyMutableConfigValues::alt_origin()
-    const {
-  return empty_origin_;
-}
-
-const net::ProxyServer&
-DataReductionProxyMutableConfigValues::alt_fallback_origin() const {
-  return empty_origin_;
-}
-
-const net::ProxyServer& DataReductionProxyMutableConfigValues::ssl_origin()
-    const {
-  return empty_origin_;
+  return proxies_for_https_;
 }
 
 const GURL& DataReductionProxyMutableConfigValues::secure_proxy_check_url()
@@ -127,11 +73,15 @@ const GURL& DataReductionProxyMutableConfigValues::secure_proxy_check_url()
 }
 
 void DataReductionProxyMutableConfigValues::UpdateValues(
-    const net::ProxyServer& origin,
-    const net::ProxyServer& fallback_origin) {
+    const std::vector<net::ProxyServer>& proxies_for_http) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  origin_ = origin;
-  fallback_origin_ = fallback_origin;
+  proxies_for_http_ = proxies_for_http;
+}
+
+void DataReductionProxyMutableConfigValues::Invalidate() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  proxies_for_http_.clear();
+  proxies_for_https_.clear();
 }
 
 }  // namespace data_reduction_proxy

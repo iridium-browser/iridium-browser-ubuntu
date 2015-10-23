@@ -46,8 +46,8 @@ class HangMonitorThread {
  public:
   // Instantiates the background thread.
   HangMonitorThread()
-      : event_received_(false, false),
-        event_(WindowHangMonitor::WINDOW_NOT_FOUND),
+      : event_(WindowHangMonitor::WINDOW_NOT_FOUND),
+        event_received_(false, false),
         thread_("HangMonitorThread") {}
 
   ~HangMonitorThread() {
@@ -368,7 +368,7 @@ TEST_F(WindowHangMonitorTest, DetectsWindowHang) {
   // Block the worker thread.
   base::WaitableEvent hang(true, false);
 
-  window_thread()->message_loop_proxy()->PostTask(
+  window_thread()->task_runner()->PostTask(
       FROM_HERE,
       base::Bind(&base::WaitableEvent::Wait, base::Unretained(&hang)));
 

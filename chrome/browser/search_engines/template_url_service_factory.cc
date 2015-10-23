@@ -13,15 +13,18 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/search_engines/chrome_template_url_service_client.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/web_data_service_factory.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/search_engines/default_search_manager.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url_service.h"
+
+#if defined(ENABLE_RLZ)
+#include "components/rlz/rlz_tracker.h"
+#endif
 
 // static
 TemplateURLService* TemplateURLServiceFactory::GetForProfile(Profile* profile) {
@@ -35,18 +38,16 @@ TemplateURLServiceFactory* TemplateURLServiceFactory::GetInstance() {
 }
 
 // static
-KeyedService* TemplateURLServiceFactory::BuildInstanceFor(
+scoped_ptr<KeyedService> TemplateURLServiceFactory::BuildInstanceFor(
     content::BrowserContext* context) {
   base::Closure dsp_change_callback;
 #if defined(ENABLE_RLZ)
-  dsp_change_callback =
-      base::Bind(base::IgnoreResult(&RLZTracker::RecordProductEvent),
-                 rlz_lib::CHROME,
-                 RLZTracker::ChromeOmnibox(),
-                 rlz_lib::SET_TO_GOOGLE);
+  dsp_change_callback = base::Bind(
+      base::IgnoreResult(&rlz::RLZTracker::RecordProductEvent), rlz_lib::CHROME,
+      rlz::RLZTracker::ChromeOmnibox(), rlz_lib::SET_TO_GOOGLE);
 #endif
   Profile* profile = static_cast<Profile*>(context);
-  return new TemplateURLService(
+  return make_scoped_ptr(new TemplateURLService(
       profile->GetPrefs(),
       scoped_ptr<SearchTermsData>(new UIThreadSearchTermsData(profile)),
       WebDataServiceFactory::GetKeywordWebDataForProfile(
@@ -55,8 +56,7 @@ KeyedService* TemplateURLServiceFactory::BuildInstanceFor(
           HistoryServiceFactory::GetForProfile(
               profile, ServiceAccessType::EXPLICIT_ACCESS))),
       GoogleURLTrackerFactory::GetForProfile(profile),
-      g_browser_process->rappor_service(),
-      dsp_change_callback);
+      g_browser_process->rappor_service(), dsp_change_callback));
 }
 
 TemplateURLServiceFactory::TemplateURLServiceFactory()
@@ -72,48 +72,13 @@ TemplateURLServiceFactory::~TemplateURLServiceFactory() {}
 
 KeyedService* TemplateURLServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* profile) const {
-  return BuildInstanceFor(static_cast<Profile*>(profile));
+  return BuildInstanceFor(static_cast<Profile*>(profile)).release();
 }
 
 void TemplateURLServiceFactory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   DefaultSearchManager::RegisterProfilePrefs(registry);
-  registry->RegisterStringPref(prefs::kSyncedDefaultSearchProviderGUID,
-                               std::string(),
-                               user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(prefs::kDefaultSearchProviderEnabled, true);
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderName,
-                               std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderID, std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderPrepopulateID,
-                               std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderSuggestURL,
-                               std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderSearchURL,
-                               std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderInstantURL,
-                               std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderImageURL,
-                               std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderNewTabURL,
-                               std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderSearchURLPostParams,
-                               std::string());
-  registry->RegisterStringPref(
-      prefs::kDefaultSearchProviderSuggestURLPostParams, std::string());
-  registry->RegisterStringPref(
-      prefs::kDefaultSearchProviderInstantURLPostParams, std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderImageURLPostParams,
-                               std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderKeyword,
-                               std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderIconURL,
-                               std::string());
-  registry->RegisterStringPref(prefs::kDefaultSearchProviderEncodings,
-                               std::string());
-  registry->RegisterListPref(prefs::kDefaultSearchProviderAlternateURLs);
-  registry->RegisterStringPref(
-      prefs::kDefaultSearchProviderSearchTermsReplacementKey, std::string());
+  TemplateURLService::RegisterProfilePrefs(registry);
 }
 
 content::BrowserContext* TemplateURLServiceFactory::GetBrowserContextToUse(

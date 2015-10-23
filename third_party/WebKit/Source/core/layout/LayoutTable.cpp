@@ -41,10 +41,10 @@
 #include "core/layout/TableLayoutAlgorithmAuto.h"
 #include "core/layout/TableLayoutAlgorithmFixed.h"
 #include "core/layout/TextAutosizer.h"
-#include "core/style/StyleInheritedData.h"
 #include "core/paint/BoxPainter.h"
 #include "core/paint/DeprecatedPaintLayer.h"
 #include "core/paint/TablePainter.h"
+#include "core/style/StyleInheritedData.h"
 
 namespace blink {
 
@@ -52,10 +52,10 @@ using namespace HTMLNames;
 
 LayoutTable::LayoutTable(Element* element)
     : LayoutBlock(element)
-    , m_head(0)
-    , m_foot(0)
-    , m_firstBody(0)
-    , m_currentBorder(0)
+    , m_head(nullptr)
+    , m_foot(nullptr)
+    , m_firstBody(nullptr)
+    , m_currentBorder(nullptr)
     , m_collapsedBordersValid(false)
     , m_hasColElements(false)
     , m_needsSectionRecalc(false)
@@ -410,6 +410,7 @@ void LayoutTable::simplifiedNormalFlowLayout()
         section->layoutRows();
         section->computeOverflowFromCells();
         section->updateLayerTransformAfterLayout();
+        section->addVisualEffectOverflow();
     }
 }
 
@@ -553,6 +554,7 @@ void LayoutTable::layout()
             setLogicalHeight(logicalHeight() + section->logicalHeight());
 
             section->updateLayerTransformAfterLayout();
+            section->addVisualEffectOverflow();
 
             section = sectionBelow(section);
         }
@@ -577,6 +579,7 @@ void LayoutTable::layout()
         invalidateCollapsedBorders();
 
         computeOverflow(clientLogicalBottom());
+        updateScrollInfoAfterLayout();
     }
 
     // FIXME: This value isn't the intrinsic content logical height, but we need
@@ -792,7 +795,7 @@ LayoutTableCol* LayoutTable::firstColumn() const
             return toLayoutTableCol(child);
     }
 
-    return 0;
+    return nullptr;
 }
 
 void LayoutTable::updateColumnCache() const
@@ -832,16 +835,16 @@ LayoutTableCol* LayoutTable::slowColElement(unsigned col, bool* startEdge, bool*
             return columnLayoutObject;
         }
     }
-    return 0;
+    return nullptr;
 }
 
 void LayoutTable::recalcSections() const
 {
     ASSERT(m_needsSectionRecalc);
 
-    m_head = 0;
-    m_foot = 0;
-    m_firstBody = 0;
+    m_head = nullptr;
+    m_foot = nullptr;
+    m_firstBody = nullptr;
     m_hasColElements = false;
     m_hasCellColspanThatDeterminesTableWidth = hasCellColspanThatDeterminesTableWidth();
 
@@ -915,7 +918,7 @@ int LayoutTable::calcBorderStart() const
     if (!numEffCols())
         return 0;
 
-    unsigned borderWidth = 0;
+    int borderWidth = 0;
 
     const BorderValue& tableStartBorder = style()->borderStart();
     if (tableStartBorder.style() == BHIDDEN)
@@ -969,7 +972,7 @@ int LayoutTable::calcBorderEnd() const
     if (!numEffCols())
         return 0;
 
-    unsigned borderWidth = 0;
+    int borderWidth = 0;
 
     const BorderValue& tableEndBorder = style()->borderEnd();
     if (tableEndBorder.style() == BHIDDEN)
@@ -1154,7 +1157,7 @@ LayoutTableSection* LayoutTable::sectionBelow(const LayoutTableSection* section,
     recalcSectionsIfNeeded();
 
     if (section == m_foot)
-        return 0;
+        return nullptr;
 
     LayoutObject* nextSection = section == m_head ? firstChild() : section->nextSibling();
     while (nextSection) {
@@ -1179,7 +1182,7 @@ LayoutTableSection* LayoutTable::bottomSection() const
             return toLayoutTableSection(child);
     }
 
-    return 0;
+    return nullptr;
 }
 
 LayoutTableCell* LayoutTable::cellAbove(const LayoutTableCell* cell) const
@@ -1188,7 +1191,7 @@ LayoutTableCell* LayoutTable::cellAbove(const LayoutTableCell* cell) const
 
     // Find the section and row to look in
     unsigned r = cell->rowIndex();
-    LayoutTableSection* section = 0;
+    LayoutTableSection* section = nullptr;
     unsigned rAbove = 0;
     if (r > 0) {
         // cell is not in the first row, so use the above row in its own section
@@ -1208,7 +1211,7 @@ LayoutTableCell* LayoutTable::cellAbove(const LayoutTableCell* cell) const
         LayoutTableSection::CellStruct& aboveCell = section->cellAt(rAbove, effCol);
         return aboveCell.primaryCell();
     }
-    return 0;
+    return nullptr;
 }
 
 LayoutTableCell* LayoutTable::cellBelow(const LayoutTableCell* cell) const
@@ -1217,7 +1220,7 @@ LayoutTableCell* LayoutTable::cellBelow(const LayoutTableCell* cell) const
 
     // Find the section and row to look in
     unsigned r = cell->rowIndex() + cell->rowSpan() - 1;
-    LayoutTableSection* section = 0;
+    LayoutTableSection* section = nullptr;
     unsigned rBelow = 0;
     if (r < cell->section()->numRows() - 1) {
         // The cell is not in the last row, so use the next row in the section.
@@ -1235,7 +1238,7 @@ LayoutTableCell* LayoutTable::cellBelow(const LayoutTableCell* cell) const
         LayoutTableSection::CellStruct& belowCell = section->cellAt(rBelow, effCol);
         return belowCell.primaryCell();
     }
-    return 0;
+    return nullptr;
 }
 
 LayoutTableCell* LayoutTable::cellBefore(const LayoutTableCell* cell) const
@@ -1245,7 +1248,7 @@ LayoutTableCell* LayoutTable::cellBefore(const LayoutTableCell* cell) const
     LayoutTableSection* section = cell->section();
     unsigned effCol = colToEffCol(cell->col());
     if (!effCol)
-        return 0;
+        return nullptr;
 
     // If we hit a colspan back up to a real cell.
     LayoutTableSection::CellStruct& prevCell = section->cellAt(cell->rowIndex(), effCol - 1);
@@ -1258,7 +1261,7 @@ LayoutTableCell* LayoutTable::cellAfter(const LayoutTableCell* cell) const
 
     unsigned effCol = colToEffCol(cell->col() + cell->colSpan());
     if (effCol >= numEffCols())
-        return 0;
+        return nullptr;
     return cell->section()->primaryCellAt(cell->rowIndex(), effCol);
 }
 
@@ -1308,7 +1311,7 @@ int LayoutTable::firstLineBoxBaseline() const
     return -1;
 }
 
-LayoutRect LayoutTable::overflowClipRect(const LayoutPoint& location, OverlayScrollbarSizeRelevancy relevancy)
+LayoutRect LayoutTable::overflowClipRect(const LayoutPoint& location, OverlayScrollbarSizeRelevancy relevancy) const
 {
     LayoutRect rect = LayoutBlock::overflowClipRect(location, relevancy);
 
@@ -1362,7 +1365,7 @@ bool LayoutTable::nodeAtPoint(HitTestResult& result, const HitTestLocation& loca
 LayoutTable* LayoutTable::createAnonymousWithParent(const LayoutObject* parent)
 {
     RefPtr<ComputedStyle> newStyle = ComputedStyle::createAnonymousStyleWithDisplay(parent->styleRef(), TABLE);
-    LayoutTable* newTable = new LayoutTable(0);
+    LayoutTable* newTable = new LayoutTable(nullptr);
     newTable->setDocumentForAnonymous(&parent->document());
     newTable->setStyle(newStyle.release());
     return newTable;
@@ -1407,11 +1410,17 @@ void LayoutTable::invalidatePaintOfSubtreesIfNeeded(PaintInvalidationState& chil
                 for (LayoutTableCell* cell = row->firstCell(); cell; cell = cell->nextCell()) {
                     LayoutTableCol* column = colElement(cell->col());
                     LayoutTableCol* columnGroup = column ? column->enclosingColumnGroup() : 0;
+                    // Table cells paint container's background on the container's backing instead of its own (if any),
+                    // so we must invalidate it by the containers.
+                    bool invalidated = false;
                     if ((columnGroup && columnGroup->shouldDoFullPaintInvalidation())
                         || (column && column->shouldDoFullPaintInvalidation())
-                        || section->shouldDoFullPaintInvalidation()
-                        || row->shouldDoFullPaintInvalidation())
-                        cell->invalidateDisplayItemClient(*cell);
+                        || section->shouldDoFullPaintInvalidation()) {
+                        section->invalidateDisplayItemClient(*cell);
+                        invalidated = true;
+                    }
+                    if ((!invalidated || row->isPaintInvalidationContainer()) && row->shouldDoFullPaintInvalidation())
+                        row->invalidateDisplayItemClient(*cell);
                 }
             }
         }

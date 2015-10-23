@@ -14,7 +14,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/content_browser_client.h"
 
 class ChromeContentBrowserClientParts;
@@ -33,6 +32,10 @@ class BrowserPermissionsPolicyDelegate;
 
 namespace user_prefs {
 class PrefRegistrySyncable;
+}
+
+namespace version_info {
+enum class Channel;
 }
 
 namespace chrome {
@@ -89,6 +92,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool IsHandledURL(const GURL& url) override;
   bool CanCommitURL(content::RenderProcessHost* process_host,
                     const GURL& url) override;
+  bool IsIllegalOrigin(content::ResourceContext* resource_context,
+                       int child_process_id,
+                       const GURL& origin) override;
   bool ShouldAllowOpenURL(content::SiteInstance* site_instance,
                           const GURL& url) override;
   bool IsSuitableHost(content::RenderProcessHost* process_host,
@@ -154,6 +160,13 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const base::string16& name,
       content::ResourceContext* context,
       const std::vector<std::pair<int, int>>& render_frames) override;
+
+#if defined(ENABLE_WEBRTC)
+  bool AllowWebRTCIdentityCache(const GURL& url,
+                                const GURL& first_party_url,
+                                content::ResourceContext* context) override;
+#endif  // defined(ENABLE_WEBRTC)
+
   net::URLRequestContext* OverrideRequestContextForURL(
       const GURL& url,
       content::ResourceContext* context) override;
@@ -194,7 +207,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                        bool opener_suppressed,
                        content::ResourceContext* context,
                        int render_process_id,
-                       int opener_id,
+                       int opener_render_view_id,
+                       int opener_render_frame_id,
                        bool* no_javascript_access) override;
   void ResourceDispatcherHostCreated() override;
   content::SpeechRecognitionManagerDelegate*
@@ -209,6 +223,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void ClearCookies(content::RenderFrameHost* rfh) override;
   base::FilePath GetDefaultDownloadDirectory() override;
   std::string GetDefaultDownloadName() override;
+  base::FilePath GetShaderDiskCacheDirectory() override;
   void DidCreatePpapiPlugin(content::BrowserPpapiHost* browser_host) override;
   content::BrowserPpapiHost* GetExternalBrowserPpapiHost(
       int plugin_process_id) override;
@@ -239,23 +254,35 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost* render_frame_host,
       blink::WebPageVisibilityState* visibility_state) override;
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_ANDROID)
+  void GetAdditionalMappedFilesForChildProcess(
+      const base::CommandLine& command_line,
+      int child_process_id,
+      content::FileDescriptorInfo* mappings,
+      std::map<int, base::MemoryMappedFile::Region>* regions) override;
+#elif defined(OS_POSIX) && !defined(OS_MACOSX)
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
       content::FileDescriptorInfo* mappings) override;
-#endif
+#endif  // defined(OS_ANDROID)
 #if defined(OS_WIN)
   const wchar_t* GetResourceDllName() override;
   void PreSpawnRenderer(sandbox::TargetPolicy* policy, bool* success) override;
+  base::string16 GetAppContainerSidForSandboxType(
+      int sandbox_type) const override;
 #endif
-  void OverrideRenderFrameMojoServices(
+  void RegisterFrameMojoShellServices(
       content::ServiceRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
+  void RegisterInProcessMojoApplications(
+      StaticMojoApplicationMap* apps) override;
   void OpenURL(content::BrowserContext* browser_context,
                const content::OpenURLParams& params,
                const base::Callback<void(content::WebContents*)>& callback)
       override;
+  content::PresentationServiceDelegate* GetPresentationServiceDelegate(
+      content::WebContents* web_contents) override;
 
   void RecordURLMetric(const std::string& metric, const GURL& url) override;
 
@@ -267,7 +294,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   static void MaybeCopyDisableWebRtcEncryptionSwitch(
       base::CommandLine* to_command_line,
       const base::CommandLine& from_command_line,
-      VersionInfo::Channel channel);
+      version_info::Channel channel);
 #endif
 
   void FileSystemAccessed(
@@ -300,11 +327,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   // versions of Chrome.
   std::set<std::string> allowed_dev_channel_origins_;
 #endif
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  base::ScopedFD v8_natives_fd_;
-  base::ScopedFD v8_snapshot_fd_;
-#endif  // OS_POSIX && !OS_MACOSX
 
   // Vector of additional ChromeContentBrowserClientParts.
   // Parts are deleted in the reverse order they are added.

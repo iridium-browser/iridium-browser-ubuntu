@@ -11,7 +11,7 @@
 #include "sync/engine/model_type_sync_worker.h"
 #include "sync/internal_api/public/non_blocking_sync_common.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
 // Receives and records commit requests sent through the ModelTypeSyncWorker.
 //

@@ -4,12 +4,12 @@
 
 #include "chrome/browser/push_messaging/push_messaging_permission_context.h"
 
-#include "chrome/browser/content_settings/permission_context_uma_util.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/notifications/notification_permission_context.h"
+#include "chrome/browser/notifications/notification_permission_context_factory.h"
+#include "chrome/browser/permissions/permission_context_uma_util.h"
+#include "chrome/browser/permissions/permission_request_id.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/content_settings/core/common/permission_request_id.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -37,12 +37,12 @@ ContentSetting PushMessagingPermissionContext::GetPermissionStatus(
       profile_->GetHostContentSettingsMap()->GetContentSetting(
           requesting_origin, embedding_origin, kPushSettingType, std::string());
 
-  DesktopNotificationService* notification_service =
-      DesktopNotificationServiceFactory::GetForProfile(profile_);
-  DCHECK(notification_service);
+  NotificationPermissionContext* notification_context =
+      NotificationPermissionContextFactory::GetForProfile(profile_);
+  DCHECK(notification_context);
 
   ContentSetting notifications_permission =
-      notification_service->GetPermissionStatus(requesting_origin,
+      notification_context->GetPermissionStatus(requesting_origin,
                                                 embedding_origin);
 
   if (notifications_permission == CONTENT_SETTING_BLOCK ||
@@ -59,12 +59,6 @@ ContentSetting PushMessagingPermissionContext::GetPermissionStatus(
 #else
   return CONTENT_SETTING_BLOCK;
 #endif
-}
-
-void PushMessagingPermissionContext::CancelPermissionRequest(
-    content::WebContents* web_contents, const PermissionRequestID& id) {
-  // TODO(peter): consider implementing this method.
-  NOTIMPLEMENTED() << "CancelPermission not implemented for push messaging";
 }
 
 // Unlike other permissions, push is decided by the following algorithm
@@ -87,11 +81,12 @@ void PushMessagingPermissionContext::DecidePermission(
                         false /* persist */, CONTENT_SETTING_BLOCK);
     return;
   }
-  DesktopNotificationService* notification_service =
-      DesktopNotificationServiceFactory::GetForProfile(profile_);
-  DCHECK(notification_service);
 
-  notification_service->RequestPermission(
+  NotificationPermissionContext* notification_context =
+      NotificationPermissionContextFactory::GetForProfile(profile_);
+  DCHECK(notification_context);
+
+  notification_context->RequestPermission(
       web_contents, id, requesting_origin, user_gesture,
       base::Bind(&PushMessagingPermissionContext::DecidePushPermission,
                  weak_factory_ui_thread_.GetWeakPtr(), id, requesting_origin,
@@ -100,6 +95,10 @@ void PushMessagingPermissionContext::DecidePermission(
   NotifyPermissionSet(id, requesting_origin, embedding_origin, callback,
                       false /* persist */, CONTENT_SETTING_BLOCK);
 #endif
+}
+
+bool PushMessagingPermissionContext::IsRestrictedToSecureOrigins() const {
+  return true;
 }
 
 void PushMessagingPermissionContext::DecidePushPermission(

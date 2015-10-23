@@ -535,15 +535,12 @@ class Assembler : public AssemblerBase {
   // the absolute address of the target.
   // These functions convert between absolute Addresses of Code objects and
   // the relative displacements stored in the code.
-  static inline Address target_address_at(Address pc,
-                                          ConstantPoolArray* constant_pool);
-  static inline void set_target_address_at(Address pc,
-                                           ConstantPoolArray* constant_pool,
-                                           Address target,
-                                           ICacheFlushMode icache_flush_mode =
-                                               FLUSH_ICACHE_IF_NEEDED) ;
+  static inline Address target_address_at(Address pc, Address constant_pool);
+  static inline void set_target_address_at(
+      Address pc, Address constant_pool, Address target,
+      ICacheFlushMode icache_flush_mode = FLUSH_ICACHE_IF_NEEDED);
   static inline Address target_address_at(Address pc, Code* code) {
-    ConstantPoolArray* constant_pool = code ? code->constant_pool() : NULL;
+    Address constant_pool = code ? code->constant_pool() : NULL;
     return target_address_at(pc, constant_pool);
   }
   static inline void set_target_address_at(Address pc,
@@ -551,16 +548,13 @@ class Assembler : public AssemblerBase {
                                            Address target,
                                            ICacheFlushMode icache_flush_mode =
                                                FLUSH_ICACHE_IF_NEEDED) {
-    ConstantPoolArray* constant_pool = code ? code->constant_pool() : NULL;
+    Address constant_pool = code ? code->constant_pool() : NULL;
     set_target_address_at(pc, constant_pool, target, icache_flush_mode);
   }
 
   // Return the code target address at a call site from the return address
   // of that call in the instruction stream.
   static inline Address target_address_from_return_address(Address pc);
-
-  // Return the code target address of the patch debug break slot
-  inline static Address break_address_from_return_address(Address pc);
 
   // This sets the branch destination (which is in the instruction on x64).
   // This is for calls and branches within generated code.
@@ -602,23 +596,11 @@ class Assembler : public AssemblerBase {
       kMoveAddressIntoScratchRegisterInstructionLength +
       kCallScratchRegisterInstructionLength;
 
-  // The js return and debug break slot must be able to contain an indirect
-  // call sequence, some x64 JS code is padded with int3 to make it large
-  // enough to hold an instruction when the debugger patches it.
-  static const int kJSReturnSequenceLength = kCallSequenceLength;
+  // The debug break slot must be able to contain an indirect call sequence.
   static const int kDebugBreakSlotLength = kCallSequenceLength;
-  static const int kPatchDebugBreakSlotReturnOffset = kCallTargetAddressOffset;
-  // Distance between the start of the JS return sequence and where the
-  // 32-bit displacement of a short call would be. The short call is from
-  // SetDebugBreakAtIC from debug-x64.cc.
-  static const int kPatchReturnSequenceAddressOffset =
-      kJSReturnSequenceLength - kPatchDebugBreakSlotReturnOffset;
-  // Distance between the start of the JS return sequence and where the
-  // 32-bit displacement of a short call would be. The short call is from
-  // SetDebugBreakAtIC from debug-x64.cc.
+  // Distance between start of patched debug break slot and the emitted address
+  // to jump to.
   static const int kPatchDebugBreakSlotAddressOffset =
-      kDebugBreakSlotLength - kPatchDebugBreakSlotReturnOffset;
-  static const int kRealPatchReturnSequenceAddressOffset =
       kMoveAddressIntoScratchRegisterInstructionLength - kPointerSize;
 
   // One byte opcode for test eax,0xXXXXXXXX.
@@ -707,6 +689,9 @@ class Assembler : public AssemblerBase {
   // possible to align the pc offset to a multiple
   // of m, where m must be a power of 2.
   void Align(int m);
+  // Insert the smallest number of zero bytes possible to align the pc offset
+  // to a mulitple of m. m must be a power of 2 (>= 2).
+  void DataAlign(int m);
   void Nop(int bytes = 1);
   // Aligns code to something that's optimal for a jump target for the platform.
   void CodeTargetAlign();
@@ -1614,11 +1599,11 @@ class Assembler : public AssemblerBase {
     return pc_offset() - label->pos();
   }
 
-  // Mark address of the ExitJSFrame code.
-  void RecordJSReturn();
+  // Mark generator continuation.
+  void RecordGeneratorContinuation();
 
   // Mark address of a debug break slot.
-  void RecordDebugBreakSlot();
+  void RecordDebugBreakSlot(RelocInfo::Mode mode, int argc = 0);
 
   // Record a comment relocation entry that can be used by a disassembler.
   // Use --code-comments to enable.
@@ -1628,16 +1613,19 @@ class Assembler : public AssemblerBase {
   // Use --trace-deopt to enable.
   void RecordDeoptReason(const int reason, const SourcePosition position);
 
-  // Allocate a constant pool of the correct size for the generated code.
-  Handle<ConstantPoolArray> NewConstantPool(Isolate* isolate);
-
-  // Generate the constant pool for the generated code.
-  void PopulateConstantPool(ConstantPoolArray* constant_pool);
+  void PatchConstantPoolAccessInstruction(int pc_offset, int offset,
+                                          ConstantPoolEntry::Access access,
+                                          ConstantPoolEntry::Type type) {
+    // No embedded constant pool support.
+    UNREACHABLE();
+  }
 
   // Writes a single word of data in the code stream.
   // Used for inline tables, e.g., jump-tables.
   void db(uint8_t data);
   void dd(uint32_t data);
+  void dq(uint64_t data);
+  void dp(uintptr_t data) { dq(data); }
   void dq(Label* label);
 
   PositionsRecorder* positions_recorder() { return &positions_recorder_; }

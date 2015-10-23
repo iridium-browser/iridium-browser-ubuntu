@@ -98,11 +98,11 @@ new file mode 100644
 +%(deps_sha)s
 """
 
-REGRESSION_CONFIDENCE_ERROR_TEMPLATE = """
-We could not reproduce the regression with this test/metric/platform combination
-with enough confidence.
+REGRESSION_NOT_REPRODUCED_MESSAGE_TEMPLATE = """
+Bisect did not clearly reproduce a regression between the given "good"
+and "bad" revisions.
 
-Here are the results for the given "good" and "bad" revisions:
+Results:
 "Good" revision: {good_rev}
 \tMean: {good_mean}
 \tStandard error: {good_std_err}
@@ -113,8 +113,8 @@ Here are the results for the given "good" and "bad" revisions:
 \tStandard error: {bad_std_err}
 \tSample size: {bad_sample_size}
 
-NOTE: There's still a chance that this is actually a regression, but you may
-      need to bisect a different platform."""
+You may want to try bisecting on a different platform or metric.
+"""
 
 # Git branch name used to run bisect try jobs.
 BISECT_TRYJOB_BRANCH = 'bisect-tryjob'
@@ -475,46 +475,42 @@ def _GenerateProfileIfNecessary(command_args):
   return True
 
 
-def _CheckRegressionConfidenceError(
-    good_revision,
-    bad_revision,
-    known_good_value,
-    known_bad_value):
-  """Checks whether we can be confident beyond a certain degree that the given
-  metrics represent a regression.
+def _IsRegressionReproduced(known_good_result, known_bad_result):
+  """Checks whether the regression was reproduced based on the initial values.
 
   Args:
-    good_revision: string representing the commit considered 'good'
-    bad_revision: Same as above for 'bad'.
-    known_good_value: A dict with at least: 'values', 'mean' and 'std_err'
-    known_bad_value: Same as above.
+    known_good_result: A dict with the keys "values", "mean" and "std_err".
+    known_bad_result: Same as above.
 
   Returns:
-    False if there is no error (i.e. we can be confident there's a regression),
-    a string containing the details of the lack of confidence otherwise.
+    True if there is a clear change between the result values for the given
+    good and bad revisions, False otherwise.
   """
-  error = False
-  # Adding good and bad values to a parameter list.
-  confidence_params = []
-  for l in [known_bad_value['values'], known_good_value['values']]:
-    # Flatten if needed, by averaging the values in each nested list
-    if isinstance(l, list) and all([isinstance(x, list) for x in l]):
-      averages = map(math_utils.Mean, l)
-      confidence_params.append(averages)
-    else:
-      confidence_params.append(l)
-  regression_confidence = BisectResults.ConfidenceScore(*confidence_params)
-  if regression_confidence < REGRESSION_CONFIDENCE:
-    error = REGRESSION_CONFIDENCE_ERROR_TEMPLATE.format(
-        good_rev=good_revision,
-        good_mean=known_good_value['mean'],
-        good_std_err=known_good_value['std_err'],
-        good_sample_size=len(known_good_value['values']),
-        bad_rev=bad_revision,
-        bad_mean=known_bad_value['mean'],
-        bad_std_err=known_bad_value['std_err'],
-        bad_sample_size=len(known_bad_value['values']))
-  return error
+  def PossiblyFlatten(values):
+    """Flattens if needed, by averaging the values in each nested list."""
+    if isinstance(values, list) and all(isinstance(x, list) for x in values):
+      return map(math_utils.Mean, values)
+    return values
+
+  p_value = BisectResults.ConfidenceScore(
+      PossiblyFlatten(known_bad_result['values']),
+      PossiblyFlatten(known_good_result['values']),
+      accept_single_bad_or_good=True)
+
+  return p_value > REGRESSION_CONFIDENCE
+
+
+def _RegressionNotReproducedWarningMessage(
+    good_revision, bad_revision, known_good_value, known_bad_value):
+  return REGRESSION_NOT_REPRODUCED_MESSAGE_TEMPLATE.format(
+      good_rev=good_revision,
+      good_mean=known_good_value['mean'],
+      good_std_err=known_good_value['std_err'],
+      good_sample_size=len(known_good_value['values']),
+      bad_rev=bad_revision,
+      bad_mean=known_bad_value['mean'],
+      bad_std_err=known_bad_value['std_err'],
+      bad_sample_size=len(known_bad_value['values']))
 
 
 class DepotDirectoryRegistry(object):
@@ -1218,6 +1214,18 @@ class BisectPerformanceMetrics(object):
     """
     if self.opts.debug_ignore_build:
       return True
+    # Some "runhooks" calls create symlinks that other (older?) versions
+    # do not handle correctly causing the build to fail.  We want to avoid
+    # clearing the entire out/ directory so that changes close together will
+    # build faster so we just clear out all symlinks on the expectation that
+    # the next "runhooks" call will recreate everything properly.  Ignore
+    # failures (like Windows that doesn't have "find").
+    try:
+      bisect_utils.RunProcess(
+          ['find', 'out/', '-type', 'l', '-exec', 'rm', '-f', '{}', ';'],
+          cwd=self.src_cwd, shell=False)
+    except OSError:
+      pass
     return not bisect_utils.RunGClient(['runhooks'], cwd=self.src_cwd)
 
   def _IsBisectModeUsingMetric(self):
@@ -1229,37 +1237,6 @@ class BisectPerformanceMetrics(object):
 
   def _IsBisectModeStandardDeviation(self):
     return self.opts.bisect_mode in [bisect_utils.BISECT_MODE_STD_DEV]
-
-  def GetCompatibleCommand(self, command_to_run, revision, depot):
-    """Return a possibly modified test command depending on the revision.
-
-    Prior to crrev.com/274857 *only* android-chromium-testshell
-    Then until crrev.com/276628 *both* (android-chromium-testshell and
-    android-chrome-shell) work. After that rev 276628 *only*
-    android-chrome-shell works. The bisect_perf_regression.py script should
-    handle these cases and set appropriate browser type based on revision.
-    """
-    if self.opts.target_platform in ['android']:
-      # When its a third_party depot, get the chromium revision.
-      if depot != 'chromium':
-        revision = bisect_utils.CheckRunGit(
-            ['rev-parse', 'HEAD'], cwd=self.src_cwd).strip()
-      commit_position = source_control.GetCommitPosition(revision,
-                                                         cwd=self.src_cwd)
-      if not commit_position:
-        return command_to_run
-      cmd_re = re.compile(r'--browser=(?P<browser_type>\S+)')
-      matches = cmd_re.search(command_to_run)
-      if bisect_utils.IsStringInt(commit_position) and matches:
-        cmd_browser = matches.group('browser_type')
-        if commit_position <= 274857 and cmd_browser == 'android-chrome-shell':
-          return command_to_run.replace(cmd_browser,
-                                        'android-chromium-testshell')
-        elif (commit_position >= 276628 and
-              cmd_browser == 'android-chromium-testshell'):
-          return command_to_run.replace(cmd_browser,
-                                        'android-chrome-shell')
-    return command_to_run
 
   def RunPerformanceTestAndParseResults(
       self, command_to_run, metric, reset_on_first_run=False,
@@ -1533,9 +1510,6 @@ class BisectPerformanceMetrics(object):
       return ('Failed to build revision: [%s]' % str(revision),
               BUILD_RESULT_FAIL)
     after_build_time = time.time()
-
-    # Possibly alter the command.
-    command = self.GetCompatibleCommand(command, revision, depot)
 
     # Run the command and get the results.
     results = self.RunPerformanceTestAndParseResults(
@@ -2294,9 +2268,18 @@ class BisectPerformanceMetrics(object):
 
       # We need these reference values to determine if later runs should be
       # classified as pass or fail.
+
       known_bad_value = bad_results[0]
       known_good_value = good_results[0]
 
+      # Abort bisect early when the return codes for known good
+      # and known bad revisions are same.
+      if (self._IsBisectModeReturnCode() and
+          known_bad_value['mean'] == known_good_value['mean']):
+        return BisectResults(abort_reason=('known good and known bad revisions '
+            'returned same return code (return code=%s). '
+            'Continuing bisect might not yield any results.' %
+            known_bad_value['mean']))
       # Check the direction of improvement only if the improvement_direction
       # option is set to a specific direction (1 for higher is better or -1 for
       # lower is better).
@@ -2344,18 +2327,15 @@ class BisectPerformanceMetrics(object):
 
       # Check how likely it is that the good and bad results are different
       # beyond chance-induced variation.
-      confidence_error = False
-      if not self.opts.debug_ignore_regression_confidence:
-        confidence_error = _CheckRegressionConfidenceError(good_revision,
-                                                           bad_revision,
-                                                           known_good_value,
-                                                           known_bad_value)
-        if confidence_error:
+      if not (self.opts.debug_ignore_regression_confidence or
+              self._IsBisectModeReturnCode()):
+        if not _IsRegressionReproduced(known_good_value, known_bad_value):
           # If there is no significant difference between "good" and "bad"
           # revision results, then the "bad revision" is considered "good".
           # TODO(qyearsley): Remove this if it is not necessary.
           bad_revision_state.passed = True
-          self.warnings.append(confidence_error)
+          self.warnings.append(_RegressionNotReproducedWarningMessage(
+              good_revision, bad_revision, known_good_value, known_bad_value))
           return BisectResults(bisect_state, self.depot_registry, self.opts,
                                self.warnings)
 
@@ -2692,9 +2672,10 @@ class BisectOptions(object):
     group.add_argument('--output_buildbot_annotations', action='store_true',
                        help='Add extra annotation output for buildbot.')
     group.add_argument('--target_arch', default='ia32',
-                       dest='target_arch', choices=['ia32', 'x64', 'arm'],
+                       dest='target_arch',
+                       choices=['ia32', 'x64', 'arm', 'arm64'],
                        help='The target build architecture. Choices are "ia32" '
-                            '(default), "x64" or "arm".')
+                            '(default), "x64", "arm" or "arm64".')
     group.add_argument('--target_build_type', default='Release',
                        choices=['Release', 'Debug', 'Release_x64'],
                        help='The target build type. Choices are "Release" '
@@ -2832,8 +2813,8 @@ def main():
         bisect_utils.OutputAnnotationStepClosed()
       if issue_closed:
         results = BisectResults(abort_reason='the bug is closed.')
-        bisect_test = BisectPerformanceMetrics(opts, os.getcwd())
-        bisect_test.printer.FormatAndPrintResults(results)
+        bisect_printer = BisectPrinter(opts)
+        bisect_printer.FormatAndPrintResults(results)
         return 0
 
     if opts.extra_src:

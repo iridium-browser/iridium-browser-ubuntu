@@ -16,10 +16,15 @@ namespace trace_event {
 // Dump provider which collects process-wide memory stats.
 class BASE_EXPORT MallocDumpProvider : public MemoryDumpProvider {
  public:
+  // Name of the allocated_objects dump. Use this to declare suballocator dumps
+  // from other dump providers.
+  static const char kAllocatedObjects[];
+
   static MallocDumpProvider* GetInstance();
 
   // MemoryDumpProvider implementation.
-  bool OnMemoryDump(ProcessMemoryDump* pmd) override;
+  bool OnMemoryDump(const MemoryDumpArgs& args,
+                    ProcessMemoryDump* pmd) override;
 
  private:
   friend struct DefaultSingletonTraits<MallocDumpProvider>;

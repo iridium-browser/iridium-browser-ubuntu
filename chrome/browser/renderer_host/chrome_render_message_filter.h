@@ -13,12 +13,15 @@
 #include "content/public/browser/browser_message_filter.h"
 #include "third_party/WebKit/public/web/WebCache.h"
 
-class CookieSettings;
 class GURL;
 class Profile;
 
 namespace chrome_browser_net {
 class Predictor;
+}
+
+namespace content_settings {
+class CookieSettings;
 }
 
 namespace network_hints {
@@ -35,19 +38,6 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
  public:
   ChromeRenderMessageFilter(int render_process_id, Profile* profile);
 
-  class V8HeapStatsDetails {
-   public:
-    V8HeapStatsDetails(size_t v8_memory_allocated,
-                       size_t v8_memory_used)
-        : v8_memory_allocated_(v8_memory_allocated),
-          v8_memory_used_(v8_memory_used) {}
-    size_t v8_memory_allocated() const { return v8_memory_allocated_; }
-    size_t v8_memory_used() const { return v8_memory_used_; }
-   private:
-    size_t v8_memory_allocated_;
-    size_t v8_memory_used_;
-  };
-
   // content::BrowserMessageFilter methods:
   bool OnMessageReceived(const IPC::Message& message) override;
   void OverrideThreadForMessage(const IPC::Message& message,
@@ -60,10 +50,8 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
   ~ChromeRenderMessageFilter() override;
 
   void OnDnsPrefetch(const network_hints::LookupRequest& request);
-  void OnPreconnect(const GURL& url, int count);
-  void OnResourceTypeStats(const blink::WebCache::ResourceTypeStats& stats);
+  void OnPreconnect(const GURL& url, bool allow_credentials, int count);
   void OnUpdatedCacheStats(const blink::WebCache::UsageStats& stats);
-  void OnV8HeapStats(int v8_memory_allocated, int v8_memory_used);
 
   void OnAllowDatabase(int render_frame_id,
                        const GURL& origin_url,
@@ -138,7 +126,7 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
   chrome_browser_net::Predictor* predictor_;
 
   // Used to look up permissions at database creation time.
-  scoped_refptr<CookieSettings> cookie_settings_;
+  scoped_refptr<content_settings::CookieSettings> cookie_settings_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeRenderMessageFilter);
 };

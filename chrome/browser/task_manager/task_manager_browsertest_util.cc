@@ -4,17 +4,22 @@
 
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
 
-#include "base/message_loop/message_loop.h"
+#include "base/command_line.h"
+#include "base/location.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/strings/pattern.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/resource_provider.h"
 #include "chrome/browser/task_manager/task_manager.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/strings/grit/extensions_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -78,7 +83,8 @@ class ResourceChangeObserver : public TaskManagerModelObserver {
     if (!IsSatisfied())
       return;
 
-    base::MessageLoop::current()->PostTask(FROM_HERE, run_loop_.QuitClosure());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  run_loop_.QuitClosure());
   }
 
   bool IsSatisfied() { return CountMatches() == required_count_; }
@@ -86,7 +92,7 @@ class ResourceChangeObserver : public TaskManagerModelObserver {
   int CountMatches() {
     int match_count = 0;
     for (int i = 0; i < model_->ResourceCount(); i++) {
-      if (!MatchPattern(model_->GetResourceTitle(i), title_pattern_))
+      if (!base::MatchPattern(model_->GetResourceTitle(i), title_pattern_))
         continue;
 
       if (GetColumnValue(i) < min_column_value_)
@@ -133,7 +139,8 @@ class ResourceChangeObserver : public TaskManagerModelObserver {
   }
 
   void OnTimeout() {
-    base::MessageLoop::current()->PostTask(FROM_HERE, run_loop_.QuitClosure());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  run_loop_.QuitClosure());
     FAIL() << "Timed out.\n" << DumpTaskManagerModel();
   }
 
@@ -171,6 +178,11 @@ class ResourceChangeObserver : public TaskManagerModelObserver {
 };
 
 }  // namespace
+
+void EnableOldTaskManager() {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisableNewTaskManager);
+}
 
 void WaitForTaskManagerRows(int required_count,
                             const base::string16& title_pattern) {
@@ -249,6 +261,14 @@ base::string16 MatchSubframe(const char* title) {
 
 base::string16 MatchAnySubframe() {
   return MatchSubframe("*");
+}
+
+base::string16 MatchUtility(const base::string16& title) {
+  return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_UTILITY_PREFIX, title);
+}
+
+base::string16 MatchAnyUtility() {
+  return MatchUtility(base::ASCIIToUTF16("*"));
 }
 
 }  // namespace browsertest_util

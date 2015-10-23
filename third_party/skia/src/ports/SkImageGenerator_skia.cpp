@@ -46,10 +46,8 @@ protected:
     SkData* onRefEncodedData() override {
         return SkRef(fData.get());
     }
-
-    virtual Result onGetPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
-                               const Options&,
-                               SkPMColor ctableEntries[], int* ctableCount) override {
+    bool onGetPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
+                     SkPMColor ctableEntries[], int* ctableCount) override {
         SkMemoryStream stream(fData->data(), fData->size(), false);
         SkAutoTUnref<BareMemoryAllocator> allocator(SkNEW_ARGS(BareMemoryAllocator,
                                                                (info, pixels, rowBytes)));
@@ -60,7 +58,7 @@ protected:
         const SkImageDecoder::Result result = fDecoder->decode(&stream, &bm, info.colorType(),
                                                                SkImageDecoder::kDecodePixels_Mode);
         if (SkImageDecoder::kFailure == result) {
-            return kInvalidInput;
+            return false;
         }
 
         SkASSERT(info.colorType() == bm.info().colorType());
@@ -70,16 +68,13 @@ protected:
 
             SkColorTable* ctable = bm.getColorTable();
             if (NULL == ctable) {
-                return kInvalidConversion;
+                return false;
             }
             const int count = ctable->count();
             memcpy(ctableEntries, ctable->readColors(), count * sizeof(SkPMColor));
             *ctableCount = count;
         }
-        if (SkImageDecoder::kPartialSuccess == result) {
-            return kIncompleteInput;
-        }
-        return kSuccess;
+        return true;
     }
 
     bool onGetYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3],
@@ -92,11 +87,7 @@ private:
     typedef SkImageGenerator INHERITED;
 };
 
-SkImageGenerator* SkImageGenerator::NewFromData(SkData* data) {
-    if (NULL == data) {
-        return NULL;
-    }
-
+SkImageGenerator* SkImageGenerator::NewFromEncodedImpl(SkData* data) {
     SkMemoryStream stream(data->data(), data->size(), false);
     SkImageDecoder* decoder = SkImageDecoder::Factory(&stream);
     if (NULL == decoder) {

@@ -20,12 +20,12 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/chrome_bookmark_client.h"
-#include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
+#include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
+#include "chrome/browser/sync/test/integration/await_match_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/multi_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
@@ -36,6 +36,7 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/bookmarks/managed/managed_bookmark_service.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_util.h"
 #include "components/history/core/browser/history_db_task.h"
@@ -463,8 +464,9 @@ const BookmarkNode* GetSyncedBookmarksNode(int index) {
 }
 
 const BookmarkNode* GetManagedNode(int index) {
-  return ChromeBookmarkClientFactory::GetForProfile(
-      sync_datatype_helper::test()->GetProfile(index))->managed_node();
+  return ManagedBookmarkServiceFactory::GetForProfile(
+             sync_datatype_helper::test()->GetProfile(index))
+      ->managed_node();
 }
 
 BookmarkModel* GetVerifierBookmarkModel() {
@@ -813,6 +815,8 @@ bool AwaitAllModelsMatch() {
 
 namespace {
 
+// TODO(pvalenzuela): Remove this class and instead use
+// AwaitMatchStatusChangeChecker.
 class CountBookmarksWithTitlesMatchingChecker
     : public SingleClientStatusChangeChecker {
  public:
@@ -824,7 +828,7 @@ class CountBookmarksWithTitlesMatchingChecker
         profile_index_(profile_index),
         title_(title),
         expected_count_(expected_count) {
-    DCHECK_GE(0, expected_count) << "expected_count must be non-negative.";
+    DCHECK_GE(expected_count, 0) << "expected_count must be non-negative.";
   }
 
   bool IsExitConditionSatisfied() override {
@@ -853,6 +857,32 @@ bool AwaitCountBookmarksWithTitlesMatching(int profile,
                                                   profile,
                                                   title,
                                                   expected_count);
+  checker.Wait();
+  return !checker.TimedOut();
+}
+
+
+bool BookmarkCountsByUrlMatch(int profile,
+                              const GURL& url,
+                              int expected_count) {
+  int actual_count = CountBookmarksWithUrlsMatching(profile, url);
+  if (expected_count != actual_count) {
+    DVLOG(1) << base::StringPrintf("Expected %d URL(s), but there were %d.",
+                                   expected_count,
+                                   actual_count);
+    return false;
+  }
+  return true;
+}
+
+bool AwaitCountBookmarksWithUrlsMatching(int profile,
+                                         const GURL& url,
+                                         int expected_count) {
+  AwaitMatchStatusChangeChecker checker(base::Bind(BookmarkCountsByUrlMatch,
+                                                   profile,
+                                                   base::ConstRef(url),
+                                                   expected_count),
+                                        "Bookmark URL counts match.");
   checker.Wait();
   return !checker.TimedOut();
 }
@@ -904,6 +934,12 @@ int CountBookmarksWithTitlesMatching(int profile, const std::string& title) {
                                       base::UTF8ToUTF16(title));
 }
 
+int CountBookmarksWithUrlsMatching(int profile, const GURL& url) {
+  std::vector<const BookmarkNode*> nodes;
+  GetBookmarkModel(profile)->GetNodesByURL(url, &nodes);
+  return nodes.size();
+}
+
 int CountFoldersWithTitlesMatching(int profile, const std::string& title) {
   return CountNodesWithTitlesMatching(GetBookmarkModel(profile),
                                       BookmarkNode::FOLDER,
@@ -929,7 +965,8 @@ gfx::Image CreateFavicon(SkColor color) {
 
 gfx::Image Create1xFaviconFromPNGFile(const std::string& path) {
   const char* kPNGExtension = ".png";
-  if (!EndsWith(path, kPNGExtension, false))
+  if (!base::EndsWith(path, kPNGExtension,
+                      base::CompareCase::INSENSITIVE_ASCII))
     return gfx::Image();
 
   base::FilePath full_path;

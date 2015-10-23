@@ -60,10 +60,8 @@ class ChromeSSLHostStateDelegate : public content::SSLHostStateDelegate {
   void SetClock(scoped_ptr<base::Clock> clock);
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(ForgetInstantlySSLHostStateDelegateTest,
-                           MakeAndForgetException);
-  FRIEND_TEST_ALL_PREFIXES(RememberSSLHostStateDelegateTest, AfterRestart);
-  FRIEND_TEST_ALL_PREFIXES(RememberSSLHostStateDelegateTest,
+  FRIEND_TEST_ALL_PREFIXES(DefaultMemorySSLHostStateDelegateTest, AfterRestart);
+  FRIEND_TEST_ALL_PREFIXES(DefaultMemorySSLHostStateDelegateTest,
                            QueryPolicyExpired);
 
   // Used to specify whether new content setting entries should be created if
@@ -104,7 +102,6 @@ class ChromeSSLHostStateDelegate : public content::SSLHostStateDelegate {
 
   scoped_ptr<base::Clock> clock_;
   RememberSSLExceptionDecisionsDisposition should_remember_ssl_decisions_;
-  base::TimeDelta default_ssl_cert_decision_expiration_delta_;
   Profile* profile_;
 
   // A BrokenHostEntry is a pair of (host, process_id) that indicates the host

@@ -10,6 +10,7 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 
 namespace gcm {
@@ -30,6 +31,8 @@ class InstanceID {
     INVALID_PARAMETER,
     // Instance ID is disabled.
     DISABLED,
+    // Previous asynchronous operation is still pending to finish.
+    ASYNC_OPERATION_PENDING,
     // Network socket error.
     NETWORK_ERROR,
     // Problem at the server.
@@ -55,8 +58,8 @@ class InstanceID {
   // |app_id|: identifies the application that uses the Instance ID.
   // |gcm_driver|: driver to access the GCM functionalities needed to support
   //               Instance ID.
-  static InstanceID* Create(const std::string& app_id,
-                            gcm::GCMDriver* gcm_driver);
+  static scoped_ptr<InstanceID> Create(const std::string& app_id,
+                                       gcm::GCMDriver* gcm_driver);
 
   virtual ~InstanceID();
 

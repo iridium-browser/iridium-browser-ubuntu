@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/printing/print_view_manager_observer.h"
+#include "chrome/browser/ui/webui/print_preview/print_preview_distiller.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -122,11 +123,15 @@ class PrintPreviewHandler
   // Gets the list of printers. |args| is unused.
   void HandleGetPrinters(const base::ListValue* args);
 
-  // Starts getting all local privet printers. |arg| is unused.
+  // Starts getting all local privet printers. |args| is unused.
   void HandleGetPrivetPrinters(const base::ListValue* args);
 
-  // Starts getting all local extension managed printers. |arg| is unused.
+  // Starts getting all local extension managed printers. |args| is unused.
   void HandleGetExtensionPrinters(const base::ListValue* args);
+
+  // Grants an extension access to a provisional printer.  First element of
+  // |args| is the provisional printer ID.
+  void HandleGrantExtensionPrinterAccess(const base::ListValue* args);
 
   // Stops getting all local privet printers. |arg| is unused.
   void HandleStopGetPrivetPrinters(const base::ListValue* args);
@@ -308,6 +313,13 @@ class PrintPreviewHandler
   //     they manage.
   void OnGotPrintersForExtension(const base::ListValue& printers, bool done);
 
+  // Called when an extension reports information requested for a provisional
+  // printer.
+  // |printer_id|: The provisional printer id.
+  // |printer_info|: The data reported by the extension.
+  void OnGotExtensionPrinterInfo(const std::string& printer_id,
+                                 const base::DictionaryValue& printer_info);
+
   // Called when an extension reports the set of print capabilites for a
   // printer.
   // |printer_id|: The id of the printer whose capabilities are reported.
@@ -321,6 +333,11 @@ class PrintPreviewHandler
   // |status|: The returned print job status. Useful for reporting a specific
   //     error.
   void OnExtensionPrintResult(bool success, const std::string& status);
+
+  // Called when the DOM Distiller determines whether or not this page can
+  // be distilled.
+  // |distillable|: Whether or not this page can be distilled.
+  void HandleIsPageDistillableResult(bool distillable);
 
   // Register/unregister from notifications of changes done to the GAIA
   // cookie.
@@ -377,6 +394,10 @@ class PrintPreviewHandler
   // Notifies tests that want to know if the PDF has been saved. This doesn't
   // notify the test if it was a successful save, only that it was attempted.
   base::Closure pdf_file_saved_closure_;
+
+  // A print preview that is responsible for rendering the page after
+  // being processed by the DOM Distiller.
+  scoped_ptr<PrintPreviewDistiller> print_preview_distiller_;
 
   base::WeakPtrFactory<PrintPreviewHandler> weak_factory_;
 

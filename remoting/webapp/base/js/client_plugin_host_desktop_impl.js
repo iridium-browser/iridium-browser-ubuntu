@@ -41,12 +41,6 @@ remoting.ClientPlugin.HostDesktopImpl = function(plugin, postMessageCallback) {
   this.defineEvents(base.values(remoting.HostDesktop.Events));
 };
 
-/** @return {boolean} Whether the host supports desktop resizing. */
-remoting.ClientPlugin.HostDesktopImpl.prototype.isResizable = function() {
-  return this.plugin_.hasFeature(
-      remoting.ClientPlugin.Feature.NOTIFY_CLIENT_RESOLUTION);
-};
-
 /** @return {{width:number, height:number, xDpi:number, yDpi:number}} */
 remoting.ClientPlugin.HostDesktopImpl.prototype.getDimensions = function() {
   return {
@@ -64,18 +58,16 @@ remoting.ClientPlugin.HostDesktopImpl.prototype.getDimensions = function() {
  */
 remoting.ClientPlugin.HostDesktopImpl.prototype.resize = function(
     width, height, deviceScale) {
-  if (this.isResizable()) {
-    var dpi = Math.floor(deviceScale * 96);
-    this.postMessageCallback_({
-      method: 'notifyClientResolution',
-      data: {
-        width: Math.floor(width * deviceScale),
-        height: Math.floor(height * deviceScale),
-        x_dpi: dpi,
-        y_dpi: dpi
-      }
-    });
-  }
+  var dpi = Math.floor(deviceScale * 96);
+  this.postMessageCallback_({
+    method: 'notifyClientResolution',
+    data: {
+      width: Math.floor(width * deviceScale),
+      height: Math.floor(height * deviceScale),
+      x_dpi: dpi,
+      y_dpi: dpi
+    }
+  });
 };
 
 /**
@@ -106,7 +98,7 @@ remoting.ClientPlugin.HostDesktopImpl.prototype.onShapeUpdated =
     function(message) {
   var shapes = base.getArrayAttr(message.data, 'rects');
   var rects = shapes.map(
-    /** @param {Array.<number>} shape */
+    /** @param {Array<number>} shape */
     function(shape) {
       if (!Array.isArray(shape) || shape.length != 4) {
         throw 'Received invalid onDesktopShape message';

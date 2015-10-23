@@ -5,10 +5,11 @@
 #include "ui/views/controls/button/blue_button.h"
 
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/vector2d.h"
-#include "ui/gfx/sys_color_change_listener.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/label_button_border.h"
+#include "ui/views/resources/grit/views_resources.h"
 
 namespace views {
 
@@ -26,7 +27,7 @@ BlueButton::~BlueButton() {}
 
 void BlueButton::ResetColorsFromNativeTheme() {
   LabelButton::ResetColorsFromNativeTheme();
-  if (!gfx::IsInvertedColorScheme()) {
+  if (!color_utils::IsInvertedColorScheme()) {
     SetTextColor(STATE_NORMAL, GetNativeTheme()->
         GetSystemColor(ui::NativeTheme::kColorId_BlueButtonEnabledColor));
     SetTextColor(STATE_HOVERED, GetNativeTheme()->
@@ -51,7 +52,8 @@ const char* BlueButton::GetClassName() const {
 scoped_ptr<LabelButtonBorder> BlueButton::CreateDefaultBorder() const {
   // Insets for splitting the images.
   const gfx::Insets insets(5, 5, 5, 5);
-  scoped_ptr<LabelButtonBorder> button_border(new LabelButtonBorder(style()));
+  scoped_ptr<LabelButtonAssetBorder> button_border(
+      new LabelButtonAssetBorder(style()));
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   button_border->SetPainter(false, STATE_NORMAL, Painter::CreateImagePainter(
       *rb.GetImageSkiaNamed(IDR_BLUE_BUTTON_NORMAL), insets));

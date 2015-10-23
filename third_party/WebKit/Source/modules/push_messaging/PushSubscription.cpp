@@ -17,10 +17,11 @@
 
 namespace blink {
 
-PushSubscription* PushSubscription::take(ScriptPromiseResolver*, WebPushSubscription* pushSubscription, ServiceWorkerRegistration* serviceWorkerRegistration)
+PushSubscription* PushSubscription::take(ScriptPromiseResolver*, PassOwnPtr<WebPushSubscription> pushSubscription, ServiceWorkerRegistration* serviceWorkerRegistration)
 {
-    OwnPtr<WebPushSubscription> subscription = adoptPtr(pushSubscription);
-    return new PushSubscription(subscription->endpoint, subscription->subscriptionId, serviceWorkerRegistration);
+    if (!pushSubscription)
+        return nullptr;
+    return new PushSubscription(*pushSubscription, serviceWorkerRegistration);
 }
 
 void PushSubscription::dispose(WebPushSubscription* pushSubscription)
@@ -29,9 +30,9 @@ void PushSubscription::dispose(WebPushSubscription* pushSubscription)
         delete pushSubscription;
 }
 
-PushSubscription::PushSubscription(const String& endpoint, const String& subscriptionId, ServiceWorkerRegistration* serviceWorkerRegistration)
-    : m_endpoint(endpoint)
-    , m_subscriptionId(subscriptionId)
+PushSubscription::PushSubscription(const WebPushSubscription& subscription, ServiceWorkerRegistration* serviceWorkerRegistration)
+    : m_endpoint(subscription.endpoint)
+    , m_curve25519dh(DOMArrayBuffer::create(subscription.curve25519dh.data(), subscription.curve25519dh.size()))
     , m_serviceWorkerRegistration(serviceWorkerRegistration)
 {
 }
@@ -40,16 +41,19 @@ PushSubscription::~PushSubscription()
 {
 }
 
-String PushSubscription::endpoint() const
+KURL PushSubscription::endpoint() const
 {
-    // TODO(peter): Remove all plumbing which separates the endpoint from the subscriptionId
-    // after the deprecation period has finished. https://crbug.com/477401.
-    return m_endpoint + "/" + m_subscriptionId;
+    return m_endpoint;
+}
+
+PassRefPtr<DOMArrayBuffer> PushSubscription::curve25519dh() const
+{
+    return m_curve25519dh;
 }
 
 ScriptPromise PushSubscription::unsubscribe(ScriptState* scriptState)
 {
-    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     WebPushProvider* webPushProvider = Platform::current()->pushProvider();
@@ -63,7 +67,9 @@ ScriptValue PushSubscription::toJSONForBinding(ScriptState* scriptState)
 {
     V8ObjectBuilder result(scriptState);
     result.addString("endpoint", endpoint());
-    result.addString("subscriptionId", subscriptionId());
+
+    // TODO(peter): Include |curve25519dh| in the serialized JSON blob if the intended
+    // serialization behavior gets defined in the spec.
 
     return result.scriptValue();
 }

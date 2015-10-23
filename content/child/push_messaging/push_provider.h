@@ -5,7 +5,9 @@
 #ifndef CONTENT_CHILD_PUSH_MESSAGING_PUSH_PROVIDER_H_
 #define CONTENT_CHILD_PUSH_MESSAGING_PUSH_PROVIDER_H_
 
+#include <stdint.h>
 #include <string>
+#include <vector>
 
 #include "base/id_map.h"
 #include "base/memory/ref_counted.h"
@@ -63,17 +65,18 @@ class PushProvider : public blink::WebPushProvider,
                PushDispatcher* push_dispatcher);
 
   // IPC message handlers.
-  void OnRegisterFromWorkerSuccess(int request_id,
-                                   const GURL& endpoint,
-                                   const std::string& registration_id);
-  void OnRegisterFromWorkerError(int request_id, PushRegistrationStatus status);
-  void OnUnregisterSuccess(int request_id, bool did_unregister);
-  void OnUnregisterError(int request_id,
-                         blink::WebPushError::ErrorType error_type,
-                         const std::string& error_message);
+  void OnSubscribeFromWorkerSuccess(int request_id,
+                                    const GURL& endpoint,
+                                    const std::vector<uint8_t>& curve25519dh);
+  void OnSubscribeFromWorkerError(int request_id,
+                                  PushRegistrationStatus status);
+  void OnUnsubscribeSuccess(int request_id, bool did_unsubscribe);
+  void OnUnsubscribeError(int request_id,
+                          blink::WebPushError::ErrorType error_type,
+                          const std::string& error_message);
   void OnGetRegistrationSuccess(int request_id,
                                 const GURL& endpoint,
-                                const std::string& registration_id);
+                                const std::vector<uint8_t>& curve25519dh);
   void OnGetRegistrationError(int request_id, PushGetRegistrationStatus status);
   void OnGetPermissionStatusSuccess(int request_id,
                                     blink::WebPushPermissionStatus status);

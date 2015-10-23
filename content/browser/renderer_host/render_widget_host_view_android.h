@@ -105,10 +105,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   float GetTopControlsHeight() const override;
   void UpdateCursor(const WebCursor& cursor) override;
   void SetIsLoading(bool is_loading) override;
-  void TextInputTypeChanged(ui::TextInputType type,
-                            ui::TextInputMode input_mode,
-                            bool can_compose_inline,
-                            int flags) override;
+  void TextInputStateChanged(
+      const ViewHostMsg_TextInputState_Params& params) override;
   void ImeCancelComposition() override;
   void ImeCompositionRangeChanged(
       const gfx::Range& range,
@@ -154,6 +152,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
                              scoped_ptr<cc::CompositorFrame> frame) override;
   void DidOverscroll(const DidOverscrollParams& params) override;
   void DidStopFlinging() override;
+  uint32_t GetSurfaceIdNamespace() override;
   void ShowDisambiguationPopup(const gfx::Rect& rect_pixels,
                                const SkBitmap& zoomed_bitmap) override;
   scoped_ptr<SyntheticGestureTarget> CreateSyntheticGestureTarget() override;
@@ -181,8 +180,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void OnVSync(base::TimeTicks frame_time,
                base::TimeDelta vsync_period) override;
   void OnAnimate(base::TimeTicks begin_frame_time) override;
-  void OnActivityPaused() override;
-  void OnActivityResumed() override;
+  void OnActivityStopped() override;
+  void OnActivityStarted() override;
 
   // DelegatedFrameEvictor implementation
   void EvictDelegatedFrame() override;
@@ -211,7 +210,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void SendMouseWheelEvent(const blink::WebMouseWheelEvent& event);
   void SendGestureEvent(const blink::WebGestureEvent& event);
 
-  void OnTextInputStateChanged(const ViewHostMsg_TextInputState_Params& params);
   void OnDidChangeBodyBackgroundColor(SkColor color);
   void OnStartContentIntent(const GURL& content_url);
   void OnSetNeedsBeginFrames(bool enabled);
@@ -262,9 +260,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
 
   void DestroyDelegatedContent();
   void CheckOutputSurfaceChanged(uint32 output_surface_id);
-  void SubmitFrame(scoped_ptr<cc::DelegatedFrameData> frame_data);
+  void SubmitFrame(scoped_ptr<cc::CompositorFrame> frame_data);
   void SwapDelegatedFrame(uint32 output_surface_id,
-                          scoped_ptr<cc::DelegatedFrameData> frame_data);
+                          scoped_ptr<cc::CompositorFrame> frame_data);
   void SendDelegatedFrameAck(uint32 output_surface_id);
   void SendReturnedDelegatedResources(uint32 output_surface_id);
 
@@ -359,6 +357,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   cc::SurfaceId surface_id_;
   gfx::Size current_surface_size_;
   cc::ReturnedResourceArray surface_returned_resources_;
+  gfx::Vector2dF location_bar_content_translation_;
+  cc::ViewportSelection current_viewport_selection_;
 
   // The most recent texture size that was pushed to the texture layer.
   gfx::Size texture_size_in_layer_;

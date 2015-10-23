@@ -35,14 +35,8 @@ class WebViewGuestDelegate {
   // Called when context menu operation was handled.
   virtual bool HandleContextMenu(const content::ContextMenuParams& params) = 0;
 
-  // Called to attach helpers just after additional initialization is performed.
-  virtual void OnAttachWebViewHelpers(content::WebContents* contents) = 0;
-
   // Called just after additional initialization is performed.
   virtual void OnDidInitialize() = 0;
-
-  // Called immediately after the guest WebContents has been destroyed.
-  virtual void OnGuestDestroyed() = 0;
 
   // Shows the context menu for the guest.
   // |items| acts as a filter. This restricts the current context's default
@@ -51,6 +45,10 @@ class WebViewGuestDelegate {
   virtual void OnShowContextMenu(
       int request_id,
       const MenuItemVector* items) = 0;
+
+  // Returns true if the WebViewGuest should handle find requests for its
+  // embedder.
+  virtual bool ShouldHandleFindRequestsForEmbedder() const = 0;
 };
 
 }  // namespace extensions

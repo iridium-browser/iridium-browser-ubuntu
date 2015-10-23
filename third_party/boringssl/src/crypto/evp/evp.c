@@ -70,11 +70,11 @@
 #include <openssl/thread.h>
 
 #include "internal.h"
+#include "../internal.h"
 
 
 extern const EVP_PKEY_ASN1_METHOD dsa_asn1_meth;
 extern const EVP_PKEY_ASN1_METHOD ec_asn1_meth;
-extern const EVP_PKEY_ASN1_METHOD hmac_asn1_meth;
 extern const EVP_PKEY_ASN1_METHOD rsa_asn1_meth;
 
 EVP_PKEY *EVP_PKEY_new(void) {
@@ -82,7 +82,7 @@ EVP_PKEY *EVP_PKEY_new(void) {
 
   ret = OPENSSL_malloc(sizeof(EVP_PKEY));
   if (ret == NULL) {
-    OPENSSL_PUT_ERROR(EVP, EVP_PKEY_new, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(EVP, ERR_R_MALLOC_FAILURE);
     return NULL;
   }
 
@@ -106,7 +106,7 @@ void EVP_PKEY_free(EVP_PKEY *pkey) {
     return;
   }
 
-  if (CRYPTO_add(&pkey->references, -1, CRYPTO_LOCK_EVP_PKEY)) {
+  if (!CRYPTO_refcount_dec_and_test_zero(&pkey->references)) {
     return;
   }
 
@@ -115,7 +115,7 @@ void EVP_PKEY_free(EVP_PKEY *pkey) {
 }
 
 EVP_PKEY *EVP_PKEY_up_ref(EVP_PKEY *pkey) {
-  CRYPTO_add(&pkey->references, 1, CRYPTO_LOCK_EVP_PKEY);
+  CRYPTO_refcount_inc(&pkey->references);
   return pkey;
 }
 
@@ -158,12 +158,12 @@ int EVP_PKEY_cmp(const EVP_PKEY *a, const EVP_PKEY *b) {
 
 int EVP_PKEY_copy_parameters(EVP_PKEY *to, const EVP_PKEY *from) {
   if (to->type != from->type) {
-    OPENSSL_PUT_ERROR(EVP, EVP_PKEY_copy_parameters, EVP_R_DIFFERENT_KEY_TYPES);
+    OPENSSL_PUT_ERROR(EVP, EVP_R_DIFFERENT_KEY_TYPES);
     goto err;
   }
 
   if (EVP_PKEY_missing_parameters(from)) {
-    OPENSSL_PUT_ERROR(EVP, EVP_PKEY_copy_parameters, EVP_R_MISSING_PARAMETERS);
+    OPENSSL_PUT_ERROR(EVP, EVP_R_MISSING_PARAMETERS);
     goto err;
   }
 
@@ -206,8 +206,6 @@ const EVP_PKEY_ASN1_METHOD *EVP_PKEY_asn1_find(ENGINE **pengine, int nid) {
     case EVP_PKEY_RSA:
     case EVP_PKEY_RSA2:
       return &rsa_asn1_meth;
-    case EVP_PKEY_HMAC:
-      return &hmac_asn1_meth;
     case EVP_PKEY_EC:
       return &ec_asn1_meth;
     case EVP_PKEY_DSA:
@@ -225,32 +223,6 @@ int EVP_PKEY_type(int nid) {
   return meth->pkey_id;
 }
 
-EVP_PKEY *EVP_PKEY_new_mac_key(int type, ENGINE *e, const uint8_t *mac_key,
-                               size_t mac_key_len) {
-  EVP_PKEY_CTX *mac_ctx = NULL;
-  EVP_PKEY *ret = NULL;
-
-  mac_ctx = EVP_PKEY_CTX_new_id(type, e);
-  if (!mac_ctx) {
-    return NULL;
-  }
-
-  if (!EVP_PKEY_keygen_init(mac_ctx) ||
-      !EVP_PKEY_CTX_ctrl(mac_ctx, -1, EVP_PKEY_OP_KEYGEN,
-                         EVP_PKEY_CTRL_SET_MAC_KEY, mac_key_len,
-                         (uint8_t *)mac_key) ||
-      !EVP_PKEY_keygen(mac_ctx, &ret)) {
-    ret = NULL;
-    goto merr;
-  }
-
-merr:
-  if (mac_ctx) {
-    EVP_PKEY_CTX_free(mac_ctx);
-  }
-  return ret;
-}
-
 int EVP_PKEY_set1_RSA(EVP_PKEY *pkey, RSA *key) {
   if (EVP_PKEY_assign_RSA(pkey, key)) {
     RSA_up_ref(key);
@@ -265,7 +237,7 @@ int EVP_PKEY_assign_RSA(EVP_PKEY *pkey, RSA *key) {
 
 RSA *EVP_PKEY_get1_RSA(EVP_PKEY *pkey) {
   if (pkey->type != EVP_PKEY_RSA) {
-    OPENSSL_PUT_ERROR(EVP, EVP_PKEY_get1_RSA, EVP_R_EXPECTING_AN_RSA_KEY);
+    OPENSSL_PUT_ERROR(EVP, EVP_R_EXPECTING_AN_RSA_KEY);
     return NULL;
   }
   RSA_up_ref(pkey->pkey.rsa);
@@ -286,7 +258,7 @@ int EVP_PKEY_assign_DSA(EVP_PKEY *pkey, DSA *key) {
 
 DSA *EVP_PKEY_get1_DSA(EVP_PKEY *pkey) {
   if (pkey->type != EVP_PKEY_DSA) {
-    OPENSSL_PUT_ERROR(EVP, EVP_PKEY_get1_DSA, EVP_R_EXPECTING_A_DSA_KEY);
+    OPENSSL_PUT_ERROR(EVP, EVP_R_EXPECTING_A_DSA_KEY);
     return NULL;
   }
   DSA_up_ref(pkey->pkey.dsa);
@@ -307,7 +279,7 @@ int EVP_PKEY_assign_EC_KEY(EVP_PKEY *pkey, EC_KEY *key) {
 
 EC_KEY *EVP_PKEY_get1_EC_KEY(EVP_PKEY *pkey) {
   if (pkey->type != EVP_PKEY_EC) {
-    OPENSSL_PUT_ERROR(EVP, EVP_PKEY_get1_EC_KEY, EVP_R_EXPECTING_AN_EC_KEY_KEY);
+    OPENSSL_PUT_ERROR(EVP, EVP_R_EXPECTING_AN_EC_KEY_KEY);
     return NULL;
   }
   EC_KEY_up_ref(pkey->pkey.ec);
@@ -328,7 +300,7 @@ int EVP_PKEY_assign_DH(EVP_PKEY *pkey, DH *key) {
 
 DH *EVP_PKEY_get1_DH(EVP_PKEY *pkey) {
   if (pkey->type != EVP_PKEY_DH) {
-    OPENSSL_PUT_ERROR(EVP, EVP_PKEY_get1_DH, EVP_R_EXPECTING_A_DH_KEY);
+    OPENSSL_PUT_ERROR(EVP, EVP_R_EXPECTING_A_DH_KEY);
     return NULL;
   }
   DH_up_ref(pkey->pkey.dh);
@@ -348,8 +320,6 @@ const EVP_PKEY_ASN1_METHOD *EVP_PKEY_asn1_find_str(ENGINE **pengine,
                                                    size_t len) {
   if (len == 3 && memcmp(name, "RSA", 3) == 0) {
     return &rsa_asn1_meth;
-  } else if (len == 4 && memcmp(name, "HMAC", 4) == 0) {
-    return &hmac_asn1_meth;
   } if (len == 2 && memcmp(name, "EC", 2) == 0) {
     return &ec_asn1_meth;
   }
@@ -365,7 +335,7 @@ int EVP_PKEY_set_type(EVP_PKEY *pkey, int type) {
 
   ameth = EVP_PKEY_asn1_find(NULL, type);
   if (ameth == NULL) {
-    OPENSSL_PUT_ERROR(EVP, EVP_PKEY_set_type, EVP_R_UNSUPPORTED_ALGORITHM);
+    OPENSSL_PUT_ERROR(EVP, EVP_R_UNSUPPORTED_ALGORITHM);
     ERR_add_error_dataf("algorithm %d (%s)", type, OBJ_nid2sn(type));
     return 0;
   }
@@ -435,10 +405,10 @@ int EVP_PKEY_CTX_get_signature_md(EVP_PKEY_CTX *ctx, const EVP_MD **out_md) {
                            0, (void *)out_md);
 }
 
-EVP_PKEY *EVP_PKEY_dup(EVP_PKEY *pkey) {
-  return EVP_PKEY_up_ref(pkey);
-}
-
 void OpenSSL_add_all_algorithms(void) {}
+
+void OpenSSL_add_all_ciphers(void) {}
+
+void OpenSSL_add_all_digests(void) {}
 
 void EVP_cleanup(void) {}

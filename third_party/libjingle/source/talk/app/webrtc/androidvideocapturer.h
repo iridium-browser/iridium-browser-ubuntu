@@ -71,8 +71,13 @@ class AndroidVideoCapturer : public cricket::VideoCapturer {
   // Called from JNI when a new frame has been captured.
   void OnIncomingFrame(void* video_frame,
                        int length,
+                       int width,
+                       int height,
                        int rotation,
                        int64 time_stamp);
+
+  // Called from JNI to request a new video format.
+  void OnOutputFormatRequest(int width, int height, int fps);
 
   AndroidVideoCapturerDelegate* delegate() { return delegate_.get(); }
 

@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string16.h"
@@ -132,7 +133,7 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   };
 
   // Core implementation of history querying.
-  void QueryHistory(base::string16 search_text,
+  void QueryHistory(const base::string16& search_text,
                     const history::QueryOptions& options);
 
   // Combines the query results from the local history database and the history
@@ -219,6 +220,7 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
 class HistoryUI : public content::WebUIController {
  public:
   explicit HistoryUI(content::WebUI* web_ui);
+  ~HistoryUI() override;
 
   static base::RefCountedMemory* GetFaviconResourceBytes(
       ui::ScaleFactor scale_factor);

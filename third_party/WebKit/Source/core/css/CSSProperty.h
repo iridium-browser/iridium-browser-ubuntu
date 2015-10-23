@@ -27,12 +27,14 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/text/TextDirection.h"
 #include "platform/text/WritingMode.h"
+#include "wtf/Allocator.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
 
 struct StylePropertyMetadata {
+    DISALLOW_ALLOCATION();
     StylePropertyMetadata(CSSPropertyID propertyID, bool isSetFromShorthand, int indexInShorthandsVector, bool important, bool implicit, bool inherited)
         : m_propertyID(propertyID)
         , m_isSetFromShorthand(isSetFromShorthand)
@@ -70,8 +72,8 @@ public:
     }
 
     CSSPropertyID id() const { return static_cast<CSSPropertyID>(m_metadata.m_propertyID); }
-    bool isSetFromShorthand() const { return m_metadata.m_isSetFromShorthand; };
-    CSSPropertyID shorthandID() const { return m_metadata.shorthandID(); };
+    bool isSetFromShorthand() const { return m_metadata.m_isSetFromShorthand; }
+    CSSPropertyID shorthandID() const { return m_metadata.shorthandID(); }
     bool isImportant() const { return m_metadata.m_important; }
 
     CSSValue* value() const { return m_value.get(); }

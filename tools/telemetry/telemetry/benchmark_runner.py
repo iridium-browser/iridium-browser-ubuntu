@@ -7,19 +7,30 @@
 Handles benchmark configuration, but all the logic for
 actually running the benchmark is in Benchmark and PageRunner."""
 
-import difflib
 import hashlib
 import inspect
 import json
+import logging
 import os
 import sys
 
+
+# We need to set logging format here to make sure that any other modules
+# imported by telemetry doesn't set the logging format before this, which will
+# make this a no-op call.
+# (See: https://docs.python.org/2/library/logging.html#logging.basicConfig)
+logging.basicConfig(
+  format=('(%(levelname)s) %(filename)s:%(funcName)s:%(lineno)d '
+          '%(asctime)s:%(message)s'))
+
+
 from telemetry import benchmark
-from telemetry.core import browser_finder
-from telemetry.core import browser_options
-from telemetry.core import command_line
 from telemetry.core import discover
 from telemetry import decorators
+from telemetry.internal.browser import browser_finder
+from telemetry.internal.browser import browser_options
+from telemetry.internal.util import binary_manager
+from telemetry.internal.util import command_line
 
 
 def PrintBenchmarkList(benchmarks, possible_browser, output_pipe=sys.stdout):
@@ -67,52 +78,23 @@ def PrintBenchmarkList(benchmarks, possible_browser, output_pipe=sys.stdout):
   print >> output_pipe
 
 
-def GetMostLikelyMatchedBenchmarks(all_benchmarks, input_benchmark_name):
-  """ Returns the list of benchmarks whose name most likely matched with
-    |input_benchmark_name|.
-
-  Args:
-    all_benchmarks: the list of benchmark classes.
-    input_benchmark_name: a string to be matched against the names of benchmarks
-      in |all_benchmarks|.
-
-  Returns:
-    A list of benchmark classes whose name likely matched
-    |input_benchmark_name|. Benchmark classes are arranged in descending order
-    of similarity between their names to |input_benchmark_name|.
-  """
-  def MatchedWithBenchmarkInputNameScore(benchmark_class):
-    return difflib.SequenceMatcher(
-        isjunk=None,
-        a=benchmark_class.Name(), b=input_benchmark_name).ratio()
-  benchmarks_with_similar_names = [
-      b for b in all_benchmarks if
-      MatchedWithBenchmarkInputNameScore(b) > 0.4]
-  ordered_list = sorted(benchmarks_with_similar_names,
-                        key=MatchedWithBenchmarkInputNameScore,
-                        reverse=True)
-  return ordered_list
-
-class Environment(object):
+class ProjectConfig(object):
   """Contains information about the benchmark runtime environment.
 
   Attributes:
-    top_level_dir: A dir that contains benchmark, page test, and/or user story
+    top_level_dir: A dir that contains benchmark, page test, and/or story
         set dirs and associated artifacts.
     benchmark_dirs: A list of dirs containing benchmarks.
     benchmark_aliases: A dict of name:alias string pairs to be matched against
         exactly during benchmark selection.
+    client_config: A path to a ProjectDependencies json file.
   """
   def __init__(self, top_level_dir, benchmark_dirs=None,
-               benchmark_aliases=None):
+               benchmark_aliases=None, client_config=None):
     self._top_level_dir = top_level_dir
     self._benchmark_dirs = benchmark_dirs or []
     self._benchmark_aliases = benchmark_aliases or dict()
-
-    if benchmark_aliases:
-      self._benchmark_aliases = benchmark_aliases
-    else:
-      self._benchmark_aliases = {}
+    self._client_config = client_config or ''
 
   @property
   def top_level_dir(self):
@@ -126,6 +108,9 @@ class Environment(object):
   def benchmark_aliases(self):
     return self._benchmark_aliases
 
+  @property
+  def client_config(self):
+    return self._client_config
 
 class Help(command_line.OptparseCommand):
   """Display help information about a command"""
@@ -239,8 +224,8 @@ class Run(command_line.OptparseCommand):
     if not matching_benchmarks:
       print >> sys.stderr, 'No benchmark named "%s".' % input_benchmark_name
       print >> sys.stderr
-      most_likely_matched_benchmarks = GetMostLikelyMatchedBenchmarks(
-          all_benchmarks, input_benchmark_name)
+      most_likely_matched_benchmarks = command_line.GetMostLikelyMatchedObject(
+          all_benchmarks, input_benchmark_name, lambda x: x.Name())
       if most_likely_matched_benchmarks:
         print >> sys.stderr, 'Do you mean any of those benchmarks below?'
         PrintBenchmarkList(most_likely_matched_benchmarks, None, sys.stderr)
@@ -322,6 +307,14 @@ def _MatchBenchmarkName(input_benchmark_name, environment, exact_matches=True):
   # Fuzzy matching.
   return [benchmark_class for benchmark_class in _Benchmarks(environment)
           if _Matches(input_benchmark_name, benchmark_class.Name())]
+
+
+def GetBenchmarkByName(name, environment):
+  matched = _MatchBenchmarkName(name, environment, exact_matches=True)
+  # With exact_matches, len(matched) is either 0 or 1.
+  if len(matched) == 0:
+    return None
+  return matched[0]
 
 
 def _GetJsonBenchmarkList(possible_browser, possible_reference_browser,
@@ -426,6 +419,8 @@ def main(environment):
     command = commands[0]
   else:
     command = Run
+
+  binary_manager.InitDependencyManager(environment.client_config)
 
   # Parse and run the command.
   parser = command.CreateParser()

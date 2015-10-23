@@ -16,9 +16,9 @@
 #include "chrome/browser/ui/app_list/test/fake_profile.h"
 #include "chrome/browser/ui/app_list/test/fake_profile_store.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/app_list/app_list_switches.h"
 
 class TestingAppListServiceImpl : public AppListServiceImpl {
  public:
@@ -87,7 +87,6 @@ class AppListServiceUnitTest : public testing::Test {
  protected:
   void SetupWithCommandLine(const base::CommandLine& command_line) {
     user_data_dir_ = base::FilePath(FILE_PATH_LITERAL("udd"));
-    initial_profile_ = "ip";
     profile1_.reset(
         new FakeProfile("p1", user_data_dir_.AppendASCII("profile1")));
     profile2_.reset(
@@ -101,7 +100,7 @@ class AppListServiceUnitTest : public testing::Test {
     factory.set_user_prefs(make_scoped_refptr(new TestingPrefStore));
     local_state_ = factory.Create(pref_registry).Pass();
 
-    profile_store_ = new FakeProfileStore(user_data_dir_, initial_profile_);
+    profile_store_ = new FakeProfileStore(user_data_dir_, local_state_.get());
     service_.reset(new TestingAppListServiceImpl(
         command_line,
         local_state_.get(),
@@ -114,7 +113,6 @@ class AppListServiceUnitTest : public testing::Test {
   }
 
   base::FilePath user_data_dir_;
-  std::string initial_profile_;
   scoped_ptr<PrefService> local_state_;
   FakeProfileStore* profile_store_;
   scoped_ptr<TestingAppListServiceImpl> service_;
@@ -143,8 +141,12 @@ TEST_F(AppListServiceUnitTest, ShowingForProfileLoadsAProfile) {
 TEST_F(AppListServiceUnitTest, RemovedProfileResetsToInitialProfile) {
   EnableAppList();
   profile_store_->RemoveProfile(profile1_.get());
+
+  // kAppListProfile should have been cleared, and therefore GetProfilePath
+  // should return the initial profile.
+  EXPECT_EQ("", local_state_->GetString(prefs::kAppListProfile));
   base::FilePath initial_profile_path =
-      user_data_dir_.AppendASCII(initial_profile_);
+      user_data_dir_.AppendASCII(chrome::kInitialProfile);
   EXPECT_EQ(initial_profile_path,
             service_->GetProfilePath(profile_store_->GetUserDataDir()));
 }
@@ -155,6 +157,8 @@ TEST_F(AppListServiceUnitTest,
   EnableAppList();
   profile_store_->RemoveProfile(profile1_.get());
 
+  // kAppListProfile should have been set to kProfileLastUsed.
+  EXPECT_EQ("last-used", local_state_->GetString(prefs::kAppListProfile));
   base::FilePath last_used_profile_path =
       user_data_dir_.AppendASCII("last-used");
   EXPECT_EQ(last_used_profile_path,
@@ -163,6 +167,31 @@ TEST_F(AppListServiceUnitTest,
   // For this test, the AppListViewDelegate is not created because the
   // app list is never shown, so there is nothing to destroy.
   EXPECT_EQ(0, service_->destroy_app_list_call_count());
+}
+
+TEST_F(AppListServiceUnitTest, RefusesToLoadGuestAppListProfile) {
+  // Unlikely, but if somehow the user's app_list.profile pref was set to the
+  // guest profile, make sure we refuse to load it (or it would crash).
+  local_state_->SetString(
+      prefs::kAppListProfile,
+      base::FilePath(chrome::kGuestProfileDir).MaybeAsASCII());
+  local_state_->SetString(prefs::kProfileLastUsed, "last-used");
+  base::FilePath last_used_profile_path =
+      user_data_dir_.AppendASCII("last-used");
+  EXPECT_EQ(last_used_profile_path,
+            service_->GetProfilePath(profile_store_->GetUserDataDir()));
+}
+
+TEST_F(AppListServiceUnitTest, RefusesToLoadGuestLastUsedProfile) {
+  // If the user's most recent browser session was a guest session, make sure we
+  // do not open a guest profile in the launcher (which would crash).
+  local_state_->SetString(
+      prefs::kProfileLastUsed,
+      base::FilePath(chrome::kGuestProfileDir).MaybeAsASCII());
+  base::FilePath initial_profile_path =
+      user_data_dir_.AppendASCII(chrome::kInitialProfile);
+  EXPECT_EQ(initial_profile_path,
+            service_->GetProfilePath(profile_store_->GetUserDataDir()));
 }
 
 TEST_F(AppListServiceUnitTest, SwitchingProfilesPersists) {
@@ -181,7 +210,7 @@ TEST_F(AppListServiceUnitTest, SwitchingProfilesPersists) {
 
 TEST_F(AppListServiceUnitTest, EnableViaCommandLineFlag) {
   base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-  command_line.AppendSwitch(switches::kEnableAppList);
+  command_line.AppendSwitch(app_list::switches::kEnableAppList);
   SetupWithCommandLine(command_line);
   service_->PerformStartupChecks(profile1_.get());
   EXPECT_TRUE(local_state_->GetBoolean(prefs::kAppLauncherHasBeenEnabled));
@@ -189,7 +218,7 @@ TEST_F(AppListServiceUnitTest, EnableViaCommandLineFlag) {
 
 TEST_F(AppListServiceUnitTest, DisableViaCommandLineFlag) {
   base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-  command_line.AppendSwitch(switches::kResetAppListInstallState);
+  command_line.AppendSwitch(app_list::switches::kResetAppListInstallState);
   SetupWithCommandLine(command_line);
   service_->PerformStartupChecks(profile1_.get());
   EXPECT_FALSE(local_state_->GetBoolean(prefs::kAppLauncherHasBeenEnabled));

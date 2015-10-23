@@ -48,8 +48,7 @@ const SkColor kFolderBubbleColor = SK_ColorWHITE;
 // Color of the folder bubble shadow.
 const SkColor kFolderShadowColor = SkColorSetRGB(0xBF, 0xBF, 0xBF);
 const float kFolderBubbleRadius = 23;
-const float kFolderShadowRadius = 23.5;
-const float kFolderShadowOffsetY = 1;
+const float kFolderBubbleOffsetY = 1;
 
 const SkColor kCardBackgroundColor = SK_ColorWHITE;
 
@@ -86,6 +85,9 @@ const int kGridIconDimension = 48;
 
 // Preferred search result icon sizes.
 const int kListIconSize = 24;
+const int kListBadgeIconSize = 16;
+const int kListBadgeIconOffsetX = 6;
+const int kListBadgeIconOffsetY = 6;
 const int kTileIconSize = 48;
 
 // Preferred number of columns and rows in the centered app list apps grid.
@@ -160,6 +162,20 @@ gfx::ShadowValue GetShadowForZHeight(int z_height) {
       return gfx::ShadowValue(gfx::Vector2d(0, 8), 12,
                               SkColorSetARGB(0x3F, 0, 0, 0));
   }
+}
+
+const gfx::ShadowValues& IconStartShadows() {
+  CR_DEFINE_STATIC_LOCAL(const gfx::ShadowValues, icon_shadows,
+                         (1, gfx::ShadowValue(gfx::Vector2d(0, 1), 2,
+                                              SkColorSetARGB(0x33, 0, 0, 0))));
+  return icon_shadows;
+}
+
+const gfx::ShadowValues& IconEndShadows() {
+  CR_DEFINE_STATIC_LOCAL(const gfx::ShadowValues, icon_shadows,
+                         (1, gfx::ShadowValue(gfx::Vector2d(0, 4), 4,
+                                              SkColorSetARGB(0x50, 0, 0, 0))));
+  return icon_shadows;
 }
 
 }  // namespace app_list

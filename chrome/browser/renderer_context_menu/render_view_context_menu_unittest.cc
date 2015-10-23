@@ -4,11 +4,11 @@
 
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/extensions/menu_manager.h"
@@ -23,9 +23,12 @@
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
+#include "components/data_reduction_proxy/core/browser/data_store.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
 
 #include "extensions/browser/extension_prefs.h"
@@ -121,6 +124,8 @@ class RenderViewContextMenuTest : public testing::Test {
     menu->Init();
     return menu;
   }
+ private:
+  content::RenderViewHostTestEnabler rvh_test_enabler_;
 };
 
 // Generates a URLPatternSet with a single pattern
@@ -294,7 +299,6 @@ TEST_F(RenderViewContextMenuTest, TargetIgnoredForSelectionOnImage) {
 
 TEST_F(RenderViewContextMenuTest, ItemWithSameTitleFromTwoExtensions) {
   extensions::TestExtensionEnvironment env;
-  env.GetExtensionPrefs();  // Force creation before adding extensions.
 
   MenuManager* menu_manager =  // Owned by env.profile().
       static_cast<MenuManager*>(
@@ -356,6 +360,10 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
     return menu;
   }
 
+  void AppendImageItems(TestRenderViewContextMenu* menu) {
+    menu->AppendImageItems();
+  }
+
   void SetupDataReductionProxy(bool enable_data_reduction_proxy) {
     drp_test_context_ =
         data_reduction_proxy::DataReductionProxyTestContext::Builder()
@@ -386,7 +394,19 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
     settings->InitDataReductionProxySettings(
         drp_test_context_->io_data(), drp_test_context_->pref_service(),
         drp_test_context_->request_context_getter(),
-        base::MessageLoopProxy::current());
+        make_scoped_ptr(new data_reduction_proxy::DataStore()),
+        base::ThreadTaskRunnerHandle::Get(),
+        base::ThreadTaskRunnerHandle::Get());
+  }
+
+  // Force destruction of |DataReductionProxySettings| so that objects on DB
+  // task runner can be destroyed before test threads are destroyed. This method
+  // must be called by tests that call |SetupDataReductionProxy|. We cannot
+  // destroy |drp_test_context_| until browser context keyed services are
+  // destroyed since |DataReductionProxyChromeSettings| holds a pointer to the
+  // |PrefService|, which is owned by |drp_test_context_|.
+  void DestroyDataReductionProxySettings() {
+    drp_test_context_->DestroySettings();
   }
 
  protected:
@@ -443,9 +463,10 @@ TEST_F(RenderViewContextMenuPrefsTest, DataSaverEnabledSaveImageAs) {
 
   const std::string& headers =
       content::WebContentsTester::For(web_contents())->GetSaveFrameHeaders();
-  EXPECT_TRUE(headers.find("X-PSA-Client-Options: v=1,m=1") !=
-                  std::string::npos &&
-              headers.find("Cache-Control: no-cache") != std::string::npos);
+  EXPECT_TRUE(headers.find("Chrome-Proxy: pass-through") != std::string::npos);
+  EXPECT_TRUE(headers.find("Cache-Control: no-cache") != std::string::npos);
+
+  DestroyDataReductionProxySettings();
 }
 
 // Verify that request headers do not specify pass through when "Save Image
@@ -463,7 +484,26 @@ TEST_F(RenderViewContextMenuPrefsTest, DataSaverDisabledSaveImageAs) {
 
   const std::string& headers =
       content::WebContentsTester::For(web_contents())->GetSaveFrameHeaders();
-  EXPECT_TRUE(headers.find("X-PSA-Client-Options: v=1,m=1") ==
-                  std::string::npos &&
-              headers.find("Cache-Control: no-cache") == std::string::npos);
+  EXPECT_TRUE(headers.find("Chrome-Proxy: pass-through") == std::string::npos);
+  EXPECT_TRUE(headers.find("Cache-Control: no-cache") == std::string::npos);
+
+  DestroyDataReductionProxySettings();
+}
+
+// Verify that the Chrome-Proxy Lo-Fi directive causes the context menu to
+// display the "Load Image" menu item.
+TEST_F(RenderViewContextMenuPrefsTest, DataSaverLoadImage) {
+  SetupDataReductionProxy(true);
+  content::ContextMenuParams params = CreateParams(MenuItem::IMAGE);
+  params.properties[data_reduction_proxy::chrome_proxy_header()] =
+      data_reduction_proxy::chrome_proxy_lo_fi_directive();
+  params.unfiltered_link_url = params.link_url;
+  content::WebContents* wc = web_contents();
+  scoped_ptr<TestRenderViewContextMenu> menu(
+      new TestRenderViewContextMenu(wc->GetMainFrame(), params));
+  AppendImageItems(menu.get());
+
+  ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE));
+
+  DestroyDataReductionProxySettings();
 }

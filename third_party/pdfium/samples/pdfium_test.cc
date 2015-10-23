@@ -46,6 +46,7 @@ struct Options {
   std::string scale_factor_as_string;
   std::string exe_path;
   std::string bin_directory;
+  std::string font_directory;
 };
 
 // Reads the entire contents of a file into a newly malloc'd buffer.
@@ -143,22 +144,20 @@ static void WritePpm(const char* pdf_name, int num, const void* buffer_void,
   // Source data is B, G, R, unused.
   // Dest data is R, G, B.
   char* result = new char[out_len];
-  if (result) {
-    for (int h = 0; h < height; ++h) {
-      const char* src_line = buffer + (stride * h);
-      char* dest_line = result + (width * h * 3);
-      for (int w = 0; w < width; ++w) {
-        // R
-        dest_line[w * 3] = src_line[(w * 4) + 2];
-        // G
-        dest_line[(w * 3) + 1] = src_line[(w * 4) + 1];
-        // B
-        dest_line[(w * 3) + 2] = src_line[w * 4];
-      }
+  for (int h = 0; h < height; ++h) {
+    const char* src_line = buffer + (stride * h);
+    char* dest_line = result + (width * h * 3);
+    for (int w = 0; w < width; ++w) {
+      // R
+      dest_line[w * 3] = src_line[(w * 4) + 2];
+      // G
+      dest_line[(w * 3) + 1] = src_line[(w * 4) + 1];
+      // B
+      dest_line[(w * 3) + 2] = src_line[w * 4];
     }
-    fwrite(result, out_len, 1, fp);
-    delete [] result;
   }
+  fwrite(result, out_len, 1, fp);
+  delete[] result;
   fclose(fp);
 }
 
@@ -215,7 +214,7 @@ static void WriteBmp(const char* pdf_name, int num, const void* buffer,
   if (!fp)
     return;
 
-  BITMAPINFO bmi = {0};
+  BITMAPINFO bmi = {};
   bmi.bmiHeader.biSize = sizeof(bmi) - sizeof(RGBQUAD);
   bmi.bmiHeader.biWidth = width;
   bmi.bmiHeader.biHeight = -height;  // top-down image
@@ -224,7 +223,7 @@ static void WriteBmp(const char* pdf_name, int num, const void* buffer,
   bmi.bmiHeader.biCompression = BI_RGB;
   bmi.bmiHeader.biSizeImage = 0;
 
-  BITMAPFILEHEADER file_header = {0};
+  BITMAPFILEHEADER file_header = {};
   file_header.bfType = 0x4d42;
   file_header.bfSize = sizeof(file_header) + bmi.bmiHeader.biSize + out_len;
   file_header.bfOffBits = file_header.bfSize - out_len;
@@ -347,7 +346,15 @@ bool ParseCommandLine(const std::vector<std::string>& args,
         return false;
       }
       options->output_format = OUTPUT_PNG;
+    } else if (cur_arg.size() > 11 &&
+               cur_arg.compare(0, 11, "--font-dir=") == 0) {
+      if (!options->font_directory.empty()) {
+        fprintf(stderr, "Duplicate --font-dir argument\n");
+        return false;
+      }
+      options->font_directory = cur_arg.substr(11);
     }
+
 #ifdef _WIN32
     else if (cur_arg == "--emf") {
       if (options->output_format != OUTPUT_NONE) {
@@ -426,7 +433,7 @@ void RenderPdf(const std::string& name, const char* pBuf, size_t len,
 
   IPDF_JSPLATFORM platform_callbacks;
   memset(&platform_callbacks, '\0', sizeof(platform_callbacks));
-  platform_callbacks.version = 1;
+  platform_callbacks.version = 2;
   platform_callbacks.app_alert = ExampleAppAlert;
   platform_callbacks.Doc_gotoPage = ExampleDocGotoPage;
 
@@ -560,8 +567,9 @@ void RenderPdf(const std::string& name, const char* pBuf, size_t len,
 
 static const char usage_string[] =
     "Usage: pdfium_test [OPTION] [FILE]...\n"
-    "  --bin-dir=<path> - override path to v8 external data\n"
-    "  --scale=<number> - scale output size by number (e.g. 0.5)\n"
+    "  --bin-dir=<path>  - override path to v8 external data\n"
+    "  --font-dir=<path> - override path to external fonts\n"
+    "  --scale=<number>  - scale output size by number (e.g. 0.5)\n"
 #ifdef _WIN32
     "  --bmp - write page images <pdf-name>.<page-number>.bmp\n"
     "  --emf - write page meta files <pdf-name>.<page-number>.emf\n"
@@ -583,6 +591,11 @@ int main(int argc, const char* argv[]) {
   v8::V8::InitializePlatform(platform);
   v8::V8::Initialize();
 
+  // By enabling predictable mode, V8 won't post any background tasks.
+  static const char predictable_flag[] = "--predictable";
+  v8::V8::SetFlagsFromString(predictable_flag,
+                             static_cast<int>(strlen(predictable_flag)));
+
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
   v8::StartupData natives;
   v8::StartupData snapshot;
@@ -594,7 +607,17 @@ int main(int argc, const char* argv[]) {
   v8::V8::SetSnapshotDataBlob(&snapshot);
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
-  FPDF_InitLibrary();
+  if (!options.font_directory.empty()) {
+    const char* path_array[2];
+    path_array[0] = options.font_directory.c_str();
+    path_array[1] = nullptr;
+    FPDF_LIBRARY_CONFIG config;
+    config.version = 1;
+    config.m_pUserFontPaths = path_array;
+    FPDF_InitLibraryWithConfig(&config);
+  } else {
+    FPDF_InitLibrary();
+  }
 
   UNSUPPORT_INFO unsuppored_info;
   memset(&unsuppored_info, '\0', sizeof(unsuppored_info));

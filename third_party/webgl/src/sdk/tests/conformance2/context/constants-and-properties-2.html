@@ -30,8 +30,8 @@
 <meta charset="utf-8">
 <title>WebGL2 Constants and Properties Test</title>
 <link rel="stylesheet" href="../../resources/js-test-style.css"/>
-<script src="../../resources/js-test-pre.js"></script>
-<script src="../../conformance/resources/webgl-test-utils.js"></script>
+<script src="../../js/js-test-pre.js"></script>
+<script src="../../js/webgl-test-utils.js"></script>
 </head>
 <body>
 <div id="description"></div>
@@ -497,8 +497,6 @@ TEXTURE_COMPARE_FUNC : 0x884D,
 CURRENT_QUERY : 0x8865,
 QUERY_RESULT : 0x8866,
 QUERY_RESULT_AVAILABLE : 0x8867,
-BUFFER_MAPPED : 0x88BC,
-BUFFER_MAP_POINTER : 0x88BD,
 STREAM_READ : 0x88E1,
 STREAM_COPY : 0x88E2,
 STATIC_READ : 0x88E5,
@@ -664,7 +662,6 @@ RG8_SNORM : 0x8F95,
 RGB8_SNORM : 0x8F96,
 RGBA8_SNORM : 0x8F97,
 SIGNED_NORMALIZED : 0x8F9C,
-PRIMITIVE_RESTART_FIXED_INDEX : 0x8D69,
 COPY_READ_BUFFER : 0x8F36,
 COPY_WRITE_BUFFER : 0x8F37,
 COPY_READ_BUFFER_BINDING : 0x8F36,
@@ -718,10 +715,6 @@ ANY_SAMPLES_PASSED : 0x8C2F,
 ANY_SAMPLES_PASSED_CONSERVATIVE : 0x8D6A,
 SAMPLER_BINDING : 0x8919,
 RGB10_A2UI : 0x906F,
-TEXTURE_SWIZZLE_R : 0x8E42,
-TEXTURE_SWIZZLE_G : 0x8E43,
-TEXTURE_SWIZZLE_B : 0x8E44,
-TEXTURE_SWIZZLE_A : 0x8E45,
 GREEN : 0x1904,
 BLUE : 0x1905,
 INT_2_10_10_10_REV : 0x8D9F,
@@ -742,7 +735,10 @@ COMPRESSED_SRGB8_ALPHA8_ETC2_EAC : 0x9279,
 TEXTURE_IMMUTABLE_FORMAT : 0x912F,
 MAX_ELEMENT_INDEX : 0x8D6B,
 NUM_SAMPLE_COUNTS : 0x9380,
-TEXTURE_IMMUTABLE_LEVELS : 0x82DF
+TEXTURE_IMMUTABLE_LEVELS : 0x82DF,
+
+/* WebGL-specific enums */
+MAX_CLIENT_WAIT_TIMEOUT_WEBGL: 0x9247
 };
 
 // Other non-function properties on the WebGL object
@@ -788,6 +784,11 @@ PROGRAM_BINARY_RETRIEVABLE_HINT       : 0x8257,
 PROGRAM_BINARY_LENGTH                 : 0x8741,
 PROGRAM_BINARY_FORMATS                : 0x87FE,
 NUM_PROGRAM_BINARY_FORMATS            : 0x87FF,
+TEXTURE_SWIZZLE_A                     : 0x8E45,
+TEXTURE_SWIZZLE_B                     : 0x8E44,
+TEXTURE_SWIZZLE_G                     : 0x8E43,
+TEXTURE_SWIZZLE_R                     : 0x8E42,
+PRIMITIVE_RESTART_FIXED_INDEX         : 0x8D69,
 };
 
 function assertProperty(v, p) {
@@ -861,7 +862,7 @@ if (!extended) {
 debug("");
 var successfullyParsed = true;
 </script>
-<script src="../../resources/js-test-post.js"></script>
+<script src="../../js/js-test-post.js"></script>
 
 </body>
 </html>

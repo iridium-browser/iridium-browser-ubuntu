@@ -126,6 +126,57 @@ enum AccountReauth {
   HISTOGRAM_REAUTH_MAX
 };
 
+// Enum values used for "Signin.XDevicePromo.Eligible" histogram, which tracks
+// the reasons for which a profile is or is not eligible for the promo.
+enum CrossDevicePromoEligibility {
+  // The user is eligible for the promo.
+  ELIGIBLE,
+  // The profile has previously opted out of the promo.
+  OPTED_OUT,
+  // The profile is already signed in.
+  SIGNED_IN,
+  // The profile does not have a single, peristent GAIA cookie.
+  NOT_SINGLE_GAIA_ACCOUNT,
+  // Yet to determine how many devices the user has.
+  UNKNOWN_COUNT_DEVICES,
+  // An error was returned trying to determine the account's devices.
+  ERROR_FETCHING_DEVICE_ACTIVITY,
+  // The call to get device activity was throttled, and never executed.
+  THROTTLED_FETCHING_DEVICE_ACTIVITY,
+  // The user has no devices.
+  ZERO_DEVICES,
+  // The user has no device that was recently active.
+  NO_ACTIVE_DEVICES,
+  // Always last enumerated type.
+  NUM_CROSS_DEVICE_PROMO_ELIGIBILITY_METRICS
+};
+
+// Enum reasons the CrossDevicePromo couldn't initialize, or that it succeeded.
+enum CrossDevicePromoInitialized {
+  // The promo was initialized successfully.
+  INITIALIZED,
+  // The profile is opted out, so the promo didn't initialize.
+  UNINITIALIZED_OPTED_OUT,
+  // Unable to read the variations configuration.
+  NO_VARIATIONS_CONFIG,
+  // Always the last enumerated type.
+  NUM_CROSS_DEVICE_PROMO_INITIALIZED_METRICS
+};
+
+// Enum values used for "Signin.AccountReconcilorState.OnGaiaResponse"
+// histogram, which records the state of the AccountReconcilor when GAIA returns
+// a specific response.
+enum AccountReconcilorState {
+  // The AccountReconcilor has finished running ans is up-to-date.
+  ACCOUNT_RECONCILOR_OK,
+  // The AccountReconcilor is running and gathering information.
+  ACCOUNT_RECONCILOR_RUNNING,
+  // The AccountReconcilor encountered an error and stopped.
+  ACCOUNT_RECONCILOR_ERROR,
+  // Always the last enumerated type.
+  ACCOUNT_RECONCILOR_HISTOGRAM_COUNT,
+};
+
 // Log to UMA histograms and UserCounts stats about a single execution of the
 // AccountReconciler.
 // |total_number_accounts| - How many accounts are in the browser for this
@@ -170,6 +221,17 @@ void LogExternalCcResultFetches(
 void LogAuthError(GoogleServiceAuthError::State auth_error);
 
 void LogSigninConfirmHistogramValue(int action);
+
+void LogXDevicePromoEligible(CrossDevicePromoEligibility metric);
+
+void LogXDevicePromoInitialized(CrossDevicePromoInitialized metric);
+
+void LogBrowsingSessionDuration(const base::Time& previous_activity_time);
+
+// Records the AccountReconcilor |state| when GAIA returns a specific response.
+// If |state| is different than ACCOUNT_RECONCILOR_OK it means the user will
+// be shown a different set of accounts in the content-area and the settings UI.
+void LogAccountReconcilorStateOnGaiaResponse(AccountReconcilorState state);
 
 }  // namespace signin_metrics
 

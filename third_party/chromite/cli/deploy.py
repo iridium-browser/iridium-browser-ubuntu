@@ -46,6 +46,10 @@ class DeployError(Exception):
 
 class BrilloDeployOperation(operation.ProgressBarOperation):
   """ProgressBarOperation specific for brillo deploy."""
+  MERGE_EVENTS = ['NOTICE: Copying', 'NOTICE: Installing',
+                  'Calculating dependencies', '... done!', 'Extracting info',
+                  'Installing (1 of 1)', 'has been installed.']
+  UNMERGE_EVENTS = ['NOTICE: Unmerging', 'has been uninstalled.']
 
   def __init__(self, pkg_count, emerge):
     """Construct BrilloDeployOperation object.
@@ -55,14 +59,10 @@ class BrilloDeployOperation(operation.ProgressBarOperation):
       emerge: True if emerge, False is unmerge.
     """
     super(BrilloDeployOperation, self).__init__()
-    self._merge_events = ['NOTICE: Copying', 'NOTICE: Installing',
-                          'Calculating dependencies', '... done!', 'Extracting '
-                          'info', 'Installing (1 of 1)', 'has been installed.']
-    self._unmerge_events = ['NOTICE: Unmerging', 'has been uninstalled.']
     if emerge:
-      self._events = self._merge_events
+      self._events = self.MERGE_EVENTS
     else:
-      self._events = self._unmerge_events
+      self._events = self.UNMERGE_EVENTS
     self._total = pkg_count * len(self._events)
     self._completed = 0
 
@@ -721,64 +721,34 @@ print(json.dumps(pkg_info))
     return sorted_installs, listed_installs, num_updates
 
 
-def _GetPackageByCPV(cpv, strip, sysroot):
-  """Returns the path to a binary package corresponding to |cpv|.
-
-  Args:
-    cpv: CPV components given by portage_util.SplitCPV().
-    strip: True to run strip_package.
-    sysroot: Sysroot path.
-  """
-  packages_dir = None
-  if strip:
-    try:
-      cros_build_lib.RunCommand(
-          ['strip_package', '--sysroot', sysroot,
-           os.path.join(cpv.category, '%s' % (cpv.pv))])
-      packages_dir = _STRIPPED_PACKAGES_DIR
-    except cros_build_lib.RunCommandError:
-      logging.error('Cannot strip package %s', cpv)
-      raise
-
-  return portage_util.GetBinaryPackagePath(
-      cpv.category, cpv.package, cpv.version, sysroot=sysroot,
-      packages_dir=packages_dir)
-
-
-def _Emerge(device, pkg, strip, sysroot, root, extra_args=None):
+def _Emerge(device, pkg_path, root, extra_args=None):
   """Copies |pkg| to |device| and emerges it.
 
   Args:
     device: A ChromiumOSDevice object.
-    pkg: A package CPV or a binary package file.
-    strip: True to run strip_package.
-    sysroot: Sysroot path.
+    pkg_path: A path to a binary package.
     root: Package installation root path.
     extra_args: Extra arguments to pass to emerge.
 
   Raises:
     DeployError: Unrecoverable error during emerge.
   """
-  if os.path.isfile(pkg):
-    latest_pkg = pkg
-  else:
-    latest_pkg = _GetPackageByCPV(portage_util.SplitCPV(pkg), strip, sysroot)
-
-  if not latest_pkg:
-    raise DeployError('Missing package %s.' % pkg)
-
   pkgroot = os.path.join(device.work_dir, 'packages')
-  pkg_name = os.path.basename(latest_pkg)
-  pkg_dirname = os.path.basename(os.path.dirname(latest_pkg))
+  pkg_name = os.path.basename(pkg_path)
+  pkg_dirname = os.path.basename(os.path.dirname(pkg_path))
   pkg_dir = os.path.join(pkgroot, pkg_dirname)
-  device.RunCommand(['mkdir', '-p', pkg_dir], remote_sudo=True)
+  portage_tmpdir = os.path.join(device.work_dir, 'portage-tmp')
+  # Clean out the dirs first if we had a previous emerge on the device so as to
+  # free up space for this emerge.  The last emerge gets implicitly cleaned up
+  # when the device connection deletes its work_dir.
+  device.RunCommand(
+      ['rm', '-rf', pkg_dir, portage_tmpdir, '&&',
+       'mkdir', '-p', pkg_dir, portage_tmpdir], remote_sudo=True)
 
   # This message is read by BrilloDeployOperation.
   logging.notice('Copying %s to device.', pkg_name)
-  device.CopyToDevice(latest_pkg, pkg_dir, remote_sudo=True)
+  device.CopyToDevice(pkg_path, pkg_dir, remote_sudo=True)
 
-  portage_tmpdir = os.path.join(device.work_dir, 'portage-tmp')
-  device.RunCommand(['mkdir', '-p', portage_tmpdir], remote_sudo=True)
   logging.info('Use portage temp dir %s', portage_tmpdir)
 
   # This message is read by BrilloDeployOperation.
@@ -811,10 +781,73 @@ def _Emerge(device, pkg, strip, sysroot, root, extra_args=None):
     raise
   else:
     logging.notice('%s has been installed.', pkg_name)
-  finally:
-    # Free up the space for other packages.
-    device.RunCommand(['rm', '-rf', portage_tmpdir, pkg_dir],
-                      error_code_ok=True, remote_sudo=True)
+
+
+def _GetPackagesByCPV(cpvs, strip, sysroot):
+  """Returns paths to binary packages corresponding to |cpvs|.
+
+  Args:
+    cpvs: List of CPV components given by portage_util.SplitCPV().
+    strip: True to run strip_package.
+    sysroot: Sysroot path.
+
+  Returns:
+    List of paths corresponding to |cpvs|.
+
+  Raises:
+    DeployError: If a package is missing.
+  """
+  packages_dir = None
+  if strip:
+    try:
+      cros_build_lib.RunCommand(
+          ['strip_package', '--sysroot', sysroot] +
+          [os.path.join(cpv.category, str(cpv.pv)) for cpv in cpvs])
+      packages_dir = _STRIPPED_PACKAGES_DIR
+    except cros_build_lib.RunCommandError:
+      logging.error('Cannot strip packages %s',
+                    ' '.join([str(cpv) for cpv in cpvs]))
+      raise
+
+  paths = []
+  for cpv in cpvs:
+    path = portage_util.GetBinaryPackagePath(
+        cpv.category, cpv.package, cpv.version, sysroot=sysroot,
+        packages_dir=packages_dir)
+    if not path:
+      raise DeployError('Missing package %s.' % cpv)
+    paths.append(path)
+
+  return paths
+
+
+def _GetPackagesPaths(pkgs, strip, sysroot):
+  """Returns paths to binary |pkgs|.
+
+  Each package argument may be specified as a filename, in which case it is
+  returned as-is, or it may be a CPV value, in which case it is stripped (if
+  instructed) and a path to it is returned.
+
+  Args:
+    pkgs: List of package arguments.
+    strip: Whether or not to run strip_package for CPV packages.
+    sysroot: The sysroot path.
+
+  Returns:
+    List of paths corresponding to |pkgs|.
+  """
+  indexes = []
+  cpvs = []
+  for i, pkg in enumerate(pkgs):
+    if not os.path.isfile(pkg):
+      indexes.append(i)
+      cpvs.append(portage_util.SplitCPV(pkg))
+
+  cpv_paths = cpvs and _GetPackagesByCPV(cpvs, strip, sysroot)
+  paths = list(pkgs)
+  for i, cpv_path in zip(indexes, cpv_paths):
+    paths[i] = cpv_path
+  return paths
 
 
 def _Unmerge(device, pkg, root):
@@ -857,8 +890,8 @@ def _ConfirmDeploy(num_updates):
 
 def _EmergePackages(pkgs, device, strip, sysroot, root, emerge_args):
   """Call _Emerge for each packge in pkgs."""
-  for pkg in pkgs:
-    _Emerge(device, pkg, strip, sysroot, root, extra_args=emerge_args)
+  for pkg_path in _GetPackagesPaths(pkgs, strip, sysroot):
+    _Emerge(device, pkg_path, root, extra_args=emerge_args)
 
 
 def _UnmergePackages(pkgs, device, root):
@@ -937,14 +970,17 @@ def Deploy(device, packages, board=None, brick_name=None, blueprint=None,
   else:
     hostname, username, port = None, None, None
 
-  do_flash = False
   lsb_release = None
   sysroot = None
   try:
-    with remote_access.ChromiumOSDeviceHandler(
-        hostname, port=port, username=username, private_key=ssh_private_key,
-        base_dir=_DEVICE_BASE_DIR, ping=ping) as device_handler:
-      lsb_release = device_handler.lsb_release
+    with cros_build_lib.ContextManagerStack() as stack:
+      # Get a handle to our device pre-flashing.
+      device_handler = stack.Add(
+          remote_access.ChromiumOSDeviceHandler, hostname, port=port,
+          username=username, private_key=ssh_private_key,
+          base_dir=_DEVICE_BASE_DIR, ping=ping)
+      device = device_handler.device
+      lsb_release = device.lsb_release
 
       # We don't check for compatibility correctly in the brick/blueprint case
       # as we don't have enough information to determine whether it is safe or
@@ -962,40 +998,45 @@ def Deploy(device, packages, board=None, brick_name=None, blueprint=None,
         packages = packages or brick.MainPackages()
 
       else:
-        board = cros_build_lib.GetBoard(device_board=device_handler.board,
+        board = cros_build_lib.GetBoard(device_board=device.board,
                                         override_board=board)
-        if not force and board != device_handler.board:
+        if not force and board != device.board:
           raise DeployError('Device (%s) is incompatible with board %s. Use '
                             '--force to deploy anyway.' % (device, board))
 
         sysroot = cros_build_lib.GetSysroot(board=board)
 
       # Check that the target is compatible with the SDK (if any).
+      do_flash = False
       if reflash or not force:
         try:
-          _CheckDeviceVersion(device_handler)
+          _CheckDeviceVersion(device)
         except DeployError as e:
           if not reflash:
             raise
           logging.warning('%s, reflashing' % e)
           do_flash = True
 
-    # Reflash the device with a current Project SDK image.
-    # TODO(garnold) We may want to clobber stateful or wipe temp, or at least
-    # expose them as options.
-    if do_flash:
-      flash.Flash(device, None, project_sdk_image=True, brick_name=brick_name,
-                  ping=ping, force=force)
-      logging.info('Done reflashing Project SDK image')
-
-    with remote_access.ChromiumOSDeviceHandler(
-        hostname, port=port, username=username, private_key=ssh_private_key,
-        base_dir=_DEVICE_BASE_DIR, ping=ping) as device_handler:
-      lsb_release = device_handler.lsb_release
-      # If the device was reflashed check the version again, just to be sure.
+      # Reflash the device with a current Project SDK image.
+      # TODO(garnold) We may want to clobber stateful or wipe temp, or at least
+      # expose them as options.
       if do_flash:
+        flash.Flash(device, None, project_sdk_image=True, brick_name=brick_name,
+                    ping=ping, force=force)
+        logging.info('Done reflashing Project SDK image')
+
+        # Now refresh the handler.
+        # TODO: If ContextManagerStack allows for explicit breakdown of objects
+        # early on, we should do that here with the previous device connection.
+        device_handler = stack.Add(
+            remote_access.ChromiumOSDeviceHandler, hostname, port=port,
+            username=username, private_key=ssh_private_key,
+            base_dir=_DEVICE_BASE_DIR, ping=ping)
+        device = device_handler.device
+        lsb_release = device.lsb_release
+        # Check the version again, just to be sure.
         try:
-          _CheckDeviceVersion(device_handler)
+          _CheckDeviceVersion(device)
         except DeployError as e:
           raise DeployError('%s, reflashing failed' % e)
 
@@ -1006,15 +1047,15 @@ def Deploy(device, packages, board=None, brick_name=None, blueprint=None,
         logging.notice('Cleaning outdated binary packages from %s', sysroot)
         portage_util.CleanOutdatedBinaryPackages(sysroot)
 
-      if not device_handler.IsPathWritable(root):
+      if not device.IsDirWritable(root):
         # Only remounts rootfs if the given root is not writable.
-        if not device_handler.MountRootfsReadWrite():
+        if not device.MountRootfsReadWrite():
           raise DeployError('Cannot remount rootfs as read-write. Exiting.')
 
       # Obtain list of packages to upgrade/remove.
       pkg_scanner = _InstallPackageScanner(sysroot)
       pkgs, listed, num_updates = pkg_scanner.Run(
-          device_handler, root, packages, update, deep, deep_rev)
+          device, root, packages, update, deep, deep_rev)
       if emerge:
         action_str = 'emerge'
       else:
@@ -1034,10 +1075,10 @@ def Deploy(device, packages, board=None, brick_name=None, blueprint=None,
 
       # Select function (emerge or unmerge) and bind args.
       if emerge:
-        func = functools.partial(_EmergePackages, pkgs, device_handler, strip,
+        func = functools.partial(_EmergePackages, pkgs, device, strip,
                                  sysroot, root, emerge_args)
       else:
-        func = functools.partial(_UnmergePackages, pkgs, device_handler, root)
+        func = functools.partial(_UnmergePackages, pkgs, device, root)
 
       # Call the function with the progress bar or with normal output.
       if command.UseProgressBar():

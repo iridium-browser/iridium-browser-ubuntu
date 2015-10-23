@@ -32,20 +32,12 @@
 #define ErrorEvent_h
 
 #include "bindings/core/v8/DOMWrapperWorld.h"
+#include "core/events/ErrorEventInit.h"
 #include "core/events/Event.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
-
-struct ErrorEventInit : public EventInit {
-    ErrorEventInit();
-
-    String message;
-    String filename;
-    unsigned lineno;
-    unsigned colno;
-};
 
 class ErrorEvent final : public Event {
     DEFINE_WRAPPERTYPEINFO();
@@ -66,18 +58,19 @@ public:
     {
         return adoptRefWillBeNoop(new ErrorEvent("Script error.", String(), 0, 0, world));
     }
-    virtual ~ErrorEvent();
+    ~ErrorEvent() override;
 
     // As 'message' is exposed to JavaScript, never return unsanitizedMessage.
     const String& message() const { return m_sanitizedMessage; }
     const String& filename() const { return m_fileName; }
     unsigned lineno() const { return m_lineNumber; }
     unsigned colno() const { return m_columnNumber; }
+    ScriptValue error(ScriptState*) const;
 
     // 'messageForConsole' is not exposed to JavaScript, and prefers 'm_unsanitizedMessage'.
     const String& messageForConsole() const { return !m_unsanitizedMessage.isEmpty() ? m_unsanitizedMessage : m_sanitizedMessage; }
 
-    virtual const AtomicString& interfaceName() const override;
+    const AtomicString& interfaceName() const override;
 
     DOMWrapperWorld* world() const { return m_world.get(); }
 
@@ -95,6 +88,7 @@ private:
     String m_fileName;
     unsigned m_lineNumber;
     unsigned m_columnNumber;
+    ScriptValue m_error;
 
     RefPtr<DOMWrapperWorld> m_world;
 };

@@ -9,8 +9,9 @@
 #include "base/command_line.h"
 #include "base/json/string_escape.h"
 #include "base/strings/string_piece.h"
-#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "content/public/child/v8_value_converter.h"
 #include "content/public/common/content_switches.h"
@@ -28,24 +29,17 @@
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebSerializedScriptValue.h"
 #include "third_party/WebKit/public/web/WebView.h"
-#include "third_party/re2/re2/re2.h"
-
 using base::UserMetricsAction;
-using blink::WebElement;
-using blink::WebLocalFrame;
-using blink::WebMouseEvent;
-using blink::WebNode;
-using blink::WebPlugin;
-using blink::WebPluginContainer;
-using blink::WebPluginParams;
-using blink::WebScriptSource;
-using blink::WebURLRequest;
 using content::PluginInstanceThrottler;
 using content::RenderThread;
 
 namespace plugins {
 
-#if defined(ENABLE_PLUGINS)
+// TODO(tommycli): After a size update, re-check the size after this delay, as
+// Blink can report incorrect sizes to plugins while the compositing state is
+// dirty. Chosen because it seems to work.
+const int kSizeChangeRecheckDelayMilliseconds = 100;
+
 void LoadablePluginPlaceholder::BlockForPowerSaverPoster() {
   DCHECK(!is_blocked_for_power_saver_poster_);
   is_blocked_for_power_saver_poster_ = true;
@@ -63,34 +57,27 @@ void LoadablePluginPlaceholder::SetPremadePlugin(
   DCHECK(!premade_throttler_);
   premade_throttler_ = throttler;
 }
-#endif
 
 LoadablePluginPlaceholder::LoadablePluginPlaceholder(
     content::RenderFrame* render_frame,
-    WebLocalFrame* frame,
-    const WebPluginParams& params,
-    const std::string& html_data,
-    GURL placeholderDataUrl)
-    : PluginPlaceholder(render_frame,
-                        frame,
-                        params,
-                        html_data,
-                        placeholderDataUrl),
+    blink::WebLocalFrame* frame,
+    const blink::WebPluginParams& params,
+    const std::string& html_data)
+    : PluginPlaceholderBase(render_frame, frame, params, html_data),
       is_blocked_for_background_tab_(false),
       is_blocked_for_prerendering_(false),
       is_blocked_for_power_saver_poster_(false),
       power_saver_enabled_(false),
       premade_throttler_(nullptr),
       allow_loading_(false),
-      hidden_(false),
       finished_loading_(false),
+      in_size_recheck_(false),
       weak_factory_(this) {
 }
 
 LoadablePluginPlaceholder::~LoadablePluginPlaceholder() {
 }
 
-#if defined(ENABLE_PLUGINS)
 void LoadablePluginPlaceholder::MarkPluginEssential(
     PluginInstanceThrottler::PowerSaverUnthrottleMethod method) {
   if (!power_saver_enabled_)
@@ -109,39 +96,17 @@ void LoadablePluginPlaceholder::MarkPluginEssential(
       LoadPlugin();
   }
 }
-#endif
 
-void LoadablePluginPlaceholder::BindWebFrame(blink::WebFrame* frame) {
-  v8::Isolate* isolate = blink::mainThreadIsolate();
-  v8::HandleScope handle_scope(isolate);
-  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
-  DCHECK(!context.IsEmpty());
-
-  v8::Context::Scope context_scope(context);
-  v8::Local<v8::Object> global = context->Global();
-  global->Set(gin::StringToV8(isolate, "plugin"),
-              gin::CreateHandle(isolate, this).ToV8());
-}
-
-gin::ObjectTemplateBuilder LoadablePluginPlaceholder::GetObjectTemplateBuilder(
-    v8::Isolate* isolate) {
-  return gin::Wrappable<PluginPlaceholder>::GetObjectTemplateBuilder(isolate)
-      .SetMethod("load", &LoadablePluginPlaceholder::LoadCallback)
-      .SetMethod("hide", &LoadablePluginPlaceholder::HideCallback)
-      .SetMethod("didFinishLoading",
-                 &LoadablePluginPlaceholder::DidFinishLoadingCallback);
-}
-
-void LoadablePluginPlaceholder::ReplacePlugin(WebPlugin* new_plugin) {
+void LoadablePluginPlaceholder::ReplacePlugin(blink::WebPlugin* new_plugin) {
   CHECK(plugin());
   if (!new_plugin)
     return;
-  WebPluginContainer* container = plugin()->container();
+  blink::WebPluginContainer* container = plugin()->container();
   // Set the new plugin on the container before initializing it.
   container->setPlugin(new_plugin);
   // Save the element in case the plugin is removed from the page during
   // initialization.
-  WebElement element = container->element();
+  blink::WebElement element = container->element();
   bool plugin_needs_initialization =
       !premade_throttler_ || new_plugin != premade_throttler_->GetWebPlugin();
   if (plugin_needs_initialization && !new_plugin->initialize(container)) {
@@ -169,54 +134,6 @@ void LoadablePluginPlaceholder::ReplacePlugin(WebPlugin* new_plugin) {
   plugin()->destroy();
 }
 
-void LoadablePluginPlaceholder::HidePlugin() {
-  hidden_ = true;
-  if (!plugin())
-    return;
-  WebPluginContainer* container = plugin()->container();
-  WebElement element = container->element();
-  element.setAttribute("style", "display: none;");
-  // If we have a width and height, search for a parent (often <div>) with the
-  // same dimensions. If we find such a parent, hide that as well.
-  // This makes much more uncovered page content usable (including clickable)
-  // as opposed to merely visible.
-  // TODO(cevans) -- it's a foul heuristic but we're going to tolerate it for
-  // now for these reasons:
-  // 1) Makes the user experience better.
-  // 2) Foulness is encapsulated within this single function.
-  // 3) Confidence in no fasle positives.
-  // 4) Seems to have a good / low false negative rate at this time.
-  if (element.hasAttribute("width") && element.hasAttribute("height")) {
-    std::string width_str("width:[\\s]*");
-    width_str += element.getAttribute("width").utf8().data();
-    if (EndsWith(width_str, "px", false)) {
-      width_str = width_str.substr(0, width_str.length() - 2);
-    }
-    base::TrimWhitespace(width_str, base::TRIM_TRAILING, &width_str);
-    width_str += "[\\s]*px";
-    std::string height_str("height:[\\s]*");
-    height_str += element.getAttribute("height").utf8().data();
-    if (EndsWith(height_str, "px", false)) {
-      height_str = height_str.substr(0, height_str.length() - 2);
-    }
-    base::TrimWhitespace(height_str, base::TRIM_TRAILING, &height_str);
-    height_str += "[\\s]*px";
-    WebNode parent = element;
-    while (!parent.parentNode().isNull()) {
-      parent = parent.parentNode();
-      if (!parent.isElementNode())
-        continue;
-      element = parent.toConst<WebElement>();
-      if (element.hasAttribute("style")) {
-        std::string style_str = element.getAttribute("style").utf8();
-        if (RE2::PartialMatch(style_str, width_str) &&
-            RE2::PartialMatch(style_str, height_str))
-          element.setAttribute("style", "display: none;");
-      }
-    }
-  }
-}
-
 void LoadablePluginPlaceholder::SetMessage(const base::string16& message) {
   message_ = message;
   if (finished_loading_)
@@ -229,11 +146,10 @@ void LoadablePluginPlaceholder::UpdateMessage() {
   std::string script =
       "window.setMessage(" + base::GetQuotedJSONString(message_) + ")";
   plugin()->web_view()->mainFrame()->executeScript(
-      WebScriptSource(base::UTF8ToUTF16(script)));
+      blink::WebScriptSource(base::UTF8ToUTF16(script)));
 }
 
 void LoadablePluginPlaceholder::PluginDestroyed() {
-#if defined(ENABLE_PLUGINS)
   if (power_saver_enabled_) {
     if (premade_throttler_) {
       // Since the premade plugin has been detached from the container, it will
@@ -249,20 +165,42 @@ void LoadablePluginPlaceholder::PluginDestroyed() {
     // Prevent processing subsequent calls to MarkPluginEssential.
     power_saver_enabled_ = false;
   }
-#endif
 
-  PluginPlaceholder::PluginDestroyed();
+  PluginPlaceholderBase::PluginDestroyed();
 }
 
 v8::Local<v8::Object> LoadablePluginPlaceholder::GetV8ScriptableObject(
     v8::Isolate* isolate) const {
-#if defined(ENABLE_PLUGINS)
   // Pass through JavaScript access to the underlying throttled plugin.
   if (premade_throttler_ && premade_throttler_->GetWebPlugin()) {
     return premade_throttler_->GetWebPlugin()->v8ScriptableObject(isolate);
   }
-#endif
   return v8::Local<v8::Object>();
+}
+
+void LoadablePluginPlaceholder::OnUnobscuredRectUpdate(
+    const gfx::Rect& unobscured_rect) {
+  DCHECK(content::RenderThread::Get());
+  if (!power_saver_enabled_ || !premade_throttler_ || !finished_loading_)
+    return;
+
+  unobscured_rect_ = unobscured_rect;
+
+  // During a size recheck, we will get another notification into this method.
+  // Use this flag to early exit to prevent reentrancy issues.
+  if (in_size_recheck_)
+    return;
+
+  if (!size_update_timer_.IsRunning()) {
+    // TODO(tommycli): We have to post a delayed task to recheck the size, as
+    // Blink can report wrong sizes for partially obscured plugins while the
+    // compositing state is dirty. https://crbug.com/343769
+    size_update_timer_.Start(
+        FROM_HERE,
+        base::TimeDelta::FromMilliseconds(kSizeChangeRecheckDelayMilliseconds),
+        base::Bind(&LoadablePluginPlaceholder::RecheckSizeAndMaybeUnthrottle,
+                   weak_factory_.GetWeakPtr()));
+  }
 }
 
 void LoadablePluginPlaceholder::WasShown() {
@@ -296,7 +234,7 @@ void LoadablePluginPlaceholder::OnSetIsPrerendering(bool is_prerendering) {
 void LoadablePluginPlaceholder::LoadPlugin() {
   // This is not strictly necessary but is an important defense in case the
   // event propagation changes between "close" vs. "click-to-play".
-  if (hidden_)
+  if (hidden())
     return;
   if (!plugin())
     return;
@@ -316,17 +254,10 @@ void LoadablePluginPlaceholder::LoadPlugin() {
 
 void LoadablePluginPlaceholder::LoadCallback() {
   RenderThread::Get()->RecordAction(UserMetricsAction("Plugin_Load_Click"));
-#if defined(ENABLE_PLUGINS)
   // If the user specifically clicks on the plugin content's placeholder,
   // disable power saver throttling for this instance.
   MarkPluginEssential(PluginInstanceThrottler::UNTHROTTLE_METHOD_BY_CLICK);
-#endif
   LoadPlugin();
-}
-
-void LoadablePluginPlaceholder::HideCallback() {
-  RenderThread::Get()->RecordAction(UserMetricsAction("Plugin_Hide_Click"));
-  HidePlugin();
 }
 
 void LoadablePluginPlaceholder::DidFinishLoadingCallback() {
@@ -343,7 +274,7 @@ void LoadablePluginPlaceholder::DidFinishLoadingCallback() {
   // placeholder to be ready to receive simulated user input.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnablePluginPlaceholderTesting)) {
-    WebElement element = plugin()->container()->element();
+    blink::WebElement element = plugin()->container()->element();
     element.setAttribute("placeholderLoaded", "true");
 
     scoped_ptr<content::V8ValueConverter> converter(
@@ -355,13 +286,14 @@ void LoadablePluginPlaceholder::DidFinishLoadingCallback() {
 
     blink::WebDOMEvent event = element.document().createEvent("MessageEvent");
     blink::WebDOMMessageEvent msg_event = event.to<blink::WebDOMMessageEvent>();
-    msg_event.initMessageEvent("message",     // type
-                               false,         // canBubble
-                               false,         // cancelable
-                               message_data,  // data
-                               "",            // origin [*]
-                               NULL,          // source [*]
-                               "");           // lastEventId
+    msg_event.initMessageEvent("message",           // type
+                               false,               // canBubble
+                               false,               // cancelable
+                               message_data,        // data
+                               "",                  // origin [*]
+                               NULL,                // source [*]
+                               element.document(),  // target document
+                               "");                 // lastEventId
     element.dispatchEvent(msg_event);
   }
 }
@@ -387,6 +319,41 @@ bool LoadablePluginPlaceholder::LoadingBlocked() const {
   DCHECK(allow_loading_);
   return is_blocked_for_background_tab_ || is_blocked_for_power_saver_poster_ ||
          is_blocked_for_prerendering_;
+}
+
+void LoadablePluginPlaceholder::RecheckSizeAndMaybeUnthrottle() {
+  DCHECK(content::RenderThread::Get());
+  DCHECK(!in_size_recheck_);
+
+  if (!plugin())
+    return;
+
+  in_size_recheck_ = true;
+
+  // Re-check the size in case the reported size was incorrect.
+  plugin()->container()->reportGeometry();
+
+  float zoom_factor = plugin()->container()->pageZoomFactor();
+
+  // Adjust padding using clip coordinates to center play button for plugins
+  // that have their top or left portions obscured.
+  if (is_blocked_for_power_saver_poster_) {
+    int x = roundf(unobscured_rect_.x() / zoom_factor);
+    int y = roundf(unobscured_rect_.y() / zoom_factor);
+    std::string script =
+        base::StringPrintf("window.setPosterMargin('%dpx', '%dpx')", x, y);
+    plugin()->web_view()->mainFrame()->executeScript(
+        blink::WebScriptSource(base::UTF8ToUTF16(script)));
+  }
+
+  if (PluginInstanceThrottler::IsLargeContent(
+          roundf(unobscured_rect_.width() / zoom_factor),
+          roundf(unobscured_rect_.height() / zoom_factor))) {
+    MarkPluginEssential(
+        PluginInstanceThrottler::UNTHROTTLE_METHOD_BY_SIZE_CHANGE);
+  }
+
+  in_size_recheck_ = false;
 }
 
 }  // namespace plugins

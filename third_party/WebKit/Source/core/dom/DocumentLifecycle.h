@@ -32,12 +32,14 @@
 #define DocumentLifecycle_h
 
 #include "core/CoreExport.h"
+#include "wtf/Allocator.h"
 #include "wtf/Assertions.h"
 #include "wtf/Noncopyable.h"
 
 namespace blink {
 
 class CORE_EXPORT DocumentLifecycle {
+    DISALLOW_ALLOCATION();
     WTF_MAKE_NONCOPYABLE(DocumentLifecycle);
 public:
     enum State {
@@ -65,6 +67,12 @@ public:
         InPaintInvalidation,
         PaintInvalidationClean,
 
+        InPaintForSlimmingPaintV2,
+        PaintForSlimmingPaintV2Clean,
+
+        InCompositingForSlimmingPaintV2,
+        CompositingForSlimmingPaintV2Clean,
+
         // Once the document starts shuting down, we cannot return
         // to the style/layout/compositing states.
         Stopping,
@@ -73,12 +81,11 @@ public:
     };
 
     class Scope {
+        STACK_ALLOCATED();
         WTF_MAKE_NONCOPYABLE(Scope);
     public:
         Scope(DocumentLifecycle&, State finalState);
         ~Scope();
-
-        void setFinalState(State finalState) { m_finalState = finalState; }
 
     private:
         DocumentLifecycle& m_lifecycle;
@@ -86,6 +93,7 @@ public:
     };
 
     class DeprecatedTransition {
+        DISALLOW_ALLOCATION();
         WTF_MAKE_NONCOPYABLE(DeprecatedTransition);
     public:
         DeprecatedTransition(State from, State to);
@@ -101,6 +109,7 @@ public:
     };
 
     class DetachScope {
+        STACK_ALLOCATED();
         WTF_MAKE_NONCOPYABLE(DetachScope);
     public:
         explicit DetachScope(DocumentLifecycle& documentLifecycle)
@@ -133,6 +142,7 @@ public:
     void advanceTo(State);
     void ensureStateAtMost(State);
 
+    bool inDetach() const { return m_detachCount; }
     void incrementDetachCount() { m_detachCount++; }
     void decrementDetachCount()
     {
@@ -156,7 +166,9 @@ inline bool DocumentLifecycle::stateAllowsTreeMutations() const
     // but we need to fix MediaList listeners and plugins first.
     return m_state != InStyleRecalc
         && m_state != InPerformLayout
-        && m_state != InCompositingUpdate;
+        && m_state != InCompositingUpdate
+        && m_state != InPaintForSlimmingPaintV2
+        && m_state != InCompositingForSlimmingPaintV2;
 }
 
 inline bool DocumentLifecycle::stateAllowsLayoutTreeMutations() const
@@ -179,6 +191,8 @@ inline bool DocumentLifecycle::stateAllowsDetach() const
         || m_state == LayoutClean
         || m_state == CompositingClean
         || m_state == PaintInvalidationClean
+        || m_state == PaintForSlimmingPaintV2Clean
+        || m_state == CompositingForSlimmingPaintV2Clean
         || m_state == Stopping;
 }
 
@@ -186,7 +200,9 @@ inline bool DocumentLifecycle::stateAllowsLayoutInvalidation() const
 {
     return m_state != InPerformLayout
         && m_state != InCompositingUpdate
-        && m_state != InPaintInvalidation;
+        && m_state != InPaintInvalidation
+        && m_state != InPaintForSlimmingPaintV2
+        && m_state != InCompositingForSlimmingPaintV2;
 }
 
 } // namespace blink

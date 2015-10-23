@@ -324,9 +324,9 @@ void V8TestInterfacePartial::installV8TestInterfaceTemplate(v8::Local<v8::Functi
     functionTemplate->InstanceTemplate()->SetCallAsFunctionHandler(V8TestInterface::legacyCallCustom);
 }
 
-void V8TestInterfacePartial::preparePrototypeObject(v8::Isolate* isolate, v8::Local<v8::Object> prototypeObject)
+void V8TestInterfacePartial::preparePrototypeObject(v8::Isolate* isolate, v8::Local<v8::Object> prototypeObject, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
-    V8TestInterface::preparePrototypeObject(isolate, prototypeObject);
+    V8TestInterface::preparePrototypeObject(isolate, prototypeObject, interfaceTemplate);
     v8::Local<v8::Context> v8Context(prototypeObject->CreationContext());
     v8::Local<v8::Name> unscopablesSymbol(v8::Symbol::GetUnscopables(isolate));
     v8::Local<v8::Object> unscopeables;
@@ -334,8 +334,8 @@ void V8TestInterfacePartial::preparePrototypeObject(v8::Isolate* isolate, v8::Lo
         unscopeables = prototypeObject->Get(v8Context, unscopablesSymbol).ToLocalChecked().As<v8::Object>();
     else
         unscopeables = v8::Object::New(isolate);
-    unscopeables->ForceSet(v8Context, v8AtomicString(isolate, "unscopeableVoidMethod"), v8::True(isolate)).FromJust();
-    prototypeObject->ForceSet(v8Context, unscopablesSymbol, unscopeables).FromJust();
+    unscopeables->CreateDataProperty(v8Context, v8AtomicString(isolate, "unscopeableVoidMethod"), v8::True(isolate)).FromJust();
+    prototypeObject->CreateDataProperty(v8Context, unscopablesSymbol, unscopeables).FromJust();
 }
 
 void V8TestInterfacePartial::initialize()

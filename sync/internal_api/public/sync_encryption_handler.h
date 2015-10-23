@@ -10,10 +10,7 @@
 #include "base/time/time.h"
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
-
-namespace sync_pb {
-class EncryptedData;
-}
+#include "sync/protocol/sync.pb.h"
 
 namespace syncer {
 
@@ -49,6 +46,12 @@ enum BootstrapTokenType {
   KEYSTORE_BOOTSTRAP_TOKEN
 };
 
+// Whether we clear server data when a user enables passphrase encryption.
+enum PassphraseTransitionClearDataOption {
+  PASSPHRASE_TRANSITION_DO_NOT_CLEAR_DATA,
+  PASSPHRASE_TRANSITION_CLEAR_DATA
+};
+
 // Sync's encryption handler. Handles tracking encrypted types, ensuring the
 // cryptographer encrypts with the proper key and has the most recent keybag,
 // and keeps the nigori node up to date.
@@ -56,6 +59,8 @@ enum BootstrapTokenType {
 // methods must be invoked on the sync thread.
 class SYNC_EXPORT SyncEncryptionHandler {
  public:
+  class NigoriState;
+
   // All Observer methods are done synchronously from within a transaction and
   // on the sync thread.
   class SYNC_EXPORT Observer {
@@ -123,8 +128,22 @@ class SYNC_EXPORT SyncEncryptionHandler {
     virtual void OnPassphraseTypeChanged(PassphraseType type,
                                          base::Time passphrase_time) = 0;
 
+    // The user has set a passphrase using this device.
+    //
+    // |nigori_state| can be used to restore nigori state across
+    // SyncEncryptionHandlerImpl lifetimes. See also SyncEncryptionHandlerImpl's
+    // RestoredNigori method.
+    virtual void OnLocalSetPassphraseEncryption(
+        const NigoriState& nigori_state) = 0;
+
    protected:
     virtual ~Observer();
+  };
+
+  class SYNC_EXPORT NigoriState {
+   public:
+    NigoriState() {}
+    sync_pb::NigoriSpecifics nigori_specifics;
   };
 
   SyncEncryptionHandler();

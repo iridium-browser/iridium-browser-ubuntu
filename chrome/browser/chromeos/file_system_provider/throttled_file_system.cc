@@ -38,6 +38,19 @@ AbortCallback ThrottledFileSystem::GetMetadata(
   return file_system_->GetMetadata(entry_path, fields, callback);
 }
 
+AbortCallback ThrottledFileSystem::GetActions(
+    const base::FilePath& entry_path,
+    const GetActionsCallback& callback) {
+  return file_system_->GetActions(entry_path, callback);
+}
+
+AbortCallback ThrottledFileSystem::ExecuteAction(
+    const base::FilePath& entry_path,
+    const std::string& action_id,
+    const storage::AsyncFileUtil::StatusCallback& callback) {
+  return file_system_->ExecuteAction(entry_path, action_id, callback);
+}
+
 AbortCallback ThrottledFileSystem::ReadDirectory(
     const base::FilePath& directory_path,
     const storage::AsyncFileUtil::ReadDirectoryCallback& callback) {

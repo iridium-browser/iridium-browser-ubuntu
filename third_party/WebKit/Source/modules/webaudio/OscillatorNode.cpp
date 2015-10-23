@@ -26,7 +26,9 @@
 #if ENABLE(WEB_AUDIO)
 #include "modules/webaudio/OscillatorNode.h"
 
-#include "modules/webaudio/AudioContext.h"
+#include "bindings/core/v8/ExceptionMessages.h"
+#include "bindings/core/v8/ExceptionState.h"
+#include "core/dom/ExceptionCode.h"
 #include "modules/webaudio/AudioNodeOutput.h"
 #include "modules/webaudio/PeriodicWave.h"
 #include "platform/audio/AudioUtilities.h"
@@ -87,16 +89,21 @@ String OscillatorHandler::type() const
     }
 }
 
-void OscillatorHandler::setType(const String& type)
+void OscillatorHandler::setType(const String& type, ExceptionState& exceptionState)
 {
-    if (type == "sine")
+    if (type == "sine") {
         setType(SINE);
-    else if (type == "square")
+    } else if (type == "square") {
         setType(SQUARE);
-    else if (type == "sawtooth")
+    } else if (type == "sawtooth") {
         setType(SAWTOOTH);
-    else if (type == "triangle")
+    } else if (type == "triangle") {
         setType(TRIANGLE);
+    } else if (type == "custom") {
+        exceptionState.throwDOMException(
+            InvalidStateError,
+            "'type' cannot be set directly to 'custom'.  Use setPeriodicWave() to create a custom Oscillator type.");
+    }
 }
 
 bool OscillatorHandler::setType(unsigned type)
@@ -129,6 +136,7 @@ bool OscillatorHandler::setType(unsigned type)
     default:
         // Return error for invalid types, including CUSTOM since setPeriodicWave() method must be
         // called explicitly.
+        ASSERT_NOT_REACHED();
         return false;
     }
 
@@ -333,7 +341,7 @@ bool OscillatorHandler::propagatesSilence() const
 
 // ----------------------------------------------------------------
 
-OscillatorNode::OscillatorNode(AudioContext& context, float sampleRate)
+OscillatorNode::OscillatorNode(AbstractAudioContext& context, float sampleRate)
     : AudioScheduledSourceNode(context)
     // Use musical pitch standard A440 as a default.
     , m_frequency(AudioParam::create(context, 440))
@@ -343,7 +351,7 @@ OscillatorNode::OscillatorNode(AudioContext& context, float sampleRate)
     setHandler(OscillatorHandler::create(*this, sampleRate, m_frequency->handler(), m_detune->handler()));
 }
 
-OscillatorNode* OscillatorNode::create(AudioContext& context, float sampleRate)
+OscillatorNode* OscillatorNode::create(AbstractAudioContext& context, float sampleRate)
 {
     return new OscillatorNode(context, sampleRate);
 }
@@ -365,9 +373,9 @@ String OscillatorNode::type() const
     return oscillatorHandler().type();
 }
 
-void OscillatorNode::setType(const String& type)
+void OscillatorNode::setType(const String& type, ExceptionState& exceptionState)
 {
-    oscillatorHandler().setType(type);
+    oscillatorHandler().setType(type, exceptionState);
 }
 
 AudioParam* OscillatorNode::frequency()

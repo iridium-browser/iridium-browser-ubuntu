@@ -16,6 +16,7 @@ namespace dom_distiller {
  */
 
 namespace {
+
 std::string GetLastSegment(const std::string& path) {
   // return re.search('[^/]*\/?$', path).group(0)
   if (path.size() == 0)
@@ -46,7 +47,8 @@ bool EndsWith(const std::string& t, const std::string& s) {
   return s.size() >= t.size() &&
          s.compare(s.size() - t.size(), std::string::npos, t) == 0;
 }
-}
+
+}  // namespace
 
 int kDerivedFeaturesCount = 29;
 
@@ -142,7 +144,7 @@ std::vector<double> CalculateDerivedFeaturesFromJSON(
     return std::vector<double>();
   }
 
-  scoped_ptr<base::Value> json(base::JSONReader::Read(stringified));
+  scoped_ptr<base::Value> json = base::JSONReader::Read(stringified);
   if (!json) {
     return std::vector<double>();
   }
@@ -176,4 +178,5 @@ std::vector<double> CalculateDerivedFeaturesFromJSON(
                                   numAnchors, numForms, innerText, textContent,
                                   innerHTML);
 }
-}
+
+}  // namespace dom_distiller

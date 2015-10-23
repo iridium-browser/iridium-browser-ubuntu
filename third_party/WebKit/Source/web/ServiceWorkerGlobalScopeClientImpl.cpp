@@ -103,14 +103,9 @@ void ServiceWorkerGlobalScopeClientImpl::didHandlePushEvent(int pushEventID, Web
     m_client.didHandlePushEvent(pushEventID, result);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::didHandleSyncEvent(int syncEventID)
+void ServiceWorkerGlobalScopeClientImpl::didHandleSyncEvent(int syncEventID, WebServiceWorkerEventResult result)
 {
-    m_client.didHandleSyncEvent(syncEventID);
-}
-
-void ServiceWorkerGlobalScopeClientImpl::didHandleCrossOriginConnectEvent(int connectEventID, bool acceptConnect)
-{
-    m_client.didHandleCrossOriginConnectEvent(connectEventID, acceptConnect);
+    m_client.didHandleSyncEvent(syncEventID, result);
 }
 
 void ServiceWorkerGlobalScopeClientImpl::postMessageToClient(const WebString& clientUUID, const WebString& message, PassOwnPtr<WebMessagePortChannelArray> webChannels)
@@ -136,6 +131,11 @@ void ServiceWorkerGlobalScopeClientImpl::claim(WebServiceWorkerClientsClaimCallb
 void ServiceWorkerGlobalScopeClientImpl::focus(const WebString& clientUUID, WebServiceWorkerClientCallbacks* callback)
 {
     m_client.focus(clientUUID, callback);
+}
+
+void ServiceWorkerGlobalScopeClientImpl::navigate(const WebString& clientUUID, const WebURL& url, WebServiceWorkerClientCallbacks* callback)
+{
+    m_client.navigate(clientUUID, url, callback);
 }
 
 ServiceWorkerGlobalScopeClientImpl::ServiceWorkerGlobalScopeClientImpl(WebServiceWorkerContextClient& client)

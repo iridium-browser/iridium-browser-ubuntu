@@ -220,7 +220,7 @@ struct SpdySessionDependencies {
   SpdySession::TimeFunc time_func;
   NextProtoVector next_protos;
   std::string trusted_spdy_proxy;
-  bool use_alternate_protocols;
+  bool use_alternative_services;
   NetLog* net_log;
 };
 
@@ -463,6 +463,10 @@ class SpdyTestUtil {
                                       const char* const extra_headers[],
                                       int extra_header_count);
 
+  SpdyFrame* ConstructSpdyHeaderFrame(int stream_id,
+                                      const char* const headers[],
+                                      int header_count);
+
   // Construct a SPDY syn (HEADERS or SYN_STREAM, depending on protocol
   // version) carrying exactly the given headers and priority.
   SpdyFrame* ConstructSpdySyn(int stream_id,
@@ -550,7 +554,7 @@ class SpdyTestUtil {
   const SpdyHeaderInfo MakeSpdyHeader(SpdyFrameType type);
 
   // For versions below SPDY4, adds the version HTTP/1.1 header.
-  void MaybeAddVersionHeader(SpdyFrameWithNameValueBlockIR* frame_ir) const;
+  void MaybeAddVersionHeader(SpdyFrameWithHeaderBlockIR* frame_ir) const;
   void MaybeAddVersionHeader(SpdyHeaderBlock* block) const;
 
   // Maps |priority| to SPDY version priority, and sets it on |frame_ir|.
@@ -559,7 +563,7 @@ class SpdyTestUtil {
   NextProto protocol() const { return protocol_; }
   SpdyMajorVersion spdy_version() const { return spdy_version_; }
   bool include_version_header() const {
-    return protocol_ < kProtoSPDY4MinimumVersion;
+    return protocol_ < kProtoHTTP2MinimumVersion;
   }
   scoped_ptr<SpdyFramer> CreateFramer(bool compressed) const;
 

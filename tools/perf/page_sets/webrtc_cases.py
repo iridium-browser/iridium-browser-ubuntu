@@ -4,7 +4,7 @@
 import os
 
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry import story
 
 
 WEBRTC_GITHUB_SAMPLES_URL = 'http://webrtc.github.io/samples/src/content/'
@@ -170,19 +170,19 @@ class Page9(WebrtcCasesPage):
     action_runner.Wait(30)
 
 
-class WebrtcCasesPageSet(page_set_module.PageSet):
+class WebrtcCasesPageSet(story.StorySet):
 
   """ WebRTC tests for Real-time audio and video communication. """
 
   def __init__(self):
     super(WebrtcCasesPageSet, self).__init__(
       archive_data_file='data/webrtc_cases.json',
-      bucket=page_set_module.PUBLIC_BUCKET)
+      cloud_storage_bucket=story.PUBLIC_BUCKET)
 
-    self.AddUserStory(Page1(self))
-    self.AddUserStory(Page2(self))
-    self.AddUserStory(Page3(self))
+    self.AddStory(Page1(self))
+    self.AddStory(Page2(self))
+    self.AddStory(Page3(self))
     # Disable page 4-7 until we can implement http://crbug.com/468732. We can
     # get data out from the tests, but it's not very useful yet.
-    self.AddUserStory(Page8(self))
-    self.AddUserStory(Page9(self))
+    self.AddStory(Page8(self))
+    self.AddStory(Page9(self))

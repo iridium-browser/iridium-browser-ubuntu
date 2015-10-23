@@ -150,7 +150,7 @@ void HTMLFrameOwnerElement::disconnectContentFrame()
     // reach up into this document and then attempt to look back down. We should
     // see if this behavior is really needed as Gecko does not allow this.
     if (RefPtrWillBeRawPtr<Frame> frame = contentFrame()) {
-        frame->detach();
+        frame->detach(FrameDetachType::Remove);
     }
 #if ENABLE(OILPAN)
     // Oilpan: a plugin container must be explicitly disposed before it
@@ -242,11 +242,11 @@ Widget* HTMLFrameOwnerElement::ownedWidget() const
     return m_widget.get();
 }
 
-bool HTMLFrameOwnerElement::loadOrRedirectSubframe(const KURL& url, const AtomicString& frameName, bool lockBackForwardList)
+bool HTMLFrameOwnerElement::loadOrRedirectSubframe(const KURL& url, const AtomicString& frameName, bool replaceCurrentItem)
 {
     RefPtrWillBeRawPtr<LocalFrame> parentFrame = document().frame();
     if (contentFrame()) {
-        contentFrame()->navigate(document(), url, lockBackForwardList);
+        contentFrame()->navigate(document(), url, replaceCurrentItem, UserGestureStatus::None);
         return true;
     }
 

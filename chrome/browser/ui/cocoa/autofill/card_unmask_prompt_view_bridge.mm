@@ -5,9 +5,9 @@
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_models.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
-#include "chrome/browser/ui/autofill/card_unmask_prompt_controller.h"
 #include "chrome/browser/ui/chrome_style.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_pop_up_button.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_textfield.h"
@@ -20,11 +20,16 @@
 #import "chrome/browser/ui/cocoa/key_equivalent_constants.h"
 #import "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/spinner_view.h"
+#include "chrome/browser/ui/cocoa/themed_window.h"
+#include "components/autofill/core/browser/ui/card_unmask_prompt_controller.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
+#import "ui/base/cocoa/controls/hyperlink_button_cell.h"
 #include "ui/base/cocoa/window_size_constants.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/theme_provider.h"
 
 namespace {
 
@@ -46,8 +51,6 @@ const CGFloat kSpinnerToProgressTextGap = 8.0f;
 const CGFloat kYearToCvcGap = 12.0f;
 
 const SkColor kPermanentErrorTextColor = SK_ColorWHITE;
-// Material blue. TODO(bondd): share with Views version.
-const SkColor kProgressTextColor = SkColorSetRGB(0x42, 0x85, 0xf4);
 // TODO(bondd): Unify colors with Views version and AutofillMessageView.
 const SkColor kShadingColor = SkColorSetRGB(0xf2, 0xf2, 0xf2);
 const SkColor kSubtleBorderColor = SkColorSetRGB(0xdf, 0xdf, 0xdf);
@@ -56,20 +59,28 @@ const SkColor kSubtleBorderColor = SkColorSetRGB(0xdf, 0xdf, 0xdf);
 
 namespace autofill {
 
-// static
-CardUnmaskPromptView* CardUnmaskPromptView::CreateAndShow(
-    CardUnmaskPromptController* controller) {
-  return new CardUnmaskPromptViewBridge(controller);
+CardUnmaskPromptView* CreateCardUnmaskPromptView(
+    CardUnmaskPromptController* controller,
+    content::WebContents* web_contents) {
+  return new CardUnmaskPromptViewBridge(controller, web_contents);
 }
 
 #pragma mark CardUnmaskPromptViewBridge
 
 CardUnmaskPromptViewBridge::CardUnmaskPromptViewBridge(
-    CardUnmaskPromptController* controller)
-    : controller_(controller), weak_ptr_factory_(this) {
+    CardUnmaskPromptController* controller,
+    content::WebContents* web_contents)
+    : controller_(controller),
+      web_contents_(web_contents),
+      weak_ptr_factory_(this) {
   view_controller_.reset(
       [[CardUnmaskPromptViewCocoa alloc] initWithBridge:this]);
+}
 
+CardUnmaskPromptViewBridge::~CardUnmaskPromptViewBridge() {
+}
+
+void CardUnmaskPromptViewBridge::Show() {
   // Setup the constrained window that will show the view.
   base::scoped_nsobject<NSWindow> window([[ConstrainedWindowCustomWindow alloc]
       initWithContentRect:[[view_controller_ view] bounds]]);
@@ -77,10 +88,7 @@ CardUnmaskPromptViewBridge::CardUnmaskPromptViewBridge(
   base::scoped_nsobject<CustomConstrainedWindowSheet> sheet(
       [[CustomConstrainedWindowSheet alloc] initWithCustomWindow:window]);
   constrained_window_.reset(
-      new ConstrainedWindowMac(this, controller_->GetWebContents(), sheet));
-}
-
-CardUnmaskPromptViewBridge::~CardUnmaskPromptViewBridge() {
+      new ConstrainedWindowMac(this, web_contents_, sheet));
 }
 
 void CardUnmaskPromptViewBridge::ControllerGone() {
@@ -132,6 +140,10 @@ CardUnmaskPromptController* CardUnmaskPromptViewBridge::GetController() {
   return controller_;
 }
 
+content::WebContents* CardUnmaskPromptViewBridge::GetWebContents() {
+  return web_contents_;
+}
+
 void CardUnmaskPromptViewBridge::PerformClose() {
   constrained_window_->CloseWebContentsModalDialog();
 }
@@ -142,6 +154,7 @@ void CardUnmaskPromptViewBridge::PerformClose() {
 
 @implementation CardUnmaskPromptViewCocoa {
   base::scoped_nsobject<NSBox> permanentErrorBox_;
+  base::scoped_nsobject<NSView> expirationView_;
   base::scoped_nsobject<NSView> inputRowView_;
   base::scoped_nsobject<NSView> progressOverlayView_;
   base::scoped_nsobject<NSView> storageView_;
@@ -152,6 +165,8 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   base::scoped_nsobject<AutofillTextField> cvcInput_;
   base::scoped_nsobject<AutofillPopUpButton> monthPopup_;
   base::scoped_nsobject<AutofillPopUpButton> yearPopup_;
+  base::scoped_nsobject<NSImageView> cvcImageView_;
+  base::scoped_nsobject<NSButton> newCardButton_;
   base::scoped_nsobject<NSButton> cancelButton_;
   base::scoped_nsobject<NSButton> verifyButton_;
   base::scoped_nsobject<NSButton> storageCheckbox_;
@@ -215,8 +230,8 @@ void CardUnmaskPromptViewBridge::PerformClose() {
 }
 
 - (void)updateProgressOverlayOrigin {
-  // Center progressOverlayView_ horizontally in the dialog, and position it a
-  // fixed distance below instructionsLabel_.
+  // Center |progressOverlayView_| horizontally in the dialog, and position it
+  // a fixed distance below |instructionsLabel_|.
   CGFloat viewMinY = NSMinY([instructionsLabel_ frame]) -
                      kProgressToInstructionsGap -
                      NSHeight([progressOverlayView_ frame]);
@@ -259,6 +274,7 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   [cvcInput_ setEnabled:enabled];
   [monthPopup_ setEnabled:enabled];
   [yearPopup_ setEnabled:enabled];
+  [newCardButton_ setEnabled:enabled];
   [storageCheckbox_ setEnabled:enabled];
 }
 
@@ -269,10 +285,17 @@ void CardUnmaskPromptViewBridge::PerformClose() {
           NSNaturalTextAlignment, NSLineBreakByWordWrapping);
   [errorLabel_ setAttributedStringValue:attributedString];
 
-  // If there is more than one input showing, don't mark anything as
-  // invalid since we don't know the location of the problem.
-  if (!text.empty() && !bridge_->GetController()->ShouldRequestExpirationDate())
+  // If there is more than one input showing, don't mark anything as invalid
+  // since we don't know the location of the problem.
+  if (!text.empty() &&
+      !bridge_->GetController()->ShouldRequestExpirationDate()) {
     [cvcInput_ setValidityMessage:@"invalid"];
+
+    // Show "New card?" button, which when clicked will cause this dialog to
+    // ask for expiration date.
+    [self createNewCardButton];
+    [inputRowView_ addSubview:newCardButton_];
+  }
 
   [self performLayoutAndDisplay:YES];
 }
@@ -331,6 +354,24 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   bridge_->PerformClose();
 }
 
+- (void)onNewCard:(id)sender {
+  autofill::CardUnmaskPromptController* controller = bridge_->GetController();
+  controller->NewCardLinkClicked();
+
+  // |newCardButton_| will never be shown again for this dialog.
+  [newCardButton_ removeFromSuperview];
+  newCardButton_.reset();
+
+  [self createExpirationView];
+  [inputRowView_ addSubview:expirationView_];
+  [cvcInput_ setStringValue:@""];
+  [cvcInput_ setValidityMessage:@""];
+  [self setRetriableErrorMessage:base::string16()];
+  [self updateInstructionsText];
+  [self updateVerifyButtonEnabled];
+  [self performLayoutAndDisplay:YES];
+}
+
 - (BOOL)expirationDateIsValid {
   if (!bridge_->GetController()->ShouldRequestExpirationDate())
     return true;
@@ -368,17 +409,83 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   [self updateVerifyButtonEnabled];
 }
 
-- (base::scoped_nsobject<NSView>)createStorageViewWithController:
+- (void)updateInstructionsText {
+  NSAttributedString* instructionsString =
+      constrained_window::GetAttributedLabelString(
+          SysUTF16ToNSString(
+              bridge_->GetController()->GetInstructionsMessage()),
+          chrome_style::kTextFontStyle, NSNaturalTextAlignment,
+          NSLineBreakByWordWrapping);
+  [instructionsLabel_ setAttributedStringValue:instructionsString];
+}
+
+- (void)createNewCardButton {
+  DCHECK(!newCardButton_);
+  newCardButton_.reset([[HyperlinkButtonCell
+      buttonWithString:l10n_util::GetNSString(
+                           IDS_AUTOFILL_CARD_UNMASK_NEW_CARD_LINK)] retain]);
+  [[newCardButton_ cell] setShouldUnderline:NO];
+  [newCardButton_ setTarget:self];
+  [newCardButton_ setAction:@selector(onNewCard:)];
+  [newCardButton_ sizeToFit];
+}
+
+- (void)createExpirationView {
+  DCHECK(!expirationView_);
+  expirationView_.reset([[NSView alloc] initWithFrame:NSZeroRect]);
+
+  // Add expiration month.
+  autofill::MonthComboboxModel monthModel;
+  monthPopupDefaultIndex_ = monthModel.GetDefaultIndex();
+  monthPopup_.reset(
+      [CardUnmaskPromptViewCocoa buildDatePopupWithModel:monthModel]);
+  [monthPopup_ setTarget:self];
+  [monthPopup_ setAction:@selector(onExpirationDateChanged:)];
+  [expirationView_ addSubview:monthPopup_];
+
+  // Add separator between month and year.
+  base::scoped_nsobject<NSTextField> separatorLabel(
+      [constrained_window::CreateLabel() retain]);
+  NSAttributedString* separatorString =
+      constrained_window::GetAttributedLabelString(
+          SysUTF16ToNSString(l10n_util::GetStringUTF16(
+              IDS_AUTOFILL_CARD_UNMASK_EXPIRATION_DATE_SEPARATOR)),
+          chrome_style::kTextFontStyle, NSNaturalTextAlignment,
+          NSLineBreakByWordWrapping);
+  [separatorLabel setAttributedStringValue:separatorString];
+  [separatorLabel sizeToFit];
+  [expirationView_ addSubview:separatorLabel];
+
+  // Add expiration year.
+  autofill::YearComboboxModel yearModel;
+  yearPopupDefaultIndex_ = yearModel.GetDefaultIndex();
+  yearPopup_.reset(
+      [CardUnmaskPromptViewCocoa buildDatePopupWithModel:yearModel]);
+  [yearPopup_ setTarget:self];
+  [yearPopup_ setAction:@selector(onExpirationDateChanged:)];
+  [expirationView_ addSubview:yearPopup_];
+
+  // Lay out month, separator, and year within |expirationView_|.
+  [separatorLabel setFrameOrigin:NSMakePoint(NSMaxX([monthPopup_ frame]), 0)];
+  [yearPopup_ setFrameOrigin:NSMakePoint(NSMaxX([separatorLabel frame]), 0)];
+  NSRect expirationFrame = NSUnionRect([monthPopup_ frame], [yearPopup_ frame]);
+  expirationFrame.size.width += kYearToCvcGap;
+  [expirationView_ setFrame:expirationFrame];
+  [CardUnmaskPromptViewCocoa verticallyCenterSubviewsInView:expirationView_];
+}
+
+- (void)createStorageViewWithController:
         (autofill::CardUnmaskPromptController*)controller {
-  base::scoped_nsobject<NSView> view([[NSView alloc] initWithFrame:NSZeroRect]);
-  [view setAutoresizingMask:NSViewWidthSizable];
+  DCHECK(!storageView_);
+  storageView_.reset([[NSView alloc] initWithFrame:NSZeroRect]);
+  [storageView_ setAutoresizingMask:NSViewWidthSizable];
 
   base::scoped_nsobject<NSBox> box = [CardUnmaskPromptViewCocoa createPlainBox];
   [box setAutoresizingMask:NSViewWidthSizable];
   [box setFillColor:gfx::SkColorToCalibratedNSColor(kShadingColor)];
   [box setContentViewMargins:NSMakeSize(chrome_style::kHorizontalPadding,
                                         chrome_style::kClientBottomPadding)];
-  [view addSubview:box];
+  [storageView_ addSubview:box];
 
   // Add "Store card on this device" checkbox.
   storageCheckbox_.reset([[NSButton alloc] initWithFrame:NSZeroRect]);
@@ -410,13 +517,12 @@ void CardUnmaskPromptViewBridge::PerformClose() {
       [CardUnmaskPromptViewCocoa createPlainBox];
   [separator setAutoresizingMask:NSViewWidthSizable];
   [separator setFillColor:gfx::SkColorToCalibratedNSColor(kSubtleBorderColor)];
-  [view addSubview:separator];
+  [storageView_ addSubview:separator];
 
   [box sizeToFit];
   [separator setFrame:NSMakeRect(0, NSMaxY([box frame]), NSWidth([box frame]),
                                  kSeparatorHeight)];
-  [CardUnmaskPromptViewCocoa sizeToFitView:view];
-  return view;
+  [CardUnmaskPromptViewCocoa sizeToFitView:storageView_];
 }
 
 // +---------------------------------------------------------------------------+
@@ -426,11 +532,12 @@ void CardUnmaskPromptViewBridge::PerformClose() {
 // |---------------------------------------------------------------------------|
 // | instructionsLabel_ (Multiline.)                                           |
 // |---------------------------------------------------------------------------|
-// | monthPopup_ yearPopup_ cvcInput_ cvcImage                                 |
-// |     (All enclosed in inputRowView_. Month and year may be hidden.)        |
+// | monthPopup_ yearPopup_ cvcInput_ cvcImageView_ newCardButton_             |
+// |     (All enclosed in inputRowView_. month, year, and newCard may be       |
+// |      hidden.)                                                             |
 // |---------------------------------------------------------------------------|
-// | errorLabel_ (Multiline. Always takes up space for one line even if        |
-// |                 empty. Hidden when progressOverlayView_ is displayed.)    |
+// | errorLabel_ (Multiline. Always takes up space for one line even if empty. |
+// |              Hidden when progressOverlayView_ is displayed.)              |
 // |---------------------------------------------------------------------------|
 // |                                                         [Cancel] [Verify] |
 // |---------------------------------------------------------------------------|
@@ -438,17 +545,31 @@ void CardUnmaskPromptViewBridge::PerformClose() {
 // | storageCheckbox_ storageTooltip_ (Both enclosed in another NSBox.         |
 // |                                   Checkbox and tooltip may be hidden.)    |
 // |     (Both NSBoxes are enclosed in storageView_. Will all be nil if        |
-// |          !CanStoreLocally()).                                             |
+// |      !CanStoreLocally()).                                                 |
 // +---------------------------------------------------------------------------+
 //
 // progressOverlayView_:
 //     (Displayed below instructionsLabel_, may be hidden.
-//         progressOverlaySpinner_ may be hidden while progressOverlayLabel_
-//         is shown.)
+//      progressOverlaySpinner_ may be hidden while progressOverlayLabel_
+//      is shown.)
 // +---------------------------------------------------------------------------+
 // | progressOverlaySpinner_ progressOverlayLabel_                             |
 // +---------------------------------------------------------------------------+
 - (void)performLayoutAndDisplay:(BOOL)display {
+  // Lay out |inputRowView_| contents.
+  // |expirationView_| may be nil, which will result in |cvcInput_| getting an
+  // x value of 0.
+  [cvcInput_ setFrame:NSMakeRect(NSMaxX([expirationView_ frame]), 0,
+                                 kCvcInputWidth, NSHeight([cvcInput_ frame]))];
+  [cvcImageView_
+      setFrameOrigin:NSMakePoint(
+                         NSMaxX([cvcInput_ frame]) + kCvcInputToImageGap, 0)];
+  [newCardButton_
+      setFrameOrigin:NSMakePoint(
+                         NSMaxX([cvcImageView_ frame]) + kButtonGap, 0)];
+  [CardUnmaskPromptViewCocoa sizeToFitView:inputRowView_];
+  [CardUnmaskPromptViewCocoa verticallyCenterSubviewsInView:inputRowView_];
+
   // Calculate dialog content width.
   CGFloat contentWidth =
       std::max(NSWidth([titleLabel_ frame]), NSWidth([inputRowView_ frame]));
@@ -488,7 +609,7 @@ void CardUnmaskPromptViewBridge::PerformClose() {
                           contentWidth, 0)];
   cocoa_l10n_util::WrapOrSizeToFit(instructionsLabel_);
 
-  // Layout permanent error box.
+  // Lay out permanent error box.
   CGFloat titleMinY;
   if (permanentErrorBox_ && ![permanentErrorBox_ isHidden]) {
     [permanentErrorBox_
@@ -528,7 +649,7 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   [mainView addSubview:inputRowView_];
 
   if (controller->CanStoreLocally()) {
-    storageView_ = [self createStorageViewWithController:controller];
+    [self createStorageViewWithController:controller];
     [mainView addSubview:storageView_];
   }
 
@@ -538,8 +659,12 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   [mainView addSubview:progressOverlayView_];
 
   progressOverlayLabel_.reset([constrained_window::CreateLabel() retain]);
-  [progressOverlayLabel_
-      setTextColor:gfx::SkColorToCalibratedNSColor(kProgressTextColor)];
+  NSView* webContentView = bridge_->GetWebContents()->GetNativeView();
+  ui::ThemeProvider* themeProvider = [[webContentView window] themeProvider];
+  DCHECK(themeProvider);
+  NSColor* throbberBlueColor = themeProvider->GetNSColor(
+      ThemeProperties::COLOR_THROBBER_SPINNING);
+  [progressOverlayLabel_ setTextColor:throbberBlueColor];
   [progressOverlayView_ addSubview:progressOverlayLabel_];
 
   progressOverlaySpinner_.reset([[SpinnerView alloc]
@@ -559,59 +684,13 @@ void CardUnmaskPromptViewBridge::PerformClose() {
 
   // Add instructions label.
   instructionsLabel_.reset([constrained_window::CreateLabel() retain]);
-  NSAttributedString* instructionsString =
-      constrained_window::GetAttributedLabelString(
-          SysUTF16ToNSString(controller->GetInstructionsMessage()),
-          chrome_style::kTextFontStyle, NSNaturalTextAlignment,
-          NSLineBreakByWordWrapping);
-  [instructionsLabel_ setAttributedStringValue:instructionsString];
+  [self updateInstructionsText];
   [mainView addSubview:instructionsLabel_];
 
   // Add expiration date.
-  base::scoped_nsobject<NSView> expirationView;
   if (controller->ShouldRequestExpirationDate()) {
-    expirationView.reset([[NSView alloc] initWithFrame:NSZeroRect]);
-
-    // Add expiration month.
-    autofill::MonthComboboxModel monthModel;
-    monthPopupDefaultIndex_ = monthModel.GetDefaultIndex();
-    monthPopup_.reset(
-        [CardUnmaskPromptViewCocoa buildDatePopupWithModel:monthModel]);
-    [monthPopup_ setTarget:self];
-    [monthPopup_ setAction:@selector(onExpirationDateChanged:)];
-    [expirationView addSubview:monthPopup_];
-
-    // Add separator between month and year.
-    base::scoped_nsobject<NSTextField> separatorLabel(
-        [constrained_window::CreateLabel() retain]);
-    NSAttributedString* separatorString =
-        constrained_window::GetAttributedLabelString(
-            SysUTF16ToNSString(l10n_util::GetStringUTF16(
-                IDS_AUTOFILL_CARD_UNMASK_EXPIRATION_DATE_SEPARATOR)),
-            chrome_style::kTextFontStyle, NSNaturalTextAlignment,
-            NSLineBreakByWordWrapping);
-    [separatorLabel setAttributedStringValue:separatorString];
-    [separatorLabel sizeToFit];
-    [expirationView addSubview:separatorLabel];
-
-    // Add expiration year.
-    autofill::YearComboboxModel yearModel;
-    yearPopupDefaultIndex_ = yearModel.GetDefaultIndex();
-    yearPopup_.reset(
-        [CardUnmaskPromptViewCocoa buildDatePopupWithModel:yearModel]);
-    [yearPopup_ setTarget:self];
-    [yearPopup_ setAction:@selector(onExpirationDateChanged:)];
-    [expirationView addSubview:yearPopup_];
-
-    // Layout month, separator, and year within expirationView.
-    [separatorLabel setFrameOrigin:NSMakePoint(NSMaxX([monthPopup_ frame]), 0)];
-    [yearPopup_ setFrameOrigin:NSMakePoint(NSMaxX([separatorLabel frame]), 0)];
-    NSRect expirationFrame =
-        NSUnionRect([monthPopup_ frame], [yearPopup_ frame]);
-    expirationFrame.size.width += kYearToCvcGap;
-    [expirationView setFrame:expirationFrame];
-    [CardUnmaskPromptViewCocoa verticallyCenterSubviewsInView:expirationView];
-    [inputRowView_ addSubview:expirationView];
+    [self createExpirationView];
+    [inputRowView_ addSubview:expirationView_];
   }
 
   // Add CVC text input.
@@ -622,22 +701,16 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   [[cvcInput_ cell] setScrollable:YES];
   [cvcInput_ setDelegate:self];
   [cvcInput_ sizeToFit];
-  [cvcInput_ setFrame:NSMakeRect(NSMaxX([expirationView frame]), 0,
-                                 kCvcInputWidth, NSHeight([cvcInput_ frame]))];
   [inputRowView_ addSubview:cvcInput_];
 
   // Add CVC image.
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   NSImage* cvcImage =
       rb.GetNativeImageNamed(controller->GetCvcImageRid()).ToNSImage();
-  base::scoped_nsobject<NSImageView> cvcImageView(
-      [[NSImageView alloc] initWithFrame:NSZeroRect]);
-  [cvcImageView setImage:cvcImage];
-  [cvcImageView setFrameSize:[cvcImage size]];
-  [cvcImageView
-      setFrameOrigin:NSMakePoint(
-                         NSMaxX([cvcInput_ frame]) + kCvcInputToImageGap, 0)];
-  [inputRowView_ addSubview:cvcImageView];
+  cvcImageView_.reset([[NSImageView alloc] initWithFrame:NSZeroRect]);
+  [cvcImageView_ setImage:cvcImage];
+  [cvcImageView_ setFrameSize:[cvcImage size]];
+  [inputRowView_ addSubview:cvcImageView_];
 
   // Add error message label.
   errorLabel_.reset([constrained_window::CreateLabel() retain]);
@@ -666,10 +739,6 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   [verifyButton_ sizeToFit];
   [self updateVerifyButtonEnabled];
   [mainView addSubview:verifyButton_];
-
-  // Layout inputRowView_.
-  [CardUnmaskPromptViewCocoa sizeToFitView:inputRowView_];
-  [CardUnmaskPromptViewCocoa verticallyCenterSubviewsInView:inputRowView_];
 
   [self setView:mainView];
   [self performLayoutAndDisplay:NO];

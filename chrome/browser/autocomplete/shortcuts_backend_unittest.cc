@@ -2,17 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/autocomplete/shortcuts_backend.h"
+#include "components/omnibox/browser/shortcuts_backend.h"
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
-#include "chrome/browser/autocomplete/shortcuts_database.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/omnibox/browser/shortcuts_database.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/test/test_browser_thread.h"
 
@@ -61,6 +62,7 @@ class ShortcutsBackendTest : public testing::Test,
 
  protected:
   TestingProfile profile_;
+  UIThreadSearchTermsData search_terms_data_;
 
  private:
   scoped_refptr<ShortcutsBackend> backend_;
@@ -74,6 +76,7 @@ class ShortcutsBackendTest : public testing::Test,
 ShortcutsBackendTest::ShortcutsBackendTest()
     : ui_thread_(content::BrowserThread::UI, &ui_message_loop_),
       db_thread_(content::BrowserThread::DB),
+      search_terms_data_(&profile_),
       load_notified_(false),
       changed_notified_(false) {
 }
@@ -92,7 +95,9 @@ ShortcutsBackendTest::MatchCoreForTesting(const std::string& url,
       AutocompleteMatch::ClassificationsFromString(description_class);
   match.search_terms_args.reset(
       new TemplateURLRef::SearchTermsArgs(match.contents));
-  return ShortcutsBackend::MatchToMatchCore(match, &profile_);
+  return ShortcutsBackend::MatchToMatchCore(
+      match, TemplateURLServiceFactory::GetForProfile(&profile_),
+      &search_terms_data_);
 }
 
 void ShortcutsBackendTest::SetSearchProvider() {
@@ -231,8 +236,9 @@ TEST_F(ShortcutsBackendTest, EntitySuggestionTest) {
       new TemplateURLRef::SearchTermsArgs(match.fill_into_edit));
 
   ShortcutsDatabase::Shortcut::MatchCore match_core =
-      ShortcutsBackend::MatchToMatchCore(match, &profile_);
-
+      ShortcutsBackend::MatchToMatchCore(
+          match, TemplateURLServiceFactory::GetForProfile(&profile_),
+          &search_terms_data_);
   EXPECT_EQ("http://foo.com/search?bar=franklin+d+roosevelt",
             match_core.destination_url.spec());
   EXPECT_EQ(match.fill_into_edit, match_core.contents);

@@ -14,7 +14,7 @@
 __gCrWeb['plugin'] = {};
 
 /* Beginning of anonymous object. */
-new function() {
+(function() {
 
   /* Data-URL version of plugin_blocked_android.png. Served this way rather
    * than with an intercepted URL to avoid messing up https pages.
@@ -102,7 +102,7 @@ new function() {
    * "significant" is a heuristic that attempts to determine if it's a critical
    * visual element for the page (i.e., not invisible, or an incidental ad).
    * @param {HTMLElement} plugin The <object> node to check.
-   * @return {Boolean} Whether the node is significant.
+   * @return {boolean} Whether the node is significant.
    * @private
    */
   __gCrWeb['plugin'].isSignificantPlugin_ = function(plugin) {
@@ -196,4 +196,4 @@ new function() {
       plugin.insertBefore(placeholder, plugin.firstChild);
     }
   };
-}  // End of anonymous object
+}());  // End of anonymous object

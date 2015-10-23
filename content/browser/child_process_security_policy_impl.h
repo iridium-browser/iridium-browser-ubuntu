@@ -74,6 +74,7 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
                                const std::string& filesystem_id) override;
   bool HasWebUIBindings(int child_id) override;
   void GrantSendMidiSysExMessage(int child_id) override;
+  bool CanAccessDataForOrigin(int child_id, const GURL& url) override;
 
   // Pseudo schemes are treated differently than other schemes because they
   // cannot be requested like normal URLs.  There is no mechanism for revoking
@@ -125,12 +126,11 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
   // request the URL.
   bool CanRequestURL(int child_id, const GURL& url);
 
-  // Returns true if the process is permitted to load pages from
-  // the given origin in main frames or subframes.
-  // Only might return false if --site-per-process flag is used.
-  bool CanLoadPage(int child_id,
-                   const GURL& url,
-                   ResourceType resource_type);
+  // Whether the process is allowed to commit a document from the given URL.
+  // This is more restrictive than CanRequestURL, since CanRequestURL allows
+  // requests that might lead to cross-process navigations or external protocol
+  // handlers.
+  bool CanCommitURL(int child_id, const GURL& url);
 
   // Explicit permissions checks for FileSystemURL specified files.
   bool CanReadFileSystemFile(int child_id, const storage::FileSystemURL& url);
@@ -145,23 +145,9 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
   // Returns true if the specified child_id has been granted ReadRawCookies.
   bool CanReadRawCookies(int child_id);
 
-  // Returns true if the process is permitted to read and modify the cookies for
-  // the given origin.  Does not affect cookies attached to or set by network
-  // requests.
-  // Only might return false if the very experimental
-  // --enable-strict-site-isolation or --site-per-process flags are used.
-  bool CanAccessCookiesForOrigin(int child_id, const GURL& gurl);
-
-  // Returns true if the process is permitted to attach cookies to (or have
-  // cookies set by) network requests.
-  // Only might return false if the very experimental
-  // --enable-strict-site-isolation or --site-per-process flags are used.
-  bool CanSendCookiesForOrigin(int child_id, const GURL& gurl);
-
   // Sets the process as only permitted to use and see the cookies for the
   // given origin.
-  // Only used if the very experimental --enable-strict-site-isolation or
-  // --site-per-process flags are used.
+  // Origin lock is applied only if the --site-per-process flag is used.
   void LockToOrigin(int child_id, const GURL& gurl);
 
   // Register FileSystem type and permission policy which should be used

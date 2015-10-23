@@ -51,7 +51,12 @@ import org.json.JSONObject;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Exchanger;
 import java.util.concurrent.TimeUnit;
 
@@ -73,6 +78,7 @@ import java.util.concurrent.TimeUnit;
 @SuppressWarnings("deprecation")
 public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallback {
   private final static String TAG = "VideoCapturerAndroid";
+  private final static int CAMERA_OBSERVER_PERIOD_MS = 5000;
 
   private Camera camera;  // Only non-null while capturing.
   private CameraThread cameraThread;
@@ -83,14 +89,74 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
   private SurfaceTexture cameraSurfaceTexture;
   private int[] cameraGlTextures = null;
   private final FramePool videoBuffers = new FramePool();
-  private int width;
-  private int height;
-  private int framerate;
+  // Remember the requested format in case we want to switch cameras.
+  private int requestedWidth;
+  private int requestedHeight;
+  private int requestedFramerate;
+  // The capture format will be the closest supported format to the requested format.
+  private CaptureFormat captureFormat;
+  private int cameraFramesCount;
+  private int captureBuffersCount;
   private volatile boolean pendingCameraSwitch;
   private CapturerObserver frameObserver = null;
+  private CameraErrorHandler errorHandler = null;
   // List of formats supported by all cameras. This list is filled once in order
   // to be able to switch cameras.
   private static List<List<CaptureFormat>> supportedFormats;
+
+  // Camera error callback.
+  private final Camera.ErrorCallback cameraErrorCallback =
+      new Camera.ErrorCallback() {
+    @Override
+    public void onError(int error, Camera camera) {
+      String errorMessage;
+      if (error == android.hardware.Camera.CAMERA_ERROR_SERVER_DIED) {
+        errorMessage = "Camera server died!";
+      } else {
+        errorMessage = "Camera error: " + error;
+      }
+      Log.e(TAG, errorMessage);
+      if (errorHandler != null) {
+        errorHandler.onCameraError(errorMessage);
+      }
+    }
+  };
+
+  // Camera observer - monitors camera framerate and amount of available
+  // camera buffers. Observer is excecuted on camera thread.
+  private final Runnable cameraObserver = new Runnable() {
+    @Override
+    public void run() {
+      int cameraFps = (cameraFramesCount * 1000 + CAMERA_OBSERVER_PERIOD_MS / 2)
+          / CAMERA_OBSERVER_PERIOD_MS;
+      double averageCaptureBuffersCount = 0;
+      if (cameraFramesCount > 0) {
+        averageCaptureBuffersCount =
+            (double)captureBuffersCount / cameraFramesCount;
+      }
+      Log.d(TAG, "Camera fps: " + cameraFps + ". CaptureBuffers: " +
+          String.format("%.1f", averageCaptureBuffersCount) +
+          ". Pending buffers: " + videoBuffers.pendingFramesTimeStamps());
+      if (cameraFramesCount == 0) {
+        Log.e(TAG, "Camera freezed.");
+        if (errorHandler != null) {
+          errorHandler.onCameraError("Camera failure.");
+        }
+      } else {
+        cameraFramesCount = 0;
+        captureBuffersCount = 0;
+        if (cameraThreadHandler != null) {
+          cameraThreadHandler.postDelayed(this, CAMERA_OBSERVER_PERIOD_MS);
+        }
+      }
+    }
+  };
+
+  // Camera error handler - invoked when camera stops receiving frames
+  // or any camera exception happens on camera thread.
+  public static interface CameraErrorHandler {
+    public void onCameraError(String errorDescription);
+  }
 
   // Returns device names that can be used to create a new VideoCapturerAndroid.
   public static String[] getDeviceNames() {
@@ -155,10 +221,14 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
     return null;
   }
 
-  public static VideoCapturerAndroid create(String name) {
+  public static VideoCapturerAndroid create(String name,
+      CameraErrorHandler errorHandler) {
     VideoCapturer capturer = VideoCapturer.create(name);
-    if (capturer != null)
-      return (VideoCapturerAndroid) capturer;
+    if (capturer != null) {
+      VideoCapturerAndroid capturerAndroid = (VideoCapturerAndroid) capturer;
+      capturerAndroid.errorHandler = errorHandler;
+      return capturerAndroid;
+    }
     return null;
   }
 
@@ -181,30 +251,48 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
       return false;
     }
 
-    int new_id = (id + 1) % Camera.getNumberOfCameras();
-
-    CaptureFormat formatToUse  = null;
-    List<CaptureFormat> formats = supportedFormats.get(new_id);
-    for (CaptureFormat format : formats) {
-      if (format.width == width && format.height == height) {
-        formatToUse = format;
-        break;
-      }
-    }
-
-    if (formatToUse == null) {
-      Log.d(TAG, "No valid format found to switch camera.");
-      return false;
-    }
-
     pendingCameraSwitch = true;
-    id = new_id;
+    id = (id + 1) % Camera.getNumberOfCameras();
     cameraThreadHandler.post(new Runnable() {
       @Override public void run() {
         switchCameraOnCameraThread(switchDoneEvent);
       }
     });
     return true;
+  }
+
+  // Requests a new output format from the video capturer. Captured frames
+  // by the camera will be scaled/or dropped by the video capturer.
+  public synchronized void onOutputFormatRequest(
+      final int width, final int height, final int fps) {
+    if (cameraThreadHandler == null) {
+      Log.e(TAG, "Calling onOutputFormatRequest() for already stopped camera.");
+      return;
+    }
+    cameraThreadHandler.post(new Runnable() {
+      @Override public void run() {
+        onOutputFormatRequestOnCameraThread(width, height, fps);
+      }
+    });
+  }
+
+  // Reconfigure the camera to capture in a new format. This should only be called while the camera
+  // is running.
+  public synchronized void changeCaptureFormat(
+      final int width, final int height, final int framerate) {
+    if (cameraThreadHandler == null) {
+      Log.e(TAG, "Calling changeCaptureFormat() for already stopped camera.");
+      return;
+    }
+    cameraThreadHandler.post(new Runnable() {
+      @Override public void run() {
+        startPreviewOnCameraThread(width, height, framerate);
+      }
+    });
+  }
+
+  public synchronized List<CaptureFormat> getSupportedFormats() {
+    return supportedFormats.get(id);
   }
 
   private VideoCapturerAndroid() {
@@ -218,7 +306,7 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
   // If deviceName is empty, the first available device is used in order to be
   // compatible with the generic VideoCapturer class.
   synchronized boolean init(String deviceName) {
-    Log.d(TAG, "init " + deviceName);
+    Log.d(TAG, "init: " + deviceName);
     if (deviceName == null || !initStatics())
       return false;
 
@@ -245,9 +333,20 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
       Log.d(TAG, "Get supported formats.");
       supportedFormats =
           new ArrayList<List<CaptureFormat>>(Camera.getNumberOfCameras());
-      for (int i = 0; i < Camera.getNumberOfCameras(); ++i) {
-        supportedFormats.add(getSupportedFormats(i));
+      // Start requesting supported formats from camera with the highest index
+      // (back camera) first. If it fails then likely camera is in bad state.
+      for (int i = Camera.getNumberOfCameras() - 1; i >= 0; i--) {
+        ArrayList<CaptureFormat> supportedFormat = getSupportedFormats(i);
+        if (supportedFormat.size() == 0) {
+          Log.e(TAG, "Fail to get supported formats for camera " + i);
+          supportedFormats = null;
+          return false;
+        }
+        supportedFormats.add(supportedFormat);
       }
+      // Reverse the list since it is filled in reverse order.
+      Collections.reverse(supportedFormats);
+      Log.d(TAG, "Get supported formats done.");
       return true;
     } catch (Exception e) {
       supportedFormats = null;
@@ -260,7 +359,7 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
     return getSupportedFormatsAsJson(id);
   }
 
-  static class CaptureFormat {
+  public static class CaptureFormat {
     public final int width;
     public final int height;
     public final int maxFramerate;
@@ -305,6 +404,21 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
     private static int roundUp(int x, int alignment) {
       return (int)ceil(x / (double)alignment) * alignment;
     }
+
+    @Override
+    public String toString() {
+      return width + "x" + height + "@[" + minFramerate + ":" + maxFramerate + "]";
+    }
+
+    @Override
+    public boolean equals(Object that) {
+      if (!(that instanceof CaptureFormat)) {
+        return false;
+      }
+      final CaptureFormat c = (CaptureFormat) that;
+      return width == c.width && height == c.height && maxFramerate == c.maxFramerate
+          && minFramerate == c.minFramerate;
+    }
   }
 
   private static String getSupportedFormatsAsJson(int id) throws JSONException {
@@ -328,6 +442,7 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
 
     Camera camera;
     try {
+      Log.d(TAG, "Opening camera " + id);
       camera = Camera.open(id);
     } catch (Exception e) {
       Log.e(TAG, "Open camera failed on id " + id, e);
@@ -353,6 +468,7 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
       Log.e(TAG, "getSupportedFormats failed on id " + id, e);
     }
     camera.release();
+    camera = null;
     return formatList;
   }
 
@@ -388,9 +504,6 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
     if (cameraThreadHandler != null) {
       throw new RuntimeException("Camera has already been started.");
     }
-    this.width = width;
-    this.height = height;
-    this.framerate = framerate;
 
     Exchanger<Handler> handlerExchanger = new Exchanger<Handler>();
     cameraThread = new CameraThread(handlerExchanger);
@@ -411,6 +524,7 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
     this.applicationContext = applicationContext;
     this.frameObserver = frameObserver;
     try {
+      Log.d(TAG, "Opening camera " + id);
       camera = Camera.open(id);
       info = new Camera.CameraInfo();
       Camera.getCameraInfo(id, info);
@@ -447,39 +561,14 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
 
       Log.d(TAG, "Camera orientation: " + info.orientation +
           " .Device orientation: " + getDeviceOrientation());
-      Camera.Parameters parameters = camera.getParameters();
-      Log.d(TAG, "isVideoStabilizationSupported: " +
-          parameters.isVideoStabilizationSupported());
-      if (parameters.isVideoStabilizationSupported()) {
-        parameters.setVideoStabilization(true);
-      }
-
-      int androidFramerate = framerate * 1000;
-      int[] range = getFramerateRange(parameters, androidFramerate);
-      if (range != null) {
-        Log.d(TAG, "Start capturing: " + width + "x" + height + "@[" +
-            range[Camera.Parameters.PREVIEW_FPS_MIN_INDEX]  + ":" +
-            range[Camera.Parameters.PREVIEW_FPS_MAX_INDEX] + "]");
-        parameters.setPreviewFpsRange(
-            range[Camera.Parameters.PREVIEW_FPS_MIN_INDEX],
-            range[Camera.Parameters.PREVIEW_FPS_MAX_INDEX]);
-      }
-      Camera.Size pictureSize = getPictureSize(parameters, width, height);
-      parameters.setPictureSize(pictureSize.width, pictureSize.height);
-      parameters.setPreviewSize(width, height);
-      // TODO(hbos): If other ImageFormats are to be supported then
-      // CaptureFormat needs to be updated (currently hard-coded to say YV12,
-      // getSupportedFormats only returns YV12).
-      int format = ImageFormat.YV12;
-      parameters.setPreviewFormat(format);
-      camera.setParameters(parameters);
-      // Note: setRecordingHint(true) actually decrease frame rate on N5.
-      // parameters.setRecordingHint(true);
-
-      videoBuffers.queueCameraBuffers(width, height, format, camera);
-      camera.setPreviewCallbackWithBuffer(this);
-      camera.startPreview();
+      camera.setErrorCallback(cameraErrorCallback);
+      startPreviewOnCameraThread(width, height, framerate);
       frameObserver.OnCapturerStarted(true);
+
+      // Start camera observer.
+      cameraFramesCount = 0;
+      captureBuffersCount = 0;
+      cameraThreadHandler.postDelayed(cameraObserver, CAMERA_OBSERVER_PERIOD_MS);
       return;
     } catch (RuntimeException e) {
       error = e;
@@ -488,7 +577,73 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
     stopCaptureOnCameraThread();
     cameraThreadHandler = null;
     frameObserver.OnCapturerStarted(false);
+    if (errorHandler != null) {
+      errorHandler.onCameraError("Camera can not be started.");
+    }
     return;
+  }
+
+  // (Re)start preview with the closest supported format to |width| x |height| @ |framerate|.
+  private void startPreviewOnCameraThread(int width, int height, int framerate) {
+    Log.d(TAG, "startPreviewOnCameraThread requested: " + width + "x" + height + "@" + framerate);
+    if (camera == null) {
+      Log.e(TAG, "Calling startPreviewOnCameraThread on stopped camera.");
+      return;
+    }
+
+    requestedWidth = width;
+    requestedHeight = height;
+    requestedFramerate = framerate;
+
+    // Find closest supported format for |width| x |height| @ |framerate|.
+    final Camera.Parameters parameters = camera.getParameters();
+    final int[] range = getFramerateRange(parameters, framerate * 1000);
+    final Camera.Size previewSize =
+        getClosestSupportedSize(parameters.getSupportedPreviewSizes(), width, height);
+    final CaptureFormat captureFormat = new CaptureFormat(
+        previewSize.width, previewSize.height,
+        range[Camera.Parameters.PREVIEW_FPS_MIN_INDEX],
+        range[Camera.Parameters.PREVIEW_FPS_MAX_INDEX]);
+
+    // Check if we are already using this capture format, then we don't need to do anything.
+    if (captureFormat.equals(this.captureFormat)) {
+      return;
+    }
+
+    // Update camera parameters.
+    Log.d(TAG, "isVideoStabilizationSupported: " +
+        parameters.isVideoStabilizationSupported());
+    if (parameters.isVideoStabilizationSupported()) {
+      parameters.setVideoStabilization(true);
+    }
+    // Note: setRecordingHint(true) actually decrease frame rate on N5.
+    // parameters.setRecordingHint(true);
+    if (captureFormat.maxFramerate > 0) {
+      parameters.setPreviewFpsRange(captureFormat.minFramerate, captureFormat.maxFramerate);
+    }
+    parameters.setPreviewSize(captureFormat.width, captureFormat.height);
+    parameters.setPreviewFormat(captureFormat.imageFormat);
+    // Picture size is for taking pictures and not for preview/video, but we need to set it anyway
+    // as a workaround for an aspect ratio problem on Nexus 7.
+    final Camera.Size pictureSize =
+        getClosestSupportedSize(parameters.getSupportedPictureSizes(), width, height);
+    parameters.setPictureSize(pictureSize.width, pictureSize.height);
+
+    // Temporarily stop preview if it's already running.
+    if (this.captureFormat != null) {
+      camera.stopPreview();
+      // Calling |setPreviewCallbackWithBuffer| with null should clear the internal camera buffer
+      // queue, but sometimes we receive a frame with the old resolution after this call anyway.
+      camera.setPreviewCallbackWithBuffer(null);
+    }
+
+    // (Re)start preview.
+    Log.d(TAG, "Start capturing: " + captureFormat);
+    this.captureFormat = captureFormat;
+    camera.setParameters(parameters);
+    videoBuffers.queueCameraBuffers(captureFormat.frameSize(), camera);
+    camera.setPreviewCallbackWithBuffer(this);
+    camera.startPreview();
   }
 
   // Called by native code.  Returns true when camera is known to be stopped.
@@ -509,21 +664,23 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
   }
 
   private void stopCaptureOnCameraThread() {
-    Log.d(TAG, "stopCaptureOnCameraThread");
-    doStopCaptureOnCamerathread();
+    doStopCaptureOnCameraThread();
     Looper.myLooper().quit();
     return;
   }
 
-  private void doStopCaptureOnCamerathread() {
+  private void doStopCaptureOnCameraThread() {
+    Log.d(TAG, "stopCaptureOnCameraThread");
     if (camera == null) {
       return;
     }
     try {
+      cameraThreadHandler.removeCallbacks(cameraObserver);
       Log.d(TAG, "Stop preview.");
       camera.stopPreview();
       camera.setPreviewCallbackWithBuffer(null);
       videoBuffers.stopReturnBuffersToCamera();
+      captureFormat = null;
 
       camera.setPreviewTexture(null);
       cameraSurfaceTexture = null;
@@ -543,14 +700,24 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
   private void switchCameraOnCameraThread(Runnable switchDoneEvent) {
     Log.d(TAG, "switchCameraOnCameraThread");
 
-    doStopCaptureOnCamerathread();
-    startCaptureOnCameraThread(width, height, framerate, frameObserver,
+    doStopCaptureOnCameraThread();
+    startCaptureOnCameraThread(requestedWidth, requestedHeight, requestedFramerate, frameObserver,
         applicationContext);
     pendingCameraSwitch = false;
     Log.d(TAG, "switchCameraOnCameraThread done");
     if (switchDoneEvent != null) {
       switchDoneEvent.run();
     }
+  }
+
+  private void onOutputFormatRequestOnCameraThread(
+      int width, int height, int fps) {
+    if (camera == null) {
+      return;
+    }
+    Log.d(TAG, "onOutputFormatRequestOnCameraThread: " + width + "x" + height +
+        "@" + fps);
+    frameObserver.OnOutputFormatRequest(width, height, fps);
   }
 
   synchronized void returnBuffer(final long timeStamp) {
@@ -589,37 +756,40 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
     return orientation;
   }
 
-  private static int[] getFramerateRange(Camera.Parameters parameters,
-                                         int framerate) {
-    List<int[]> listFpsRange = parameters.getSupportedPreviewFpsRange();
-    int[] bestRange = null;
-    int bestRangeDiff = Integer.MAX_VALUE;
-    for (int[] range : listFpsRange) {
-      int rangeDiff =
-          abs(framerate -range[Camera.Parameters.PREVIEW_FPS_MIN_INDEX])
-          + abs(range[Camera.Parameters.PREVIEW_FPS_MAX_INDEX] - framerate);
-      if (bestRangeDiff > rangeDiff) {
-        bestRange = range;
-        bestRangeDiff = rangeDiff;
-      }
+  // Helper class for finding the closest supported format for the two functions below.
+  private static abstract class ClosestComparator<T> implements Comparator<T> {
+    // Difference between supported and requested parameter.
+    abstract int diff(T supportedParameter);
+
+    @Override
+    public int compare(T t1, T t2) {
+      return diff(t1) - diff(t2);
     }
-    return bestRange;
   }
 
-  private static Camera.Size getPictureSize(Camera.Parameters parameters,
-      int width, int height) {
-    int bestAreaDiff = Integer.MAX_VALUE;
-    Camera.Size bestSize = null;
-    int requestedArea = width * height;
-    for (Camera.Size pictureSize : parameters.getSupportedPictureSizes()) {
-      int areaDiff = abs(requestedArea
-          - pictureSize.width * pictureSize.height);
-      if (areaDiff < bestAreaDiff) {
-        bestAreaDiff = areaDiff;
-        bestSize = pictureSize;
-      }
+  private static int[] getFramerateRange(Camera.Parameters parameters, final int framerate) {
+    List<int[]> listFpsRange = parameters.getSupportedPreviewFpsRange();
+    if (listFpsRange.isEmpty()) {
+      Log.w(TAG, "No supported preview fps range");
+      return new int[]{0, 0};
     }
-    return bestSize;
+    return Collections.min(listFpsRange,
+        new ClosestComparator<int[]>() {
+          @Override int diff(int[] range) {
+            return abs(framerate - range[Camera.Parameters.PREVIEW_FPS_MIN_INDEX])
+                + abs(framerate - range[Camera.Parameters.PREVIEW_FPS_MAX_INDEX]);
+          }
+     });
+  }
+
+  private static Camera.Size getClosestSupportedSize(
+      List<Camera.Size> supportedSizes, final int requestedWidth, final int requestedHeight) {
+    return Collections.min(supportedSizes,
+        new ClosestComparator<Camera.Size>() {
+          @Override int diff(Camera.Size size) {
+            return abs(requestedWidth - size.width) + abs(requestedHeight - size.height);
+          }
+     });
   }
 
   // Called on cameraThread so must not "synchronized".
@@ -635,9 +805,10 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
       throw new RuntimeException("Unexpected camera in callback!");
     }
 
-    long captureTimeNs =
+    final long captureTimeNs =
         TimeUnit.MILLISECONDS.toNanos(SystemClock.elapsedRealtime());
 
+    captureBuffersCount += videoBuffers.numCaptureBuffersAvailable();
     int rotation = getDeviceOrientation();
     if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) {
       rotation = 360 - rotation;
@@ -646,9 +817,13 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
     // Mark the frame owning |data| as used.
     // Note that since data is directBuffer,
     // data.length >= videoBuffers.frameSize.
-    videoBuffers.reserveByteBuffer(data, captureTimeNs);
-    frameObserver.OnFrameCaptured(data, videoBuffers.frameSize, rotation,
-        captureTimeNs);
+    if (videoBuffers.reserveByteBuffer(data, captureTimeNs)) {
+      cameraFramesCount++;
+      frameObserver.OnFrameCaptured(data, videoBuffers.frameSize, captureFormat.width,
+          captureFormat.height, rotation, captureTimeNs);
+    } else {
+      Log.w(TAG, "reserveByteBuffer failed - dropping frame.");
+    }
   }
 
   // runCameraThreadUntilIdle make sure all posted messages to the cameraThread
@@ -684,118 +859,105 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
     // Arbitrary queue depth.  Higher number means more memory allocated & held,
     // lower number means more sensitivity to processing time in the client (and
     // potentially stalling the capturer if it runs out of buffers to write to).
-    private static int numCaptureBuffers = 3;
-    private final List<Frame> cameraFrames = new ArrayList<Frame>();
-    public int frameSize = 0;
+    private static final int numCaptureBuffers = 3;
+    // This container tracks the buffers added as camera callback buffers. It is needed for finding
+    // the corresponding ByteBuffer given a byte[].
+    private final Map<byte[], ByteBuffer> queuedBuffers = new IdentityHashMap<byte[], ByteBuffer>();
+    // This container tracks the frames that have been sent but not returned. It is needed for
+    // keeping the buffers alive and for finding the corresponding ByteBuffer given a timestamp.
+    private final Map<Long, ByteBuffer> pendingBuffers = new HashMap<Long, ByteBuffer>();
+    private int frameSize = 0;
     private Camera camera;
 
-    private static class Frame {
-      private final ByteBuffer buffer;
-      public long timeStamp = -1;
-      public final int frameSize;
-
-      Frame(int frameSize) {
-        this.frameSize = frameSize;
-        buffer = ByteBuffer.allocateDirect(frameSize);
-      }
-
-      byte[] data() {
-        return buffer.array();
-      }
+    int numCaptureBuffersAvailable() {
+      return queuedBuffers.size();
     }
 
-    // Adds frames as callback buffers to |camera|. If a new frame size is
-    // required, new buffers are allocated and added.
-    void queueCameraBuffers(int width, int height, int format, Camera camera) {
-      if (this.camera != null)
-        throw new RuntimeException("camera already set.");
-
+    // Discards previous queued buffers and adds new callback buffers to camera.
+    void queueCameraBuffers(int frameSize, Camera camera) {
       this.camera = camera;
-      int newFrameSize = CaptureFormat.frameSize(width, height, format);
+      this.frameSize = frameSize;
 
-      int numberOfEnquedCameraBuffers = 0;
-      if (newFrameSize != frameSize) {
-        // Create new frames and add to the camera.
-        // The old frames will be released when frames are returned.
-        for (int i = 0; i < numCaptureBuffers; ++i) {
-          Frame frame = new Frame(newFrameSize);
-          cameraFrames.add(frame);
-          this.camera.addCallbackBuffer(frame.data());
-        }
-        numberOfEnquedCameraBuffers = numCaptureBuffers;
-      } else {
-        // Add all frames that have been returned.
-        for (Frame frame : cameraFrames) {
-          if (frame.timeStamp < 0) {
-            camera.addCallbackBuffer(frame.data());
-            ++numberOfEnquedCameraBuffers;
-          }
-        }
+      queuedBuffers.clear();
+      for (int i = 0; i < numCaptureBuffers; ++i) {
+        final ByteBuffer buffer = ByteBuffer.allocateDirect(frameSize);
+        camera.addCallbackBuffer(buffer.array());
+        queuedBuffers.put(buffer.array(), buffer);
       }
-      frameSize = newFrameSize;
-      Log.d(TAG, "queueCameraBuffers enqued " + numberOfEnquedCameraBuffers
+      Log.d(TAG, "queueCameraBuffers enqueued " + numCaptureBuffers
           + " buffers of size " + frameSize + ".");
+    }
+
+    String pendingFramesTimeStamps() {
+      List<Long> timeStampsMs = new ArrayList<Long>();
+      for (Long timeStampNs : pendingBuffers.keySet()) {
+        timeStampsMs.add(TimeUnit.NANOSECONDS.toMillis(timeStampNs));
+      }
+      return timeStampsMs.toString();
     }
 
     void stopReturnBuffersToCamera() {
       this.camera = null;
-      String pendingTimeStamps = new String();
-      for (Frame frame : cameraFrames) {
-        if (frame.timeStamp > -1) {
-          pendingTimeStamps+= " " + frame.timeStamp;
-        }
-      }
+      queuedBuffers.clear();
+      // Frames in |pendingBuffers| need to be kept alive until they are returned.
       Log.d(TAG, "stopReturnBuffersToCamera called."
-            + (pendingTimeStamps.isEmpty() ?
+            + (pendingBuffers.isEmpty() ?
                    " All buffers have been returned."
-                   : " Pending buffers " + pendingTimeStamps + "."));
-
+                   : " Pending buffers: " + pendingFramesTimeStamps() + "."));
     }
 
-    void reserveByteBuffer(byte[] data, long timeStamp) {
-      for (Frame frame : cameraFrames) {
-        if (data == frame.data()) {
-          if (frame.timeStamp > 0) {
-            throw new RuntimeException("Frame already in use !");
-          }
-          frame.timeStamp = timeStamp;
-          return;
-        }
+    boolean reserveByteBuffer(byte[] data, long timeStamp) {
+      final ByteBuffer buffer = queuedBuffers.remove(data);
+      if (buffer == null) {
+        // Frames might be posted to |onPreviewFrame| with the previous format while changing
+        // capture format in |startPreviewOnCameraThread|. Drop these old frames.
+        Log.w(TAG, "Received callback buffer from previous configuration with length: "
+            + (data == null ? "null" : data.length));
+        return false;
       }
-      throw new RuntimeException("unknown data buffer?!?");
+      if (buffer.capacity() != frameSize) {
+        throw new IllegalStateException("Callback buffer has unexpected frame size");
+      }
+      if (pendingBuffers.containsKey(timeStamp)) {
+        Log.e(TAG, "Timestamp already present in pending buffers - they need to be unique");
+        return false;
+      }
+      pendingBuffers.put(timeStamp, buffer);
+      if (queuedBuffers.isEmpty()) {
+        Log.v(TAG, "Camera is running out of capture buffers."
+            + " Pending buffers: " + pendingFramesTimeStamps());
+      }
+      return true;
     }
 
     void returnBuffer(long timeStamp) {
-      Frame returnedFrame = null;
-      for (Frame frame : cameraFrames) {
-        if (timeStamp == frame.timeStamp) {
-          frame.timeStamp = -1;
-          returnedFrame = frame;
-          break;
-        }
-      }
-
+      final ByteBuffer returnedFrame = pendingBuffers.remove(timeStamp);
       if (returnedFrame == null) {
         throw new RuntimeException("unknown data buffer with time stamp "
             + timeStamp + "returned?!?");
       }
 
-      if (camera != null && returnedFrame.frameSize == frameSize) {
-        camera.addCallbackBuffer(returnedFrame.data());
+      if (camera != null && returnedFrame.capacity() == frameSize) {
+        camera.addCallbackBuffer(returnedFrame.array());
+        if (queuedBuffers.isEmpty()) {
+          Log.v(TAG, "Frame returned when camera is running out of capture"
+              + " buffers for TS " + TimeUnit.NANOSECONDS.toMillis(timeStamp));
+        }
+        queuedBuffers.put(returnedFrame.array(), returnedFrame);
         return;
       }
 
-      if (returnedFrame.frameSize != frameSize) {
-        Log.d(TAG, "returnBuffer with time stamp "+ timeStamp
-            + " called with old frame size, " + returnedFrame.frameSize + ".");
-        // Since this frame has the wrong size, remove it from the list. Frames
-        // with the correct size is created in queueCameraBuffers so this must
-        // be an old buffer.
-        cameraFrames.remove(returnedFrame);
+      if (returnedFrame.capacity() != frameSize) {
+        Log.d(TAG, "returnBuffer with time stamp "
+            + TimeUnit.NANOSECONDS.toMillis(timeStamp)
+            + " called with old frame size, " + returnedFrame.capacity() + ".");
+        // Since this frame has the wrong size, don't requeue it. Frames with the correct size are
+        // created in queueCameraBuffers so this must be an old buffer.
         return;
       }
 
-      Log.d(TAG, "returnBuffer with time stamp "+ timeStamp
+      Log.d(TAG, "returnBuffer with time stamp "
+          + TimeUnit.NANOSECONDS.toMillis(timeStamp)
           + " called after camera has been stopped.");
     }
   }
@@ -808,8 +970,13 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
 
     // Delivers a captured frame. Called on a Java thread owned by
     // VideoCapturerAndroid.
-    abstract void OnFrameCaptured(byte[] data, int length, int rotation,
-        long timeStamp);
+    abstract void OnFrameCaptured(byte[] data, int length, int width, int height,
+        int rotation, long timeStamp);
+
+    // Requests an output format from the video capturer. Captured frames
+    // by the camera will be scaled/or dropped by the video capturer.
+    // Called on a Java thread owned by VideoCapturerAndroid.
+    abstract void OnOutputFormatRequest(int width, int height, int fps);
   }
 
   // An implementation of CapturerObserver that forwards all calls from
@@ -827,14 +994,21 @@ public class VideoCapturerAndroid extends VideoCapturer implements PreviewCallba
     }
 
     @Override
-    public void OnFrameCaptured(byte[] data, int length, int rotation,
-        long timeStamp) {
-      nativeOnFrameCaptured(nativeCapturer, data, length, rotation, timeStamp);
+    public void OnFrameCaptured(byte[] data, int length, int width, int height,
+        int rotation, long timeStamp) {
+      nativeOnFrameCaptured(nativeCapturer, data, length, width, height, rotation, timeStamp);
+    }
+
+    @Override
+    public void OnOutputFormatRequest(int width, int height, int fps) {
+      nativeOnOutputFormatRequest(nativeCapturer, width, height, fps);
     }
 
     private native void nativeCapturerStarted(long nativeCapturer,
         boolean success);
     private native void nativeOnFrameCaptured(long nativeCapturer,
-        byte[] data, int length, int rotation, long timeStamp);
+        byte[] data, int length, int width, int height, int rotation, long timeStamp);
+    private native void nativeOnOutputFormatRequest(long nativeCapturer,
+        int width, int height, int fps);
   }
 }

@@ -53,22 +53,22 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLFrameOwnerElement.h"
+#include "core/input/EventHandler.h"
 #include "core/layout/LayoutGeometryMap.h"
+#include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutScrollbar.h"
 #include "core/layout/LayoutScrollbarPart.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/compositing/CompositedDeprecatedPaintLayerMapping.h"
 #include "core/layout/compositing/DeprecatedPaintLayerCompositor.h"
-#include "core/page/Chrome.h"
-#include "core/page/EventHandler.h"
+#include "core/page/ChromeClient.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 #include "core/paint/DeprecatedPaintLayerFragment.h"
 #include "platform/PlatformGestureEvent.h"
 #include "platform/PlatformMouseEvent.h"
-#include "platform/graphics/GraphicsContextStateSaver.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/scroll/ScrollAnimator.h"
@@ -83,16 +83,16 @@ DeprecatedPaintLayerScrollableArea::DeprecatedPaintLayerScrollableArea(Deprecate
     : m_layer(layer)
     , m_inResizeMode(false)
     , m_scrollsOverflow(false)
-    , m_scrollDimensionsDirty(true)
     , m_inOverflowRelayout(false)
     , m_nextTopmostScrollChild(0)
     , m_topmostScrollChild(0)
     , m_needsCompositedScrolling(false)
     , m_scrollCorner(nullptr)
     , m_resizer(nullptr)
+#if ENABLE(ASSERT)
+    , m_hasBeenDisposed(false)
+#endif
 {
-    ScrollableArea::setConstrainsScrollingToContentEdge(false);
-
     Node* node = box().node();
     if (node && node->isElementNode()) {
         // We save and restore only the scrollOffset as the other scroll values are recalculated.
@@ -102,11 +102,15 @@ DeprecatedPaintLayerScrollableArea::DeprecatedPaintLayerScrollableArea(Deprecate
             scrollAnimator()->setCurrentPosition(FloatPoint(m_scrollOffset.width(), m_scrollOffset.height()));
         element->setSavedLayerScrollOffset(IntSize());
     }
-
     updateResizerAreaSet();
 }
 
 DeprecatedPaintLayerScrollableArea::~DeprecatedPaintLayerScrollableArea()
+{
+    ASSERT(m_hasBeenDisposed);
+}
+
+void DeprecatedPaintLayerScrollableArea::dispose()
 {
     if (inResizeMode() && !box().documentBeingDestroyed()) {
         if (LocalFrame* frame = box().frame())
@@ -144,12 +148,25 @@ DeprecatedPaintLayerScrollableArea::~DeprecatedPaintLayerScrollableArea()
         m_scrollCorner->destroy();
     if (m_resizer)
         m_resizer->destroy();
+
+    clearScrollAnimators();
+
+#if ENABLE(ASSERT)
+    m_hasBeenDisposed = true;
+#endif
+}
+
+DEFINE_TRACE(DeprecatedPaintLayerScrollableArea)
+{
+    visitor->trace(m_hBar);
+    visitor->trace(m_vBar);
+    ScrollableArea::trace(visitor);
 }
 
 HostWindow* DeprecatedPaintLayerScrollableArea::hostWindow() const
 {
     if (Page* page = box().frame()->page())
-        return &page->chrome();
+        return &page->chromeClient();
     return nullptr;
 }
 
@@ -357,17 +374,13 @@ int DeprecatedPaintLayerScrollableArea::scrollSize(ScrollbarOrientation orientat
     return (orientation == HorizontalScrollbar) ? scrollDimensions.width() : scrollDimensions.height();
 }
 
-void DeprecatedPaintLayerScrollableArea::setScrollOffset(const IntPoint& newScrollOffset)
+void DeprecatedPaintLayerScrollableArea::setScrollOffset(const IntPoint& newScrollOffset, ScrollType scrollType)
 {
-    setScrollOffset(DoublePoint(newScrollOffset));
+    setScrollOffset(DoublePoint(newScrollOffset), scrollType);
 }
 
-void DeprecatedPaintLayerScrollableArea::setScrollOffset(const DoublePoint& newScrollOffset)
+void DeprecatedPaintLayerScrollableArea::setScrollOffset(const DoublePoint& newScrollOffset, ScrollType)
 {
-    // Ensure that the dimensions will be computed if they need to be (for overflow:hidden blocks).
-    if (m_scrollDimensionsDirty)
-        computeScrollDimensions();
-
     if (scrollOffset() == toDoubleSize(newScrollOffset))
         return;
 
@@ -379,7 +392,7 @@ void DeprecatedPaintLayerScrollableArea::setScrollOffset(const DoublePoint& newS
 
     RefPtrWillBeRawPtr<FrameView> frameView = box().frameView();
 
-    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ScrollLayer", "data", InspectorScrollLayerEvent::data(&box()));
+    TRACE_EVENT1("devtools.timeline", "ScrollLayer", "data", InspectorScrollLayerEvent::data(&box()));
 
     // FIXME(420741): Resolve circular dependency between scroll offset and
     // compositing state, and remove this disabler.
@@ -424,15 +437,15 @@ void DeprecatedPaintLayerScrollableArea::setScrollOffset(const DoublePoint& newS
             requiresPaintInvalidation = true;
     }
 
-    // For slimming paint we need to fully invalidate during scrolling.
-    if (requiresPaintInvalidation && RuntimeEnabledFeatures::slimmingPaintEnabled()) {
-        DisablePaintInvalidationStateAsserts disabler;
-        box().invalidatePaintIncludingNonCompositingDescendants();
-    }
-
     // Just schedule a full paint invalidation of our object.
-    if (requiresPaintInvalidation)
-        box().setShouldDoFullPaintInvalidation();
+    // FIXME: This invalidation will be unnecessary in slimming paint phase 2.
+    if (requiresPaintInvalidation) {
+        if (RuntimeEnabledFeatures::slimmingPaintEnabled())
+            box().setShouldDoFullPaintInvalidationIncludingNonCompositingDescendants();
+        else
+            box().setShouldDoFullPaintInvalidation();
+        frameView->setFrameTimingRequestsDirty(true);
+    }
 
     // Schedule the scroll DOM event.
     if (box().node())
@@ -440,6 +453,13 @@ void DeprecatedPaintLayerScrollableArea::setScrollOffset(const DoublePoint& newS
 
     if (AXObjectCache* cache = box().document().existingAXObjectCache())
         cache->handleScrollPositionChanged(&box());
+    box().view()->clearHitTestCache();
+
+    // Inform the FrameLoader of the new scroll position, so it can be restored when navigating back.
+    if (layer()->isRootLayer()) {
+        frameView->frame().loader().saveScrollState();
+        frameView->clearScrollAnchor();
+    }
 }
 
 IntPoint DeprecatedPaintLayerScrollableArea::scrollPosition() const
@@ -512,6 +532,12 @@ bool DeprecatedPaintLayerScrollableArea::shouldSuspendScrollAnimations() const
     return view->frameView()->shouldSuspendScrollAnimations();
 }
 
+void DeprecatedPaintLayerScrollableArea::scrollbarVisibilityChanged()
+{
+    if (LayoutView* view = box().view())
+        return view->clearHitTestCache();
+}
+
 bool DeprecatedPaintLayerScrollableArea::scrollbarsCanBeActive() const
 {
     LayoutView* view = box().view();
@@ -578,15 +604,11 @@ DeprecatedPaintLayer* DeprecatedPaintLayerScrollableArea::layer() const
 
 LayoutUnit DeprecatedPaintLayerScrollableArea::scrollWidth() const
 {
-    if (m_scrollDimensionsDirty)
-        const_cast<DeprecatedPaintLayerScrollableArea*>(this)->computeScrollDimensions();
     return m_overflowRect.width();
 }
 
 LayoutUnit DeprecatedPaintLayerScrollableArea::scrollHeight() const
 {
-    if (m_scrollDimensionsDirty)
-        const_cast<DeprecatedPaintLayerScrollableArea*>(this)->computeScrollDimensions();
     return m_overflowRect.height();
 }
 
@@ -602,8 +624,6 @@ int DeprecatedPaintLayerScrollableArea::pixelSnappedScrollHeight() const
 
 void DeprecatedPaintLayerScrollableArea::computeScrollDimensions()
 {
-    m_scrollDimensionsDirty = false;
-
     m_overflowRect = box().layoutOverflowRect();
     box().flipForWritingMode(m_overflowRect);
 
@@ -617,16 +637,8 @@ void DeprecatedPaintLayerScrollableArea::scrollToOffset(const DoubleSize& scroll
     cancelProgrammaticScrollAnimation();
     DoubleSize newScrollOffset = clamp == ScrollOffsetClamped ? clampScrollOffset(scrollOffset) : scrollOffset;
     if (newScrollOffset != adjustedScrollOffset()) {
-        if (scrollBehavior == ScrollBehaviorAuto)
-            scrollBehavior = scrollBehaviorStyle();
         DoublePoint origin(scrollOrigin());
-        if (scrollBehavior == ScrollBehaviorSmooth) {
-            // FIXME: Make programmaticallyScrollSmoothlyToOffset take DoublePoint. crbug.com/243871.
-            programmaticallyScrollSmoothlyToOffset(toFloatPoint(-origin + newScrollOffset));
-        } else {
-            // FIXME: Make scrollToOffsetWithoutAnimation take DoublePoint. crbug.com/414283.
-            scrollToOffsetWithoutAnimation(toFloatPoint(-origin + newScrollOffset));
-        }
+        ScrollableArea::setScrollPosition(-origin + newScrollOffset, ProgrammaticScroll, scrollBehavior);
     }
 }
 
@@ -634,9 +646,7 @@ void DeprecatedPaintLayerScrollableArea::updateAfterLayout()
 {
     ASSERT(box().hasOverflowClip());
 
-    m_scrollDimensionsDirty = true;
     DoubleSize originalScrollOffset = adjustedScrollOffset();
-
     computeScrollDimensions();
 
     // Layout may cause us to be at an invalid scroll position. In this case we need
@@ -647,7 +657,7 @@ void DeprecatedPaintLayerScrollableArea::updateAfterLayout()
 
     if (originalScrollOffset != adjustedScrollOffset()) {
         DoublePoint origin(scrollOrigin());
-        scrollToOffsetWithoutAnimation(toFloatPoint(-origin + adjustedScrollOffset()));
+        scrollPositionChanged(-origin + adjustedScrollOffset(), ProgrammaticScroll);
     }
 
     bool hasHorizontalOverflow = this->hasHorizontalOverflow();
@@ -673,7 +683,7 @@ void DeprecatedPaintLayerScrollableArea::updateAfterLayout()
     bool autoHorizontalScrollBarChanged = box().hasAutoHorizontalScrollbar() && (hasHorizontalScrollbar() != hasHorizontalOverflow);
     bool autoVerticalScrollBarChanged = box().hasAutoVerticalScrollbar() && (hasVerticalScrollbar() != hasVerticalOverflow);
 
-    if (autoHorizontalScrollBarChanged || autoVerticalScrollBarChanged) {
+    if (!visualViewportSuppliesScrollbars() && (autoHorizontalScrollBarChanged || autoVerticalScrollBarChanged)) {
         if (box().hasAutoHorizontalScrollbar())
             setHasHorizontalScrollbar(hasHorizontalOverflow);
         if (box().hasAutoVerticalScrollbar())
@@ -735,15 +745,11 @@ ScrollBehavior DeprecatedPaintLayerScrollableArea::scrollBehaviorStyle() const
 
 bool DeprecatedPaintLayerScrollableArea::hasHorizontalOverflow() const
 {
-    ASSERT(!m_scrollDimensionsDirty);
-
     return pixelSnappedScrollWidth() > box().pixelSnappedClientWidth();
 }
 
 bool DeprecatedPaintLayerScrollableArea::hasVerticalOverflow() const
 {
-    ASSERT(!m_scrollDimensionsDirty);
-
     return pixelSnappedScrollHeight() > box().pixelSnappedClientHeight();
 }
 
@@ -780,11 +786,19 @@ static bool canHaveOverflowScrollbars(const LayoutBox& box)
 
 void DeprecatedPaintLayerScrollableArea::updateAfterStyleChange(const ComputedStyle* oldStyle)
 {
-    if (!m_scrollDimensionsDirty)
+    // Don't do this on first style recalc, before layout has ever happened.
+    if (!overflowRect().size().isZero())
         updateScrollableAreaSet(hasScrollableHorizontalOverflow() || hasScrollableVerticalOverflow());
 
     if (!canHaveOverflowScrollbars(box()))
         return;
+
+    // Avoid drawing two sets of scrollbars when one is provided by the visual viewport.
+    if (visualViewportSuppliesScrollbars()) {
+        setHasHorizontalScrollbar(false);
+        setHasVerticalScrollbar(false);
+        return;
+    }
 
     EOverflow overflowX = box().style()->overflowX();
     EOverflow overflowY = box().style()->overflowY();
@@ -913,8 +927,30 @@ IntSize DeprecatedPaintLayerScrollableArea::scrollbarOffset(const Scrollbar* scr
 static inline LayoutObject* layoutObjectForScrollbar(LayoutObject& layoutObject)
 {
     if (Node* node = layoutObject.node()) {
+        if (layoutObject.isLayoutView()) {
+            Document& doc = node->document();
+            if (Settings* settings = doc.settings()) {
+                if (!settings->allowCustomScrollbarInMainFrame() && layoutObject.frame() && layoutObject.frame()->isMainFrame())
+                    return &layoutObject;
+            }
+
+            // Try the <body> element first as a scrollbar source.
+            Element* body = doc.body();
+            if (body && body->layoutObject() && body->layoutObject()->style()->hasPseudoStyle(SCROLLBAR))
+                return body->layoutObject();
+
+            // If the <body> didn't have a custom style, then the root element might.
+            Element* docElement = doc.documentElement();
+            if (docElement && docElement->layoutObject() && docElement->layoutObject()->style()->hasPseudoStyle(SCROLLBAR))
+                return docElement->layoutObject();
+
+            // If we have an owning ipage/LocalFrame element, then it can set the custom scrollbar also.
+            LayoutPart* frameLayoutObject = node->document().frame()->ownerLayoutObject();
+            if (frameLayoutObject && frameLayoutObject->style()->hasPseudoStyle(SCROLLBAR))
+                return frameLayoutObject;
+        }
         if (ShadowRoot* shadowRoot = node->containingShadowRoot()) {
-            if (shadowRoot->type() == ShadowRoot::UserAgentShadowRoot)
+            if (shadowRoot->type() == ShadowRootType::UserAgent)
                 return shadowRoot->host()->layoutObject();
         }
     }
@@ -945,7 +981,7 @@ PassRefPtrWillBeRawPtr<Scrollbar> DeprecatedPaintLayerScrollableArea::createScro
 
 void DeprecatedPaintLayerScrollableArea::destroyScrollbar(ScrollbarOrientation orientation)
 {
-    RefPtrWillBePersistent<Scrollbar>& scrollbar = orientation == HorizontalScrollbar ? m_hBar : m_vBar;
+    RefPtrWillBeMember<Scrollbar>& scrollbar = orientation == HorizontalScrollbar ? m_hBar : m_vBar;
     if (!scrollbar)
         return;
 
@@ -1284,23 +1320,23 @@ void DeprecatedPaintLayerScrollableArea::resize(const PlatformEvent& evt, const 
     if (resize != RESIZE_VERTICAL && difference.width()) {
         if (element->isFormControlElement()) {
             // Make implicit margins from the theme explicit (see <http://bugs.webkit.org/show_bug.cgi?id=9547>).
-            element->setInlineStyleProperty(CSSPropertyMarginLeft, box().marginLeft() / zoomFactor, CSSPrimitiveValue::CSS_PX);
-            element->setInlineStyleProperty(CSSPropertyMarginRight, box().marginRight() / zoomFactor, CSSPrimitiveValue::CSS_PX);
+            element->setInlineStyleProperty(CSSPropertyMarginLeft, box().marginLeft() / zoomFactor, CSSPrimitiveValue::UnitType::Pixels);
+            element->setInlineStyleProperty(CSSPropertyMarginRight, box().marginRight() / zoomFactor, CSSPrimitiveValue::UnitType::Pixels);
         }
         LayoutUnit baseWidth = box().size().width() - (isBoxSizingBorder ? LayoutUnit() : box().borderAndPaddingWidth());
         baseWidth = baseWidth / zoomFactor;
-        element->setInlineStyleProperty(CSSPropertyWidth, roundToInt(baseWidth + difference.width()), CSSPrimitiveValue::CSS_PX);
+        element->setInlineStyleProperty(CSSPropertyWidth, roundToInt(baseWidth + difference.width()), CSSPrimitiveValue::UnitType::Pixels);
     }
 
     if (resize != RESIZE_HORIZONTAL && difference.height()) {
         if (element->isFormControlElement()) {
             // Make implicit margins from the theme explicit (see <http://bugs.webkit.org/show_bug.cgi?id=9547>).
-            element->setInlineStyleProperty(CSSPropertyMarginTop, box().marginTop() / zoomFactor, CSSPrimitiveValue::CSS_PX);
-            element->setInlineStyleProperty(CSSPropertyMarginBottom, box().marginBottom() / zoomFactor, CSSPrimitiveValue::CSS_PX);
+            element->setInlineStyleProperty(CSSPropertyMarginTop, box().marginTop() / zoomFactor, CSSPrimitiveValue::UnitType::Pixels);
+            element->setInlineStyleProperty(CSSPropertyMarginBottom, box().marginBottom() / zoomFactor, CSSPrimitiveValue::UnitType::Pixels);
         }
         LayoutUnit baseHeight = box().size().height() - (isBoxSizingBorder ? LayoutUnit() : box().borderAndPaddingHeight());
         baseHeight = baseHeight / zoomFactor;
-        element->setInlineStyleProperty(CSSPropertyHeight, roundToInt(baseHeight + difference.height()), CSSPrimitiveValue::CSS_PX);
+        element->setInlineStyleProperty(CSSPropertyHeight, roundToInt(baseHeight + difference.height()), CSSPrimitiveValue::UnitType::Pixels);
     }
 
     document.updateLayout();
@@ -1407,6 +1443,18 @@ void DeprecatedPaintLayerScrollableArea::setTopmostScrollChild(DeprecatedPaintLa
     if (!hasOverlayScrollbars())
         return;
     m_nextTopmostScrollChild = scrollChild;
+}
+
+bool DeprecatedPaintLayerScrollableArea::visualViewportSuppliesScrollbars() const
+{
+    if (!layer()->isRootLayer())
+        return false;
+
+    LocalFrame* frame = box().frame();
+    if (!frame || !frame->isMainFrame() || !frame->settings())
+        return false;
+
+    return frame->settings()->viewportMetaEnabled();
 }
 
 } // namespace blink

@@ -46,8 +46,8 @@ TouchEvent::TouchEvent(TouchList* touches, TouchList* targetTouches,
         PassRefPtrWillBeRawPtr<AbstractView> view,
         bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, bool cancelable, bool causesScrollingIfUncanceled,
         double uiCreateTime)
-    : UIEventWithKeyState(type, true, cancelable, view, 0,
-                        ctrlKey, altKey, shiftKey, metaKey)
+    // Pass a sourceCapabilities including the ability to fire touchevents when creating this touchevent, which is always created from input device capabilities from EventHandler.
+    : UIEventWithKeyState(type, true, cancelable, view, 0, ctrlKey, altKey, shiftKey, metaKey, InputDeviceCapabilities::firesTouchEventsSourceCapabilities())
     , m_touches(touches)
     , m_targetTouches(targetTouches)
     , m_changedTouches(changedTouches)
@@ -109,6 +109,12 @@ void TouchEvent::preventDefault()
             "Ignored attempt to cancel a " + type() + " event with cancelable=false, for example because scrolling is in progress and cannot be interrupted."));
     }
 }
+
+PassRefPtrWillBeRawPtr<EventDispatchMediator> TouchEvent::createMediator()
+{
+    return TouchEventDispatchMediator::create(this);
+}
+
 DEFINE_TRACE(TouchEvent)
 {
     visitor->trace(m_touches);

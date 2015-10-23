@@ -5,7 +5,10 @@
 package org.chromium.chromoting;
 
 import android.annotation.SuppressLint;
-import android.content.res.Configuration;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Build;
 import android.os.Bundle;
 import android.support.v7.app.ActionBarActivity;
@@ -27,7 +30,7 @@ import java.util.TreeSet;
 public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibilityChangeListener {
     /** Web page to be displayed in the Help screen when launched from this activity. */
     private static final String HELP_URL =
-            "http://support.google.com/chrome/?p=mobile_crd_connecthost";
+            "https://support.google.com/chrome/?p=mobile_crd_connecthost";
 
     /** The surface that displays the remote host's desktop feed. */
     private DesktopView mRemoteHostDesktop;
@@ -37,6 +40,10 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
 
     private ActivityLifecycleListener mActivityLifecycleListener;
 
+    // Flag to indicate whether the current activity is going to switch to Cardboard
+    // desktop activity.
+    private boolean mSwitchToCardboardDesktopActivity;
+
     /** Called when the activity is first created. */
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -44,6 +51,7 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
         setContentView(R.layout.desktop);
         mRemoteHostDesktop = (DesktopView) findViewById(R.id.desktop_view);
         mRemoteHostDesktop.setDesktop(this);
+        mSwitchToCardboardDesktopActivity = false;
 
         // For this Activity, the home button in the action bar acts as a Disconnect button, so
         // set the description for accessibility/screen readers.
@@ -62,13 +70,16 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
         super.onStart();
         mActivityLifecycleListener.onActivityStarted(this);
         JniInterface.enableVideoChannel(true);
+        mRemoteHostDesktop.attachRedrawCallback();
     }
 
     @Override
     protected void onPause() {
         if (isFinishing()) mActivityLifecycleListener.onActivityPaused(this);
         super.onPause();
-        JniInterface.enableVideoChannel(false);
+        if (!mSwitchToCardboardDesktopActivity) {
+            JniInterface.enableVideoChannel(false);
+        }
     }
 
     @Override
@@ -82,21 +93,11 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
     protected void onStop() {
         mActivityLifecycleListener.onActivityStopped(this);
         super.onStop();
-        JniInterface.enableVideoChannel(false);
-    }
-
-    /** Called when the activity is finally finished. */
-    @Override
-    public void onDestroy() {
-        super.onDestroy();
-        JniInterface.disconnectFromHost();
-    }
-
-    /** Called when the display is rotated (as registered in the manifest). */
-    @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-        mRemoteHostDesktop.onScreenConfigurationChanged();
+        if (mSwitchToCardboardDesktopActivity) {
+            mSwitchToCardboardDesktopActivity = false;
+        } else {
+            JniInterface.enableVideoChannel(false);
+        }
     }
 
     /** Called to initialize the action bar. */
@@ -105,6 +106,19 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
         getMenuInflater().inflate(R.menu.desktop_actionbar, menu);
 
         mActivityLifecycleListener.onActivityCreatedOptionsMenu(this, menu);
+
+        boolean enableCardboard = false;
+        try {
+            ApplicationInfo ai = getPackageManager()
+                    .getApplicationInfo(getPackageName(), PackageManager.GET_META_DATA);
+            Bundle bundle = ai.metaData;
+            enableCardboard = bundle.getInt("enable_cardboard") == 1;
+        } catch (NameNotFoundException e) {
+            // Does nothing since by default Cardboard activity is turned off.
+        }
+
+        MenuItem item = menu.findItem(R.id.actionbar_cardboard);
+        item.setVisible(enableCardboard);
 
         return super.onCreateOptionsMenu(menu);
     }
@@ -138,8 +152,9 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
     }
 
     public void showActionBar() {
-        showActionBarWithoutSystemUi();
-
+        // Request exit from any fullscreen mode. The action-bar controls will be shown in response
+        // to the SystemUiVisibility notification. The visibility of the action-bar should be tied
+        // to the fullscreen state of the system, so there's no need to explicitly show it here.
         View decorView = getWindow().getDecorView();
         decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
     }
@@ -151,8 +166,12 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
 
     @SuppressLint("InlinedApi")
     public void hideActionBar() {
-        hideActionBarWithoutSystemUi();
-
+        // Request the device to enter fullscreen mode. Don't hide the controls yet, because the
+        // system might not honor the fullscreen request immediately (for example, if the
+        // keyboard is visible, the system might delay fullscreen until the keyboard is hidden).
+        // The controls will be hidden in response to the SystemUiVisibility notification.
+        // This helps ensure that the visibility of the controls is synchronized with the
+        // fullscreen state.
         View decorView = getWindow().getDecorView();
 
         // LOW_PROFILE gives the status and navigation bars a "lights-out" appearance.
@@ -183,6 +202,12 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
 
         mActivityLifecycleListener.onActivityOptionsItemSelected(this, item);
 
+        if (id == R.id.actionbar_cardboard) {
+            mSwitchToCardboardDesktopActivity = true;
+            Intent intent = new Intent(this, CardboardDesktopActivity.class);
+            startActivityForResult(intent, Chromoting.CARDBOARD_DESKTOP_ACTIVITY);
+            return true;
+        }
         if (id == R.id.actionbar_keyboard) {
             ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).toggleSoftInput(0, 0);
             return true;

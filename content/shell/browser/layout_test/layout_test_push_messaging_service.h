@@ -21,29 +21,33 @@ class LayoutTestPushMessagingService : public PushMessagingService {
 
   // PushMessagingService implementation:
   GURL GetPushEndpoint() override;
-  void RegisterFromDocument(
+  void SubscribeFromDocument(
       const GURL& requesting_origin,
-      int64 service_worker_registration_id,
+      int64_t service_worker_registration_id,
       const std::string& sender_id,
       int renderer_id,
       int render_frame_id,
       bool user_visible,
       const PushMessagingService::RegisterCallback& callback) override;
-  void RegisterFromWorker(
+  void SubscribeFromWorker(
       const GURL& requesting_origin,
-      int64 service_worker_registration_id,
+      int64_t service_worker_registration_id,
       const std::string& sender_id,
       bool user_visible,
       const PushMessagingService::RegisterCallback& callback) override;
+  void GetPublicEncryptionKey(
+      const GURL& origin,
+      int64_t service_worker_registration_id,
+      const PushMessagingService::PublicKeyCallback& callback) override;
   blink::WebPushPermissionStatus GetPermissionStatus(
       const GURL& requesting_origin,
       const GURL& embedding_origin,
       bool user_visible) override;
   bool SupportNonVisibleMessages() override;
-  void Unregister(const GURL& requesting_origin,
-                  int64 service_worker_registration_id,
-                  const std::string& sender_id,
-                  const UnregisterCallback& callback) override;
+  void Unsubscribe(const GURL& requesting_origin,
+                   int64_t service_worker_registration_id,
+                   const std::string& sender_id,
+                   const UnregisterCallback& callback) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(LayoutTestPushMessagingService);

@@ -9,7 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -53,10 +53,10 @@ const char kWpadUrl[] = "http://wpad/wpad.dat";
 const int kQuickCheckDelayMs = 1000;
 };
 
-base::Value* ProxyScriptDecider::PacSource::NetLogCallback(
+scoped_ptr<base::Value> ProxyScriptDecider::PacSource::NetLogCallback(
     const GURL* effective_pac_url,
     NetLogCaptureMode /* capture_mode */) const {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   std::string source;
   switch (type) {
     case PacSource::WPAD_DHCP:
@@ -72,7 +72,7 @@ base::Value* ProxyScriptDecider::PacSource::NetLogCallback(
       break;
   }
   dict->SetString("source", source);
-  return dict;
+  return dict.Pass();
 }
 
 ProxyScriptDecider::ProxyScriptDecider(
@@ -138,10 +138,10 @@ const ProxyConfig& ProxyScriptDecider::effective_config() const {
   return effective_config_;
 }
 
-// TODO(eroman): Return a const-pointer.
-ProxyResolverScriptData* ProxyScriptDecider::script_data() const {
+const scoped_refptr<ProxyResolverScriptData>&
+ProxyScriptDecider::script_data() const {
   DCHECK_EQ(STATE_NONE, next_state_);
-  return script_data_.get();
+  return script_data_;
 }
 
 // Initialize the fallback rules.

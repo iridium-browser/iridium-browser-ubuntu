@@ -176,7 +176,6 @@ IGNORED_PATHS = (
       '__init__.py',
   'out/',
   # TODO(maruel): Fix these.
-  'third_party/android_testrunner/',
   'third_party/bintrees/',
   'third_party/closure_linter/',
   'third_party/devscripts/licensecheck.pl.vanilla',
@@ -197,6 +196,8 @@ IGNORED_PATHS = (
   'third_party/talloc/script/mksyms.sh',
   'third_party/tcmalloc/',
   'third_party/tlslite/setup.py',
+  # TODO(nednguyen): Remove this when telemetry is moved to catapult
+  'tools/telemetry/third_party/',
 )
 
 #### USER EDITABLE SECTION ENDS HERE ####

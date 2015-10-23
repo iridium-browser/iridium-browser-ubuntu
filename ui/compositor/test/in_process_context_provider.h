@@ -18,6 +18,8 @@
 
 namespace gpu {
 class GLInProcessContext;
+class GpuMemoryBufferManager;
+class ImageFactory;
 }
 
 namespace ui {
@@ -26,24 +28,28 @@ class InProcessContextProvider : public cc::ContextProvider {
  public:
   static scoped_refptr<InProcessContextProvider> Create(
       const gpu::gles2::ContextCreationAttribHelper& attribs,
-      bool lose_context_when_out_of_memory,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+      gpu::ImageFactory* image_factory,
       gfx::AcceleratedWidget window,
       const std::string& debug_name);
 
   // Uses default attributes for creating an offscreen context.
   static scoped_refptr<InProcessContextProvider> CreateOffscreen(
-      bool lose_context_when_out_of_memory);
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+      gpu::ImageFactory* image_factory);
 
  private:
   InProcessContextProvider(
       const gpu::gles2::ContextCreationAttribHelper& attribs,
-      bool lose_context_when_out_of_memory,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+      gpu::ImageFactory* image_factory,
       gfx::AcceleratedWidget window,
       const std::string& debug_name);
   ~InProcessContextProvider() override;
 
   // cc::ContextProvider:
   bool BindToCurrentThread() override;
+  void DetachFromThread() override;
   Capabilities ContextCapabilities() override;
   gpu::gles2::GLES2Interface* ContextGL() override;
   gpu::ContextSupport* ContextSupport() override;
@@ -51,7 +57,6 @@ class InProcessContextProvider : public cc::ContextProvider {
   void InvalidateGrContext(uint32_t state) override;
   void SetupLock() override;
   base::Lock* GetLock() override;
-  bool IsContextLost() override;
   void VerifyContexts() override;
   void DeleteCachedResources() override;
   bool DestroyedOnMainThread() override;
@@ -70,7 +75,8 @@ class InProcessContextProvider : public cc::ContextProvider {
   skia::RefPtr<class GrContext> gr_context_;
 
   gpu::gles2::ContextCreationAttribHelper attribs_;
-  bool lose_context_when_out_of_memory_;
+  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
+  gpu::ImageFactory* image_factory_;
   gfx::AcceleratedWidget window_;
   std::string debug_name_;
   cc::ContextProvider::Capabilities capabilities_;

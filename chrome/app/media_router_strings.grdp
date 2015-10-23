@@ -5,6 +5,9 @@
   <message name="IDS_MEDIA_ROUTER_TITLE" desc="Title for media router">
     Media Router
   </message>
+  <message name="IDS_MEDIA_ROUTER_SHARE_YOUR_SCREEN_TEXT" desc="Text for Media Router Action tooltip, which appears on mouseover of the action icon in the toolbar.">
+   Share your screen
+  </message>
 
   <!-- Cast Modes -->
   <message name="IDS_MEDIA_ROUTER_DEFAULT_CAST_MODE" desc="Message for default cast mode.">
@@ -13,38 +16,65 @@
   <message name="IDS_MEDIA_ROUTER_DEFAULT_CAST_MODE_TITLE" desc="Title for default cast mode.">
     Cast <ph name="HOST_NAME">$1<ex>google.com</ex></ph> to...
   </message>
-  <message name="IDS_MEDIA_ROUTER_DESKTOP_OR_WINDOW_MIRROR_CAST_MODE" desc="Message for desktop/window mirror cast mode.">
-    Cast desktop or window
+  <message name="IDS_MEDIA_ROUTER_DESKTOP_MIRROR_CAST_MODE" desc="Message for desktop mirror cast mode.">
+    Cast desktop
   </message>
-  <message name="IDS_MEDIA_ROUTER_DESKTOP_OR_WINDOW_MIRROR_CAST_MODE_TITLE" desc="Title for desktop/window mirror cast mode.">
-    Cast desktop or window to...
-  </message>
-  <message name="IDS_MEDIA_ROUTER_SOUND_OPTIMIZED_TAB_MIRROR_CAST_MODE" desc="Message for default cast mode.">
-    Cast this tab (optimized for audio)
-  </message>
-  <message name="IDS_MEDIA_ROUTER_SOUND_OPTIMIZED_TAB_MIRROR_CAST_MODE_TITLE" desc="Title for sound optimized tab mirror cast mode.">
-    Cast this tab (optimized for audio) to...
+  <message name="IDS_MEDIA_ROUTER_DESKTOP_MIRROR_CAST_MODE_TITLE" desc="Title for desktop mirror cast mode.">
+    Cast desktop to...
   </message>
   <message name="IDS_MEDIA_ROUTER_TAB_MIRROR_CAST_MODE" desc="Message for tab mirror cast mode.">
-    Cast this tab
+    Cast tab
   </message>
   <message name="IDS_MEDIA_ROUTER_TAB_MIRROR_CAST_MODE_TITLE" desc="Title for tab mirror cast mode.">
-    Cast this tab to...
+    Cast tab to...
   </message>
 
   <!-- Cast Mode Picker -->
   <message name="IDS_MEDIA_ROUTER_SELECT_CAST_MODE_HEADER" desc="Header for select cast mode view.">
-   Select cast mode
+   Select source
+  </message>
+  <message name="IDS_MEDIA_ROUTER_SHARE_YOUR_SCREEN_SUBHEADING" desc="Text for share your screen subheading, which appears above a list of non-default cast modes.">
+   Share your screen
+  </message>
+
+  <!-- Contextual Menu -->
+  <message name="IDS_MEDIA_ROUTER_ABOUT" desc="Title of menu item which, on selection, opens a page with product information about Chromecast.">
+   About
+  </message>
+  <message name="IDS_MEDIA_ROUTER_HELP" desc="Title of help item which, on selection, opens a page to the Chromecast help center.">
+   Help
+  </message>
+  <message name="IDS_MEDIA_ROUTER_LEARN_MORE" desc="Title of learn more item which, on selection, opens a page with instructions on how to cast to a Chromecast.">
+   Learn more
+  </message>
+  <message name="IDS_MEDIA_ROUTER_REPORT_ISSUE" desc="Title of report issue item which, on selection, opens a page to give feedback or report an issue with Chromecast integration.">
+   Report an issue
+  </message>
+
+  <!-- Issue Actions -->
+  <message name="IDS_MEDIA_ROUTER_CANCEL_BUTTON" desc="Text of Cancel button.">
+    Cancel
+  </message>
+  <message name="IDS_MEDIA_ROUTER_DISMISS_BUTTON" desc="Text of Dismiss button.">
+    Dismiss
+  </message>
+  <message name="IDS_MEDIA_ROUTER_LEARN_MORE_BUTTON" desc="Text of Learn More button.">
+    Learn More
+  </message>
+  <message name="IDS_MEDIA_ROUTER_OK_BUTTON" desc="Text of Ok button.">
+    Ok
   </message>
 
   <!-- Route Details -->
-  <message name="IDS_MEDIA_ROUTER_BACK_TO_SINK_PICKER" desc="Label of back to sink picker button.">
-    Back to device list
-  </message>
   <message name="IDS_MEDIA_ROUTER_CASTING_ACTIVITY_STATUS" desc="Label of activity status.">
-    Casting to <ph name="sinkName">$1<ex>Living Room TV</ex></ph>
+    Casting: <ph name="routeTitle">$1<ex>Video</ex></ph>
   </message>
   <message name="IDS_MEDIA_ROUTER_STOP_CASTING_BUTTON" desc="Text of Stop casting button.">
     Stop casting
+  </message>
+
+  <!-- Sink List -->
+  <message name="IDS_MEDIA_ROUTER_DEVICE_MISSING" desc="Text to display when no devices are found.">
+    Device missing?
   </message>
 </grit-part>

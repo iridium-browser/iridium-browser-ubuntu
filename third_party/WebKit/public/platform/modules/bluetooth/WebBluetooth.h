@@ -6,43 +6,74 @@
 #define WebBluetooth_h
 
 #include "public/platform/WebCallbacks.h"
+#include "public/platform/WebPassOwnPtr.h"
 #include "public/platform/WebString.h"
+#include "public/platform/WebVector.h"
+#include "public/platform/modules/bluetooth/WebBluetoothError.h"
+#include <vector>
 
 namespace blink {
 
 struct WebBluetoothDevice;
-struct WebBluetoothError;
+struct WebBluetoothGATTCharacteristic;
 struct WebBluetoothGATTRemoteServer;
+struct WebBluetoothGATTService;
+struct WebRequestDeviceOptions;
 
 // Success and failure callbacks for requestDevice.
-// WebBluetoothDevice and WebBluetoothError object ownership is transfered.
-typedef WebCallbacks<WebBluetoothDevice, WebBluetoothError> WebBluetoothRequestDeviceCallbacks;
+using WebBluetoothRequestDeviceCallbacks = WebCallbacks<WebPassOwnPtr<WebBluetoothDevice>, const WebBluetoothError&>;
 
 // Success and failure callbacks for connectGATT.
-typedef WebCallbacks<WebBluetoothGATTRemoteServer, WebBluetoothError> WebBluetoothConnectGATTCallbacks;
+using WebBluetoothConnectGATTCallbacks = WebCallbacks<WebPassOwnPtr<WebBluetoothGATTRemoteServer>, const WebBluetoothError&>;
+
+// Success and failure callbacks for getPrimaryService.
+using WebBluetoothGetPrimaryServiceCallbacks = WebCallbacks<WebPassOwnPtr<WebBluetoothGATTService>, const WebBluetoothError&>;
+
+// Success and failure callbacks for getCharacteristic.
+using WebBluetoothGetCharacteristicCallbacks = WebCallbacks<WebPassOwnPtr<WebBluetoothGATTCharacteristic>, const WebBluetoothError&>;
+
+// Success and failure callbacks for readValue.
+using WebBluetoothReadValueCallbacks = WebCallbacks<const WebVector<uint8_t>&, const WebBluetoothError&>;
+
+// Success and failure callbacks for writeValue.
+using WebBluetoothWriteValueCallbacks = WebCallbacks<void, const WebBluetoothError&>;
 
 class WebBluetooth {
 public:
     virtual ~WebBluetooth() { }
 
-    // BluetoothDiscovery Methods:
-    // See https://webbluetoothcg.github.io/web-bluetooth/#idl-def-bluetoothdiscovery
+    // Bluetooth Methods:
+    // See https://webbluetoothchrome.github.io/web-bluetooth/#device-discovery
     // WebBluetoothRequestDeviceCallbacks ownership transferred to the client.
-    virtual void requestDevice(WebBluetoothRequestDeviceCallbacks*) = 0;
+    virtual void requestDevice(const WebRequestDeviceOptions&, WebBluetoothRequestDeviceCallbacks*) { }
 
     // BluetoothDevice methods:
-    // See https://webbluetoothcg.github.io/web-bluetooth/#idl-def-bluetoothdevice
+    // See https://webbluetoothchrome.github.io/web-bluetooth/#idl-def-bluetoothdevice
     // WebBluetoothConnectGATTCallbacks ownership transferred to the callee.
     virtual void connectGATT(const WebString& /* deviceInstanceID */,
         WebBluetoothConnectGATTCallbacks*) { }
 
     // BluetoothGATTRemoteServer methods:
-    // See https://webbluetoothcg.github.io/web-bluetooth/#idl-def-bluetoothgattremoteserver
+    // See https://webbluetoothchrome.github.io/web-bluetooth/#idl-def-bluetoothgattremoteserver
     virtual void disconnect() { }
-    // TODO(ortuno): Properly define these methods once WebBluetoothServiceUuid
-    // and WebBluetoothGATTService are defined.
-    // virtual void getPrimaryService() { }
+    virtual void getPrimaryService(const WebString& deviceInstanceID,
+        const WebString& serviceUUID,
+        WebBluetoothGetPrimaryServiceCallbacks*) { }
     // virtual void getPrimaryServices() { }
+
+    // BluetoothGATTService methods:
+    // See https://webbluetoothchrome.github.io/web-bluetooth/#idl-def-bluetoothgattservice
+    virtual void getCharacteristic(const WebString& serviceInstanceID,
+        const WebString& characteristicUUID,
+        WebBluetoothGetCharacteristicCallbacks*) { }
+
+    // BluetoothGATTCharacteristic methods:
+    // See https://webbluetoothchrome.github.io/web-bluetooth/#bluetoothgattcharacteristic
+    virtual void readValue(const WebString& characteristicInstanceID,
+        WebBluetoothReadValueCallbacks*) { }
+    virtual void writeValue(const WebString& characteristicInstanceID,
+        const std::vector<uint8_t>& value,
+        WebBluetoothWriteValueCallbacks*) { }
 };
 
 } // namespace blink

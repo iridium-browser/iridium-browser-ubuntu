@@ -13,17 +13,20 @@
 #include "ProcStats.h"
 #include "SkBBHFactory.h"
 #include "SkChecksum.h"
+#include "SkCodec.h"
 #include "SkCommonFlags.h"
+#include "SkFontMgr.h"
 #include "SkForceLinking.h"
 #include "SkGraphics.h"
-#include "SkInstCnt.h"
 #include "SkMD5.h"
+#include "SkMutex.h"
 #include "SkOSFile.h"
 #include "SkTHash.h"
 #include "SkTaskGroup.h"
 #include "SkThreadUtils.h"
 #include "Test.h"
 #include "Timer.h"
+#include "sk_tool_utils.h"
 
 DEFINE_string(src, "tests gm skp image", "Source types to test.");
 DEFINE_bool(nameByHash, false,
@@ -48,6 +51,7 @@ DEFINE_string(uninterestingHashesFile, "",
 
 DEFINE_int32(shards, 1, "We're splitting source data into this many shards.");
 DEFINE_int32(shard,  0, "Which shard do I run?");
+DEFINE_bool2(pre_log, p, false, "Log before running each test. May be incomprehensible when threading");
 
 __SK_FORCE_IMAGE_DECODER_LINKING;
 using namespace DM;
@@ -89,14 +93,16 @@ static void done(double ms,
         log.prepend("\n");
     }
     auto pending = sk_atomic_dec(&gPending)-1;
-    SkDebugf("%s(%4d/%-4dMB %5d) %s\t%s%s%s", FLAGS_verbose ? "\n" : kSkOverwriteLine
-                                       , sk_tools::getCurrResidentSetSizeMB()
-                                       , sk_tools::getMaxResidentSetSizeMB()
-                                       , pending
-                                       , HumanizeMs(ms).c_str()
-                                       , id.c_str()
-                                       , note.c_str()
-                                       , log.c_str());
+    if (!FLAGS_quiet) {
+        SkDebugf("%s(%4d/%-4dMB %6d) %s\t%s%s%s", FLAGS_verbose ? "\n" : kSkOverwriteLine
+                                           , sk_tools::getCurrResidentSetSizeMB()
+                                           , sk_tools::getMaxResidentSetSizeMB()
+                                           , pending
+                                           , HumanizeMs(ms).c_str()
+                                           , id.c_str()
+                                           , note.c_str()
+                                           , log.c_str());
+    }
     // We write our dm.json file every once in a while in case we crash.
     // Notice this also handles the final dm.json when pending == 0.
     if (pending % 500 == 0) {
@@ -160,16 +166,19 @@ static void gather_uninteresting_hashes() {
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
-template <typename T>
-struct Tagged : public SkAutoTDelete<T> {
-  const char* tag;
-  const char* options;
+struct TaggedSrc : public SkAutoTDelete<Src> {
+    const char* tag;
+    const char* options;
+};
+
+struct TaggedSink : public SkAutoTDelete<Sink> {
+    const char* tag;
 };
 
 static const bool kMemcpyOK = true;
 
-static SkTArray<Tagged<Src>,  kMemcpyOK>  gSrcs;
-static SkTArray<Tagged<Sink>, kMemcpyOK> gSinks;
+static SkTArray<TaggedSrc,  kMemcpyOK>  gSrcs;
+static SkTArray<TaggedSink, kMemcpyOK> gSinks;
 
 static bool in_shard() {
     static int N = 0;
@@ -181,7 +190,7 @@ static void push_src(const char* tag, const char* options, Src* s) {
     if (in_shard() &&
         FLAGS_src.contains(tag) &&
         !SkCommandLineFlags::ShouldSkip(FLAGS_match, src->name().c_str())) {
-        Tagged<Src>& s = gSrcs.push_back();
+        TaggedSrc& s = gSrcs.push_back();
         s.reset(src.detach());
         s.tag = tag;
         s.options = options;
@@ -200,40 +209,77 @@ static void push_codec_srcs(Path path) {
         return;
     }
 
-    // Build additional test cases for images that decode natively to non-canvas types
-    switch(codec->getInfo().colorType()) {
-        case kGray_8_SkColorType:
-            push_src("image", "codec_kGray8", new CodecSrc(path, CodecSrc::kNormal_Mode,
-                    CodecSrc::kGrayscale_Always_DstColorType));
-            push_src("image", "scanline_kGray8", new CodecSrc(path, CodecSrc::kScanline_Mode,
-                    CodecSrc::kGrayscale_Always_DstColorType));
-            // Intentional fall through
-            // FIXME: Is this a long term solution for testing wbmps decodes to kIndex8?
-            // Further discussion on this topic is at skbug.com/3683
-      case kIndex_8_SkColorType:
-          push_src("image", "codec_kIndex8", new CodecSrc(path, CodecSrc::kNormal_Mode,
-                  CodecSrc::kIndex8_Always_DstColorType));
-          push_src("image", "scanline_kIndex8", new CodecSrc(path, CodecSrc::kScanline_Mode,
-                  CodecSrc::kIndex8_Always_DstColorType));
-        break;
-      default:
-        // Do nothing
-        break;
-    }
+    // Choose scales for scaling tests.
+    // TODO (msarett): Add more scaling tests as we implement more flexible scaling.
+    // TODO (msarett): Implement scaling tests for SkImageDecoder in order to compare with these
+    //                 tests.  SkImageDecoder supports downscales by integer factors.
+    // SkJpegCodec natively supports scaling to: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875
+    // 0.1, 0.16, 0.2 etc allow us to test SkScaledCodec with sampleSize 10, 6, 5, etc
+    // 0.4, 0.7 etc allow to test what happens when the client requests a scale that
+    // does not exactly match a sampleSize or native scaling capability
+    const float scales[] = { 0.1f, 0.125f, 0.166f, 0.2f, 0.25f, 0.333f, 0.375f, 0.4f, 0.5f, 0.6f,
+                             0.625f, 0.750f, 0.8f, 0.875f, 1.0f };
 
-    // Decode all images to the canvas color type
-    push_src("image", "codec", new CodecSrc(path, CodecSrc::kNormal_Mode,
-            CodecSrc::kGetFromCanvas_DstColorType));
-    push_src("image", "scanline", new CodecSrc(path, CodecSrc::kScanline_Mode,
-            CodecSrc::kGetFromCanvas_DstColorType));
+    for (float scale : scales) {
+        if (scale != 1.0f && (path.endsWith(".webp") || path.endsWith(".WEBP"))) {
+            // FIXME: skbug.com/4038 Scaling webp seems to leave some pixels uninitialized/
+            // compute their colors based on uninitialized values.
+            continue;
+        }
+        // Build additional test cases for images that decode natively to non-canvas types
+        switch(codec->getInfo().colorType()) {
+            case kGray_8_SkColorType:
+                push_src("image", "codec_kGray8", new CodecSrc(path, CodecSrc::kNormal_Mode,
+                        CodecSrc::kGrayscale_Always_DstColorType, scale));
+                push_src("image", "scanline_kGray8", new CodecSrc(path, CodecSrc::kScanline_Mode,
+                        CodecSrc::kGrayscale_Always_DstColorType, scale));
+                push_src("image", "scanline_subset_kGray8", new CodecSrc(path,
+                        CodecSrc::kScanline_Subset_Mode, CodecSrc::kGrayscale_Always_DstColorType,
+                        scale));
+                push_src("image", "stripe_kGray8", new CodecSrc(path, CodecSrc::kStripe_Mode,
+                        CodecSrc::kGrayscale_Always_DstColorType, scale));
+                // Intentional fall through
+                // FIXME: Is this a long term solution for testing wbmps decodes to kIndex8?
+                // Further discussion on this topic is at skbug.com/3683
+            case kIndex_8_SkColorType:
+                push_src("image", "codec_kIndex8", new CodecSrc(path, CodecSrc::kNormal_Mode,
+                        CodecSrc::kIndex8_Always_DstColorType, scale));
+                push_src("image", "scanline_kIndex8", new CodecSrc(path, CodecSrc::kScanline_Mode,
+                        CodecSrc::kIndex8_Always_DstColorType, scale));
+                push_src("image", "scanline_subset_kIndex8", new CodecSrc(path,
+                        CodecSrc::kScanline_Subset_Mode, CodecSrc::kIndex8_Always_DstColorType,
+                        scale));
+                push_src("image", "stripe_kIndex8", new CodecSrc(path, CodecSrc::kStripe_Mode,
+                        CodecSrc::kIndex8_Always_DstColorType, scale));
+                break;
+            default:
+                // Do nothing
+                break;
+        }
+
+        // Decode all images to the canvas color type
+        push_src("image", "codec", new CodecSrc(path, CodecSrc::kNormal_Mode,
+                CodecSrc::kGetFromCanvas_DstColorType, scale));
+        push_src("image", "scanline", new CodecSrc(path, CodecSrc::kScanline_Mode,
+                CodecSrc::kGetFromCanvas_DstColorType, scale));
+        push_src("image", "scanline_subset", new CodecSrc(path, CodecSrc::kScanline_Subset_Mode,
+                CodecSrc::kGetFromCanvas_DstColorType, scale));
+        push_src("image", "stripe", new CodecSrc(path, CodecSrc::kStripe_Mode,
+                CodecSrc::kGetFromCanvas_DstColorType, scale));
+        // Note: The only codec which supports subsets natively is SkWebpCodec, which will never
+        // report kIndex_8 or kGray_8, so there is no need to test kSubset_mode with those color
+        // types specifically requested.
+        push_src("image", "codec_subset", new CodecSrc(path, CodecSrc::kSubset_Mode,
+                CodecSrc::kGetFromCanvas_DstColorType, scale));
+    }
 }
 
 static bool codec_supported(const char* ext) {
     // FIXME: Once other versions of SkCodec are available, we can add them to this
     // list (and eventually we can remove this check once they are all supported).
     static const char* const exts[] = {
-        "bmp", "gif", "jpg", "jpeg", "png", "ico", "wbmp",
-        "BMP", "GIF", "JPG", "JPEG", "PNG", "ICO", "WBMP"
+        "bmp", "gif", "jpg", "jpeg", "png", "ico", "wbmp", "webp",
+        "BMP", "GIF", "JPG", "JPEG", "PNG", "ICO", "WBMP", "WEBP",
     };
 
     for (uint32_t i = 0; i < SK_ARRAY_COUNT(exts); i++) {
@@ -297,23 +343,26 @@ static void push_sink(const char* tag, Sink* s) {
     if (!FLAGS_config.contains(tag)) {
         return;
     }
-    // Try a noop Src as a canary.  If it fails, skip this sink.
+    // Try a simple Src as a canary.  If it fails, skip this sink.
     struct : public Src {
-        Error draw(SkCanvas*) const override { return ""; }
+        Error draw(SkCanvas* c) const override {
+            c->drawRect(SkRect::MakeWH(1,1), SkPaint());
+            return "";
+        }
         SkISize size() const override { return SkISize::Make(16, 16); }
-        Name name() const override { return "noop"; }
-    } noop;
+        Name name() const override { return "justOneRect"; }
+    } justOneRect;
 
     SkBitmap bitmap;
     SkDynamicMemoryWStream stream;
     SkString log;
-    Error err = sink->draw(noop, &bitmap, &stream, &log);
+    Error err = sink->draw(justOneRect, &bitmap, &stream, &log);
     if (err.isFatal()) {
         SkDebugf("Could not run %s: %s\n", tag, err.c_str());
         exit(1);
     }
 
-    Tagged<Sink>& ts = gSinks.push_back();
+    TaggedSink& ts = gSinks.push_back();
     ts.reset(sink.detach());
     ts.tag = tag;
 }
@@ -369,7 +418,6 @@ static Sink* create_via(const char* tag, Sink* wrapped) {
     VIA("twice",     ViaTwice,         wrapped);
     VIA("pipe",      ViaPipe,          wrapped);
     VIA("serialize", ViaSerialization, wrapped);
-    VIA("deferred",  ViaDeferred,      wrapped);
     VIA("2ndpic",    ViaSecondPicture, wrapped);
     VIA("sp",        ViaSingletonPictures, wrapped);
     VIA("tiles",     ViaTiles, 256, 256,               NULL, wrapped);
@@ -440,24 +488,33 @@ static ImplicitString is_blacklisted(const char* sink, const char* src,
 // The finest-grained unit of work we can run: draw a single Src into a single Sink,
 // report any errors, and perhaps write out the output: a .png of the bitmap, or a raw stream.
 struct Task {
-    Task(const Tagged<Src>& src, const Tagged<Sink>& sink) : src(src), sink(sink) {}
-    const Tagged<Src>&  src;
-    const Tagged<Sink>& sink;
+    Task(const TaggedSrc& src, const TaggedSink& sink) : src(src), sink(sink) {}
+    const TaggedSrc&  src;
+    const TaggedSink& sink;
 
     static void Run(Task* task) {
         SkString name = task->src->name();
-        SkString note;
+
+        // We'll skip drawing this Src/Sink pair if:
+        //   - the Src vetoes the Sink;
+        //   - this Src / Sink combination is on the blacklist;
+        //   - it's a dry run.
+        SkString note(task->src->veto(task->sink->flags()) ? " (veto)" : "");
         SkString whyBlacklisted = is_blacklisted(task->sink.tag, task->src.tag,
                                                  task->src.options, name.c_str());
         if (!whyBlacklisted.isEmpty()) {
             note.appendf(" (--blacklist %s)", whyBlacklisted.c_str());
         }
+
         SkString log;
         WallTimer timer;
         timer.start();
-        if (!FLAGS_dryRun && whyBlacklisted.isEmpty()) {
+        if (!FLAGS_dryRun && note.isEmpty()) {
             SkBitmap bitmap;
             SkDynamicMemoryWStream stream;
+            if (FLAGS_pre_log) {
+                SkDebugf("\nRunning %s->%s", name.c_str(), task->sink.tag);
+            }
             start(task->sink.tag, task->src.tag, task->src.options, name.c_str());
             Error err = task->sink->draw(*task->src, &bitmap, &stream, &log);
             if (!err.isEmpty()) {
@@ -485,7 +542,17 @@ struct Task {
                     hash.writeStream(data, data->getLength());
                     data->rewind();
                 } else {
-                    hash.write(bitmap.getPixels(), bitmap.getSize());
+                    // If we're BGRA (Linux, Windows), swizzle over to RGBA (Mac, Android).
+                    // This helps eliminate multiple 0-pixel-diff hashes on gold.skia.org.
+                    // (Android's general slow speed breaks the tie arbitrarily in RGBA's favor.)
+                    // We might consider promoting 565 to RGBA too.
+                    if (bitmap.colorType() == kBGRA_8888_SkColorType) {
+                        SkBitmap swizzle;
+                        SkAssertResult(bitmap.copyTo(&swizzle, kRGBA_8888_SkColorType));
+                        hash.write(swizzle.getPixels(), swizzle.getSize());
+                    } else {
+                        hash.write(bitmap.getPixels(), bitmap.getSize());
+                    }
                 }
                 SkMD5::Digest digest;
                 hash.finish(digest);
@@ -644,15 +711,25 @@ static void run_test(skiatest::Test* test) {
         }
         bool verbose() const override { return FLAGS_veryVerbose; }
     } reporter;
+
+    SkString note;
+    SkString whyBlacklisted = is_blacklisted("_", "tests", "_", test->name);
+    if (!whyBlacklisted.isEmpty()) {
+        note.appendf(" (--blacklist %s)", whyBlacklisted.c_str());
+    }
+
     WallTimer timer;
     timer.start();
-    if (!FLAGS_dryRun) {
+    if (!FLAGS_dryRun && whyBlacklisted.isEmpty()) {
         start("unit", "test", "", test->name);
         GrContextFactory factory;
+        if (FLAGS_pre_log) {
+            SkDebugf("\nRunning test %s", test->name);
+        }
         test->proc(&reporter, &factory);
     }
     timer.end();
-    done(timer.fWall, "unit", "test", "", test->name, "", "");
+    done(timer.fWall, "unit", "test", "", test->name, note, "");
 }
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
@@ -692,14 +769,26 @@ static void start_keepalive() {
     intentionallyLeaked->start();
 }
 
+#define PORTABLE_FONT_PREFIX "Toy Liberation "
+
+static SkTypeface* create_from_name(const char familyName[], SkTypeface::Style style) {
+    if (familyName && strlen(familyName) > sizeof(PORTABLE_FONT_PREFIX)
+            && !strncmp(familyName, PORTABLE_FONT_PREFIX, sizeof(PORTABLE_FONT_PREFIX) - 1)) {
+        return sk_tool_utils::create_portable_typeface(familyName, style);
+    }
+    return NULL;
+}
+
+#undef PORTABLE_FONT_PREFIX
+
+extern SkTypeface* (*gCreateTypefaceDelegate)(const char [], SkTypeface::Style );
+
 int dm_main();
 int dm_main() {
     SetupCrashHandler();
     SkAutoGraphics ag;
     SkTaskGroup::Enabler enabled(FLAGS_threads);
-    if (FLAGS_leaks) {
-        SkInstCountPrintLeaksOnExit();
-    }
+    gCreateTypefaceDelegate = &create_from_name;
 
     start_keepalive();
 
@@ -742,6 +831,7 @@ int dm_main() {
     }
     tg.wait();
     // At this point we're back in single-threaded land.
+    sk_tool_utils::release_portable_typefaces();
 
     SkDebugf("\n");
     if (gFailures.count() > 0) {

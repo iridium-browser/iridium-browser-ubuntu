@@ -54,6 +54,7 @@ class DeprecatedPaintLayer;
 class LayoutObject;
 
 enum PaintLayerFlag {
+    PaintLayerNoFlag = 0,
     PaintLayerHaveTransparency = 1,
     PaintLayerAppliedTransform = 1 << 1,
     PaintLayerUncachedClipRects = 1 << 2,
@@ -67,6 +68,7 @@ enum PaintLayerFlag {
     PaintLayerPaintingRootBackgroundOnly = 1 << 10,
     PaintLayerPaintingSkipRootBackground = 1 << 11,
     PaintLayerPaintingChildClippingMaskPhase = 1 << 12,
+    PaintLayerPaintingRenderingClipPathAsMask = 1 << 13,
     PaintLayerPaintingCompositingAllPhases = (PaintLayerPaintingCompositingBackgroundPhase | PaintLayerPaintingCompositingForegroundPhase | PaintLayerPaintingCompositingMaskPhase)
 };
 
@@ -74,21 +76,28 @@ typedef unsigned PaintLayerFlags;
 
 struct DeprecatedPaintLayerPaintingInfo {
     DeprecatedPaintLayerPaintingInfo(DeprecatedPaintLayer* inRootLayer, const LayoutRect& inDirtyRect,
-        PaintBehavior inPaintBehavior, const LayoutSize& inSubPixelAccumulation,
+        GlobalPaintFlags globalPaintFlags, const LayoutSize& inSubPixelAccumulation,
         LayoutObject* inPaintingRoot = 0)
         : rootLayer(inRootLayer)
         , paintingRoot(inPaintingRoot)
         , paintDirtyRect(inDirtyRect)
         , subPixelAccumulation(inSubPixelAccumulation)
-        , paintBehavior(inPaintBehavior)
         , clipToDirtyRect(true)
+        , m_globalPaintFlags(globalPaintFlags)
     { }
+
+    GlobalPaintFlags globalPaintFlags() const { return m_globalPaintFlags; }
+
+    // TODO(jchaffraix): We should encapsulate all these fields.
     DeprecatedPaintLayer* rootLayer;
     LayoutObject* paintingRoot; // only paint descendants of this object
     LayoutRect paintDirtyRect; // relative to rootLayer;
     LayoutSize subPixelAccumulation;
-    PaintBehavior paintBehavior;
+    IntSize scrollOffsetAccumulation;
     bool clipToDirtyRect;
+
+private:
+    const GlobalPaintFlags m_globalPaintFlags;
 };
 
 } // namespace blink

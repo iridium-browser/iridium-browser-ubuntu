@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -146,9 +147,8 @@ class PersistentTabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
   // way of AddWindowWithOneTabToSessionService. If |pinned| is true, the
   // tab is marked as pinned in the session service.
   void CreateSessionServiceWithOneWindow(bool pinned) {
-    // The profile takes ownership of this.
-    SessionService* session_service = new SessionService(profile());
-    SessionServiceFactory::SetForTestProfile(profile(), session_service);
+    scoped_ptr<SessionService> session_service(new SessionService(profile()));
+    SessionServiceFactory::SetForTestProfile(profile(), session_service.Pass());
 
     AddWindowWithOneTabToSessionService(pinned);
 
@@ -642,7 +642,7 @@ TEST_F(PersistentTabRestoreServiceTest, PruneEntries) {
     SerializedNavigationEntry navigation =
         SerializedNavigationEntryTestHelper::CreateNavigation(
             base::StringPrintf("http://%d", static_cast<int>(i)),
-            base::StringPrintf("%d", static_cast<int>(i)));
+            base::SizeTToString(i));
 
     Tab* tab = new Tab();
     tab->navigations.push_back(navigation);

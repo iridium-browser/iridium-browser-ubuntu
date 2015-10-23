@@ -60,13 +60,15 @@ class FakeOutputSurface : public OutputSurface {
 
   static scoped_ptr<FakeOutputSurface> CreateDelegating3d(
       scoped_refptr<TestContextProvider> context_provider) {
-    return make_scoped_ptr(new FakeOutputSurface(context_provider, true));
+    return make_scoped_ptr(new FakeOutputSurface(
+        context_provider, TestContextProvider::Create(), true));
   }
 
   static scoped_ptr<FakeOutputSurface> CreateDelegating3d(
       scoped_ptr<TestWebGraphicsContext3D> context) {
-    return make_scoped_ptr(new FakeOutputSurface(
-        TestContextProvider::Create(context.Pass()), true));
+    return make_scoped_ptr(
+        new FakeOutputSurface(TestContextProvider::Create(context.Pass()),
+                              TestContextProvider::Create(), true));
   }
 
   static scoped_ptr<FakeOutputSurface> CreateDelegatingSoftware(
@@ -117,8 +119,14 @@ class FakeOutputSurface : public OutputSurface {
 
   bool HasExternalStencilTest() const override;
 
+  bool SurfaceIsSuspendForRecycle() const override;
+
   void set_has_external_stencil_test(bool has_test) {
     has_external_stencil_test_ = has_test;
+  }
+
+  void set_suspended_for_recycle(bool suspended) {
+    suspended_for_recycle_ = suspended;
   }
 
   void SetMemoryPolicyToSetAtBind(
@@ -149,6 +157,7 @@ class FakeOutputSurface : public OutputSurface {
   CompositorFrame last_sent_frame_;
   size_t num_sent_frames_;
   bool has_external_stencil_test_;
+  bool suspended_for_recycle_;
   unsigned framebuffer_;
   TransferableResourceArray resources_held_by_parent_;
   scoped_ptr<ManagedMemoryPolicy> memory_policy_to_set_at_bind_;

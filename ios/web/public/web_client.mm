@@ -28,10 +28,6 @@ WebMainParts* WebClient::CreateWebMainParts() {
   return nullptr;
 }
 
-WebViewFactory* WebClient::GetWebViewFactory() const {
-  return nullptr;
-}
-
 std::string WebClient::GetAcceptLangs(BrowserState* state) const {
   return std::string();
 }
@@ -41,6 +37,14 @@ std::string WebClient::GetApplicationLocale() const {
 }
 
 bool WebClient::IsAppSpecificURL(const GURL& url) const {
+  return false;
+}
+
+bool WebClient::AllowWebViewAllocInit() const {
+  return false;
+}
+
+bool WebClient::WebViewsNeedActiveStateManager() const {
   return false;
 }
 
@@ -75,4 +79,7 @@ NSString* WebClient::GetEarlyPageScript(WebViewType web_view_type) const {
   return @"";
 }
 
+bool WebClient::IsExternalURLBlockingEnabled() const {
+  return true;
+}
 }  // namespace web

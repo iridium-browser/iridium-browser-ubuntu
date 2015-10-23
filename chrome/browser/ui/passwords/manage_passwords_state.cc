@@ -14,12 +14,22 @@ using autofill::PasswordFormMap;
 
 namespace {
 
-// Converts the map with pointers or const pointers to the vector of const
-// pointers.
-template <typename T>
-std::vector<const T*> MapToVector(
-    const std::map<base::string16, T*>& map) {
-  std::vector<const autofill::PasswordForm*> ret;
+// Returns a vector containing the values of a map.
+template <typename Map>
+std::vector<typename Map::mapped_type> MapToVector(const Map& map) {
+  std::vector<typename Map::mapped_type> ret;
+  ret.reserve(map.size());
+  for (const auto& form_pair : map)
+    ret.push_back(form_pair.second);
+  return ret;
+}
+
+// Takes a ScopedPtrMap. Returns a vector of non-owned pointers to the elements
+// inside the scoped_ptrs.
+template <typename Map>
+std::vector<const typename Map::mapped_type::element_type*>
+ScopedPtrMapToVector(const Map& map) {
+  std::vector<const typename Map::mapped_type::element_type*> ret;
   ret.reserve(map.size());
   for (const auto& form_pair : map)
     ret.push_back(form_pair.second);
@@ -43,17 +53,6 @@ ScopedVector<const autofill::PasswordForm> ConstifyVector(
   return ret.Pass();
 }
 
-// True if the unique keys for the forms are the same. The unique key is
-// (origin, username_element, username_value, password_element, signon_realm).
-bool IsEqualUniqueKey(const autofill::PasswordForm& left,
-                      const autofill::PasswordForm& right) {
-  return left.signon_realm == right.signon_realm &&
-      left.origin == right.origin &&
-      left.username_element == right.username_element &&
-      left.username_value == right.username_value &&
-      left.password_element == right.password_element;
-}
-
 // Updates one form in |forms| that has the same unique key as |updated_form|.
 // Returns true if the form was found and updated.
 bool UpdateFormInVector(const autofill::PasswordForm& updated_form,
@@ -61,7 +60,7 @@ bool UpdateFormInVector(const autofill::PasswordForm& updated_form,
   ScopedVector<const autofill::PasswordForm>::iterator it = std::find_if(
       forms->begin(), forms->end(),
       [&updated_form](const autofill::PasswordForm* form) {
-    return IsEqualUniqueKey(*form, updated_form);
+    return ArePasswordFormUniqueKeyEqual(*form, updated_form);
   });
   if (it != forms->end()) {
     delete *it;
@@ -78,21 +77,10 @@ void RemoveFormFromVector(const autofill::PasswordForm& form_to_delete,
   typename Vector::iterator it = std::find_if(
       forms->begin(), forms->end(),
       [&form_to_delete](const autofill::PasswordForm* form) {
-    return IsEqualUniqueKey(*form, form_to_delete);
+    return ArePasswordFormUniqueKeyEqual(*form, form_to_delete);
   });
   if (it != forms->end())
     forms->erase(it);
-}
-
-// Inserts |form| to the beginning of |forms| if it's blacklisted or to the end
-// otherwise. UnblacklistSite() expects the first saved password to be the
-// blacklisted credential.
-template <class Vector>
-void InsertFormToVector(const autofill::PasswordForm* form,
-                        Vector* forms) {
-  typename Vector::iterator it = form->blacklisted_by_user ? forms->begin()
-                                                           : forms->end();
-  forms->insert(it, form);
 }
 
 }  // namespace
@@ -108,9 +96,18 @@ void ManagePasswordsState::OnPendingPassword(
       scoped_ptr<password_manager::PasswordFormManager> form_manager) {
   ClearData();
   form_manager_ = form_manager.Pass();
-  current_forms_weak_ = MapToVector(form_manager_->best_matches());
+  current_forms_weak_ = ScopedPtrMapToVector(form_manager_->best_matches());
   origin_ = form_manager_->pending_credentials().origin;
   SetState(password_manager::ui::PENDING_PASSWORD_STATE);
+}
+
+void ManagePasswordsState::OnUpdatePassword(
+    scoped_ptr<password_manager::PasswordFormManager> form_manager) {
+  ClearData();
+  form_manager_ = form_manager.Pass();
+  current_forms_weak_ = ScopedPtrMapToVector(form_manager_->best_matches());
+  origin_ = form_manager_->pending_credentials().origin;
+  SetState(password_manager::ui::PENDING_PASSWORD_UPDATE_STATE);
 }
 
 void ManagePasswordsState::OnRequestCredentials(
@@ -140,7 +137,7 @@ void ManagePasswordsState::OnAutomaticPasswordSave(
   autofill::ConstPasswordFormMap current_forms;
   current_forms.insert(form_manager_->best_matches().begin(),
                        form_manager_->best_matches().end());
-  current_forms[form_manager_->associated_username()] =
+  current_forms[form_manager_->pending_credentials().username_value] =
       &form_manager_->pending_credentials();
   current_forms_weak_ = MapToVector(current_forms);
   origin_ = form_manager_->pending_credentials().origin;
@@ -164,16 +161,6 @@ void ManagePasswordsState::OnPasswordAutofilled(
   }
 }
 
-void ManagePasswordsState::OnBlacklistBlockedAutofill(
-    const autofill::PasswordFormMap& password_form_map) {
-  DCHECK(!password_form_map.empty());
-  ClearData();
-  local_credentials_forms_ = DeepCopyMapToVector(password_form_map);
-  origin_ = local_credentials_forms_.front()->origin;
-  DCHECK(local_credentials_forms_.front()->blacklisted_by_user);
-  SetState(password_manager::ui::BLACKLIST_STATE);
-}
-
 void ManagePasswordsState::OnInactive() {
   ClearData();
   origin_ = GURL();
@@ -183,8 +170,7 @@ void ManagePasswordsState::OnInactive() {
 void ManagePasswordsState::TransitionToState(
     password_manager::ui::State state) {
   DCHECK_NE(password_manager::ui::INACTIVE_STATE, state_);
-  DCHECK(state == password_manager::ui::BLACKLIST_STATE ||
-         state == password_manager::ui::MANAGE_STATE);
+  DCHECK_EQ(password_manager::ui::MANAGE_STATE, state);
   if (state_ == password_manager::ui::CREDENTIAL_REQUEST_STATE) {
     if (!credentials_callback_.is_null()) {
       credentials_callback_.Run(password_manager::CredentialInfo());
@@ -202,22 +188,15 @@ void ManagePasswordsState::ProcessLoginsChanged(
 
   for (const password_manager::PasswordStoreChange& change : changes) {
     const autofill::PasswordForm& changed_form = change.form();
+    if (changed_form.blacklisted_by_user)
+      continue;
     if (change.type() == password_manager::PasswordStoreChange::REMOVE) {
       DeleteForm(changed_form);
-      if (changed_form.blacklisted_by_user &&
-          state() == password_manager::ui::BLACKLIST_STATE &&
-          changed_form.origin == origin_) {
-        TransitionToState(password_manager::ui::MANAGE_STATE);
-      }
     } else {
       if (change.type() == password_manager::PasswordStoreChange::UPDATE)
         UpdateForm(changed_form);
       else
         AddForm(changed_form);
-      if (changed_form.blacklisted_by_user &&
-          changed_form.origin == origin_) {
-        TransitionToState(password_manager::ui::BLACKLIST_STATE);
-      }
     }
   }
 }
@@ -237,10 +216,9 @@ void ManagePasswordsState::AddForm(const autofill::PasswordForm& form) {
     return;
   if (form_manager_) {
     local_credentials_forms_.push_back(new autofill::PasswordForm(form));
-    InsertFormToVector(local_credentials_forms_.back(), &current_forms_weak_);
+    current_forms_weak_.push_back(local_credentials_forms_.back());
   } else {
-    InsertFormToVector(new autofill::PasswordForm(form),
-                       &local_credentials_forms_);
+    local_credentials_forms_.push_back(new autofill::PasswordForm(form));
   }
 }
 
@@ -250,7 +228,7 @@ bool ManagePasswordsState::UpdateForm(const autofill::PasswordForm& form) {
     std::vector<const autofill::PasswordForm*>::iterator it = std::find_if(
         current_forms_weak_.begin(), current_forms_weak_.end(),
         [&form](const autofill::PasswordForm* current_form) {
-      return IsEqualUniqueKey(form, *current_form);
+      return ArePasswordFormUniqueKeyEqual(form, *current_form);
     });
     if (it != current_forms_weak_.end()) {
       RemoveFormFromVector(form, &local_credentials_forms_);

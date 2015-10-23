@@ -4,7 +4,10 @@
 
 #include "chrome/renderer/media/cast_rtp_stream.h"
 
+#include <algorithm>
+
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
@@ -99,11 +102,11 @@ bool IsHardwareVP8EncodingSupported() {
   }
 
   // Query for hardware VP8 encoder support.
-  std::vector<media::VideoEncodeAccelerator::SupportedProfile> vea_profiles =
-      content::GetSupportedVideoEncodeAcceleratorProfiles();
-  for (size_t i = 0; i < vea_profiles.size(); ++i) {
-    if (vea_profiles[i].profile >= media::VP8PROFILE_MIN &&
-        vea_profiles[i].profile <= media::VP8PROFILE_MAX) {
+  const std::vector<media::VideoEncodeAccelerator::SupportedProfile>
+      vea_profiles = content::GetSupportedVideoEncodeAcceleratorProfiles();
+  for (const auto& vea_profile : vea_profiles) {
+    if (vea_profile.profile >= media::VP8PROFILE_MIN &&
+        vea_profile.profile <= media::VP8PROFILE_MAX) {
       return true;
     }
   }
@@ -118,11 +121,11 @@ bool IsHardwareH264EncodingSupported() {
   }
 
   // Query for hardware H.264 encoder support.
-  std::vector<media::VideoEncodeAccelerator::SupportedProfile> vea_profiles =
-      content::GetSupportedVideoEncodeAcceleratorProfiles();
-  for (size_t i = 0; i < vea_profiles.size(); ++i) {
-    if (vea_profiles[i].profile >= media::H264PROFILE_MIN &&
-        vea_profiles[i].profile <= media::H264PROFILE_MAX) {
+  const std::vector<media::VideoEncodeAccelerator::SupportedProfile>
+      vea_profiles = content::GetSupportedVideoEncodeAcceleratorProfiles();
+  for (const auto& vea_profile : vea_profiles) {
+    if (vea_profile.profile >= media::H264PROFILE_MIN &&
+        vea_profile.profile <= media::H264PROFILE_MAX) {
       return true;
     }
   }
@@ -130,23 +133,15 @@ bool IsHardwareH264EncodingSupported() {
 }
 
 int NumberOfEncodeThreads() {
-  // We want to give CPU cycles for capturing and not to saturate the system
-  // just for encoding. So on a lower end system with only 1 or 2 cores we
-  // use only one thread for encoding.
-  if (base::SysInfo::NumberOfProcessors() <= 2)
-    return 1;
-
-  // On higher end we want to use 2 threads for encoding to reduce latency.
-  // In theory a physical CPU core has maximum 2 hyperthreads. Having 3 or
-  // more logical processors means the system has at least 2 physical cores.
-  return 2;
+  // Do not saturate CPU utilization just for encoding. On a lower-end system
+  // with only 1 or 2 cores, use only one thread for encoding. On systems with
+  // more cores, allow half of the cores to be used for encoding.
+  return std::min(8, (base::SysInfo::NumberOfProcessors() + 1) / 2);
 }
 
 std::vector<CastRtpParams> SupportedAudioParams() {
   // TODO(hclam): Fill in more codecs here.
-  std::vector<CastRtpParams> supported_params;
-  supported_params.push_back(CastRtpParams(DefaultOpusPayload()));
-  return supported_params;
+  return std::vector<CastRtpParams>(1, CastRtpParams(DefaultOpusPayload()));
 }
 
 std::vector<CastRtpParams> SupportedVideoParams() {
@@ -278,11 +273,9 @@ class CastVideoSink : public base::SupportsWeakPtr<CastVideoSink>,
       // These parameters are passed for each frame.
       const scoped_refptr<media::VideoFrame>& frame,
       const base::TimeTicks& estimated_capture_time) {
-    base::TimeTicks timestamp;
-    if (estimated_capture_time.is_null())
-      timestamp = base::TimeTicks::Now();
-    else
-      timestamp = estimated_capture_time;
+    const base::TimeTicks timestamp = estimated_capture_time.is_null()
+                                          ? base::TimeTicks::Now()
+                                          : estimated_capture_time;
 
     // Used by chrome/browser/extension/api/cast_streaming/performance_test.cc
     TRACE_EVENT_INSTANT2(
@@ -478,7 +471,9 @@ CastRtpStream::CastRtpStream(const blink::WebMediaStreamTrack& track,
                              const scoped_refptr<CastSession>& session)
     : track_(track), cast_session_(session), weak_factory_(this) {}
 
-CastRtpStream::~CastRtpStream() {}
+CastRtpStream::~CastRtpStream() {
+  Stop();
+}
 
 std::vector<CastRtpParams> CastRtpStream::GetSupportedParams() {
   if (IsAudio())
@@ -493,6 +488,10 @@ void CastRtpStream::Start(const CastRtpParams& params,
                           const base::Closure& start_callback,
                           const base::Closure& stop_callback,
                           const ErrorCallback& error_callback) {
+  DCHECK(!start_callback.is_null());
+  DCHECK(!stop_callback.is_null());
+  DCHECK(!error_callback.is_null());
+
   DVLOG(1) << "CastRtpStream::Start = " << (IsAudio() ? "audio" : "video");
   stop_callback_ = stop_callback;
   error_callback_ = error_callback;
@@ -538,10 +537,13 @@ void CastRtpStream::Start(const CastRtpParams& params,
 
 void CastRtpStream::Stop() {
   DVLOG(1) << "CastRtpStream::Stop = " << (IsAudio() ? "audio" : "video");
+  if (stop_callback_.is_null())
+    return;  // Already stopped.
+  weak_factory_.InvalidateWeakPtrs();
+  error_callback_.Reset();
   audio_sink_.reset();
   video_sink_.reset();
-  if (!stop_callback_.is_null())
-    stop_callback_.Run();
+  base::ResetAndReturn(&stop_callback_).Run();
 }
 
 void CastRtpStream::ToggleLogging(bool enable) {
@@ -570,12 +572,13 @@ bool CastRtpStream::IsAudio() const {
 }
 
 void CastRtpStream::DidEncounterError(const std::string& message) {
+  DCHECK(content::RenderThread::Get());
   DVLOG(1) << "CastRtpStream::DidEncounterError(" << message << ") = "
            << (IsAudio() ? "audio" : "video");
   // Save the WeakPtr first because the error callback might delete this object.
   base::WeakPtr<CastRtpStream> ptr = weak_factory_.GetWeakPtr();
   error_callback_.Run(message);
-  content::RenderThread::Get()->GetTaskRunner()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&CastRtpStream::Stop, ptr));
 }

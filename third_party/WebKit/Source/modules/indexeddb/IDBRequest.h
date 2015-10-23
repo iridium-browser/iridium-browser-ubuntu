@@ -57,12 +57,12 @@ class IDBValue;
 class MODULES_EXPORT IDBRequest
     : public RefCountedGarbageCollectedEventTargetWithInlineData<IDBRequest>
     , public ActiveDOMObject {
-    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<IDBRequest>);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(IDBRequest);
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(IDBRequest);
 public:
     static IDBRequest* create(ScriptState*, IDBAny* source, IDBTransaction*);
-    virtual ~IDBRequest();
+    ~IDBRequest() override;
     DECLARE_VIRTUAL_TRACE();
 
     ScriptState* scriptState() { return m_scriptState.get(); }
@@ -110,16 +110,13 @@ public:
     virtual void onSuccess(PassOwnPtr<WebIDBDatabase>, const IDBDatabaseMetadata&) { ASSERT_NOT_REACHED(); }
 
     // ActiveDOMObject
-    virtual bool hasPendingActivity() const override final;
-    virtual void stop() override final;
+    bool hasPendingActivity() const final;
+    void stop() final;
 
     // EventTarget
-    virtual const AtomicString& interfaceName() const override;
-    virtual ExecutionContext* executionContext() const override final;
-    virtual void uncaughtExceptionInEventHandler() override final;
-
-    using EventTarget::dispatchEvent;
-    virtual bool dispatchEvent(PassRefPtrWillBeRawPtr<Event>) override;
+    const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const final;
+    void uncaughtExceptionInEventHandler() final;
 
     // Called by a version change transaction that has finished to set this
     // request back from DONE (following "upgradeneeded") back to PENDING (for
@@ -135,6 +132,9 @@ protected:
     virtual bool shouldEnqueueEvent() const;
     void onSuccessInternal(IDBAny*);
     void setResult(IDBAny*);
+
+    // EventTarget
+    bool dispatchEventInternal(PassRefPtrWillBeRawPtr<Event>) override;
 
     bool m_contextStopped;
     Member<IDBTransaction> m_transaction;

@@ -16,20 +16,13 @@ class SettingsApiBubble;
 
 class SettingsApiBubbleController : public ExtensionMessageBubbleController {
  public:
-  SettingsApiBubbleController(Profile* profile, SettingsApiOverrideType type);
+  SettingsApiBubbleController(Browser* browser, SettingsApiOverrideType type);
   ~SettingsApiBubbleController() override;
-
-  // Returns true if we should show the bubble for the extension actively
-  // overriding the setting of |type_|.
-  bool ShouldShow();
 
   // ExtensionMessageBubbleController:
   bool CloseOnDeactivate() override;
 
  private:
-  // A weak pointer to the profile we are associated with. Not owned by us.
-  Profile* profile_;
-
   // The type of settings override this bubble will report on.
   SettingsApiOverrideType type_;
 

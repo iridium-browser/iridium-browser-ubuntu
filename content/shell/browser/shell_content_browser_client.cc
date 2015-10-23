@@ -34,11 +34,11 @@
 #include "content/shell/common/shell_messages.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/renderer/layout_test/blink_test_helpers.h"
-#include "gin/v8_initializer.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
+#include "base/android/apk_assets.h"
 #include "base/android/path_utils.h"
 #include "components/crash/browser/crash_dump_manager_android.h"
 #include "content/shell/android/shell_descriptors.h"
@@ -129,12 +129,7 @@ void ShellContentBrowserClient::SetSwapProcessesForRedirect(bool swap) {
 }
 
 ShellContentBrowserClient::ShellContentBrowserClient()
-    :
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-      v8_natives_fd_(-1),
-      v8_snapshot_fd_(-1),
-#endif  // OS_POSIX && !OS_MACOSX
-      shell_browser_main_parts_(NULL) {
+    : shell_browser_main_parts_(NULL) {
   DCHECK(!g_browser_client);
   g_browser_client = this;
 }
@@ -188,7 +183,6 @@ ShellContentBrowserClient::CreateRequestContextForStoragePartition(
 bool ShellContentBrowserClient::IsHandledURL(const GURL& url) {
   if (!url.is_valid())
     return false;
-  DCHECK_EQ(url.scheme(), base::StringToLowerASCII(url.scheme()));
   // Keep in sync with ProtocolHandlers added by
   // ShellURLRequestContextGetter::GetURLRequestContext().
   static const char* const kProtocolList[] = {
@@ -206,34 +200,41 @@ bool ShellContentBrowserClient::IsHandledURL(const GURL& url) {
   return false;
 }
 
+bool ShellContentBrowserClient::IsNPAPIEnabled() {
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  return true;
+#else
+  return false;
+#endif
+}
+
 void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
     base::CommandLine* command_line,
     int child_process_id) {
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
-  std::string process_type =
-      command_line->GetSwitchValueASCII(switches::kProcessType);
-  if (process_type != switches::kZygoteProcess) {
-    command_line->AppendSwitch(::switches::kV8NativesPassedByFD);
-    command_line->AppendSwitch(::switches::kV8SnapshotPassedByFD);
-  }
-#endif  // V8_USE_EXTERNAL_STARTUP_DATA
-#endif  // OS_POSIX && !OS_MACOSX
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kRunLayoutTest))
+          switches::kRunLayoutTest)) {
     command_line->AppendSwitch(switches::kRunLayoutTest);
+  }
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableFontAntialiasing))
+          switches::kDumpLineBoxTrees)) {
+    command_line->AppendSwitch(switches::kDumpLineBoxTrees);
+  }
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableFontAntialiasing)) {
     command_line->AppendSwitch(switches::kEnableFontAntialiasing);
+  }
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kExposeInternalsForTesting))
+          switches::kExposeInternalsForTesting)) {
     command_line->AppendSwitch(switches::kExposeInternalsForTesting);
+  }
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kExposeIpcEcho))
+          switches::kExposeIpcEcho)) {
     command_line->AppendSwitch(switches::kExposeIpcEcho);
+  }
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kStableReleaseMode))
+          switches::kStableReleaseMode)) {
     command_line->AppendSwitch(switches::kStableReleaseMode);
+  }
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableCrashReporter)) {
     command_line->AppendSwitch(switches::kEnableCrashReporter);
@@ -337,45 +338,22 @@ void ShellContentBrowserClient::OpenURL(
                                       gfx::Size())->web_contents());
 }
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_ANDROID)
 void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const base::CommandLine& command_line,
     int child_process_id,
-    FileDescriptorInfo* mappings) {
-#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
-  if (v8_natives_fd_.get() == -1 || v8_snapshot_fd_.get() == -1) {
-    int v8_natives_fd = -1;
-    int v8_snapshot_fd = -1;
-    if (gin::V8Initializer::OpenV8FilesForChildProcesses(&v8_natives_fd,
-                                                         &v8_snapshot_fd)) {
-      v8_natives_fd_.reset(v8_natives_fd);
-      v8_snapshot_fd_.reset(v8_snapshot_fd);
-    }
-  }
-  DCHECK(v8_natives_fd_.get() != -1 && v8_snapshot_fd_.get() != -1);
-  mappings->Share(kV8NativesDataDescriptor, v8_natives_fd_.get());
-  mappings->Share(kV8SnapshotDataDescriptor, v8_snapshot_fd_.get());
-#endif  // V8_USE_EXTERNAL_STARTUP_DATA
-
-#if defined(OS_ANDROID)
-  int flags = base::File::FLAG_OPEN | base::File::FLAG_READ;
-  base::FilePath pak_file;
-  bool r = PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_file);
-  CHECK(r);
-  pak_file = pak_file.Append(FILE_PATH_LITERAL("paks"));
-  pak_file = pak_file.Append(FILE_PATH_LITERAL("content_shell.pak"));
-
-  base::File f(pak_file, flags);
-  if (!f.IsValid()) {
-    NOTREACHED() << "Failed to open file when creating renderer process: "
-                 << "content_shell.pak";
-  }
-
-  mappings->Transfer(kShellPakDescriptor, base::ScopedFD(f.TakePlatformFile()));
+    content::FileDescriptorInfo* mappings,
+    std::map<int, base::MemoryMappedFile::Region>* regions) {
+  mappings->Share(
+      kShellPakDescriptor,
+      base::GlobalDescriptors::GetInstance()->Get(kShellPakDescriptor));
+  regions->insert(std::make_pair(
+      kShellPakDescriptor,
+      base::GlobalDescriptors::GetInstance()->GetRegion(kShellPakDescriptor)));
 
   if (breakpad::IsCrashReporterEnabled()) {
-    f = breakpad::CrashDumpManager::GetInstance()->CreateMinidumpFile(
-        child_process_id);
+    base::File f(breakpad::CrashDumpManager::GetInstance()->CreateMinidumpFile(
+        child_process_id));
     if (!f.IsValid()) {
       LOG(ERROR) << "Failed to create file for minidump, crash reporting will "
                  << "be disabled for this process.";
@@ -384,14 +362,18 @@ void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
                          base::ScopedFD(f.TakePlatformFile()));
     }
   }
-#else  // !defined(OS_ANDROID)
+}
+#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
+    const base::CommandLine& command_line,
+    int child_process_id,
+    content::FileDescriptorInfo* mappings) {
   int crash_signal_fd = GetCrashSignalFD(command_line);
   if (crash_signal_fd >= 0) {
     mappings->Share(kCrashDumpSignal, crash_signal_fd);
   }
-#endif  // defined(OS_ANDROID)
 }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)
 void ShellContentBrowserClient::PreSpawnRenderer(sandbox::TargetPolicy* policy,

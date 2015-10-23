@@ -57,7 +57,7 @@ PassRefPtrWillBeRawPtr<HTMLMeterElement> HTMLMeterElement::create(Document& docu
 
 LayoutObject* HTMLMeterElement::createLayoutObject(const ComputedStyle& style)
 {
-    if (hasOpenShadowRoot() || !LayoutTheme::theme().supportsMeter(style.appearance()))
+    if (openShadowRoot() || !LayoutTheme::theme().supportsMeter(style.appearance()))
         return LayoutObject::createObject(this, style);
     return new LayoutMeter(this);
 }
@@ -211,7 +211,7 @@ void HTMLMeterElement::didAddUserAgentShadowRoot(ShadowRoot& root)
     inner->appendChild(bar);
 }
 
-void HTMLMeterElement::willAddFirstOpenShadowRoot()
+void HTMLMeterElement::willAddFirstAuthorShadowRoot()
 {
     ASSERT(RuntimeEnabledFeatures::authorShadowDOMForAnyElementEnabled());
     lazyReattachIfAttached();

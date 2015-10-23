@@ -5,10 +5,13 @@
 #include "content/browser/appcache/appcache_group.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/browser/appcache/appcache.h"
 #include "content/browser/appcache/appcache_host.h"
 #include "content/browser/appcache/appcache_service_impl.h"
@@ -70,8 +73,7 @@ AppCacheGroup::~AppCacheGroup() {
 void AppCacheGroup::AddUpdateObserver(UpdateObserver* observer) {
   // If observer being added is a host that has been queued for later update,
   // add observer to a different observer list.
-  AppCacheHost* host = static_cast<AppCacheHost*>(observer);
-  if (queued_updates_.find(host) != queued_updates_.end())
+  if (queued_updates_.find(observer) != queued_updates_.end())
     queued_observers_.AddObserver(observer);
   else
     observers_.AddObserver(observer);
@@ -181,7 +183,8 @@ void AppCacheGroup::CancelUpdate() {
 void AppCacheGroup::QueueUpdate(AppCacheHost* host,
                                 const GURL& new_master_resource) {
   DCHECK(update_job_ && host && !new_master_resource.is_empty());
-  queued_updates_.insert(QueuedUpdates::value_type(host, new_master_resource));
+  queued_updates_.insert(QueuedUpdates::value_type(
+      host, std::make_pair(host, new_master_resource)));
 
   // Need to know when host is destroyed.
   host->AddObserver(host_observer_.get());
@@ -207,7 +210,7 @@ void AppCacheGroup::RunQueuedUpdates() {
 
   for (QueuedUpdates::iterator it = updates_to_run.begin();
        it != updates_to_run.end(); ++it) {
-    AppCacheHost* host = it->first;
+    AppCacheHost* host = it->second.first;
     host->RemoveObserver(host_observer_.get());
     if (FindObserver(host, queued_observers_)) {
       queued_observers_.RemoveObserver(host);
@@ -215,14 +218,14 @@ void AppCacheGroup::RunQueuedUpdates() {
     }
 
     if (!is_obsolete() && !is_being_deleted())
-      StartUpdateWithNewMasterEntry(host, it->second);
+      StartUpdateWithNewMasterEntry(host, it->second.second);
   }
 }
 
 // static
 bool AppCacheGroup::FindObserver(
     const UpdateObserver* find_me,
-    const ObserverList<UpdateObserver>& observer_list) {
+    const base::ObserverList<UpdateObserver>& observer_list) {
   return observer_list.HasObserver(find_me);
 }
 
@@ -230,9 +233,8 @@ void AppCacheGroup::ScheduleUpdateRestart(int delay_ms) {
   DCHECK(restart_update_task_.IsCancelled());
   restart_update_task_.Reset(
       base::Bind(&AppCacheGroup::RunQueuedUpdates, this));
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      restart_update_task_.callback(),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, restart_update_task_.callback(),
       base::TimeDelta::FromMilliseconds(delay_ms));
 }
 

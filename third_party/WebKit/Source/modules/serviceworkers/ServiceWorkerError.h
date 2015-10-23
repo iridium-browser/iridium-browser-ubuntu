@@ -32,7 +32,8 @@
 #define ServiceWorkerError_h
 
 #include "platform/heap/Handle.h"
-#include "public/platform/WebServiceWorkerError.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerError.h"
+#include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
 
 namespace blink {
@@ -41,15 +42,11 @@ class DOMException;
 class ScriptPromiseResolver;
 
 class ServiceWorkerError {
+    STATIC_ONLY(ServiceWorkerError);
 public:
     // For CallbackPromiseAdapter
-    typedef WebServiceWorkerError WebType;
-    static DOMException* take(ScriptPromiseResolver*, WebType* webErrorRaw);
-    static void dispose(WebType* webErrorRaw);
-
-private:
-    WTF_MAKE_NONCOPYABLE(ServiceWorkerError);
-    ServiceWorkerError() = delete;
+    using WebType = const WebServiceWorkerError&;
+    static DOMException* take(ScriptPromiseResolver*, const WebServiceWorkerError& webError);
 };
 
 } // namespace blink

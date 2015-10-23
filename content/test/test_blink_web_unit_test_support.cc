@@ -12,8 +12,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
-#include "components/scheduler/renderer/renderer_scheduler.h"
+#include "components/scheduler/renderer/renderer_scheduler_impl.h"
 #include "components/scheduler/renderer/webthread_impl_for_renderer_scheduler.h"
+#include "components/scheduler/test/lazy_scheduler_message_loop_delegate_for_tests.h"
 #include "content/test/mock_webclipboard_impl.h"
 #include "content/test/web_gesture_curve_mock.h"
 #include "content/test/web_layer_tree_view_impl_for_testing.h"
@@ -24,6 +25,7 @@
 #include "storage/browser/database/vfs_backend.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/public/platform/WebPluginListBuilder.h"
 #include "third_party/WebKit/public/platform/WebStorageArea.h"
 #include "third_party/WebKit/public/platform/WebStorageNamespace.h"
 #include "third_party/WebKit/public/platform/WebString.h"
@@ -53,14 +55,14 @@ class DummyTaskRunner : public base::SingleThreadTaskRunner {
   bool PostDelayedTask(const tracked_objects::Location& from_here,
                        const base::Closure& task,
                        base::TimeDelta delay) override {
-    NOTREACHED();
+    // Drop the delayed task.
     return false;
   }
 
   bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
                                   const base::Closure& task,
                                   base::TimeDelta delay) override {
-    NOTREACHED();
+    // Drop the delayed task.
     return false;
   }
 
@@ -90,15 +92,12 @@ TestBlinkWebUnitTestSupport::TestBlinkWebUnitTestSupport() {
 
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
   gin::V8Initializer::LoadV8Snapshot();
+  gin::V8Initializer::LoadV8Natives();
 #endif
 
   scoped_refptr<base::SingleThreadTaskRunner> dummy_task_runner;
   scoped_ptr<base::ThreadTaskRunnerHandle> dummy_task_runner_handle;
-  if (base::MessageLoopProxy::current()) {
-    renderer_scheduler_ = scheduler::RendererScheduler::Create();
-    web_thread_.reset(new scheduler::WebThreadImplForRendererScheduler(
-        renderer_scheduler_.get()));
-  } else {
+  if (!base::ThreadTaskRunnerHandle::IsSet()) {
     // Dummy task runner is initialized here because the blink::initialize
     // creates IsolateHolder which needs the current task runner handle. There
     // should be no task posted to this task runner. The message loop is not
@@ -110,17 +109,13 @@ TestBlinkWebUnitTestSupport::TestBlinkWebUnitTestSupport() {
     dummy_task_runner_handle.reset(
         new base::ThreadTaskRunnerHandle(dummy_task_runner));
   }
+  renderer_scheduler_ = make_scoped_ptr(new scheduler::RendererSchedulerImpl(
+      scheduler::LazySchedulerMessageLoopDelegateForTests::Create()));
+  web_thread_.reset(new scheduler::WebThreadImplForRendererScheduler(
+      renderer_scheduler_.get()));
 
   blink::initialize(this);
   blink::setLayoutTestMode(true);
-  blink::WebSecurityPolicy::registerURLSchemeAsLocal(
-      blink::WebString::fromUTF8("test-shell-resource"));
-  blink::WebSecurityPolicy::registerURLSchemeAsNoAccess(
-      blink::WebString::fromUTF8("test-shell-resource"));
-  blink::WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(
-      blink::WebString::fromUTF8("test-shell-resource"));
-  blink::WebSecurityPolicy::registerURLSchemeAsEmptyDocument(
-      blink::WebString::fromUTF8("test-shell-resource"));
   blink::WebRuntimeFeatures::enableApplicationCache(true);
   blink::WebRuntimeFeatures::enableDatabase(true);
   blink::WebRuntimeFeatures::enableNotifications(true);
@@ -317,6 +312,11 @@ void TestBlinkWebUnitTestSupport::serveAsynchronousMockedRequests() {
   url_loader_factory_->ServeAsynchronousRequests();
 }
 
+void TestBlinkWebUnitTestSupport::setLoaderDelegate(
+    blink::WebURLLoaderTestDelegate* delegate) {
+  url_loader_factory_->set_delegate(delegate);
+}
+
 blink::WebString TestBlinkWebUnitTestSupport::webKitRootDir() {
   base::FilePath path;
   PathService::Get(base::DIR_SOURCE_ROOT, &path);
@@ -367,6 +367,12 @@ void TestBlinkWebUnitTestSupport::enterRunLoop() {
 
 void TestBlinkWebUnitTestSupport::exitRunLoop() {
   base::MessageLoop::current()->Quit();
+}
+
+void TestBlinkWebUnitTestSupport::getPluginList(
+    bool refresh, blink::WebPluginListBuilder* builder) {
+  builder->addPlugin("pdf", "pdf", "pdf-files");
+  builder->addMediaTypeToLastPlugin("application/pdf", "pdf");
 }
 
 }  // namespace content

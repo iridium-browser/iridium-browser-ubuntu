@@ -9,14 +9,14 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/i18n/case_conversion.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/in_memory_url_index.h"
-#include "chrome/browser/autocomplete/in_memory_url_index_types.h"
-#include "chrome/browser/autocomplete/url_index_private_data.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/common/chrome_paths.h"
@@ -26,6 +26,10 @@
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/omnibox/browser/in_memory_url_index.h"
+#include "components/omnibox/browser/in_memory_url_index_types.h"
+#include "components/omnibox/browser/url_index_private_data.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "sql/transaction.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -44,8 +48,32 @@ using base::ASCIIToUTF16;
 // processed when creating the test database.
 
 namespace {
+const size_t kInvalid = base::string16::npos;
 const size_t kMaxMatches = 3;
 const char kTestLanguages[] = "en,ja,hi,zh";
+const char kClientWhitelistedScheme[] = "xyz";
+
+// Helper function to set lower case |lower_string| and |lower_terms| (words
+// list) based on supplied |search_string| and |cursor_position|. If
+// |cursor_position| is set and useful (not at either end of the string), allow
+// the |search_string| to be broken at |cursor_position|. We do this by
+// pretending there's a space where the cursor is. |lower_terms| are obtained by
+// splitting the |lower_string| on whitespace into tokens.
+void StringToTerms(const char* search_string,
+                   size_t cursor_position,
+                   base::string16* lower_string,
+                   String16Vector* lower_terms) {
+  *lower_string = base::i18n::ToLower(ASCIIToUTF16(search_string));
+  if ((cursor_position != kInvalid) &&
+      (cursor_position < lower_string->length()) && (cursor_position > 0)) {
+    lower_string->insert(cursor_position, base::ASCIIToUTF16(" "));
+  }
+
+  *lower_terms = base::SplitString(*lower_string, base::kWhitespaceUTF16,
+                                   base::KEEP_WHITESPACE,
+                                   base::SPLIT_WANT_NONEMPTY);
+}
+
 }  // namespace
 
 // -----------------------------------------------------------------------------
@@ -114,7 +142,7 @@ class InMemoryURLIndexTest : public testing::Test {
   bool GetCacheFilePath(base::FilePath* file_path) const;
   void PostRestoreFromCacheFileTask();
   void PostSaveToCacheFileTask();
-  const std::set<std::string>& scheme_whitelist();
+  const SchemeSet& scheme_whitelist();
 
 
   // Pass-through functions to simplify our friendship with URLIndexPrivateData.
@@ -174,7 +202,7 @@ void InMemoryURLIndexTest::PostSaveToCacheFileTask() {
   url_index_->PostSaveToCacheFileTask();
 }
 
-const std::set<std::string>& InMemoryURLIndexTest::scheme_whitelist() {
+const SchemeSet& InMemoryURLIndexTest::scheme_whitelist() {
   return url_index_->scheme_whitelist();
 }
 
@@ -299,8 +327,12 @@ bool InMemoryURLIndexTest::InitializeInMemoryURLIndexInSetUp() const {
 
 void InMemoryURLIndexTest::InitializeInMemoryURLIndex() {
   DCHECK(!url_index_);
-  url_index_.reset(new InMemoryURLIndex(nullptr, history_service_,
-                                        base::FilePath(), kTestLanguages));
+
+  SchemeSet client_schemes_to_whitelist;
+  client_schemes_to_whitelist.insert(kClientWhitelistedScheme);
+  url_index_.reset(new InMemoryURLIndex(
+      nullptr, history_service_, content::BrowserThread::GetBlockingPool(),
+      base::FilePath(), kTestLanguages, client_schemes_to_whitelist));
   url_index_->Init();
   url_index_->RebuildFromHistory(history_database_);
 }
@@ -920,18 +952,20 @@ TEST_F(InMemoryURLIndexTest, ExpireRow) {
 }
 
 TEST_F(InMemoryURLIndexTest, WhitelistedURLs) {
+  std::string client_whitelisted_url =
+      base::StringPrintf("%s://foo", kClientWhitelistedScheme);
   struct TestData {
     const std::string url_spec;
     const bool expected_is_whitelisted;
   } data[] = {
     // URLs with whitelisted schemes.
     { "about:histograms", true },
-    { "chrome://settings", true },
     { "file://localhost/Users/joeschmoe/sekrets", true },
     { "ftp://public.mycompany.com/myfile.txt", true },
     { "http://www.google.com/translate", true },
     { "https://www.gmail.com/", true },
     { "mailto:support@google.com", true },
+    { client_whitelisted_url, true },
     // URLs with unacceptable schemes.
     { "aaa://www.dummyhost.com;frammy", false },
     { "aaas://www.dummyhost.com;frammy", false },
@@ -993,7 +1027,7 @@ TEST_F(InMemoryURLIndexTest, WhitelistedURLs) {
     { "xmpp://guest@example.com", false },
   };
 
-  const std::set<std::string>& whitelist(scheme_whitelist());
+  const SchemeSet& whitelist(scheme_whitelist());
   for (size_t i = 0; i < arraysize(data); ++i) {
     GURL url(data[i].url_spec);
     EXPECT_EQ(data[i].expected_is_whitelisted,
@@ -1193,6 +1227,85 @@ TEST_F(InMemoryURLIndexTest, MAYBE_RebuildFromHistoryIfCacheOld) {
   ExpectPrivateDataEqual(*old_data.get(), new_data);
 }
 
+TEST_F(InMemoryURLIndexTest, AddHistoryMatch) {
+  const struct {
+    const char* search_string;
+    size_t cursor_position;
+    const size_t expected_word_starts_offsets_size;
+    const size_t expected_word_starts_offsets[3];
+  } test_cases[] = {
+    /* No punctuations, only cursor position change. */
+    { "ABCD", kInvalid, 1, {0, kInvalid, kInvalid} },
+    { "abcd", 0,        1, {0, kInvalid, kInvalid} },
+    { "AbcD", 1,        2, {0, 0, kInvalid} },
+    { "abcd", 4,        1, {0, kInvalid, kInvalid} },
+
+    /* Starting with punctuation. */
+    { ".abcd",  kInvalid, 1, {1, kInvalid, kInvalid} },
+    { ".abcd",  0,        1, {1, kInvalid, kInvalid} },
+    { "!abcd",  1,        2, {1, 0, kInvalid} },
+    { "::abcd", 1,        2, {1, 1, kInvalid} },
+    { ":abcd",  5,        1, {1, kInvalid, kInvalid} },
+
+    /* Ending with punctuation. */
+    { "abcd://", kInvalid, 1, {0, kInvalid, kInvalid} },
+    { "ABCD://", 0,        1, {0, kInvalid, kInvalid} },
+    { "abcd://", 1,        2, {0, 0, kInvalid} },
+    { "abcd://", 4,        2, {0, 3, kInvalid} },
+    { "abcd://", 7,        1, {0, kInvalid, kInvalid} },
+
+    /* Punctuation in the middle. */
+    { "ab.cd", kInvalid, 1, {0, kInvalid, kInvalid} },
+    { "ab.cd", 0,        1, {0, kInvalid, kInvalid} },
+    { "ab!cd", 1,        2, {0, 0, kInvalid} },
+    { "AB.cd", 2,        2, {0, 1, kInvalid} },
+    { "AB.cd", 3,        2, {0, 0, kInvalid} },
+    { "ab:cd", 5,        1, {0, kInvalid, kInvalid} },
+
+    /* Hyphenation */
+    { "Ab-cd", kInvalid, 1, {0, kInvalid, kInvalid} },
+    { "ab-cd", 0,        1, {0, kInvalid, kInvalid} },
+    { "-abcd", 0,        1, {1, kInvalid, kInvalid} },
+    { "-abcd", 1,        2, {1, 0, kInvalid} },
+    { "abcd-", 2,        2, {0, 0, kInvalid} },
+    { "abcd-", 4,        2, {0, 1, kInvalid} },
+    { "ab-cd", 5,        1, {0, kInvalid, kInvalid} },
+
+    /* Whitespace */
+    { "Ab cd",  kInvalid, 2, {0, 0, kInvalid} },
+    { "ab cd",  0,        2, {0, 0, kInvalid} },
+    { " abcd",  0,        1, {0, kInvalid, kInvalid} },
+    { " abcd",  1,        1, {0, kInvalid, kInvalid} },
+    { "abcd ",  2,        2, {0, 0, kInvalid} },
+    { "abcd :", 4,        2, {0, 1, kInvalid} },
+    { "abcd :", 5,        2, {0, 1, kInvalid} },
+    { "abcd :", 2,        3, {0, 0, 1} }
+  };
+
+  for (size_t i = 0; i < arraysize(test_cases); ++i) {
+    SCOPED_TRACE(testing::Message()
+                 << "search_string = " << test_cases[i].search_string
+                 << ", cursor_position = " << test_cases[i].cursor_position);
+
+    base::string16 lower_string;
+    String16Vector lower_terms;
+    StringToTerms(test_cases[i].search_string, test_cases[i].cursor_position,
+                  &lower_string, &lower_terms);
+    URLIndexPrivateData::AddHistoryMatch match(nullptr, *GetPrivateData(),
+                                               kTestLanguages, lower_string,
+                                               lower_terms, base::Time::Now());
+
+    // Verify against expectations.
+    EXPECT_EQ(test_cases[i].expected_word_starts_offsets_size,
+              match.lower_terms_to_word_starts_offsets_.size());
+    for (size_t j = 0; j < test_cases[i].expected_word_starts_offsets_size;
+         ++j) {
+      EXPECT_EQ(test_cases[i].expected_word_starts_offsets[j],
+                match.lower_terms_to_word_starts_offsets_[j]);
+    }
+  }
+}
+
 class InMemoryURLIndexCacheTest : public testing::Test {
  public:
   InMemoryURLIndexCacheTest() {}
@@ -1213,8 +1326,9 @@ class InMemoryURLIndexCacheTest : public testing::Test {
 void InMemoryURLIndexCacheTest::SetUp() {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   base::FilePath path(temp_dir_.path());
-  url_index_.reset(
-      new InMemoryURLIndex(nullptr, nullptr, path, kTestLanguages));
+  url_index_.reset(new InMemoryURLIndex(
+      nullptr, nullptr, content::BrowserThread::GetBlockingPool(), path,
+      kTestLanguages, SchemeSet()));
 }
 
 void InMemoryURLIndexCacheTest::TearDown() {

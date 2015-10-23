@@ -36,15 +36,7 @@
             'SSE2_ENABLE',
           ],
           'sources': [
-            'src/transform-sse1.c',
             'src/transform-sse2.c',
-          ],
-        }],
-        # QCMS assumes this target isn't compiled since MSVC x64 doesn't support
-        # the MMX intrinsics present in the SSE1 code.
-        ['OS=="win" and target_arch=="x64"', {
-          'sources!': [
-            'src/transform-sse1.c',
           ],
         }],
         ['OS == "win"', {
@@ -55,6 +47,31 @@
         }],
       ],
     },
+    {
+      'target_name': 'qcms_test',
+      'product_name': 'qcms_test',
+      'type': 'executable',
+      'conditions': [
+        ['target_arch=="ia32" or target_arch=="x64"', {
+          'defines': [
+            'SSE2_ENABLE',
+          ],
+          'sources': [
+            'src/tests/qcms_test_tetra_clut_rgba.c',
+          ],
+          'dependencies': [
+            'qcms',
+          ],
+          'conditions': [
+            ['OS != "win"', {
+              'libraries': [
+                '-lm',
+              ],
+            }],
+          ],            
+        }],
+      ],
+    },    
   ],
 }
 

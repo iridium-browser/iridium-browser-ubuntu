@@ -70,11 +70,6 @@
 // GL_ANGLE_translated_shader_source
 #define GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE         0x93A0
 
-// GL_CHROMIUM_flipy
-#define GL_UNPACK_FLIP_Y_CHROMIUM                        0x9240
-
-#define GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM             0x9241
-#define GL_UNPACK_UNPREMULTIPLY_ALPHA_CHROMIUM           0x9242
 #define GL_UNPACK_COLORSPACE_CONVERSION_CHROMIUM         0x9243
 #define GL_BIND_GENERATES_RESOURCE_CHROMIUM              0x9244
 
@@ -143,6 +138,9 @@
 
 // GL_CHROMIUM_yuv_420_image
 #define GL_RGB_YUV_420_CHROMIUM                          0x78FA
+
+// GL_CHROMIUM_ycbcr_422_image
+#define GL_RGB_YCBCR_422_CHROMIUM                        0x78FB
 
 // GL_CHROMIUM_schedule_overlay_plane
 #define GL_OVERLAY_TRANSFORM_NONE_CHROMIUM               0x9245
@@ -229,12 +227,36 @@
 #endif
 
 #ifndef GL_CHROMIUM_path_rendering
+#define GL_CHROMIUM_path_rendering 1
 // These match the corresponding values in NV_path_rendering
 // extension, eg tokens with CHROMIUM replaced with NV.
 #define GL_PATH_MODELVIEW_MATRIX_CHROMIUM 0x0BA6
 #define GL_PATH_PROJECTION_MATRIX_CHROMIUM 0x0BA7
 #define GL_PATH_MODELVIEW_CHROMIUM 0x1700
 #define GL_PATH_PROJECTION_CHROMIUM 0x1701
+#define GL_FLAT_CHROMIUM 0x1D00
+#define GL_CLOSE_PATH_CHROMIUM 0x00
+#define GL_MOVE_TO_CHROMIUM 0x02
+#define GL_LINE_TO_CHROMIUM 0x04
+#define GL_QUADRATIC_CURVE_TO_CHROMIUM 0x0A
+#define GL_CUBIC_CURVE_TO_CHROMIUM 0x0C
+#define GL_CONIC_CURVE_TO_CHROMIUM 0x1A
+#define GL_PATH_STROKE_WIDTH_CHROMIUM 0x9075
+#define GL_PATH_END_CAPS_CHROMIUM 0x9076
+#define GL_PATH_JOIN_STYLE_CHROMIUM 0x9079
+#define GL_PATH_MITER_LIMIT_CHROMIUM 0x907a
+#define GL_PATH_STROKE_BOUND_CHROMIUM 0x9086
+#define GL_COUNT_UP_CHROMIUM 0x9088
+#define GL_COUNT_DOWN_CHROMIUM 0x9089
+#define GL_CONVEX_HULL_CHROMIUM 0x908B
+#define GL_BOUNDING_BOX_CHROMIUM 0x908D
+#define GL_SQUARE_CHROMIUM 0x90a3
+#define GL_ROUND_CHROMIUM 0x90a4
+#define GL_BEVEL_CHROMIUM 0x90a6
+#define GL_MITER_REVERT_CHROMIUM 0x90a7
+#define GL_PATH_STENCIL_FUNC_CHROMIUM 0x90B7
+#define GL_PATH_STENCIL_REF_CHROMIUM 0x90B8
+#define GL_PATH_STENCIL_VALUE_MASK_CHROMIUM 0x90B9
 #endif
 
 #ifndef GL_KHR_blend_equation_advanced
@@ -350,6 +372,7 @@ struct GL_EXPORT DriverGL {
 
 struct GL_EXPORT DriverOSMESA {
   void InitializeStaticBindings();
+  void InitializeExtensionBindings();
   void InitializeDebugBindings();
   void ClearBindings();
 
@@ -364,6 +387,7 @@ struct GL_EXPORT DriverOSMESA {
 #if defined(OS_WIN)
 struct GL_EXPORT DriverWGL {
   void InitializeStaticBindings();
+  void InitializeExtensionBindings();
   void InitializeDebugBindings();
   void ClearBindings();
 
@@ -379,6 +403,7 @@ struct GL_EXPORT DriverWGL {
 #if defined(OS_WIN) || defined(USE_X11) || defined(OS_ANDROID) || defined(USE_OZONE)
 struct GL_EXPORT DriverEGL {
   void InitializeStaticBindings();
+  void InitializeExtensionBindings();
   void InitializeDebugBindings();
   void ClearBindings();
 
@@ -386,7 +411,6 @@ struct GL_EXPORT DriverEGL {
   ProcsEGL debug_fn;
   ExtensionsEGL ext;
 
- private:
   static std::string GetPlatformExtensions();
   static std::string GetClientExtensions();
 };
@@ -395,6 +419,7 @@ struct GL_EXPORT DriverEGL {
 #if defined(USE_X11)
 struct GL_EXPORT DriverGLX {
   void InitializeStaticBindings();
+  void InitializeExtensionBindings();
   void InitializeDebugBindings();
   void ClearBindings();
 

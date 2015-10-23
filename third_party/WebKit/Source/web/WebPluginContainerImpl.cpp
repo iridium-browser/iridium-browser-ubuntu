@@ -39,6 +39,7 @@
 #include "core/HTMLNames.h"
 #include "core/clipboard/DataObject.h"
 #include "core/clipboard/DataTransfer.h"
+#include "core/events/DragEvent.h"
 #include "core/events/GestureEvent.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/events/MouseEvent.h"
@@ -49,12 +50,11 @@
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLPlugInElement.h"
+#include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutPart.h"
 #include "core/loader/FrameLoadRequest.h"
-#include "core/page/Chrome.h"
-#include "core/page/EventHandler.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
@@ -88,13 +88,10 @@
 #include "public/web/WebPrintPresetOptions.h"
 #include "public/web/WebViewClient.h"
 #include "web/ChromeClientImpl.h"
-#include "web/ScrollbarGroup.h"
 #include "web/WebDataSourceImpl.h"
 #include "web/WebInputEventConversion.h"
 #include "web/WebViewImpl.h"
 #include "wtf/Assertions.h"
-
-#include <base/debug/stack_trace.h>
 
 namespace blink {
 
@@ -121,10 +118,10 @@ void WebPluginContainerImpl::paint(GraphicsContext* context, const IntRect& rect
     if (!frameRect().intersects(rect))
         return;
 
-    LayoutObjectDrawingRecorder drawingRecorder(*context, *m_element->layoutObject(), DisplayItem::Type::WebPlugin, rect);
-    if (drawingRecorder.canUseCachedDrawing())
+    if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(*context, *m_element->layoutObject(), DisplayItem::Type::WebPlugin))
         return;
 
+    LayoutObjectDrawingRecorder drawingRecorder(*context, *m_element->layoutObject(), DisplayItem::Type::WebPlugin, rect);
     context->save();
 
     ASSERT(parent()->isFrameView());
@@ -204,6 +201,8 @@ void WebPluginContainerImpl::handleEvent(Event* event)
         handleTouchEvent(toTouchEvent(event));
     else if (event->isGestureEvent())
         handleGestureEvent(toGestureEvent(event));
+    else if (event->isDragEvent() && m_webPlugin->canProcessDrag())
+        handleDragEvent(toDragEvent(event));
 
     // FIXME: it would be cleaner if Widget::handleEvent returned true/false and
     // HTMLPluginElement called setDefaultHandled or defaultEventHandler.
@@ -319,12 +318,6 @@ void WebPluginContainerImpl::setWebLayer(WebLayer* layer)
 #endif
 
     m_element->setNeedsCompositingUpdate();
-    // Being composited or not affects the self painting layer bit
-    // on the DeprecatedPaintLayer.
-    if (LayoutPart* layoutObject = m_element->layoutPart()) {
-        ASSERT(layoutObject->hasLayer());
-        layoutObject->layer()->updateSelfPaintingLayer();
-    }
 }
 
 bool WebPluginContainerImpl::supportsPaginatedPrint() const
@@ -347,13 +340,16 @@ int WebPluginContainerImpl::printBegin(const WebPrintParams& printParams) const
     return m_webPlugin->printBegin(printParams);
 }
 
-bool WebPluginContainerImpl::printPage(int pageNumber, GraphicsContext* gc)
+void WebPluginContainerImpl::printPage(int pageNumber, GraphicsContext* gc, const IntRect& printRect)
 {
+    if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(*gc, *m_element->layoutObject(), DisplayItem::Type::WebPlugin))
+        return;
+
+    LayoutObjectDrawingRecorder drawingRecorder(*gc, *m_element->layoutObject(), DisplayItem::Type::WebPlugin, printRect);
     gc->save();
     WebCanvas* canvas = gc->canvas();
-    bool ret = m_webPlugin->printPage(pageNumber, canvas);
+    m_webPlugin->printPage(pageNumber, canvas);
     gc->restore();
-    return ret;
 }
 
 void WebPluginContainerImpl::printEnd()
@@ -423,11 +419,6 @@ void WebPluginContainerImpl::reportGeometry()
     calculateGeometry(windowRect, clipRect, unobscuredRect, cutOutRects);
 
     m_webPlugin->updateGeometry(windowRect, clipRect, unobscuredRect, cutOutRects, isVisible());
-
-    if (m_scrollbarGroup) {
-        m_scrollbarGroup->scrollAnimator()->contentsResized();
-        m_scrollbarGroup->setFrameRect(frameRect());
-    }
 }
 
 void WebPluginContainerImpl::allowScriptObjects()
@@ -510,24 +501,22 @@ void WebPluginContainerImpl::loadFrameRequest(const WebURLRequest& request, cons
     frame->loader().load(frameRequest);
 }
 
-void WebPluginContainerImpl::zoomLevelChanged(double zoomLevel)
-{
-    WebViewImpl* view = WebViewImpl::fromPage(m_element->document().frame()->page());
-    view->fullFramePluginZoomLevelChanged(zoomLevel);
-}
-
 bool WebPluginContainerImpl::isRectTopmost(const WebRect& rect)
 {
-    if (!m_element)
+    // Disallow access to the frame during dispose(), because it is not guaranteed to
+    // be valid memory once this object has started disposal. In particular, we might be being
+    // disposed because the frame has already be deleted and then something else dropped the
+    // last reference to the this object.
+    if (m_inDispose || !m_element)
         return false;
 
     LocalFrame* frame = m_element->document().frame();
     if (!frame)
         return false;
 
+    IntRect documentRect(x() + rect.x, y() + rect.y, rect.width, rect.height);
     // hitTestResultAtPoint() takes a padding rectangle.
     // FIXME: We'll be off by 1 when the width or height is even.
-    IntRect documentRect(x() + rect.x, y() + rect.y, rect.width, rect.height);
     LayoutPoint center = documentRect.center();
     // Make the rect we're checking (the point surrounded by padding rects) contained inside the requested rect. (Note that -1/2 is 0.)
     LayoutSize padding((documentRect.width() - 1) / 2, (documentRect.height() - 1) / 2);
@@ -683,25 +672,6 @@ void WebPluginContainerImpl::willDestroyPluginLoadObserver(WebPluginLoadObserver
     m_pluginLoadObservers.remove(pos);
 }
 
-ScrollbarGroup* WebPluginContainerImpl::scrollbarGroup()
-{
-    if (!m_scrollbarGroup)
-        m_scrollbarGroup = adoptPtr(new ScrollbarGroup(m_element->document().frame()->view(), frameRect()));
-    return m_scrollbarGroup.get();
-}
-
-void WebPluginContainerImpl::willStartLiveResize()
-{
-    if (m_scrollbarGroup)
-        m_scrollbarGroup->willStartLiveResize();
-}
-
-void WebPluginContainerImpl::willEndLiveResize()
-{
-    if (m_scrollbarGroup)
-        m_scrollbarGroup->willEndLiveResize();
-}
-
 // Private methods -------------------------------------------------------------
 
 WebPluginContainerImpl::WebPluginContainerImpl(HTMLPlugInElement* element, WebPlugin* webPlugin)
@@ -711,6 +681,7 @@ WebPluginContainerImpl::WebPluginContainerImpl(HTMLPlugInElement* element, WebPl
     , m_webLayer(nullptr)
     , m_touchEventRequestType(TouchEventRequestTypeNone)
     , m_wantsWheelEvents(false)
+    , m_inDispose(false)
 #if ENABLE(OILPAN)
     , m_shouldDisposePlugin(false)
 #endif
@@ -731,11 +702,14 @@ WebPluginContainerImpl::~WebPluginContainerImpl()
 
 void WebPluginContainerImpl::dispose()
 {
+    m_inDispose = true;
+
     if (m_element && m_touchEventRequestType != TouchEventRequestTypeNone && m_element->document().frameHost())
         m_element->document().frameHost()->eventHandlerRegistry().didRemoveEventHandler(*m_element, EventHandlerRegistry::TouchEvent);
 
     for (size_t i = 0; i < m_pluginLoadObservers.size(); ++i)
         m_pluginLoadObservers[i]->clearPluginContainer();
+
     m_webPlugin->destroy();
     m_webPlugin = nullptr;
 
@@ -743,7 +717,6 @@ void WebPluginContainerImpl::dispose()
         GraphicsLayer::unregisterContentsLayer(m_webLayer);
 
     m_pluginLoadObservers.clear();
-    m_scrollbarGroup.clear();
     m_element = nullptr;
 }
 
@@ -773,12 +746,6 @@ void WebPluginContainerImpl::handleMouseEvent(MouseEvent* event)
 {
     ASSERT(parent()->isFrameView());
 
-    if (event->isDragEvent()) {
-        if (m_webPlugin->canProcessDrag())
-            handleDragEvent(event);
-        return;
-    }
-
     // We cache the parent FrameView here as the plugin widget could be deleted
     // in the call to HandleEvent. See http://b/issue?id=1362948
     FrameView* parentView = toFrameView(parent());
@@ -790,18 +757,6 @@ void WebPluginContainerImpl::handleMouseEvent(MouseEvent* event)
     if (event->type() == EventTypeNames::mousedown)
         focusPlugin();
 
-    if (m_scrollbarGroup) {
-        // This needs to be set before the other callbacks in this scope, since
-        // the scroll animator class might query the position in response.
-        m_scrollbarGroup->setLastMousePosition(IntPoint(event->x(), event->y()));
-        if (event->type() == EventTypeNames::mousemove)
-            m_scrollbarGroup->scrollAnimator()->mouseMovedInContentArea();
-        else if (event->type() == EventTypeNames::mouseover)
-            m_scrollbarGroup->scrollAnimator()->mouseEnteredContentArea();
-        else if (event->type() == EventTypeNames::mouseout)
-            m_scrollbarGroup->scrollAnimator()->mouseExitedContentArea();
-    }
-
     WebCursorInfo cursorInfo;
     if (m_webPlugin->handleInputEvent(webEvent, cursorInfo))
         event->setDefaultHandled();
@@ -812,7 +767,7 @@ void WebPluginContainerImpl::handleMouseEvent(MouseEvent* event)
     Page* page = parentView->frame().page();
     if (!page)
         return;
-    toChromeClientImpl(page->chrome().client()).setCursorForPlugin(cursorInfo);
+    toChromeClientImpl(page->chromeClient()).setCursorForPlugin(cursorInfo);
 }
 
 void WebPluginContainerImpl::handleDragEvent(MouseEvent* event)
@@ -920,14 +875,6 @@ void WebPluginContainerImpl::handleTouchEvent(TouchEvent* event)
     }
 }
 
-static inline bool gestureScrollHelper(ScrollbarGroup* scrollbarGroup, ScrollDirection positiveDirection, ScrollDirection negativeDirection, float delta)
-{
-    if (!delta)
-        return false;
-    float absDelta = delta > 0 ? delta : -delta;
-    return scrollbarGroup->scroll(delta < 0 ? negativeDirection : positiveDirection, ScrollByPrecisePixel, absDelta);
-}
-
 void WebPluginContainerImpl::handleGestureEvent(GestureEvent* event)
 {
     WebGestureEventBuilder webEvent(m_element->layoutObject(), *event);
@@ -941,14 +888,6 @@ void WebPluginContainerImpl::handleGestureEvent(GestureEvent* event)
         return;
     }
 
-    if (webEvent.type == WebInputEvent::GestureScrollUpdate) {
-        if (!m_scrollbarGroup)
-            return;
-        if (gestureScrollHelper(m_scrollbarGroup.get(), ScrollLeft, ScrollRight, webEvent.data.scrollUpdate.deltaX))
-            event->setDefaultHandled();
-        if (gestureScrollHelper(m_scrollbarGroup.get(), ScrollUp, ScrollDown, webEvent.data.scrollUpdate.deltaY))
-            event->setDefaultHandled();
-    }
     // FIXME: Can a plugin change the cursor from a touch-event callback?
 }
 

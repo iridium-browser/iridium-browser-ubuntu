@@ -7,8 +7,8 @@ package org.chromium.net;
 import android.content.Context;
 import android.os.ConditionVariable;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 /**
  * Wrapper class to start an in-process native test server, and get URLs
@@ -39,9 +39,9 @@ public final class NativeTestServer {
      *             old API.
      */
     public static void registerHostResolverProc(long contextAdapter, boolean isLegacyAPI) {
-        sHostResolverBlock.close();
         nativeRegisterHostResolverProc(contextAdapter, isLegacyAPI);
         sHostResolverBlock.block();
+        sHostResolverBlock.close();
     }
 
     public static String getEchoBodyURL() {

@@ -73,16 +73,8 @@ void ImageView::SetImageSize(const gfx::Size& image_size) {
   PreferredSizeChanged();
 }
 
-bool ImageView::GetImageSize(gfx::Size* image_size) const {
-  DCHECK(image_size);
-  if (image_size_set_)
-    *image_size = image_size_;
-  return image_size_set_;
-}
-
 gfx::Rect ImageView::GetImageBounds() const {
-  gfx::Size image_size(image_size_set_ ?
-    image_size_ : gfx::Size(image_.width(), image_.height()));
+  gfx::Size image_size = GetImageSize();
   return gfx::Rect(ComputeImageOrigin(image_size), image_size);
 }
 
@@ -95,15 +87,9 @@ void ImageView::SetFocusPainter(scoped_ptr<Painter> focus_painter) {
 }
 
 gfx::Size ImageView::GetPreferredSize() const {
-  gfx::Insets insets = GetInsets();
-  if (image_size_set_) {
-    gfx::Size image_size;
-    GetImageSize(&image_size);
-    image_size.Enlarge(insets.width(), insets.height());
-    return image_size;
-  }
-  return gfx::Size(image_.width() + insets.width(),
-                   image_.height() + insets.height());
+  gfx::Size size = GetImageSize();
+  size.Enlarge(GetInsets().width(), GetInsets().height());
+  return size;
 }
 
 bool ImageView::IsImageEqual(const gfx::ImageSkia& img) const {
@@ -115,6 +101,10 @@ bool ImageView::IsImageEqual(const gfx::ImageSkia& img) const {
   return image_.BackedBySameObjectAs(img) &&
       last_paint_scale_ != 0.0f &&
       last_painted_bitmap_pixels_ == GetBitmapPixels(img, last_paint_scale_);
+}
+
+gfx::Size ImageView::GetImageSize() const {
+  return image_size_set_ ? image_size_ : image_.size();
 }
 
 gfx::Point ImageView::ComputeImageOrigin(const gfx::Size& image_size) const {

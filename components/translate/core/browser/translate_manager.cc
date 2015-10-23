@@ -29,6 +29,7 @@
 #include "components/translate/core/common/translate_pref_names.h"
 #include "components/translate/core/common/translate_switches.h"
 #include "components/translate/core/common/translate_util.h"
+#include "google_apis/google_api_keys.h"
 #include "net/base/url_util.h"
 #include "net/http/http_status_code.h"
 
@@ -95,6 +96,17 @@ void TranslateManager::InitiateTranslation(const std::string& page_lang) {
     return;
   }
 
+  if (!ignore_missing_key_for_testing_ &&
+      !::google_apis::HasKeysConfigured()) {
+    // Without an API key, translate won't work, so don't offer to translate
+    // in the first place. Leave prefs::kEnableTranslate on, though, because
+    // that settings syncs and we don't want to turn off translate everywhere
+    // else.
+    TranslateBrowserMetrics::ReportInitiationStatus(
+        TranslateBrowserMetrics::INITIATION_STATUS_DISABLED_BY_KEY);
+    return;
+  }
+
   PrefService* prefs = translate_client_->GetPrefs();
   if (!prefs->GetBoolean(prefs::kEnableTranslate)) {
     TranslateBrowserMetrics::ReportInitiationStatus(
@@ -132,9 +144,9 @@ void TranslateManager::InitiateTranslation(const std::string& page_lang) {
   }
 
   // Get the accepted languages list.
-  std::vector<std::string> accept_languages_list;
-  base::SplitString(prefs->GetString(accept_languages_pref_name_.c_str()), ',',
-                    &accept_languages_list);
+  std::vector<std::string> accept_languages_list = base::SplitString(
+      prefs->GetString(accept_languages_pref_name_), ",",
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
   std::string target_lang = GetTargetLanguage(accept_languages_list);
   std::string language_code =
@@ -207,7 +219,7 @@ void TranslateManager::InitiateTranslation(const std::string& page_lang) {
   TranslateBrowserMetrics::ReportInitiationStatus(
       TranslateBrowserMetrics::INITIATION_STATUS_SHOW_INFOBAR);
 
-  // Prompts the user if he/she wants the page translated.
+  // Prompts the user if they want the page translated.
   translate_client_->ShowTranslateUI(translate::TRANSLATE_STEP_BEFORE_TRANSLATE,
                                      language_code,
                                      target_lang,
@@ -265,10 +277,9 @@ void TranslateManager::ReportLanguageDetectionError() {
 
   GURL report_error_url = GURL(kReportLanguageDetectionErrorURL);
 
-  report_error_url =
-      net::AppendQueryParameter(report_error_url,
-                                kUrlQueryName,
-                                translate_driver_->GetActiveURL().spec());
+  report_error_url = net::AppendQueryParameter(
+      report_error_url, kUrlQueryName,
+      translate_driver_->GetLastCommittedURL().spec());
 
   report_error_url =
       net::AppendQueryParameter(report_error_url,
@@ -341,7 +352,7 @@ void TranslateManager::OnTranslateScriptFetchComplete(
     if (!translate_driver_->IsOffTheRecord()) {
       TranslateErrorDetails error_details;
       error_details.time = base::Time::Now();
-      error_details.url = translate_driver_->GetActiveURL();
+      error_details.url = translate_driver_->GetLastCommittedURL();
       error_details.error = TranslateErrors::NETWORK;
       NotifyTranslateError(error_details);
     }
@@ -389,6 +400,13 @@ std::string TranslateManager::GetAutoTargetLanguage(
 
 LanguageState& TranslateManager::GetLanguageState() {
   return language_state_;
+}
+
+bool TranslateManager::ignore_missing_key_for_testing_ = false;
+
+// static
+void TranslateManager::SetIgnoreMissingKeyForTesting(bool ignore) {
+  ignore_missing_key_for_testing_ = ignore;
 }
 
 }  // namespace translate

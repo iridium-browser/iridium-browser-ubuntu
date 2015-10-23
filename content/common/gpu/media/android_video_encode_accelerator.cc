@@ -143,7 +143,7 @@ AndroidVideoEncodeAccelerator::GetSupportedProfiles() {
 }
 
 bool AndroidVideoEncodeAccelerator::Initialize(
-    VideoFrame::Format format,
+    media::VideoPixelFormat format,
     const gfx::Size& input_visible_size,
     media::VideoCodecProfile output_profile,
     uint32 initial_bitrate,
@@ -158,7 +158,7 @@ bool AndroidVideoEncodeAccelerator::Initialize(
   client_ptr_factory_.reset(new base::WeakPtrFactory<Client>(client));
 
   if (!(media::MediaCodecBridge::SupportsSetParameters() &&
-        format == VideoFrame::I420)) {
+        format == media::PIXEL_FORMAT_I420)) {
     DLOG(ERROR) << "Unexpected combo: " << format << ", " << output_profile;
     return false;
   }
@@ -237,9 +237,8 @@ void AndroidVideoEncodeAccelerator::Encode(
     bool force_keyframe) {
   DVLOG(3) << __PRETTY_FUNCTION__ << ": " << force_keyframe;
   DCHECK(thread_checker_.CalledOnValidThread());
-  RETURN_ON_FAILURE(frame->format() == VideoFrame::I420,
-                    "Unexpected format",
-                    kInvalidArgumentError);
+  RETURN_ON_FAILURE(frame->format() == media::PIXEL_FORMAT_I420,
+                    "Unexpected format", kInvalidArgumentError);
 
   // MediaCodec doesn't have a way to specify stride for non-Packed formats, so
   // we insist on being called with packed frames and no cropping :(
@@ -253,7 +252,8 @@ void AndroidVideoEncodeAccelerator::Encode(
                     "Non-packed frame, or visible_rect != coded_size",
                     kInvalidArgumentError);
 
-  pending_frames_.push(MakeTuple(frame, force_keyframe, base::Time::Now()));
+  pending_frames_.push(
+      base::MakeTuple(frame, force_keyframe, base::Time::Now()));
   DoIOTask();
 }
 
@@ -320,7 +320,7 @@ void AndroidVideoEncodeAccelerator::QueueInput() {
   }
 
   const PendingFrames::value_type& input = pending_frames_.front();
-  bool is_key_frame = get<1>(input);
+  bool is_key_frame = base::get<1>(input);
   if (is_key_frame) {
     // Ideally MediaCodec would honor BUFFER_FLAG_SYNC_FRAME so we could
     // indicate this in the QueueInputBuffer() call below and guarantee _this_
@@ -328,14 +328,14 @@ void AndroidVideoEncodeAccelerator::QueueInput() {
     // Instead, we request a key frame "soon".
     media_codec_->RequestKeyFrameSoon();
   }
-  scoped_refptr<VideoFrame> frame = get<0>(input);
+  scoped_refptr<VideoFrame> frame = base::get<0>(input);
 
   uint8* buffer = NULL;
   size_t capacity = 0;
   media_codec_->GetInputBuffer(input_buf_index, &buffer, &capacity);
 
   size_t queued_size =
-      VideoFrame::AllocationSize(VideoFrame::I420, frame->coded_size());
+      VideoFrame::AllocationSize(media::PIXEL_FORMAT_I420, frame->coded_size());
   RETURN_ON_FAILURE(capacity >= queued_size,
                     "Failed to get input buffer: " << input_buf_index,
                     kPlatformFailureError);
@@ -365,7 +365,7 @@ void AndroidVideoEncodeAccelerator::QueueInput() {
   status = media_codec_->QueueInputBuffer(
       input_buf_index, NULL, queued_size, fake_input_timestamp_);
   UMA_HISTOGRAM_TIMES("Media.AVEA.InputQueueTime",
-                      base::Time::Now() - get<2>(input));
+                      base::Time::Now() - base::get<2>(input));
   RETURN_ON_FAILURE(status == media::MEDIA_CODEC_OK,
                     "Failed to QueueInputBuffer: " << status,
                     kPlatformFailureError);

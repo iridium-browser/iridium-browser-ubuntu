@@ -18,7 +18,7 @@
       'dependencies': [
         'core.gyp:*',
         'giflib.gyp:giflib',
-        'libjpeg.gyp:libjpeg',
+        'libwebp.gyp:libwebp',
       ],
       'cflags':[
         # FIXME: This gets around a longjmp warning. See
@@ -27,12 +27,16 @@
       ],
       'include_dirs': [
         '../include/codec',
+        '../include/private',
         '../src/codec',
         '../src/core',
       ],
       'sources': [
+        '../src/codec/SkBmpCodec.cpp',
+        '../src/codec/SkBmpMaskCodec.cpp',
+        '../src/codec/SkBmpRLECodec.cpp',
+        '../src/codec/SkBmpStandardCodec.cpp',
         '../src/codec/SkCodec.cpp',
-        '../src/codec/SkCodec_libbmp.cpp',
         '../src/codec/SkCodec_libgif.cpp',
         '../src/codec/SkCodec_libico.cpp',
         '../src/codec/SkCodec_libpng.cpp',
@@ -40,10 +44,13 @@
         '../src/codec/SkGifInterlaceIter.cpp',
         '../src/codec/SkJpegCodec.cpp',
         '../src/codec/SkJpegDecoderMgr.cpp',
-        '../src/codec/SkJpegUtility.cpp',
+        '../src/codec/SkJpegUtility_codec.cpp',
         '../src/codec/SkMaskSwizzler.cpp',
         '../src/codec/SkMasks.cpp',
+        '../src/codec/SkScaledCodec.cpp',
+        '../src/codec/SkScanlineDecoder.cpp',
         '../src/codec/SkSwizzler.cpp',
+        '../src/codec/SkWebpCodec.cpp',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -58,9 +65,25 @@
             'dependencies': [
               'libpng.gyp:libpng',
             ],
+            # TODO(msarett): Add libjpeg-turbo to Android so we can compile SkJpegCodec
+            # for the framework.
+            'sources!': [
+              '../src/codec/SkJpegCodec.cpp',
+              '../src/codec/SkJpegDecoderMgr.cpp',
+              '../src/codec/SkJpegUtility_codec.cpp',
+            ],
           }, {  # !skia_android_framework
             'dependencies': [
+              # TODO(msarett): Add libjpeg-turbo to Android so this can be a global
+              # dependency.
+              'libjpeg-turbo.gyp:libjpeg-turbo',
               'libpng.gyp:libpng_static',
+            ],
+            'export_dependent_settings': [
+              'libjpeg-turbo.gyp:libjpeg-turbo',
+            ],
+            'cflags': [
+              '-DTURBO_HAS_SKIP',
             ],
           }
         ]

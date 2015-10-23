@@ -8,6 +8,7 @@
 #include "extensions/browser/api/device_permissions_prompt.h"
 #include "extensions/browser/api/virtual_keyboard_private/virtual_keyboard_delegate.h"
 #include "extensions/browser/api/web_request/web_request_event_router_delegate.h"
+#include "extensions/browser/guest_view/extensions_guest_view_manager_delegate.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest_delegate.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper_delegate.h"
 
@@ -28,8 +29,14 @@ ExtensionsAPIClient* ExtensionsAPIClient::Get() { return g_instance; }
 void ExtensionsAPIClient::AddAdditionalValueStoreCaches(
     content::BrowserContext* context,
     const scoped_refptr<SettingsStorageFactory>& factory,
-    const scoped_refptr<ObserverListThreadSafe<SettingsObserver> >& observers,
-    std::map<settings_namespace::Namespace, ValueStoreCache*>* caches) {}
+    const scoped_refptr<base::ObserverListThreadSafe<SettingsObserver>>&
+        observers,
+    std::map<settings_namespace::Namespace, ValueStoreCache*>* caches) {
+}
+
+void ExtensionsAPIClient::AttachWebContentsHelpers(
+    content::WebContents* web_contents) const {
+}
 
 AppViewGuestDelegate* ExtensionsAPIClient::CreateAppViewGuestDelegate() const {
   return NULL;
@@ -41,10 +48,10 @@ ExtensionsAPIClient::CreateExtensionOptionsGuestDelegate(
   return NULL;
 }
 
-ExtensionViewGuestDelegate*
-ExtensionsAPIClient::CreateExtensionViewGuestDelegate(
-    ExtensionViewGuest* guest) const {
-  return NULL;
+scoped_ptr<guest_view::GuestViewManagerDelegate>
+ExtensionsAPIClient::CreateGuestViewManagerDelegate(
+    content::BrowserContext* context) const {
+  return make_scoped_ptr(new ExtensionsGuestViewManagerDelegate(context));
 }
 
 scoped_ptr<MimeHandlerViewGuestDelegate>

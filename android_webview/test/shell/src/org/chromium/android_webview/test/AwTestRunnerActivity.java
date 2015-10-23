@@ -5,10 +5,14 @@
 package org.chromium.android_webview.test;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup.LayoutParams;
 import android.widget.LinearLayout;
+
+import org.chromium.android_webview.AwBrowserProcess;
+import org.chromium.android_webview.shell.AwShellResourceProvider;
 
 /**
  * This is a lightweight activity for tests that only require WebView functionality.
@@ -16,10 +20,15 @@ import android.widget.LinearLayout;
 public class AwTestRunnerActivity extends Activity {
 
     private LinearLayout mLinearLayout;
+    private Intent mLastSentIntent;
+    private boolean mIgnoreStartActivity;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        AwShellResourceProvider.registerResources(this);
+        AwBrowserProcess.loadLibrary(this);
 
         mLinearLayout = new LinearLayout(this);
         mLinearLayout.setOrientation(LinearLayout.VERTICAL);
@@ -48,5 +57,19 @@ public class AwTestRunnerActivity extends Activity {
      */
     public void removeAllViews() {
         mLinearLayout.removeAllViews();
+    }
+
+    @Override
+    public void startActivity(Intent i) {
+        mLastSentIntent = i;
+        if (!mIgnoreStartActivity) super.startActivity(i);
+    }
+
+    public Intent getLastSentIntent() {
+        return mLastSentIntent;
+    }
+
+    public void setIgnoreStartActivity(boolean ignore) {
+        mIgnoreStartActivity = ignore;
     }
 }

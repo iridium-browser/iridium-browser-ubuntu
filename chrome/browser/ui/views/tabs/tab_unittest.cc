@@ -96,7 +96,7 @@ class TabTest : public views::ViewsTestBase,
   static void CheckForExpectedLayoutAndVisibilityOfElements(const Tab& tab) {
     // Check whether elements are visible when they are supposed to be, given
     // Tab size and TabRendererData state.
-    if (tab.data_.mini) {
+    if (tab.data_.pinned) {
       EXPECT_EQ(1, tab.IconCapacity());
       if (tab.data_.media_state != TAB_MEDIA_STATE_NONE) {
         EXPECT_FALSE(tab.ShouldShowIcon());
@@ -132,7 +132,7 @@ class TabTest : public views::ViewsTestBase,
             EXPECT_FALSE(tab.ShouldShowMediaIndicator());
           break;
       }
-    } else {  // Tab not active and not mini tab.
+    } else {  // Tab not active and not pinned tab.
       switch (tab.IconCapacity()) {
         case 0:
           EXPECT_FALSE(tab.ShouldShowCloseBox());
@@ -203,6 +203,14 @@ class TabTest : public views::ViewsTestBase,
     }
   }
 
+ protected:
+  void InitWidget(Widget* widget) {
+    Widget::InitParams params(CreateParams(Widget::InitParams::TYPE_WINDOW));
+    params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+    params.bounds.SetRect(10, 20, 300, 400);
+    widget->Init(params);
+  }
+
  private:
   static gfx::Rect GetMediaIndicatorBounds(const Tab& tab) {
     if (!tab.media_indicator_button_) {
@@ -222,10 +230,7 @@ TEST_P(TabTest, HitTestTopPixel) {
   }
 
   Widget widget;
-  Widget::InitParams params(CreateParams(Widget::InitParams::TYPE_WINDOW));
-  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.bounds.SetRect(10, 20, 300, 400);
-  widget.Init(params);
+  InitWidget(&widget);
 
   FakeTabController tab_controller;
   Tab tab(&tab_controller);
@@ -261,8 +266,12 @@ TEST_P(TabTest, LayoutAndVisibilityOfElements) {
     TAB_MEDIA_STATE_AUDIO_PLAYING, TAB_MEDIA_STATE_AUDIO_MUTING
   };
 
+  Widget widget;
+  InitWidget(&widget);
+
   FakeTabController controller;
   Tab tab(&controller);
+  widget.GetContentsView()->AddChildView(&tab);
 
   SkBitmap bitmap;
   bitmap.allocN32Pixels(16, 16);
@@ -271,7 +280,7 @@ TEST_P(TabTest, LayoutAndVisibilityOfElements) {
 
   // Perform layout over all possible combinations, checking for correct
   // results.
-  for (int is_mini_tab = 0; is_mini_tab < 2; ++is_mini_tab) {
+  for (int is_pinned_tab = 0; is_pinned_tab < 2; ++is_pinned_tab) {
     for (int is_active_tab = 0; is_active_tab < 2; ++is_active_tab) {
       for (size_t media_state_index = 0;
            media_state_index < arraysize(kMediaStatesToTest);
@@ -279,10 +288,10 @@ TEST_P(TabTest, LayoutAndVisibilityOfElements) {
         const TabMediaState media_state = kMediaStatesToTest[media_state_index];
         SCOPED_TRACE(::testing::Message()
                      << (is_active_tab ? "Active" : "Inactive") << ' '
-                     << (is_mini_tab ? "Mini " : "")
+                     << (is_pinned_tab ? "Pinned " : "")
                      << "Tab with media indicator state " << media_state);
 
-        data.mini = !!is_mini_tab;
+        data.pinned = !!is_pinned_tab;
         controller.set_active_tab(!!is_active_tab);
         data.media_state = media_state;
         tab.SetData(data);
@@ -290,9 +299,9 @@ TEST_P(TabTest, LayoutAndVisibilityOfElements) {
         // Test layout for every width from standard to minimum.
         gfx::Rect bounds(gfx::Point(0, 0), Tab::GetStandardSize());
         int min_width;
-        if (is_mini_tab) {
-          bounds.set_width(Tab::GetMiniWidth());
-          min_width = Tab::GetMiniWidth();
+        if (is_pinned_tab) {
+          bounds.set_width(Tab::GetPinnedWidth());
+          min_width = Tab::GetPinnedWidth();
         } else {
           min_width = is_active_tab ? Tab::GetMinimumSelectedSize().width() :
               Tab::GetMinimumUnselectedSize().width();
@@ -317,8 +326,12 @@ TEST_P(TabTest, TooltipProvidedByTab) {
     return;
   }
 
+  Widget widget;
+  InitWidget(&widget);
+
   FakeTabController controller;
   Tab tab(&controller);
+  widget.GetContentsView()->AddChildView(&tab);
   tab.SetBoundsRect(gfx::Rect(Tab::GetStandardSize()));
 
   SkBitmap bitmap;

@@ -52,29 +52,34 @@ class TextResourceDecoder;
 class ThreadableLoader;
 
 class CORE_EXPORT FileReaderLoader final : public ThreadableLoaderClient {
+    WTF_MAKE_FAST_ALLOCATED(FileReaderLoader);
 public:
     enum ReadType {
         ReadAsArrayBuffer,
         ReadAsBinaryString,
-        ReadAsBlob,
         ReadAsText,
         ReadAsDataURL,
         ReadByClient
     };
 
     // If client is given, do the loading asynchronously. Otherwise, load synchronously.
+    static PassOwnPtr<FileReaderLoader> create(ReadType readType, FileReaderLoaderClient* client)
+    {
+        return adoptPtr(new FileReaderLoader(readType, client));
+    }
+
     FileReaderLoader(ReadType, FileReaderLoaderClient*);
-    virtual ~FileReaderLoader();
+    ~FileReaderLoader() override;
 
     void start(ExecutionContext*, PassRefPtr<BlobDataHandle>);
     void start(ExecutionContext*, const Stream&, unsigned readSize);
     void cancel();
 
     // ThreadableLoaderClient
-    virtual void didReceiveResponse(unsigned long, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
-    virtual void didReceiveData(const char*, unsigned) override;
-    virtual void didFinishLoading(unsigned long, double) override;
-    virtual void didFail(const ResourceError&) override;
+    void didReceiveResponse(unsigned long, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
+    void didReceiveData(const char*, unsigned) override;
+    void didFinishLoading(unsigned long, double) override;
+    void didFail(const ResourceError&) override;
 
     String stringResult();
     PassRefPtr<DOMArrayBuffer> arrayBufferResult() const;

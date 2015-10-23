@@ -140,6 +140,7 @@ class Profile;
   NSString* typedPrefix_;
 
   Profile* profile_;
+  BOOL isScrolling_;
 }
 
 // Designated initializer.
@@ -191,7 +192,8 @@ class Profile;
 - (BookmarkBarFolderController*)folderController;
 - (id)folderTarget;
 - (void)configureWindowLevel;
-- (void)performOneScroll:(CGFloat)delta;
+- (void)performOneScroll:(CGFloat)delta
+    updateMouseSelection:(BOOL)updateMouseSelection;
 - (BookmarkButton*)buttonThatMouseIsIn;
 // Set to YES in order to prevent animations.
 - (void)setIgnoreAnimations:(BOOL)ignore;
@@ -199,6 +201,7 @@ class Profile;
 // Return YES if the scroll-up or scroll-down arrows are showing.
 - (BOOL)canScrollUp;
 - (BOOL)canScrollDown;
+- (BOOL)isScrolling;
 - (CGFloat)verticalScrollArrowHeight;
 - (NSView*)visibleView;
 - (NSScrollView*)scrollView;

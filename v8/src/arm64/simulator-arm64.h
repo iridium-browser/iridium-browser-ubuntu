@@ -8,8 +8,6 @@
 #include <stdarg.h>
 #include <vector>
 
-#include "src/v8.h"
-
 #include "src/allocation.h"
 #include "src/arm64/assembler-arm64.h"
 #include "src/arm64/decoder-arm64.h"
@@ -71,12 +69,6 @@ class SimulatorStack : public v8::internal::AllStatic {
 };
 
 #else  // !defined(USE_SIMULATOR)
-
-enum ReverseByteMode {
-  Reverse16 = 0,
-  Reverse32 = 1,
-  Reverse64 = 2
-};
 
 
 // The proper way to initialize a simulated system register (such as NZCV) is as
@@ -168,6 +160,8 @@ class Simulator : public DecoderVisitor {
   // System functions.
 
   static void Initialize(Isolate* isolate);
+
+  static void TearDown(HashMap* i_cache, Redirection* first);
 
   static Simulator* current(v8::internal::Isolate* isolate);
 
@@ -272,7 +266,7 @@ class Simulator : public DecoderVisitor {
   uintptr_t PopAddress();
 
   // Accessor to the internal simulator stack area.
-  uintptr_t StackLimit() const;
+  uintptr_t StackLimit(uintptr_t c_limit) const;
 
   void ResetState();
 
@@ -407,7 +401,7 @@ class Simulator : public DecoderVisitor {
   }
   Instruction* lr() { return reg<Instruction*>(kLinkRegCode); }
 
-  Address get_sp() { return reg<Address>(31, Reg31IsStackPointer); }
+  Address get_sp() const { return reg<Address>(31, Reg31IsStackPointer); }
 
   template<typename T>
   T fpreg(unsigned code) const {
@@ -706,9 +700,6 @@ class Simulator : public DecoderVisitor {
   template <typename T>
   void BitfieldHelper(Instruction* instr);
 
-  uint64_t ReverseBits(uint64_t value, unsigned num_bits);
-  uint64_t ReverseBytes(uint64_t value, ReverseByteMode mode);
-
   template <typename T>
   T FPDefaultNaN() const;
 
@@ -884,20 +875,21 @@ class Simulator : public DecoderVisitor {
       FUNCTION_ADDR(entry),                                                    \
       p0, p1, p2, p3, p4))
 
-#define CALL_GENERATED_REGEXP_CODE(entry, p0, p1, p2, p3, p4, p5, p6, p7, p8)  \
-  Simulator::current(Isolate::Current())->CallRegExp(                          \
-      entry,                                                                   \
-      p0, p1, p2, p3, p4, p5, p6, p7, NULL, p8)
+#define CALL_GENERATED_REGEXP_CODE(entry, p0, p1, p2, p3, p4, p5, p6, p7, p8) \
+  static_cast<int>(                                                           \
+      Simulator::current(Isolate::Current())                                  \
+          ->CallRegExp(entry, p0, p1, p2, p3, p4, p5, p6, p7, NULL, p8))
 
 
 // The simulator has its own stack. Thus it has a different stack limit from
-// the C-based native code.
-// See also 'class SimulatorStack' in arm/simulator-arm.h.
+// the C-based native code.  The JS-based limit normally points near the end of
+// the simulator stack.  When the C-based limit is exhausted we reflect that by
+// lowering the JS-based limit as well, to make stack checks trigger.
 class SimulatorStack : public v8::internal::AllStatic {
  public:
   static uintptr_t JsLimitFromCLimit(v8::internal::Isolate* isolate,
                                             uintptr_t c_limit) {
-    return Simulator::current(isolate)->StackLimit();
+    return Simulator::current(isolate)->StackLimit(c_limit);
   }
 
   static uintptr_t RegisterCTryCatch(uintptr_t try_catch_address) {

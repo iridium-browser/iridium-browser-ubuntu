@@ -12,13 +12,10 @@
 #include "extensions/renderer/user_script_set.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 
 namespace extensions {
 
-UserScriptSetManager::UserScriptSetManager(const ExtensionSet* extensions)
-    : static_scripts_(extensions),
-      extensions_(extensions) {
+UserScriptSetManager::UserScriptSetManager() {
   content::RenderThread::Get()->AddObserver(this);
 }
 
@@ -36,7 +33,7 @@ void UserScriptSetManager::RemoveObserver(Observer* observer) {
 scoped_ptr<ScriptInjection>
 UserScriptSetManager::GetInjectionForDeclarativeScript(
     int script_id,
-    blink::WebFrame* web_frame,
+    content::RenderFrame* render_frame,
     int tab_id,
     const GURL& url,
     const std::string& extension_id) {
@@ -47,7 +44,7 @@ UserScriptSetManager::GetInjectionForDeclarativeScript(
 
   return user_script_set->GetDeclarativeScriptInjection(
       script_id,
-      web_frame,
+      render_frame,
       tab_id,
       UserScript::BROWSER_DRIVEN,
       url);
@@ -65,14 +62,14 @@ bool UserScriptSetManager::OnControlMessageReceived(
 
 void UserScriptSetManager::GetAllInjections(
     ScopedVector<ScriptInjection>* injections,
-    blink::WebFrame* web_frame,
+    content::RenderFrame* render_frame,
     int tab_id,
     UserScript::RunLocation run_location) {
-  static_scripts_.GetInjections(injections, web_frame, tab_id, run_location);
+  static_scripts_.GetInjections(injections, render_frame, tab_id, run_location);
   for (UserScriptSetMap::iterator it = programmatic_scripts_.begin();
        it != programmatic_scripts_.end();
        ++it) {
-    it->second->GetInjections(injections, web_frame, tab_id, run_location);
+    it->second->GetInjections(injections, render_frame, tab_id, run_location);
   }
 }
 
@@ -118,7 +115,7 @@ void UserScriptSetManager::OnUpdateUserScripts(
     // or just the owner.
     CHECK(changed_hosts.size() <= 1);
     if (programmatic_scripts_.find(host_id) == programmatic_scripts_.end()) {
-      scripts = new UserScriptSet(extensions_);
+      scripts = new UserScriptSet();
       programmatic_scripts_[host_id] = make_linked_ptr(scripts);
     } else {
       scripts = programmatic_scripts_[host_id].get();
@@ -139,7 +136,8 @@ void UserScriptSetManager::OnUpdateUserScripts(
     // No owner => all known hosts.
     // Owner    => just the owner host.
     if (host_id.id().empty()) {
-      std::set<std::string> extension_ids = extensions_->GetIDs();
+      std::set<std::string> extension_ids =
+          RendererExtensionRegistry::Get()->GetIDs();
       for (const std::string& extension_id : extension_ids)
         all_hosts.insert(HostID(HostID::EXTENSIONS, extension_id));
     } else {

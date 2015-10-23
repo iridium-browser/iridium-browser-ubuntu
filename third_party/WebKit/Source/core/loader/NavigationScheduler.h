@@ -47,11 +47,12 @@ namespace blink {
 class Document;
 class FormSubmission;
 class LocalFrame;
+class NavigationScheduler;
 class ScheduledNavigation;
 
 class NavigationDisablerForBeforeUnload {
     WTF_MAKE_NONCOPYABLE(NavigationDisablerForBeforeUnload);
-
+    STACK_ALLOCATED();
 public:
     NavigationDisablerForBeforeUnload()
     {
@@ -68,6 +69,19 @@ private:
     static unsigned s_navigationDisableCount;
 };
 
+class FrameNavigationDisabler {
+    WTF_MAKE_NONCOPYABLE(FrameNavigationDisabler);
+    STACK_ALLOCATED();
+public:
+    explicit FrameNavigationDisabler(LocalFrame*);
+    ~FrameNavigationDisabler();
+
+private:
+    FrameNavigationDisabler() = delete;
+
+    NavigationScheduler& m_navigationScheduler;
+};
+
 class CORE_EXPORT NavigationScheduler final {
     WTF_MAKE_NONCOPYABLE(NavigationScheduler);
     DISALLOW_ALLOCATION();
@@ -78,7 +92,7 @@ public:
     bool locationChangePending();
 
     void scheduleRedirect(double delay, const String& url);
-    void scheduleLocationChange(Document*, const String& url, bool lockBackForwardList = true);
+    void scheduleLocationChange(Document*, const String& url, bool replacesCurrentItem = true);
     void schedulePageBlock(Document*);
     void scheduleFormSubmission(Document*, PassRefPtrWillBeRawPtr<FormSubmission>);
     void scheduleReload();
@@ -89,17 +103,24 @@ public:
     DECLARE_TRACE();
 
 private:
+    friend class FrameNavigationDisabler;
+
+    void disableFrameNavigation() { ++m_navigationDisableCount; }
+    void enableFrameNavigation() { --m_navigationDisableCount; }
+    bool isFrameNavigationAllowed() const { return !m_navigationDisableCount; }
+
     bool shouldScheduleReload() const;
     bool shouldScheduleNavigation(const String& url) const;
 
     void timerFired(Timer<NavigationScheduler>*);
     void schedule(PassOwnPtrWillBeRawPtr<ScheduledNavigation>);
 
-    static bool mustLockBackForwardList(LocalFrame* targetFrame);
+    static bool mustReplaceCurrentItem(LocalFrame* targetFrame);
 
     RawPtrWillBeMember<LocalFrame> m_frame;
     Timer<NavigationScheduler> m_timer;
     OwnPtrWillBeMember<ScheduledNavigation> m_redirect;
+    int m_navigationDisableCount;
 };
 
 } // namespace blink

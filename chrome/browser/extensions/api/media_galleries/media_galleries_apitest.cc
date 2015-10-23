@@ -164,7 +164,7 @@ class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
     const char* custom_arg = NULL;
     std::string json_string;
     if (!custom_arg_value.empty()) {
-      base::JSONWriter::Write(&custom_arg_value, &json_string);
+      base::JSONWriter::Write(custom_arg_value, &json_string);
       custom_arg = json_string.c_str();
     }
 
@@ -365,10 +365,10 @@ class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
     base::FilePath in_both_jpg = iphoto_data_root.AppendASCII("InBoth.jpg");
     ASSERT_TRUE(base::CopyFile(test_jpg_path, first_only_jpg));
     ASSERT_TRUE(base::CopyFile(test_jpg_path, in_both_jpg));
-    ReplaceFirstSubstringAfterOffset(
-        &xml_contents, 0, std::string("$path1"), first_only_jpg.value());
-    ReplaceFirstSubstringAfterOffset(
-        &xml_contents, 0, std::string("$path2"), in_both_jpg.value());
+    base::ReplaceFirstSubstringAfterOffset(
+        &xml_contents, 0, "$path1", first_only_jpg.value());
+    base::ReplaceFirstSubstringAfterOffset(
+        &xml_contents, 0, "$path2", in_both_jpg.value());
 
     base::FilePath album_xml = iphoto_data_root.AppendASCII("AlbumData.xml");
     ASSERT_NE(-1, base::WriteFile(album_xml,
@@ -437,7 +437,7 @@ class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
   scoped_ptr<EnsureMediaDirectoriesExists> ensure_media_directories_exists_;
 };
 
-#if !defined(DISABLE_NACL)
+#if !defined(DISABLE_NACL) && !defined(DISABLE_NACL_BROWSERTESTS)
 class MediaGalleriesPlatformAppPpapiTest
     : public MediaGalleriesPlatformAppBrowserTest {
  protected:
@@ -614,7 +614,13 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, CancelScan) {
   ASSERT_TRUE(RunMediaGalleriesTest("cancel_scan")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, Scan) {
+// Flaky time outs on MSAN. https://crbug.com/503329
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_Scan DISABLED_Scan
+#else
+#define MAYBE_Scan Scan
+#endif
+IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, MAYBE_Scan) {
   base::ScopedTempDir scan_root;
   ASSERT_TRUE(scan_root.CreateUniqueTempDir());
   std::vector<base::FilePath> roots;

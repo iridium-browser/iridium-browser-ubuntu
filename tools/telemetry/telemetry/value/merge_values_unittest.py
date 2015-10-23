@@ -4,8 +4,8 @@
 import os
 import unittest
 
+from telemetry import story
 from telemetry import page as page_module
-from telemetry.page import page_set
 from telemetry.value import list_of_scalar_values
 from telemetry.value import merge_values
 from telemetry.value import scalar
@@ -13,15 +13,18 @@ from telemetry.value import scalar
 
 class TestBase(unittest.TestCase):
   def setUp(self):
-    ps = page_set.PageSet(file_path=os.path.dirname(__file__))
-    ps.AddUserStory(page_module.Page('http://www.bar.com/', ps, ps.base_dir))
-    ps.AddUserStory(page_module.Page('http://www.baz.com/', ps, ps.base_dir))
-    ps.AddUserStory(page_module.Page('http://www.foo.com/', ps, ps.base_dir))
-    self.page_set = ps
+    story_set = story.StorySet(base_dir=os.path.dirname(__file__))
+    story_set.AddStory(
+        page_module.Page('http://www.bar.com/', story_set, story_set.base_dir))
+    story_set.AddStory(
+        page_module.Page('http://www.baz.com/', story_set, story_set.base_dir))
+    story_set.AddStory(
+        page_module.Page('http://www.foo.com/', story_set, story_set.base_dir))
+    self.story_set = story_set
 
   @property
   def pages(self):
-    return self.page_set.pages
+    return self.story_set.stories
 
 class MergeValueTest(TestBase):
   def testSamePageMergeBasic(self):
@@ -110,20 +113,3 @@ class MergeValueTest(TestBase):
     self.assertTrue(
         isinstance(merged_values[0], list_of_scalar_values.ListOfScalarValues))
     self.assertEquals([1], merged_values[0].values)
-
-  def testDifferentPageMergeBasicIgnoreTraceName(self):
-    page0 = self.pages[0]
-    page1 = self.pages[1]
-
-    all_values = [scalar.ScalarValue(page0, 'x.score', 'units', 1),
-                  scalar.ScalarValue(page1, 'y.score', 'units', 2)]
-    # Sort the results so that their order is predictable for the subsequent
-    # assertions.
-    merged_values = merge_values.MergeLikeValuesFromDifferentPages(
-        all_values,
-        group_by_name_suffix=True)
-    self.assertEquals(1, len(merged_values))
-
-    self.assertEquals((None, 'score'),
-                      (merged_values[0].page, merged_values[0].name))
-    self.assertEquals([1, 2], merged_values[0].values)

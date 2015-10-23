@@ -121,9 +121,6 @@ IPC_STRUCT_BEGIN(ExtensionMsg_ExecuteCode_Params)
   // The webview guest source who calls to execute code.
   IPC_STRUCT_MEMBER(GURL, webview_src)
 
-  // Whether to inject into all frames, or only the root frame.
-  IPC_STRUCT_MEMBER(bool, all_frames)
-
   // Whether to inject into about:blank (sub)frames.
   IPC_STRUCT_MEMBER(bool, match_about_blank)
 
@@ -183,11 +180,19 @@ IPC_STRUCT_BEGIN(ExtensionMsg_ExternalConnectionInfo)
   // The URL of the frame that initiated the request.
   IPC_STRUCT_MEMBER(GURL, source_url)
 
-  // The ID of the frame that is the target of the request.
+  // The ID of the tab that is the target of the request, or -1 if there is no
+  // target tab.
+  IPC_STRUCT_MEMBER(int, target_tab_id)
+
+  // The ID of the frame that is the target of the request, or -1 if there is
+  // no target frame (implying the message is for all frames).
   IPC_STRUCT_MEMBER(int, target_frame_id)
 
   // The process ID of the webview that initiated the request.
   IPC_STRUCT_MEMBER(int, guest_process_id)
+
+  // The render frame routing ID of the webview that initiated the request.
+  IPC_STRUCT_MEMBER(int, guest_render_frame_routing_id)
 IPC_STRUCT_END()
 
 IPC_STRUCT_TRAITS_BEGIN(extensions::DraggableRegion)
@@ -303,7 +308,7 @@ template <>
 struct ParamTraits<URLPattern> {
   typedef URLPattern param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* p);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* p);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -311,7 +316,7 @@ template <>
 struct ParamTraits<extensions::URLPatternSet> {
   typedef extensions::URLPatternSet param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* p);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* p);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -319,7 +324,7 @@ template <>
 struct ParamTraits<extensions::APIPermission::ID> {
   typedef extensions::APIPermission::ID param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* p);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* p);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -327,7 +332,7 @@ template <>
 struct ParamTraits<extensions::APIPermissionSet> {
   typedef extensions::APIPermissionSet param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -335,7 +340,7 @@ template <>
 struct ParamTraits<extensions::ManifestPermissionSet> {
   typedef extensions::ManifestPermissionSet param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -343,7 +348,7 @@ template <>
 struct ParamTraits<HostID> {
   typedef HostID param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -351,7 +356,7 @@ template <>
 struct ParamTraits<ExtensionMsg_PermissionSetStruct> {
   typedef ExtensionMsg_PermissionSetStruct param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* p);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* p);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -359,7 +364,7 @@ template <>
 struct ParamTraits<ExtensionMsg_Loaded_Params> {
   typedef ExtensionMsg_Loaded_Params param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* p);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* p);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -506,6 +511,11 @@ IPC_MESSAGE_ROUTED1(ExtensionMsg_NotifyRenderViewType,
 IPC_MESSAGE_CONTROL1(ExtensionMsg_UsingWebRequestAPI,
                      bool /* webrequest_used */)
 
+// The browser's response to the ExtensionMsg_WakeEventPage IPC.
+IPC_MESSAGE_CONTROL2(ExtensionMsg_WakeEventPageResponse,
+                     int /* request_id */,
+                     bool /* success */)
+
 // Ask the lazy background page if it is ready to be suspended. This is sent
 // when the page is considered idle. The renderer will reply with the same
 // sequence_id so that we can tell which message it is responding to.
@@ -549,11 +559,6 @@ IPC_MESSAGE_ROUTED2(ExtensionMsg_DispatchOnDisconnect,
 // Informs the renderer what channel (dev, beta, stable, etc) is running.
 IPC_MESSAGE_CONTROL1(ExtensionMsg_SetChannel,
                      int /* channel */)
-
-// Adds a logging message to the renderer's root frame DevTools console.
-IPC_MESSAGE_ROUTED2(ExtensionMsg_AddMessageToConsole,
-                    content::ConsoleMessageLevel /* level */,
-                    std::string /* message */)
 
 // Notify the renderer that its window has closed.
 IPC_MESSAGE_ROUTED0(ExtensionMsg_AppWindowClosed)
@@ -649,8 +654,7 @@ IPC_SYNC_MESSAGE_CONTROL3_1(ExtensionHostMsg_OpenChannelToNativeApp,
 
 // Get a port handle to the given tab.  The handle can be used for sending
 // messages to the extension.
-IPC_SYNC_MESSAGE_CONTROL4_1(ExtensionHostMsg_OpenChannelToTab,
-                            int /* routing_id */,
+IPC_SYNC_MESSAGE_CONTROL3_1(ExtensionHostMsg_OpenChannelToTab,
                             ExtensionMsg_TabTargetConnectionInfo,
                             std::string /* extension_id */,
                             std::string /* channel_name */,
@@ -736,8 +740,9 @@ IPC_MESSAGE_ROUTED0(ExtensionHostMsg_DecrementLazyKeepaliveCount)
 IPC_SYNC_MESSAGE_CONTROL0_1(ExtensionHostMsg_GenerateUniqueID,
                             int /* unique_id */)
 
-// Resumes resource requests for a newly created app window.
-IPC_MESSAGE_CONTROL1(ExtensionHostMsg_ResumeRequests, int /* route_id */)
+// Notify the browser that an app window is ready and can resume resource
+// requests.
+IPC_MESSAGE_CONTROL1(ExtensionHostMsg_AppWindowReady, int /* route_id */)
 
 // Sent by the renderer when the draggable regions are updated.
 IPC_MESSAGE_ROUTED1(ExtensionHostMsg_UpdateDraggableRegions,
@@ -773,6 +778,12 @@ IPC_MESSAGE_ROUTED1(ExtensionHostMsg_OnWatchedPageChange,
 // Sent by the renderer when it has received a Blob handle from the browser.
 IPC_MESSAGE_CONTROL1(ExtensionHostMsg_TransferBlobsAck,
                      std::vector<std::string> /* blob_uuids */)
+
+// Asks the browser to wake the event page of an extension.
+// The browser will reply with ExtensionHostMsg_WakeEventPageResponse.
+IPC_MESSAGE_CONTROL2(ExtensionHostMsg_WakeEventPage,
+                     int /* request_id */,
+                     std::string /* extension_id */)
 
 // Tells listeners that a detailed message was reported to the console by
 // WebKit.

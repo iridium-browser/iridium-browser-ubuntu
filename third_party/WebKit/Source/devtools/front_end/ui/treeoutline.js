@@ -277,11 +277,9 @@ function TreeOutlineInShadow(className)
 
     // Redefine element to the external one.
     this.element = createElement("div");
-
-    this._shadowRoot = this.element.createShadowRoot();
+    this._shadowRoot = WebInspector.createShadowRootWithCoreStyles(this.element);
     this._shadowRoot.appendChild(WebInspector.Widget.createStyleElement("ui/treeoutline.css"));
     this._shadowRoot.appendChild(innerElement);
-    WebInspector.installComponentRootStyles(innerElement);
     this._renderSelection = true;
 }
 
@@ -330,6 +328,7 @@ function TreeElement(title, expandable)
     this.expanded = false;
     this.selected = false;
     this.setExpandable(expandable || false);
+    this._collapsible = true;
 }
 
 /** @const */
@@ -599,10 +598,7 @@ TreeElement.prototype = {
      */
     set tooltip(x)
     {
-        if (x)
-            this._listItemNode.setAttribute("title", x);
-        else
-            this._listItemNode.removeAttribute("title");
+        this._listItemNode.title = x;
     },
 
     /**
@@ -626,6 +622,21 @@ TreeElement.prototype = {
         this._listItemNode.classList.toggle("parent", expandable);
         if (!expandable)
             this.collapse();
+    },
+
+    /**
+     * @param {boolean} collapsible
+     */
+    setCollapsible: function(collapsible)
+    {
+        if (this._collapsible === collapsible)
+            return;
+
+        this._collapsible = collapsible;
+
+        this._listItemNode.classList.toggle("always-parent", !collapsible);
+        if (!collapsible)
+            this.expand();
     },
 
     get hidden()
@@ -752,7 +763,7 @@ TreeElement.prototype = {
 
     collapse: function()
     {
-        if (!this.expanded)
+        if (!this.expanded || !this._collapsible)
             return;
         this._listItemNode.classList.remove("expanded");
         this._childrenListNode.classList.remove("expanded");

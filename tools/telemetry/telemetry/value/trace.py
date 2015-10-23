@@ -11,17 +11,13 @@ import StringIO
 import sys
 import tempfile
 
+from catapult_base import cloud_storage
+from telemetry.internal.util import file_handle
 from telemetry.timeline import trace_data as trace_data_module
-from telemetry.core import util
-from telemetry.util import cloud_storage
-from telemetry.util import file_handle
 from telemetry import value as value_module
 
-# Bring in tv module for transforming raw trace to html form.
-util.AddDirToPythonPath(
-    util.GetChromiumSrcDir(), 'third_party', 'trace-viewer')
+from tracing_build import trace2html
 
-from trace_viewer.build import trace2html  # pylint:disable=import-error
 
 class TraceValue(value_module.Value):
   def __init__(self, page, trace_data, important=False, description=None):
@@ -56,9 +52,9 @@ class TraceValue(value_module.Value):
 
   def __repr__(self):
     if self.page:
-      page_name = self.page.url
+      page_name = self.page.display_name
     else:
-      page_name = None
+      page_name = 'None'
     return 'TraceValue(%s, %s)' % (page_name, self.name)
 
   def CleanUp(self):
@@ -107,8 +103,7 @@ class TraceValue(value_module.Value):
     return values[0]
 
   @classmethod
-  def MergeLikeValuesFromDifferentPages(cls, values,
-                                        group_by_name_suffix=False):
+  def MergeLikeValuesFromDifferentPages(cls, values):
     return None
 
   def AsDict(self):

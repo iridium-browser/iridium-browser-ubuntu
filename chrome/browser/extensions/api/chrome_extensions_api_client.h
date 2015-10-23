@@ -20,14 +20,18 @@ class ChromeExtensionsAPIClient : public ExtensionsAPIClient {
   void AddAdditionalValueStoreCaches(
       content::BrowserContext* context,
       const scoped_refptr<SettingsStorageFactory>& factory,
-      const scoped_refptr<ObserverListThreadSafe<SettingsObserver>>& observers,
+      const scoped_refptr<base::ObserverListThreadSafe<SettingsObserver>>&
+          observers,
       std::map<settings_namespace::Namespace, ValueStoreCache*>* caches)
+      override;
+  void AttachWebContentsHelpers(content::WebContents* web_contents) const
       override;
   AppViewGuestDelegate* CreateAppViewGuestDelegate() const override;
   ExtensionOptionsGuestDelegate* CreateExtensionOptionsGuestDelegate(
       ExtensionOptionsGuest* guest) const override;
-  ExtensionViewGuestDelegate* CreateExtensionViewGuestDelegate(
-      ExtensionViewGuest* guest) const override;
+  scoped_ptr<guest_view::GuestViewManagerDelegate>
+      CreateGuestViewManagerDelegate(
+          content::BrowserContext* context) const override;
   scoped_ptr<MimeHandlerViewGuestDelegate> CreateMimeHandlerViewGuestDelegate(
       MimeHandlerViewGuest* guest) const override;
   WebViewGuestDelegate* CreateWebViewGuestDelegate(

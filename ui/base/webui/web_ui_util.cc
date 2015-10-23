@@ -16,6 +16,7 @@
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/template_expressions.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/font.h"
@@ -38,23 +39,6 @@ std::string GetBitmapDataUrl(const SkBitmap& bitmap) {
   std::string str_url;
   str_url.insert(str_url.end(), output.begin(), output.end());
 
-  base::Base64Encode(str_url, &str_url);
-  str_url.insert(0, "data:image/png;base64,");
-  return str_url;
-}
-
-std::string GetBitmapDataUrlFromResource(int res) {
-  // Load resource icon and covert to base64 encoded data url
-  base::RefCountedStaticMemory* icon_data =
-      ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
-          res, ui::SCALE_FACTOR_100P);
-  if (!icon_data)
-    return std::string();
-  scoped_refptr<base::RefCountedMemory> raw_icon(icon_data);
-  std::string str_url;
-  str_url.insert(str_url.end(),
-    raw_icon->front(),
-    raw_icon->front() + raw_icon->size());
   base::Base64Encode(str_url, &str_url);
   str_url.insert(0, "data:image/png;base64,");
   return str_url;
@@ -136,10 +120,10 @@ void SetLoadTimeDataDefaults(const std::string& app_locale,
 }
 
 std::string GetWebUiCssTextDefaults() {
-  std::vector<std::string> placeholders;
-  placeholders.push_back(GetTextDirection());  // $1
-  placeholders.push_back(GetFontFamily());  // $2
-  placeholders.push_back(GetFontSize());  // $3
+  std::map<base::StringPiece, std::string> placeholders;
+  placeholders["textDirection"] = GetTextDirection();
+  placeholders["fontFamily"] = GetFontFamily();
+  placeholders["fontSize"] = GetFontSize();
 
   const ui::ResourceBundle& resource_bundle =
       ui::ResourceBundle::GetSharedInstance();
@@ -147,7 +131,7 @@ std::string GetWebUiCssTextDefaults() {
       resource_bundle.GetRawDataResource(IDR_WEBUI_CSS_TEXT_DEFAULTS)
           .as_string();
 
-  return ReplaceStringPlaceholders(css_template, placeholders, nullptr);
+  return ui::ReplaceTemplateExpressions(css_template, placeholders);
 }
 
 void AppendWebUiCssTextDefaults(std::string* html) {

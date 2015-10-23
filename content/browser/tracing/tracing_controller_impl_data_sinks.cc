@@ -128,11 +128,24 @@ class StringTraceDataSink : public TracingController::TraceDataSink {
     system_trace_ = data;
   }
 
+  void SetMetadata(const std::string& data) override {
+    metadata_ = data;
+  }
+
+  void SetPowerTrace(const std::string& data) override { power_trace_ = data; }
+
   void Close() override {
     AddTraceChunkAndPassToEndpoint("]");
     if (!system_trace_.empty())
       AddTraceChunkAndPassToEndpoint(",\"systemTraceEvents\": " +
                                      system_trace_);
+    if (!metadata_.empty())
+      AddTraceChunkAndPassToEndpoint(",\"metadata\": " + metadata_);
+    if (!power_trace_.empty()) {
+      AddTraceChunkAndPassToEndpoint(",\"powerTraceAsString\": " +
+                                     power_trace_);
+    }
+
     AddTraceChunkAndPassToEndpoint("}");
 
     endpoint_->ReceiveTraceFinalContents(trace_);
@@ -144,6 +157,8 @@ class StringTraceDataSink : public TracingController::TraceDataSink {
   scoped_refptr<TracingController::TraceDataEndpoint> endpoint_;
   std::string trace_;
   std::string system_trace_;
+  std::string metadata_;
+  std::string power_trace_;
 
   DISALLOW_COPY_AND_ASSIGN(StringTraceDataSink);
 };
@@ -167,6 +182,12 @@ class CompressedStringTraceDataSink : public TracingController::TraceDataSink {
   void SetSystemTrace(const std::string& data) override {
     system_trace_ = data;
   }
+
+  void SetMetadata(const std::string& data) override {
+    metadata_ = data;
+  }
+
+  void SetPowerTrace(const std::string& data) override { power_trace_ = data; }
 
   void Close() override {
     BrowserThread::PostTask(
@@ -255,6 +276,14 @@ class CompressedStringTraceDataSink : public TracingController::TraceDataSink {
       AddTraceChunkAndCompressOnFileThread(
           ",\"systemTraceEvents\": " + system_trace_, false);
     }
+    if (!metadata_.empty()) {
+      AddTraceChunkAndCompressOnFileThread(",\"metadata\": " + metadata_,
+                                           false);
+    }
+    if (!power_trace_.empty()) {
+      AddTraceChunkAndCompressOnFileThread(
+          ",\"powerTraceAsString\": " + power_trace_, false);
+    }
     AddTraceChunkAndCompressOnFileThread("}", true);
 
     deflateEnd(stream_.get());
@@ -268,6 +297,8 @@ class CompressedStringTraceDataSink : public TracingController::TraceDataSink {
   bool already_tried_open_;
   std::string compressed_trace_data_;
   std::string system_trace_;
+  std::string metadata_;
+  std::string power_trace_;
 
   DISALLOW_COPY_AND_ASSIGN(CompressedStringTraceDataSink);
 };
@@ -291,6 +322,12 @@ TracingController::CreateFileSink(const base::FilePath& file_path,
                                   const base::Closure& callback) {
   return new StringTraceDataSink(
       CreateFileEndpoint(file_path, callback));
+}
+
+scoped_refptr<TracingController::TraceDataEndpoint>
+TracingController::CreateCallbackEndpoint(
+    const base::Callback<void(base::RefCountedString*)>& callback) {
+  return new StringTraceDataEndpoint(callback);
 }
 
 scoped_refptr<TracingController::TraceDataEndpoint>

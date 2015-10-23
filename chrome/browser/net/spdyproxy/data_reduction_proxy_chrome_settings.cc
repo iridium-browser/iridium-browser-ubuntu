@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/base64.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_service.h"
@@ -15,7 +16,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
-#include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
@@ -24,7 +24,9 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/core/browser/data_store.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "components/proxy_config/proxy_prefs.h"
 #include "net/base/host_port_pair.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_list.h"
@@ -42,8 +44,9 @@ bool ContainsDataReductionProxyDefaultHostSuffix(
     const net::ProxyList& proxy_list) {
   for (const net::ProxyServer& proxy : proxy_list.GetAll()) {
     if (proxy.is_valid() && !proxy.is_direct() &&
-        EndsWith(proxy.host_port_pair().host(),
-                 kDataReductionProxyDefaultHostSuffix, true)) {
+        base::EndsWith(proxy.host_port_pair().host(),
+                       kDataReductionProxyDefaultHostSuffix,
+                       base::CompareCase::SENSITIVE)) {
       return true;
     }
   }
@@ -67,7 +70,8 @@ bool GetEmbeddedPacScript(const std::string& pac_url, std::string* pac_script) {
   DCHECK(pac_script);
   const std::string kPacURLPrefix =
       "data:application/x-ns-proxy-autoconfig;base64,";
-  return StartsWithASCII(pac_url, kPacURLPrefix, true) &&
+  return base::StartsWith(pac_url, kPacURLPrefix,
+                          base::CompareCase::SENSITIVE) &&
          base::Base64Decode(pac_url.substr(kPacURLPrefix.size()), pac_script);
 }
 
@@ -175,7 +179,9 @@ void DataReductionProxyChromeSettings::InitDataReductionProxySettings(
     data_reduction_proxy::DataReductionProxyIOData* io_data,
     PrefService* profile_prefs,
     net::URLRequestContextGetter* request_context_getter,
-    const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner) {
+    scoped_ptr<data_reduction_proxy::DataStore> store,
+    const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner,
+    const scoped_refptr<base::SequencedTaskRunner>& db_task_runner) {
 #if defined(OS_ANDROID) || defined(OS_IOS)
   // On mobile we write Data Reduction Proxy prefs directly to the pref service.
   // On desktop we store Data Reduction Proxy prefs in memory, writing to disk
@@ -187,14 +193,11 @@ void DataReductionProxyChromeSettings::InitDataReductionProxySettings(
   base::TimeDelta commit_delay = base::TimeDelta::FromMinutes(60);
 #endif
 
-  scoped_ptr<data_reduction_proxy::DataReductionProxyCompressionStats>
-      compression_stats = make_scoped_ptr(
-          new data_reduction_proxy::DataReductionProxyCompressionStats(
-              profile_prefs, ui_task_runner, commit_delay));
   scoped_ptr<data_reduction_proxy::DataReductionProxyService> service =
       make_scoped_ptr(new data_reduction_proxy::DataReductionProxyService(
-          compression_stats.Pass(), this, profile_prefs, request_context_getter,
-          io_data->io_task_runner()));
+          this, profile_prefs, request_context_getter, store.Pass(),
+          ui_task_runner, io_data->io_task_runner(), db_task_runner,
+          commit_delay));
   data_reduction_proxy::DataReductionProxySettings::
       InitDataReductionProxySettings(profile_prefs, io_data, service.Pass());
   io_data->SetDataReductionProxyService(
@@ -204,9 +207,6 @@ void DataReductionProxyChromeSettings::InitDataReductionProxySettings(
       SetCallbackToRegisterSyntheticFieldTrial(
           base::Bind(
               &ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial));
-  SetDataReductionProxyAlternativeEnabled(
-      data_reduction_proxy::DataReductionProxyParams::
-          IsIncludedInAlternativeFieldTrial());
   // TODO(bengr): Remove after M46. See http://crbug.com/445599.
   MigrateDataReductionProxyOffProxyPrefs(profile_prefs);
 }

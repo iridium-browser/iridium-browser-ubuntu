@@ -402,7 +402,7 @@
       # GN version: //chrome:packed_resources
       'target_name': 'packed_resources',
       'type': 'none',
-      'dependencies': [
+      'dependencies': [  # Update duplicate logic in repack_locales.py
         # MSVS needs the dependencies explictly named, Make is able to
         # derive the dependencies from the output files.
         'chrome_resources',
@@ -437,16 +437,23 @@
         {
           'includes': ['chrome_repack_chrome_200_percent.gypi']
         },
+        {
+          'includes': ['chrome_repack_chrome_material_100_percent.gypi']
+        },
+        {
+          'includes': ['chrome_repack_chrome_material_200_percent.gypi']
+        },
       ],
-      'conditions': [
+      'conditions': [  # GN version: chrome_repack_locales.gni template("_repack_one_locale")
         ['OS != "ios"', {
-          'dependencies': [
+          'dependencies': [  # Update duplicate logic in repack_locales.py
             '<(DEPTH)/content/app/resources/content_resources.gyp:content_resources',
             '<(DEPTH)/content/app/strings/content_strings.gyp:content_strings',
+            '<(DEPTH)/device/bluetooth/bluetooth_strings.gyp:bluetooth_strings',
             '<(DEPTH)/third_party/WebKit/public/blink_resources.gyp:blink_resources',
           ],
         }, {  # else
-          'dependencies': [
+          'dependencies': [  # Update duplicate logic in repack_locales.py
             '<(DEPTH)/ios/chrome/ios_chrome_resources.gyp:ios_strings_resources_gen',
           ],
           'actions': [
@@ -456,27 +463,36 @@
           ],
         }],
         ['use_ash==1', {
-          'dependencies': [
+          'dependencies': [  # Update duplicate logic in repack_locales.py
              '<(DEPTH)/ash/ash_resources.gyp:ash_resources',
              '<(DEPTH)/ash/ash_strings.gyp:ash_strings',
           ],
         }],
-        ['chromeos==1', {
+        ['toolkit_views==1', {
           'dependencies': [
+             '<(DEPTH)/ui/views/resources/views_resources.gyp:views_resources',
+          ],
+        }],
+        ['chromeos==1', {
+          'dependencies': [  # Update duplicate logic in repack_locales.py
             '<(DEPTH)/remoting/remoting.gyp:remoting_resources',
             '<(DEPTH)/ui/chromeos/ui_chromeos.gyp:ui_chromeos_resources',
             '<(DEPTH)/ui/chromeos/ui_chromeos.gyp:ui_chromeos_strings',
           ],
         }],
         ['enable_autofill_dialog==1 and OS!="android"', {
-          'dependencies': [
+          'dependencies': [  # Update duplicate logic in repack_locales.py
             '<(DEPTH)/third_party/libaddressinput/libaddressinput.gyp:libaddressinput_strings',
           ],
         }],
         ['enable_extensions==1', {
-          'dependencies': [
-            '<(DEPTH)/device/bluetooth/bluetooth_strings.gyp:device_bluetooth_strings',
+          'dependencies': [  # Update duplicate logic in repack_locales.py
             '<(DEPTH)/extensions/extensions_strings.gyp:extensions_strings',
+          ],
+        }],
+        ['enable_app_list==1', {
+          'dependencies': [
+             '<(DEPTH)/ui/app_list/resources/app_list_resources.gyp:app_list_resources',
           ],
         }],
         ['OS != "mac" and OS != "ios"', {
@@ -533,6 +549,26 @@
                 },
               ],
             }],
+            ['enable_topchrome_md == 1', {
+              'copies': [
+                {
+                  'destination': '<(PRODUCT_DIR)',
+                  'files': [
+                    '<(SHARED_INTERMEDIATE_DIR)/repack/chrome_material_100_percent.pak',
+                  ],
+                },
+              ],
+            }],
+            ['enable_hidpi == 1 and enable_topchrome_md == 1', {
+              'copies': [
+                {
+                  'destination': '<(PRODUCT_DIR)',
+                  'files': [
+                    '<(SHARED_INTERMEDIATE_DIR)/repack/chrome_material_200_percent.pak',
+                  ],
+                },
+              ],
+            }],
           ], # conditions
         }], # end OS != "mac" and OS != "ios"
       ], # conditions
@@ -568,11 +604,27 @@
       'includes': [ '../build/grit_target.gypi' ],
     },
     {
+      # GN version: //chrome/test/data/resources:webui_test_resources
+      'target_name': 'webui_test_resources',
+      'type': 'none',
+      'actions': [
+        {
+          'action_name': 'generate_webui_test_resources',
+          'variables': {
+            'grit_grd_file': 'test/data/webui_test_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+      ],
+      'includes': [ '../build/grit_target.gypi' ],
+    },
+    {
       # GN version: //chrome:browser_tests_pak
       'target_name': 'browser_tests_pak',
       'type': 'none',
       'dependencies': [
         'options_test_resources',
+        'webui_test_resources',
       ],
       'actions': [
         {
@@ -580,6 +632,7 @@
           'variables': {
             'pak_inputs': [
               '<(SHARED_INTERMEDIATE_DIR)/chrome/options_test_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/chrome/webui_test_resources.pak',
             ],
             'pak_output': '<(PRODUCT_DIR)/browser_tests.pak',
           },

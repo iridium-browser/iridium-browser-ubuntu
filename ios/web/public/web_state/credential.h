@@ -13,7 +13,7 @@ namespace web {
 // Indicates the specific type of a Credential object.
 enum CredentialType {
   CREDENTIAL_TYPE_EMPTY = 0,
-  CREDENTIAL_TYPE_LOCAL,
+  CREDENTIAL_TYPE_PASSWORD,
   CREDENTIAL_TYPE_FEDERATED,
   CREDENTIAL_TYPE_LAST = CREDENTIAL_TYPE_FEDERATED
 };
@@ -41,6 +41,10 @@ struct Credential {
   // The federation URL for a federated credential.
   GURL federation_url;
 };
+
+// Determines whether two credentials are equal.
+bool CredentialsEqual(const web::Credential& credential1,
+                      const web::Credential& credential2);
 
 }  // namespace web
 

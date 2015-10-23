@@ -131,18 +131,16 @@ Examples:
         '--install', default=False, action='store_true',
         help='Install to the USB device using the base disk layout.')
 
-  def _HandleException(self, exception):
-    """Perform common logging and cleanup for exceptions."""
-    logging.error(exception)
-    logging.error('cros flash failed before completing.')
-    if self.options.debug:
-      raise exception
-    else:
-      raise SystemExit(1)
-
   def Run(self):
     """Perfrom the cros flash command."""
     self.options.Freeze()
+
+    # For brillo flash, enter the chroot to ensure a consistent environment. We
+    # only do this for brillo because some cros workflows do not want to use the
+    # chroot.
+    if command.GetToolset() == 'brillo':
+      commandline.RunInsideChroot(self)
+
     try:
       flash.Flash(
           self.options.device,
@@ -165,12 +163,9 @@ Examples:
           yes=self.options.yes,
           force=self.options.force,
           debug=self.options.debug)
-    except dev_server_wrapper.ImagePathError as e:
+      logging.notice('cros flash completed successfully.')
+    except dev_server_wrapper.ImagePathError:
       logging.error('To get the latest remote image, please run:\n'
                     'cros flash --board=%s %s remote/latest',
                     self.options.board, self.options.device.raw)
-      self._HandleException(e)
-    except Exception as e:
-      self._HandleException(e)
-    else:
-      logging.info('cros flash completed successfully.')
+      raise

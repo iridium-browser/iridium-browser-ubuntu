@@ -5,8 +5,6 @@
 #ifndef V8_LITHIUM_CODEGEN_H_
 #define V8_LITHIUM_CODEGEN_H_
 
-#include "src/v8.h"
-
 #include "src/bailout-reason.h"
 #include "src/compiler.h"
 #include "src/deoptimizer.h"
@@ -14,6 +12,7 @@
 namespace v8 {
 namespace internal {
 
+class LEnvironment;
 class LInstruction;
 class LPlatformChunk;
 
@@ -50,6 +49,10 @@ class LCodeGenBase BASE_EMBEDDED {
 
   void RegisterWeakObjectsInOptimizedCode(Handle<Code> code);
 
+  void WriteTranslationFrame(LEnvironment* environment,
+                             Translation* translation);
+  int DefineDeoptimizationLiteral(Handle<Object> literal);
+
   // Check that an environment assigned via AssignEnvironment is actually being
   // used. Redundant assignments keep things alive longer than necessary, and
   // consequently lead to worse code, so it's important to minimize this.
@@ -71,6 +74,7 @@ class LCodeGenBase BASE_EMBEDDED {
   int current_block_;
   int current_instruction_;
   const ZoneList<LInstruction*>* instructions_;
+  ZoneList<Handle<Object> > deoptimization_literals_;
   int last_lazy_deopt_pc_;
 
   bool is_unused() const { return status_ == UNUSED; }

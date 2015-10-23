@@ -402,7 +402,11 @@ class IdlException(IdlInterface):
             elif child_class == 'Const':
                 self.constants.append(IdlConstant(idl_name, child))
             elif child_class == 'ExtAttributes':
-                self.extended_attributes = ext_attributes_node_to_extended_attributes(idl_name, child)
+                extended_attributes = ext_attributes_node_to_extended_attributes(idl_name, child)
+                self.constructors, self.custom_constructors = (
+                    extended_attributes_to_constructors(idl_name, extended_attributes))
+                clear_constructor_attributes(extended_attributes)
+                self.extended_attributes = extended_attributes
             elif child_class == 'ExceptionOperation':
                 self.operations.append(IdlOperation.from_exception_operation_node(idl_name, child))
             else:
@@ -885,9 +889,12 @@ def ext_attributes_node_to_extended_attributes(idl_name, node):
         elif name == 'SetWrapperReferenceTo':
             if not child:
                 raise ValueError('[SetWrapperReferenceTo] requires a child, but has none.')
+            children = child.GetChildren()
+            if len(children) != 1:
+                raise ValueError('[SetWrapperReferenceTo] supports only one child.')
             if child_class != 'Arguments':
                 raise ValueError('[SetWrapperReferenceTo] only supports Arguments as child, but has child of class: %s' % child_class)
-            extended_attributes[name] = arguments_node_to_arguments(idl_name, child)
+            extended_attributes[name] = IdlArgument(idl_name, children[0])
         elif name == 'Exposed':
             if child_class and child_class != 'Arguments':
                 raise ValueError('[Exposed] only supports Arguments as child, but has child of class: %s' % child_class)

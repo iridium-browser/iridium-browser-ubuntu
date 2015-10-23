@@ -53,6 +53,10 @@ namespace gfx {
 class ImageSkia;
 }
 
+namespace mojo {
+class ApplicationDelegate;
+}
+
 namespace net {
 class CookieOptions;
 class NetLog;
@@ -213,7 +217,16 @@ class CONTENT_EXPORT ContentBrowserClient {
   // more conservative check than IsSuitableHost, since it is used after a
   // navigation has committed to ensure that the process did not exceed its
   // authority.
+  // This is called on the UI thread.
   virtual bool CanCommitURL(RenderProcessHost* process_host, const GURL& url);
+
+  // Returns true if no URL within |origin| is allowed to commit in the given
+  // process.  Must return false if there exists at least one URL in |origin|
+  // that is allowed to commit.
+  // This is called on the IO thread.
+  virtual bool IsIllegalOrigin(ResourceContext* resource_context,
+                               int child_process_id,
+                               const GURL& origin);
 
   // Returns whether a URL should be allowed to open from a specific context.
   // This also applies in cases where the new URL will open in another process.
@@ -348,6 +361,15 @@ class CONTENT_EXPORT ContentBrowserClient {
       ResourceContext* context,
       const std::vector<std::pair<int, int> >& render_frames);
 
+#if defined(ENABLE_WEBRTC)
+  // Allow the embedder to control if WebRTC identities are allowed to be cached
+  // and potentially reused for future requests (within the same origin).
+  // This is called on the IO thread.
+  virtual bool AllowWebRTCIdentityCache(const GURL& url,
+                                        const GURL& first_party_url,
+                                        ResourceContext* context);
+#endif  // defined(ENABLE_WEBRTC)
+
   // Allow the embedder to override the request context based on the URL for
   // certain operations, like cookie access. Returns nullptr to indicate the
   // regular request context should be used.
@@ -455,7 +477,8 @@ class CONTENT_EXPORT ContentBrowserClient {
                                bool opener_suppressed,
                                ResourceContext* context,
                                int render_process_id,
-                               int opener_id,
+                               int opener_render_view_id,
+                               int opener_render_frame_id,
                                bool* no_javascript_access);
 
   // Notifies the embedder that the ResourceDispatcherHost has been created.
@@ -499,6 +522,9 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Returns the default filename used in downloads when we have no idea what
   // else we should do with the file.
   virtual std::string GetDefaultDownloadName();
+
+  // Returns the path to the browser shader disk cache root.
+  virtual base::FilePath GetShaderDiskCacheDirectory();
 
   // Notification that a pepper plugin has just been spawned. This allows the
   // embedder to add filters onto the host to implement interfaces.
@@ -557,6 +583,9 @@ class CONTENT_EXPORT ContentBrowserClient {
   // It's valid to return nullptr.
   virtual TracingDelegate* GetTracingDelegate();
 
+  // Returns true if NPAPI plugins are enabled.
+  virtual bool IsNPAPIEnabled();
+
   // Returns true if plugin referred to by the url can use
   // pp::FileIO::RequestOSFileHandle.
   virtual bool IsPluginAllowedToCallRequestOSFileHandle(
@@ -568,15 +597,34 @@ class CONTENT_EXPORT ContentBrowserClient {
       BrowserContext* browser_context,
       const GURL& url);
 
-  // Allows to override browser Mojo services exposed through the
+  // Allows to register browser Mojo services exposed through the
   // RenderProcessHost.
-  virtual void OverrideRenderProcessMojoServices(ServiceRegistry* registry) {}
+  virtual void RegisterRenderProcessMojoServices(ServiceRegistry* registry) {}
 
-  // Allows to override browser Mojo services exposed through the
-  // RenderFrameHost.
-  virtual void OverrideRenderFrameMojoServices(
+  // Allows to register browser Mojo services exposed through the
+  // FrameMojoShell.
+  virtual void RegisterFrameMojoShellServices(
       ServiceRegistry* registry,
       RenderFrameHost* render_frame_host) {}
+
+  using StaticMojoApplicationMap =
+      std::map<GURL, base::Callback<scoped_ptr<mojo::ApplicationDelegate>()>>;
+
+  // Registers Mojo applications to be loaded in the browser process by the
+  // browser's global Mojo shell.
+  virtual void RegisterInProcessMojoApplications(
+      StaticMojoApplicationMap* apps) {}
+
+  // Registers Mojo applications to be loaded out of the browser process (in
+  // a utility process) without the sandbox. By default, the utility process
+  // thats runs Mojo applications are sandboxed.
+  //
+  // WARNING: This path is NOT recommended! If a Mojo application needs a
+  // service that is only available out of the sandbox, it could ask the browser
+  // process to provide it (e.g. through OverrideFrameMojoShellServices()). Only
+  // use this method when that approach does not work.
+  virtual void RegisterUnsandboxedOutOfProcessMojoApplications(
+      std::vector<GURL>* urls) {}
 
   // Registers additional navigator.connect service factories available in a
   // particular NavigatorConnectContext.
@@ -604,14 +652,20 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Allows the embedder to record |metric| for a specific |url|.
   virtual void RecordURLMetric(const std::string& metric, const GURL& url) {}
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Populates |mappings| with all files that need to be mapped before launching
   // a child process.
+#if defined(OS_ANDROID)
   virtual void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
-      FileDescriptorInfo* mappings) {}
-#endif
+      content::FileDescriptorInfo* mappings,
+      std::map<int, base::MemoryMappedFile::Region>* regions) {}
+#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+  virtual void GetAdditionalMappedFilesForChildProcess(
+      const base::CommandLine& command_line,
+      int child_process_id,
+      content::FileDescriptorInfo* mappings) {}
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)
   // Returns the name of the dll that contains cursors and other resources.
@@ -622,6 +676,12 @@ class CONTENT_EXPORT ContentBrowserClient {
   // policy.
   virtual void PreSpawnRenderer(sandbox::TargetPolicy* policy,
                                 bool* success) {}
+
+  // Returns the AppContainer SID for the specified sandboxed process type, or
+  // empty string if this sandboxed process type does not support living inside
+  // an AppContainer.
+  virtual base::string16 GetAppContainerSidForSandboxType(
+      int sandbox_type) const;
 #endif
 
 #if defined(VIDEO_HOLE)

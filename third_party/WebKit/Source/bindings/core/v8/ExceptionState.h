@@ -36,6 +36,7 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/V8ThrowException.h"
 #include "core/CoreExport.h"
+#include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/text/WTFString.h"
 #include <v8.h>
@@ -43,10 +44,12 @@
 namespace blink {
 
 typedef int ExceptionCode;
+class ScriptPromiseResolver;
 class ScriptState;
 
 class CORE_EXPORT ExceptionState {
     WTF_MAKE_NONCOPYABLE(ExceptionState);
+    WTF_MAKE_FAST_ALLOCATED(ExceptionState);
 public:
     enum Context {
         ConstructionContext,
@@ -100,6 +103,9 @@ public:
     // This method clears out the exception which |this| has.
     ScriptPromise reject(ScriptState*);
 
+    // This method clears out the exception which |this| has.
+    void reject(ScriptPromiseResolver*);
+
     Context context() const { return m_context; }
     const char* propertyName() const { return m_propertyName; }
     const char* interfaceName() const { return m_interfaceName; }
@@ -136,22 +142,24 @@ private:
 
 // Used if exceptions can/should not be directly thrown.
 class CORE_EXPORT NonThrowableExceptionState final : public ExceptionState {
+    WTF_MAKE_NONCOPYABLE(NonThrowableExceptionState);
 public:
     NonThrowableExceptionState(): ExceptionState(ExceptionState::UnknownContext, 0, 0, v8::Local<v8::Object>(), v8::Isolate::GetCurrent()) { }
-    virtual void throwDOMException(const ExceptionCode&, const String& message) override;
-    virtual void throwTypeError(const String& message = String()) override;
-    virtual void throwSecurityError(const String& sanitizedMessage, const String& unsanitizedMessage = String()) override;
-    virtual void throwRangeError(const String& message) override;
+    void throwDOMException(const ExceptionCode&, const String& message) override;
+    void throwTypeError(const String& message = String()) override;
+    void throwSecurityError(const String& sanitizedMessage, const String& unsanitizedMessage = String()) override;
+    void throwRangeError(const String& message) override;
 };
 
 // Used if any exceptions thrown are ignorable.
 class CORE_EXPORT TrackExceptionState final : public ExceptionState {
+    WTF_MAKE_NONCOPYABLE(TrackExceptionState);
 public:
     TrackExceptionState(): ExceptionState(ExceptionState::UnknownContext, 0, 0, v8::Local<v8::Object>(), v8::Isolate::GetCurrent()) { }
-    virtual void throwDOMException(const ExceptionCode&, const String& message) override;
-    virtual void throwTypeError(const String& message = String()) override;
-    virtual void throwSecurityError(const String& sanitizedMessage, const String& unsanitizedMessage = String()) override;
-    virtual void throwRangeError(const String& message) override;
+    void throwDOMException(const ExceptionCode&, const String& message) override;
+    void throwTypeError(const String& message = String()) override;
+    void throwSecurityError(const String& sanitizedMessage, const String& unsanitizedMessage = String()) override;
+    void throwRangeError(const String& message) override;
 };
 
 } // namespace blink

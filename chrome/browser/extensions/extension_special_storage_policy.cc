@@ -11,11 +11,11 @@
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/manifest_handlers/app_isolation_info.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/url_constants.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/browser/browser_context.h"
@@ -25,6 +25,7 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
+#include "extensions/common/manifest_handlers/app_isolation_info.h"
 #include "extensions/common/manifest_handlers/content_capabilities_handler.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "storage/browser/quota/quota_manager.h"
@@ -62,9 +63,9 @@ void LogHostedAppUnlimitedStorageUsage(
     // We only have to query for kStorageTypePersistent data usage, because apps
     // cannot ask for any more temporary storage, according to
     // https://developers.google.com/chrome/whitepapers/storage.
-    BrowserThread::PostTask(
-        BrowserThread::IO,
+    BrowserThread::PostAfterStartupTask(
         FROM_HERE,
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
         base::Bind(&storage::QuotaManager::GetUsageAndQuotaForWebApps,
                    partition->GetQuotaManager(),
                    launch_url,
@@ -76,8 +77,9 @@ void LogHostedAppUnlimitedStorageUsage(
 }  // namespace
 
 ExtensionSpecialStoragePolicy::ExtensionSpecialStoragePolicy(
-    CookieSettings* cookie_settings)
-    : cookie_settings_(cookie_settings) {}
+    content_settings::CookieSettings* cookie_settings)
+    : cookie_settings_(cookie_settings) {
+}
 
 ExtensionSpecialStoragePolicy::~ExtensionSpecialStoragePolicy() {}
 
@@ -132,6 +134,10 @@ bool ExtensionSpecialStoragePolicy::HasSessionOnlyOrigins() {
 bool ExtensionSpecialStoragePolicy::HasIsolatedStorage(const GURL& origin) {
   base::AutoLock locker(lock_);
   return isolated_extensions_.Contains(origin);
+}
+
+bool ExtensionSpecialStoragePolicy::IsStorageDurable(const GURL& origin) {
+  return cookie_settings_->IsStorageDurable(origin);
 }
 
 bool ExtensionSpecialStoragePolicy::NeedsProtection(

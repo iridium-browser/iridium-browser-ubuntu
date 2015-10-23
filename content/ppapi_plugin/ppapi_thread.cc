@@ -19,6 +19,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "content/child/browser_font_resource_trusted.h"
 #include "content/child/child_discardable_shared_memory_manager.h"
 #include "content/child/child_process.h"
@@ -175,8 +176,8 @@ void PpapiThread::OnChannelConnected(int32 peer_pid) {
 #endif
 }
 
-base::MessageLoopProxy* PpapiThread::GetIPCMessageLoop() {
-  return ChildProcess::current()->io_message_loop_proxy();
+base::SingleThreadTaskRunner* PpapiThread::GetIPCTaskRunner() {
+  return ChildProcess::current()->io_task_runner();
 }
 
 base::WaitableEvent* PpapiThread::GetShutdownEvent() {
@@ -199,6 +200,29 @@ IPC::PlatformFileForTransit PpapiThread::ShareHandleWithRemote(
   return BrokerGetFileHandleForProcess(handle, peer_pid, should_close_source);
 }
 
+base::SharedMemoryHandle PpapiThread::ShareSharedMemoryHandleWithRemote(
+    const base::SharedMemoryHandle& handle,
+    base::ProcessId remote_pid) {
+#if defined(OS_WIN)
+  if (peer_handle_.IsValid()) {
+    DCHECK(is_broker_);
+    return IPC::GetFileHandleForProcess(handle, peer_handle_.Get(), false);
+  }
+#endif
+
+  DCHECK(remote_pid != base::kNullProcessId);
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  base::SharedMemoryHandle duped_handle;
+  bool success =
+      BrokerDuplicateSharedMemoryHandle(handle, remote_pid, &duped_handle);
+  if (success)
+    return duped_handle;
+  return base::SharedMemory::NULLHandle();
+#else
+  return base::SharedMemory::DuplicateHandle(handle);
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+}
+
 std::set<PP_Instance>* PpapiThread::GetGloballySeenInstanceIDSet() {
   return &globally_seen_instance_ids_;
 }
@@ -212,7 +236,7 @@ std::string PpapiThread::GetUILanguage() {
   return command_line->GetSwitchValueASCII(switches::kLang);
 }
 
-void PpapiThread::PreCacheFont(const void* logfontw) {
+void PpapiThread::PreCacheFontForFlash(const void* logfontw) {
 #if defined(OS_WIN)
   ChildThreadImpl::PreCacheFont(*static_cast<const LOGFONTW*>(logfontw));
 #endif
@@ -284,7 +308,16 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
   if (plugin_entry_points_.initialize_module == NULL) {
     // Load the plugin from the specified library.
     base::NativeLibraryLoadError error;
-    library.Reset(base::LoadNativeLibrary(path, &error));
+    base::TimeDelta load_time;
+    {
+      TRACE_EVENT1("ppapi", "PpapiThread::LoadPlugin", "path",
+                   path.MaybeAsASCII());
+
+      base::TimeTicks start = base::TimeTicks::Now();
+      library.Reset(base::LoadNativeLibrary(path, &error));
+      load_time = base::TimeTicks::Now() - start;
+    }
+
     if (!library.is_valid()) {
       LOG(ERROR) << "Failed to load Pepper module from " << path.value()
                  << " (error: " << error.ToString() << ")";
@@ -297,6 +330,9 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
       ReportLoadErrorCode(path, error);
       return;
     }
+
+    // Only report load time for success loads.
+    ReportLoadTime(path, load_time);
 
     // Get the GetInterface function (required).
     plugin_entry_points_.get_interface =
@@ -367,12 +403,6 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
     rand_s(&dummy_rand);
 
     WarmupWindowsLocales(permissions);
-
-#if defined(ADDRESS_SANITIZER)
-    // Bind and leak dbghelp.dll before the token is lowered, otherwise
-    // AddressSanitizer will crash when trying to symbolize a report.
-    LoadLibraryA("dbghelp.dll");
-#endif
 
     g_target_services->LowerToken();
   }
@@ -528,17 +558,21 @@ void PpapiThread::SavePluginName(const base::FilePath& path) {
   }
 }
 
+static std::string GetHistogramName(bool is_broker,
+                                    const std::string& metric_name,
+                                    const base::FilePath& path) {
+  return std::string("Plugin.Ppapi") + (is_broker ? "Broker" : "Plugin") +
+         metric_name + "_" + path.BaseName().MaybeAsASCII();
+}
+
 void PpapiThread::ReportLoadResult(const base::FilePath& path,
                                    LoadResult result) {
   DCHECK_LT(result, LOAD_RESULT_MAX);
-  std::string histogram_name = std::string("Plugin.Ppapi") +
-                               (is_broker_ ? "Broker" : "Plugin") +
-                               "LoadResult_" + path.BaseName().MaybeAsASCII();
 
   // Note: This leaks memory, which is expected behavior.
   base::HistogramBase* histogram =
       base::LinearHistogram::FactoryGet(
-          histogram_name,
+          GetHistogramName(is_broker_, "LoadResult", path),
           1,
           LOAD_RESULT_MAX,
           LOAD_RESULT_MAX + 1,
@@ -550,17 +584,28 @@ void PpapiThread::ReportLoadResult(const base::FilePath& path,
 void PpapiThread::ReportLoadErrorCode(
     const base::FilePath& path,
     const base::NativeLibraryLoadError& error) {
+// Only report load error code on Windows because that's the only platform that
+// has a numerical error value.
 #if defined(OS_WIN)
-  // Only report load error code on Windows because that's the only platform
-  // that has a numerical error value.
-  std::string histogram_name =
-      std::string("Plugin.Ppapi") + (is_broker_ ? "Broker" : "Plugin") +
-      "LoadErrorCode_" + path.BaseName().MaybeAsASCII();
-
   // For sparse histograms, we can use the macro, as it does not incorporate a
   // static.
-  UMA_HISTOGRAM_SPARSE_SLOWLY(histogram_name, error.code);
+  UMA_HISTOGRAM_SPARSE_SLOWLY(
+      GetHistogramName(is_broker_, "LoadErrorCode", path), error.code);
 #endif
+}
+
+void PpapiThread::ReportLoadTime(const base::FilePath& path,
+                                 const base::TimeDelta load_time) {
+  // Note: This leaks memory, which is expected behavior.
+  base::HistogramBase* histogram =
+      base::Histogram::FactoryTimeGet(
+          GetHistogramName(is_broker_, "LoadTime", path),
+          base::TimeDelta::FromMilliseconds(1),
+          base::TimeDelta::FromSeconds(10),
+          50,
+          base::HistogramBase::kUmaTargetedHistogramFlag);
+
+  histogram->AddTime(load_time);
 }
 
 }  // namespace content

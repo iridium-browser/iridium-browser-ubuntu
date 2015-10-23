@@ -9,7 +9,6 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/port.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
@@ -25,6 +24,7 @@
 #include "chrome/browser/chromeos/policy/remote_commands/device_commands_factory_chromeos.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
 #include "chrome/browser/chromeos/policy/status_uploader.h"
+#include "chrome/browser/chromeos/policy/system_log_uploader.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_constants.h"
 #include "chromeos/chromeos_switches.h"
@@ -190,6 +190,7 @@ bool DeviceCloudPolicyManagerChromeOS::IsSharkRequisition() const {
 
 void DeviceCloudPolicyManagerChromeOS::Shutdown() {
   status_uploader_.reset();
+  syslog_uploader_.reset();
   heartbeat_scheduler_.reset();
   state_keys_update_subscription_.reset();
   CloudPolicyManager::Shutdown();
@@ -254,11 +255,11 @@ void DeviceCloudPolicyManagerChromeOS::StartConnection(
   // the monitoring settings and only perform monitoring if it is active.
   if (install_attributes->IsEnterpriseDevice()) {
     CreateStatusUploader();
-    heartbeat_scheduler_.reset(
-        new HeartbeatScheduler(g_browser_process->gcm_driver(),
-                               install_attributes->GetDomain(),
-                               install_attributes->GetDeviceId(),
-                               task_runner_));
+    syslog_uploader_.reset(new SystemLogUploader(nullptr, task_runner_));
+    heartbeat_scheduler_.reset(new HeartbeatScheduler(
+        g_browser_process->gcm_driver(), client(),
+        install_attributes->GetDomain(), install_attributes->GetDeviceId(),
+        task_runner_));
   }
 
   NotifyConnected();
@@ -278,6 +279,7 @@ void DeviceCloudPolicyManagerChromeOS::Unregister(
 
 void DeviceCloudPolicyManagerChromeOS::Disconnect() {
   status_uploader_.reset();
+  syslog_uploader_.reset();
   heartbeat_scheduler_.reset();
   core()->Disconnect();
 
@@ -338,7 +340,8 @@ void DeviceCloudPolicyManagerChromeOS::CreateStatusUploader() {
           local_state_, chromeos::system::StatisticsProvider::GetInstance(),
           DeviceStatusCollector::LocationUpdateRequester(),
           DeviceStatusCollector::VolumeInfoFetcher(),
-          DeviceStatusCollector::CPUStatisticsFetcher())),
+          DeviceStatusCollector::CPUStatisticsFetcher(),
+          DeviceStatusCollector::CPUTempFetcher())),
       task_runner_));
 }
 

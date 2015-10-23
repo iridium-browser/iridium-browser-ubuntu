@@ -85,8 +85,11 @@ void ContainerNode::removeDetachedChildren()
 
 void ContainerNode::parserTakeAllChildrenFrom(ContainerNode& oldParent)
 {
-    while (RefPtrWillBeRawPtr<Node> child = oldParent.firstChild())
+    while (RefPtrWillBeRawPtr<Node> child = oldParent.firstChild()) {
+        // Explicitly remove since appending can fail, but this loop shouldn't be infinite.
+        oldParent.parserRemoveChild(*child);
         parserAppendChild(child.get());
+    }
 }
 
 ContainerNode::~ContainerNode()
@@ -142,27 +145,19 @@ bool ContainerNode::checkAcceptChild(const Node* newChild, const Node* oldChild,
         return false;
     }
 
-    if (containsConsideringHostElements(*newChild)) {
-        exceptionState.throwDOMException(HierarchyRequestError, "The new child element contains the parent.");
-        return false;
-    }
-
-    if (isDocumentNode())
-        return toDocument(this)->canAcceptChild(*newChild, oldChild, exceptionState);
-
-    if (!isChildTypeAllowed(*newChild)) {
-        exceptionState.throwDOMException(HierarchyRequestError, "Nodes of type '" + newChild->nodeName() + "' may not be inserted inside nodes of type '" + nodeName() + "'.");
-        return false;
-    }
-
-    return true;
+    return checkAcceptChildGuaranteedNodeTypes(*newChild, oldChild, exceptionState);
 }
 
-bool ContainerNode::checkAcceptChildGuaranteedNodeTypes(const Node& newChild, ExceptionState& exceptionState) const
+bool ContainerNode::checkAcceptChildGuaranteedNodeTypes(const Node& newChild, const Node* oldChild, ExceptionState& exceptionState) const
 {
-    ASSERT(isChildTypeAllowed(newChild));
-    if (newChild.contains(this)) {
+    if (isDocumentNode())
+        return toDocument(this)->canAcceptChild(newChild, oldChild, exceptionState);
+    if (newChild.containsIncludingHostElements(*this)) {
         exceptionState.throwDOMException(HierarchyRequestError, "The new child element contains the parent.");
+        return false;
+    }
+    if (!isChildTypeAllowed(newChild)) {
+        exceptionState.throwDOMException(HierarchyRequestError, "Nodes of type '" + newChild.nodeName() + "' may not be inserted inside nodes of type '" + nodeName() + "'.");
         return false;
     }
     return true;
@@ -211,7 +206,7 @@ PassRefPtrWillBeRawPtr<Node> ContainerNode::insertBefore(PassRefPtrWillBeRawPtr<
         return newChild;
 
     // We need this extra check because collectChildrenAndRemoveFromOldParent() can fire mutation events.
-    if (!checkAcceptChildGuaranteedNodeTypes(*newChild, exceptionState)) {
+    if (!checkAcceptChildGuaranteedNodeTypes(*newChild, nullptr, exceptionState)) {
         if (exceptionState.hadException())
             return nullptr;
         return newChild;
@@ -289,6 +284,15 @@ void ContainerNode::appendChildCommon(Node& child)
     setLastChild(&child);
 }
 
+bool ContainerNode::checkParserAcceptChild(const Node& newChild) const
+{
+    if (!isDocumentNode())
+        return true;
+    // TODO(esprehn): Are there other conditions where the parser can create
+    // invalid trees?
+    return toDocument(*this).canAcceptChild(newChild, nullptr, IGNORE_EXCEPTION);
+}
+
 void ContainerNode::parserInsertBefore(PassRefPtrWillBeRawPtr<Node> newChild, Node& nextChild)
 {
     ASSERT(newChild);
@@ -299,6 +303,9 @@ void ContainerNode::parserInsertBefore(PassRefPtrWillBeRawPtr<Node> newChild, No
     if (nextChild.previousSibling() == newChild || &nextChild == newChild) // nothing to do
         return;
 
+    if (!checkParserAcceptChild(*newChild))
+        return;
+
     RefPtrWillBeRawPtr<Node> protect(this);
 
     // FIXME: parserRemoveChild can run script which could then insert the
@@ -306,6 +313,9 @@ void ContainerNode::parserInsertBefore(PassRefPtrWillBeRawPtr<Node> newChild, No
     // See: fast/parser/execute-script-during-adoption-agency-removal.html
     while (RefPtrWillBeRawPtr<ContainerNode> parent = newChild->parentNode())
         parent->parserRemoveChild(*newChild);
+
+    if (nextChild.parentNode() != this)
+        return;
 
     if (document() != newChild->document())
         document().adoptNode(newChild.get(), ASSERT_NO_EXCEPTION);
@@ -427,8 +437,19 @@ void ContainerNode::willRemoveChild(Node& child)
     ChildListMutationScope(*this).willRemoveChild(child);
     child.notifyMutationObserversNodeWillDetach();
     dispatchChildRemovalEvents(child);
-    document().nodeWillBeRemoved(child); // e.g. mutation event listener can create a new range.
     ChildFrameDisconnector(child).disconnect();
+    if (document() != child.document()) {
+        // |child| was moved another document by DOM mutation event handler.
+        return;
+    }
+
+    // |nodeWillBeRemoved()| must be run after |ChildFrameDisconnector|, because
+    // |ChildFrameDisconnector| can run script which may cause state that is to
+    // be invalidated by removing the node.
+    ScriptForbiddenScope scriptForbiddenScope;
+    EventDispatchForbiddenScope assertNoEventDispatch;
+    // e.g. mutation event listener can create a new range.
+    document().nodeWillBeRemoved(child);
 }
 
 void ContainerNode::willRemoveChildren()
@@ -720,7 +741,7 @@ PassRefPtrWillBeRawPtr<Node> ContainerNode::appendChild(PassRefPtrWillBeRawPtr<N
         return newChild;
 
     // We need this extra check because collectChildrenAndRemoveFromOldParent() can fire mutation events.
-    if (!checkAcceptChildGuaranteedNodeTypes(*newChild, exceptionState)) {
+    if (!checkAcceptChildGuaranteedNodeTypes(*newChild, nullptr, exceptionState)) {
         if (exceptionState.hadException())
             return nullptr;
         return newChild;
@@ -760,6 +781,9 @@ void ContainerNode::parserAppendChild(PassRefPtrWillBeRawPtr<Node> newChild)
     ASSERT(newChild);
     ASSERT(!newChild->isDocumentFragment());
     ASSERT(!isHTMLTemplateElement(this));
+
+    if (!checkParserAcceptChild(*newChild))
+        return;
 
     RefPtrWillBeRawPtr<Node> protect(this);
 
@@ -830,9 +854,9 @@ void ContainerNode::notifyNodeRemoved(Node& root)
 
     for (Node& node : NodeTraversal::inclusiveDescendantsOf(root)) {
         // As an optimization we skip notifying Text nodes and other leaf nodes
-        // of removal when they're not in the Document tree since the virtual
+        // of removal when they're not in the Document tree and not in a shadow root since the virtual
         // call to removedFrom is not needed.
-        if (!node.inDocument() && !node.isContainerNode())
+        if (!node.isContainerNode() && !node.isInTreeScope())
             continue;
         node.removedFrom(this);
         for (ShadowRoot* shadowRoot = node.youngestShadowRoot(); shadowRoot; shadowRoot = shadowRoot->olderShadowRoot())
@@ -850,7 +874,7 @@ void ContainerNode::attach(const AttachContext& context)
 void ContainerNode::detach(const AttachContext& context)
 {
     detachChildren(context);
-    clearChildNeedsStyleRecalc();
+    setChildNeedsStyleRecalc();
     Node::detach(context);
 }
 
@@ -911,7 +935,7 @@ bool ContainerNode::getUpperLeftCorner(FloatPoint& point) const
             return true;
         }
 
-        if (p->node() && p->node() == this && o->isText() && !o->isBR() && !toLayoutText(o)->firstTextBox()) {
+        if (p->node() && p->node() == this && o->isText() && !o->isBR() && !toLayoutText(o)->hasTextBoxes()) {
             // Do nothing - skip unrendered whitespace that is a child or next sibling of the anchor.
         } else if ((o->isText() && !o->isBR()) || o->isReplaced()) {
             point = FloatPoint();
@@ -1050,18 +1074,6 @@ void ContainerNode::focusStateChanged()
     if (!layoutObject())
         return;
 
-    if (isElementNode() && toElement(this)->shadowRoot()) {
-        Element* host = toElement(this);
-        bool newFocused = tabIndex() >= 0 && !host->tabStop() && computedStyle()->affectedByFocus() && shadowHostContainsFocusedElement(host);
-        Node::setFocus(newFocused);
-    }
-
-    handleStyleChangeOnFocusStateChange();
-}
-
-void ContainerNode::handleStyleChangeOnFocusStateChange()
-{
-    ASSERT(layoutObject());
     if (styleChangeType() < SubtreeStyleChange) {
         if (computedStyle()->affectedByFocus() && computedStyle()->hasPseudoStyle(FIRST_LETTER))
             setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Focus));
@@ -1076,22 +1088,27 @@ void ContainerNode::handleStyleChangeOnFocusStateChange()
 
 void ContainerNode::setFocus(bool received)
 {
+    // Recurse up author shadow trees to mark shadow hosts if it matches :focus.
+    // TODO(kochi): Handle UA shadows which marks multiple nodes as focused such as
+    // <input type="date"> the same way as author shadow.
+    if (ShadowRoot* root = containingShadowRoot()) {
+        if (root->type() != ShadowRootType::UserAgent)
+            shadowHost()->setFocus(received);
+    }
+
+    // If this is an author shadow host and indirectly focused (has focused element within
+    // its shadow root), update focus.
+    if (isElementNode() && document().focusedElement() && document().focusedElement() != this) {
+        if (toElement(this)->authorShadowRoot())
+            received = received && toElement(this)->authorShadowRoot()->delegatesFocus();
+    }
+
     if (focused() == received)
         return;
 
     Node::setFocus(received);
 
-    if (layoutObject())
-        handleStyleChangeOnFocusStateChange();
-
-    // Traverse up shadow trees to mark shadow hosts as focused where appropriate.
-    for (Element* host = shadowHost(); host; host = host->shadowHost()) {
-        bool newFocused = received && host->tabIndex() >= 0 && !host->tabStop();
-        if (host->focused() != newFocused) {
-            host->Node::setFocus(newFocused);
-            host->handleStyleChangeOnFocusStateChange();
-        }
-    }
+    focusStateChanged();
 
     if (layoutObject() || received)
         return;
@@ -1163,7 +1180,7 @@ PassRefPtrWillBeRawPtr<HTMLCollection> ContainerNode::children()
 unsigned ContainerNode::countChildren() const
 {
     unsigned count = 0;
-    Node *n;
+    Node* n;
     for (n = firstChild(); n; n = n->nextSibling())
         count++;
     return count;
@@ -1338,9 +1355,6 @@ void ContainerNode::checkForChildrenAdjacentRuleChanges()
 void ContainerNode::checkForSiblingStyleChanges(SiblingCheckType changeType, Node* nodeBeforeChange, Node* nodeAfterChange)
 {
     if (!inActiveDocument() || document().hasPendingForcedStyleRecalc() || styleChangeType() >= SubtreeStyleChange)
-        return;
-
-    if (needsStyleRecalc() && childrenAffectedByPositionalRules())
         return;
 
     // Forward positional selectors include nth-child, nth-of-type, first-of-type and only-of-type.

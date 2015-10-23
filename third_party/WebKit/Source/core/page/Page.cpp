@@ -22,10 +22,10 @@
 
 #include "core/css/resolver/ViewportStyleResolver.h"
 #include "core/dom/ClientRectList.h"
-#include "core/dom/DocumentMarkerController.h"
 #include "core/dom/VisitedLinkState.h"
-#include "core/editing/Caret.h"
-#include "core/editing/UndoStack.h"
+#include "core/editing/DragCaretController.h"
+#include "core/editing/commands/UndoStack.h"
+#include "core/editing/markers/DocumentMarkerController.h"
 #include "core/events/Event.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/frame/DOMTimer.h"
@@ -34,11 +34,11 @@
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/RemoteFrameView.h"
 #include "core/frame/Settings.h"
+#include "core/html/HTMLMediaElement.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/TextAutosizer.h"
 #include "core/page/AutoscrollController.h"
-#include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/ContextMenuController.h"
 #include "core/page/DragController.h"
@@ -104,7 +104,7 @@ Page::Page(PageClients& pageClients)
     : SettingsDelegate(Settings::create())
     , m_animator(PageAnimator::create(*this))
     , m_autoscrollController(AutoscrollController::create(*this))
-    , m_chrome(Chrome::create(this, pageClients.chromeClient))
+    , m_chromeClient(pageClients.chromeClient)
     , m_dragCaretController(DragCaretController::create())
     , m_dragController(DragController::create(this, pageClients.dragClient))
     , m_focusController(FocusController::create(this))
@@ -176,6 +176,9 @@ ClientRectList* Page::nonFastScrollableRects(const LocalFrame* frame)
         DisableCompositingQueryAsserts disabler;
         scrollingCoordinator->updateAfterCompositingChangeIfNeeded();
     }
+
+    if (!frame->view()->layerForScrolling())
+        return ClientRectList::create();
 
     // Now retain non-fast scrollable regions
     return ClientRectList::create(frame->view()->layerForScrolling()->platformLayer()->nonFastScrollableRegion());
@@ -301,29 +304,14 @@ void Page::setDefersLoading(bool defers)
     }
 }
 
-void Page::setPageScaleFactor(float scale, const IntPoint& origin)
+void Page::setPageScaleFactor(float scale)
 {
-    if (!mainFrame()->isLocalFrame())
-        return;
-
-    FrameView* view = deprecatedLocalMainFrame()->view();
-    PinchViewport& viewport = frameHost().pinchViewport();
-
-    if (scale != viewport.scale()) {
-        viewport.setScale(scale);
-
-        m_chrome->client().pageScaleFactorChanged();
-
-        deprecatedLocalMainFrame()->loader().saveScrollState();
-    }
-
-    if (view && view->scrollPosition() != origin)
-        view->notifyScrollPositionChanged(origin);
+    frameHost().visualViewport().setScale(scale);
 }
 
 float Page::pageScaleFactor() const
 {
-    return frameHost().pinchViewport().scale();
+    return frameHost().visualViewport().scale();
 }
 
 void Page::setDeviceScaleFactor(float scaleFactor)
@@ -496,6 +484,15 @@ void Page::settingsChanged(SettingsDelegate::ChangeType changeType)
             doc->styleResolver()->viewportStyleResolver()->collectViewportRules();
         }
         break;
+    case SettingsDelegate::TextTrackKindUserPreferenceChange:
+        for (Frame* frame = mainFrame(); frame; frame = frame->tree().traverseNext()) {
+            if (frame->isLocalFrame()) {
+                Document* doc = toLocalFrame(frame)->document();
+                if (doc)
+                    HTMLMediaElement::setTextTrackKindUserPreferenceForAllMediaElements(doc);
+            }
+        }
+        break;
     }
 }
 
@@ -535,15 +532,27 @@ void Page::acceptLanguagesChanged()
         frames[i]->localDOMWindow()->acceptLanguagesChanged();
 }
 
+void Page::setCompositedDisplayList(PassOwnPtr<CompositedDisplayList> compositedDisplayList)
+{
+    chromeClient().setCompositedDisplayList(compositedDisplayList);
+}
+
+CompositedDisplayList* Page::compositedDisplayListForTesting()
+{
+    return chromeClient().compositedDisplayListForTesting();
+}
+
 DEFINE_TRACE(Page)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_animator);
+    visitor->trace(m_autoscrollController);
     visitor->trace(m_dragCaretController);
     visitor->trace(m_dragController);
     visitor->trace(m_focusController);
     visitor->trace(m_contextMenuController);
     visitor->trace(m_pointerLockController);
+    visitor->trace(m_scrollingCoordinator);
     visitor->trace(m_undoStack);
     visitor->trace(m_mainFrame);
     visitor->trace(m_validationMessageClient);
@@ -558,7 +567,7 @@ void Page::willBeDestroyed()
 {
     RefPtrWillBeRawPtr<Frame> mainFrame = m_mainFrame;
 
-    mainFrame->detach();
+    mainFrame->detach(FrameDetachType::Remove);
 
     if (mainFrame->isLocalFrame()) {
         toLocalFrame(mainFrame.get())->setView(nullptr);
@@ -578,7 +587,7 @@ void Page::willBeDestroyed()
     pageCounter.decrement();
 #endif
 
-    m_chrome->willBeDestroyed();
+    chromeClient().chromeDestroyed();
     if (m_validationMessageClient)
         m_validationMessageClient->willBeDestroyed();
     m_mainFrame = nullptr;
@@ -599,6 +608,6 @@ Page::PageClients::~PageClients()
 {
 }
 
-template class WillBeHeapSupplement<Page>;
+template class CORE_TEMPLATE_EXPORT WillBeHeapSupplement<Page>;
 
 } // namespace blink

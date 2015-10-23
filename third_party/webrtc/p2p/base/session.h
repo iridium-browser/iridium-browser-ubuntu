@@ -319,9 +319,14 @@ class BaseSession : public sigslot::has_slots<>,
 
   rtc::SSLIdentity* identity() { return identity_; }
 
+  // Set the ice connection receiving timeout.
+  void SetIceConnectionReceivingTimeout(int timeout_ms);
+
  protected:
   // Specifies the identity to use in this session.
   bool SetIdentity(rtc::SSLIdentity* identity);
+
+  bool SetSslMaxProtocolVersion(rtc::SSLProtocolVersion version);
 
   bool PushdownTransportDescription(ContentSource source,
                                     ContentAction action,
@@ -366,6 +371,9 @@ class BaseSession : public sigslot::has_slots<>,
   virtual void OnTransportReadable(Transport* transport) {
   }
 
+  virtual void OnTransportReceiving(Transport* transport) {
+  }
+
   // Called when a transport has found its steady-state connections.
   virtual void OnTransportCompleted(Transport* transport) {
   }
@@ -407,8 +415,6 @@ class BaseSession : public sigslot::has_slots<>,
   Error error_;
   std::string error_desc_;
 
-  // Fires the new description signal according to the current state.
-  virtual void SignalNewDescription();
   // This method will delete the Transport and TransportChannelImpls
   // and replace those with the Transport object of the first
   // MediaContent in bundle_group.
@@ -434,9 +440,6 @@ class BaseSession : public sigslot::has_slots<>,
                                       const std::string& content_name,
                                       TransportDescription* info);
 
-  // Gets the ContentAction and ContentSource according to the session state.
-  bool GetContentAction(ContentAction* action, ContentSource* source);
-
   rtc::Thread* const signaling_thread_;
   rtc::Thread* const worker_thread_;
   PortAllocator* const port_allocator_;
@@ -445,6 +448,7 @@ class BaseSession : public sigslot::has_slots<>,
   const std::string transport_type_;
   bool initiator_;
   rtc::SSLIdentity* identity_;
+  rtc::SSLProtocolVersion ssl_max_version_;
   rtc::scoped_ptr<const SessionDescription> local_description_;
   rtc::scoped_ptr<SessionDescription> remote_description_;
   uint64 ice_tiebreaker_;
@@ -452,6 +456,10 @@ class BaseSession : public sigslot::has_slots<>,
   // will enable us to stop any role switch during the call.
   bool role_switch_;
   TransportMap transports_;
+
+  // Timeout value in milliseconds for which no ICE connection receives
+  // any packets.
+  int ice_receiving_timeout_;
 };
 
 }  // namespace cricket

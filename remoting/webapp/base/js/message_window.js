@@ -31,6 +31,7 @@ MessageWindowImpl.prototype.sendReply_ = function(
   // Only forward the first reply that we receive.
   if (!this.sentReply_) {
     var message = {
+      source: 'message-window',
       command: 'messageWindowResult',
       id: messageId,
       result: result
@@ -39,7 +40,7 @@ MessageWindowImpl.prototype.sendReply_ = function(
     this.sentReply_ = true;
   } else {
     // Make sure that the reply we're ignoring is from the window close.
-    base.debug.assert(result == 0);
+    console.assert(result == 0, 'Received unexpected result ' + result + '.');
   }
 };
 

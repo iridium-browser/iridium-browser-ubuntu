@@ -4,59 +4,64 @@
 
 
 class SharedState(object):
-  """A class that manages the test state across multiple user stories.
+  """A class that manages the test state across multiple stories.
   It's styled on unittest.TestCase for handling test setup & teardown logic.
 
   """
 
-  def __init__(self, test, options, user_story_set):
+  def __init__(self, test, options, story_set):
     """ This method is styled on unittest.TestCase.setUpClass.
-    Override to do any action before running user stories that
+    Override to do any action before running stories that
     share this same state.
     Args:
-      test: a page_test.PageTest instance.
+      test: a page_test.PageTest or story_test.StoryTest instance.
       options: a BrowserFinderOptions instance that contains command line
         options.
-      user_story_set: a user_story_set.UserStorySet instance.
+      story_set: a story.StorySet instance.
     """
     pass
 
   @property
   def platform(self):
-    """ Override to return the platform which user stories that share this same
+    """ Override to return the platform which stories that share this same
     state will be run on.
     """
     raise NotImplementedError()
 
-  def WillRunUserStory(self, user_story):
-    """ Override to do any action before running each one of all user stories
+  def WillRunStory(self, story):
+    """ Override to do any action before running each one of all stories
     that share this same state.
     This method is styled on unittest.TestCase.setUp.
     """
     raise NotImplementedError()
 
-  def DidRunUserStory(self, results):
-    """ Override to do any action after running each of all user stories that
+  def DidRunStory(self, results):
+    """ Override to do any action after running each of all stories that
     share this same state.
     This method is styled on unittest.TestCase.tearDown.
     """
     raise NotImplementedError()
 
-  def GetTestExpectationAndSkipValue(self, expectations):
-    """ Return test expectation and skip value instance in case expectation
-    is 'skip'. This is run after WillRunUserStory and before RunUserStory.
+  def CanRunStory(self, story):
+    """Indicate whether the story can be run in the current configuration.
+    This is called after WillRunStory and before RunStory. Return True
+    if the story should be run, and False if it should be skipped.
+    Most subclasses will probably want to override this to always
+    return True.
+    Args:
+      story: a story.Story instance.
     """
     raise NotImplementedError()
 
-  def RunUserStory(self, results):
-    """ Override to do any action before running each one of all user stories
+  def RunStory(self, results):
+    """ Override to do any action before running each one of all stories
     that share this same state.
     This method is styled on unittest.TestCase.run.
     """
     raise NotImplementedError()
 
   def TearDownState(self):
-    """ Override to do any action after running multiple user stories that
+    """ Override to do any action after running multiple stories that
     share this same state.
     This method is styled on unittest.TestCase.tearDownClass.
     """

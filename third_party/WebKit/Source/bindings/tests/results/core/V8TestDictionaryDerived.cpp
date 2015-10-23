@@ -8,6 +8,7 @@
 #include "V8TestDictionaryDerived.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/UnionTypesCore.h"
 #include "bindings/core/v8/V8TestDictionary.h"
 
 namespace blink {
@@ -80,6 +81,22 @@ void V8TestDictionaryDerivedImplementedAs::toImpl(v8::Isolate* isolate, v8::Loca
         }
     }
 
+    {
+        v8::Local<v8::Value> stringOrDoubleSequenceMemberValue;
+        if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "stringOrDoubleSequenceMember")).ToLocal(&stringOrDoubleSequenceMemberValue)) {
+            exceptionState.rethrowV8Exception(block.Exception());
+            return;
+        }
+        if (stringOrDoubleSequenceMemberValue.IsEmpty() || stringOrDoubleSequenceMemberValue->IsUndefined()) {
+            // Do nothing.
+        } else {
+            HeapVector<StringOrDouble> stringOrDoubleSequenceMember = toImplArray<HeapVector<StringOrDouble>>(stringOrDoubleSequenceMemberValue, 0, isolate, exceptionState);
+            if (exceptionState.hadException())
+                return;
+            impl.setStringOrDoubleSequenceMember(stringOrDoubleSequenceMember);
+        }
+    }
+
 }
 
 v8::Local<v8::Value> toV8(const TestDictionaryDerivedImplementedAs& impl, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
@@ -94,25 +111,29 @@ v8::Local<v8::Value> toV8(const TestDictionaryDerivedImplementedAs& impl, v8::Lo
 
 bool toV8TestDictionaryDerivedImplementedAs(const TestDictionaryDerivedImplementedAs& impl, v8::Local<v8::Object> dictionary, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
 {
-    // TODO(bashi): Use ForceSet() instead of Set(). http://crbug.com/476720
     if (impl.hasDerivedStringMember()) {
-        if (!v8CallBoolean(dictionary->Set(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMember"), v8String(isolate, impl.derivedStringMember()))))
+        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMember"), v8String(isolate, impl.derivedStringMember()))))
             return false;
     }
 
     if (impl.hasDerivedStringMemberWithDefault()) {
-        if (!v8CallBoolean(dictionary->Set(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMemberWithDefault"), v8String(isolate, impl.derivedStringMemberWithDefault()))))
+        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMemberWithDefault"), v8String(isolate, impl.derivedStringMemberWithDefault()))))
             return false;
     } else {
-        if (!v8CallBoolean(dictionary->Set(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMemberWithDefault"), v8String(isolate, String("default string value")))))
+        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMemberWithDefault"), v8String(isolate, String("default string value")))))
             return false;
     }
 
     if (impl.hasRequiredLongMember()) {
-        if (!v8CallBoolean(dictionary->Set(isolate->GetCurrentContext(), v8String(isolate, "requiredLongMember"), v8::Integer::New(isolate, impl.requiredLongMember()))))
+        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "requiredLongMember"), v8::Integer::New(isolate, impl.requiredLongMember()))))
             return false;
     } else {
         ASSERT_NOT_REACHED();
+    }
+
+    if (impl.hasStringOrDoubleSequenceMember()) {
+        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "stringOrDoubleSequenceMember"), toV8(impl.stringOrDoubleSequenceMember(), creationContext, isolate))))
+            return false;
     }
 
     return true;

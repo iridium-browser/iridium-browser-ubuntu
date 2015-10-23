@@ -6,12 +6,24 @@
 
 #include "base/memory/singleton.h"
 #include "base/prefs/pref_service.h"
-#include "chrome/browser/favicon/chrome_favicon_client_factory.h"
+#include "chrome/browser/favicon/chrome_favicon_client.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+
+namespace {
+
+scoped_ptr<KeyedService> BuildFaviconService(content::BrowserContext* context) {
+  Profile* profile = Profile::FromBrowserContext(context);
+  return make_scoped_ptr(new favicon::FaviconService(
+      make_scoped_ptr(new ChromeFaviconClient(profile)),
+      HistoryServiceFactory::GetForProfile(
+          profile, ServiceAccessType::EXPLICIT_ACCESS)));
+}
+
+}  // namespace
 
 // static
 favicon::FaviconService* FaviconServiceFactory::GetForProfile(
@@ -37,12 +49,17 @@ FaviconServiceFactory* FaviconServiceFactory::GetInstance() {
   return Singleton<FaviconServiceFactory>::get();
 }
 
+// static
+BrowserContextKeyedServiceFactory::TestingFactoryFunction
+FaviconServiceFactory::GetDefaultFactory() {
+  return &BuildFaviconService;
+}
+
 FaviconServiceFactory::FaviconServiceFactory()
     : BrowserContextKeyedServiceFactory(
         "FaviconService",
         BrowserContextDependencyManager::GetInstance()) {
   DependsOn(HistoryServiceFactory::GetInstance());
-  DependsOn(ChromeFaviconClientFactory::GetInstance());
 }
 
 FaviconServiceFactory::~FaviconServiceFactory() {
@@ -50,11 +67,7 @@ FaviconServiceFactory::~FaviconServiceFactory() {
 
 KeyedService* FaviconServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
-  Profile* profile = Profile::FromBrowserContext(context);
-  return new favicon::FaviconService(
-      ChromeFaviconClientFactory::GetForProfile(profile),
-      HistoryServiceFactory::GetForProfile(profile,
-                                           ServiceAccessType::EXPLICIT_ACCESS));
+  return BuildFaviconService(context).release();
 }
 
 bool FaviconServiceFactory::ServiceIsNULLWhileTesting() const {

@@ -43,7 +43,8 @@ bool IsEnabled(const PerfLoggingPrefs::InspectorDomainStatus& domain_status) {
 bool ShouldRequestTraceEvents(const std::string& command) {
   for (size_t i_domain = 0; i_domain < arraysize(kRequestTraceCommands);
        ++i_domain) {
-    if (base::strcasecmp(command.c_str(), kRequestTraceCommands[i_domain]) == 0)
+    if (base::EqualsCaseInsensitiveASCII(command,
+                                         kRequestTraceCommands[i_domain]))
       return true;
   }
   return false;
@@ -52,7 +53,8 @@ bool ShouldRequestTraceEvents(const std::string& command) {
 // Returns whether the event belongs to one of kDomains.
 bool ShouldLogEvent(const std::string& method) {
   for (size_t i_domain = 0; i_domain < arraysize(kDomains); ++i_domain) {
-    if (StartsWithASCII(method, kDomains[i_domain], true /* case_sensitive */))
+    if (base::StartsWith(method, kDomains[i_domain],
+                         base::CompareCase::SENSITIVE))
       return true;
   }
   return false;
@@ -123,7 +125,7 @@ void PerformanceLogger::AddLogEntry(
   log_message_dict.SetString("message.method", method);
   log_message_dict.Set("message.params", params.DeepCopy());
   std::string log_message_json;
-  base::JSONWriter::Write(&log_message_dict, &log_message_json);
+  base::JSONWriter::Write(log_message_dict, &log_message_json);
 
   // TODO(klm): extract timestamp from params?
   // Look at where it is for Page, Network, Timeline, and trace events.

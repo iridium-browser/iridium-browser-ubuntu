@@ -628,17 +628,6 @@ void LoadKeymap(const std::string& layout_name,
 }
 #endif
 
-KeyboardCode DomCodeToUsLayoutKeyboardCode(DomCode dom_code) {
-  DomKey dummy_dom_key;
-  base::char16 dummy_character;
-  KeyboardCode key_code;
-  if (DomCodeToUsLayoutMeaning(dom_code, EF_NONE, &dummy_dom_key,
-                               &dummy_character, &key_code)) {
-    return key_code;
-  }
-  return VKEY_UNKNOWN;
-}
-
 }  // anonymous namespace
 
 XkbKeyCodeConverter::XkbKeyCodeConverter() {
@@ -649,9 +638,7 @@ XkbKeyCodeConverter::~XkbKeyCodeConverter() {
 
 XkbKeyboardLayoutEngine::XkbKeyboardLayoutEngine(
     const XkbKeyCodeConverter& converter)
-    : num_lock_mod_mask_(0),
-      key_code_converter_(converter),
-      weak_ptr_factory_(this) {
+    : key_code_converter_(converter), weak_ptr_factory_(this) {
   // TODO: add XKB_CONTEXT_NO_ENVIRONMENT_NAMES
   xkb_context_.reset(xkb_context_new(XKB_CONTEXT_NO_DEFAULT_INCLUDES));
   xkb_context_include_path_append(xkb_context_.get(),
@@ -756,8 +743,10 @@ bool XkbKeyboardLayoutEngine::Lookup(DomCode dom_code,
     if (*key_code == VKEY_UNKNOWN) {
       *key_code = DifficultKeyboardCode(dom_code, flags, xkb_keycode, xkb_flags,
                                         xkb_keysym, *dom_key, *character);
-      if (*key_code == VKEY_UNKNOWN)
-        *key_code = DomCodeToUsLayoutKeyboardCode(dom_code);
+      if (*key_code == VKEY_UNKNOWN) {
+        *key_code = LocatedToNonLocatedKeyboardCode(
+            DomCodeToUsLayoutKeyboardCode(dom_code));
+      }
     }
     // If the Control key is down, only allow ASCII control characters to be
     // returned, regardless of the key layout. crbug.com/450849
@@ -765,11 +754,14 @@ bool XkbKeyboardLayoutEngine::Lookup(DomCode dom_code,
       *character = 0;
   } else if (*dom_key == DomKey::DEAD) {
     *character = DeadXkbKeySymToCombiningCharacter(xkb_keysym);
-    *key_code = DomCodeToUsLayoutKeyboardCode(dom_code);
+    *key_code = LocatedToNonLocatedKeyboardCode(
+        DomCodeToUsLayoutKeyboardCode(dom_code));
   } else {
     *key_code = NonPrintableDomKeyToKeyboardCode(*dom_key);
-    if (*key_code == VKEY_UNKNOWN)
-      *key_code = DomCodeToUsLayoutKeyboardCode(dom_code);
+    if (*key_code == VKEY_UNKNOWN) {
+      *key_code = LocatedToNonLocatedKeyboardCode(
+          DomCodeToUsLayoutKeyboardCode(dom_code));
+    }
   }
   return true;
 }

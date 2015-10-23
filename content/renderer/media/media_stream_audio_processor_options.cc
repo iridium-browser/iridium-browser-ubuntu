@@ -10,6 +10,8 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/common/media/media_stream_options.h"
 #include "content/renderer/media/media_stream_constraints_util.h"
@@ -35,12 +37,11 @@ const char MediaAudioConstraints::kGoogNoiseSuppression[] =
 const char MediaAudioConstraints::kGoogExperimentalNoiseSuppression[] =
     "googNoiseSuppression2";
 const char MediaAudioConstraints::kGoogBeamforming[] = "googBeamforming";
+const char MediaAudioConstraints::kGoogArrayGeometry[] = "googArrayGeometry";
 const char MediaAudioConstraints::kGoogHighpassFilter[] = "googHighpassFilter";
 const char MediaAudioConstraints::kGoogTypingNoiseDetection[] =
     "googTypingNoiseDetection";
 const char MediaAudioConstraints::kGoogAudioMirroring[] = "googAudioMirroring";
-const char MediaAudioConstraints::kGoogAudioProcessing48kHzSupport[] =
-    "googAudioProcessing48kHzSupport";
 
 namespace {
 
@@ -71,7 +72,6 @@ struct {
   { kMediaStreamAudioDucking, false },
 #endif
   { kMediaStreamAudioHotword, false },
-  { MediaAudioConstraints::kGoogAudioProcessing48kHzSupport, false },
 };
 
 bool IsAudioProcessingConstraint(const std::string& key) {
@@ -157,6 +157,13 @@ bool MediaAudioConstraints::GetProperty(const std::string& key) const {
   if (!GetConstraintValueAsBoolean(constraints_, key, &value))
     value = GetDefaultValueForConstraint(constraints_, key);
 
+  return value;
+}
+
+std::string MediaAudioConstraints::GetPropertyAsString(
+    const std::string& key) const {
+  std::string value;
+  GetConstraintValueAsString(constraints_, key, &value);
   return value;
 }
 
@@ -291,9 +298,9 @@ void EnableEchoCancellation(AudioProcessing* audio_processing) {
   CHECK_EQ(err, 0);
 }
 
-void EnableNoiseSuppression(AudioProcessing* audio_processing) {
-  int err = audio_processing->noise_suppression()->set_level(
-      webrtc::NoiseSuppression::kHigh);
+void EnableNoiseSuppression(AudioProcessing* audio_processing,
+                            webrtc::NoiseSuppression::Level ns_level) {
+  int err = audio_processing->noise_suppression()->set_level(ns_level);
   err |= audio_processing->noise_suppression()->Enable(true);
   CHECK_EQ(err, 0);
 }
@@ -382,6 +389,38 @@ void GetAecStats(webrtc::EchoCancellation* echo_cancellation,
     stats->echo_delay_median_ms = median;
     stats->echo_delay_std_ms = std;
   }
+}
+
+CONTENT_EXPORT std::vector<webrtc::Point> ParseArrayGeometry(
+    const std::string& geometry_string) {
+  const auto& tokens =
+      base::SplitString(geometry_string, base::kWhitespaceASCII,
+                        base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  std::vector<webrtc::Point> geometry;
+  if (tokens.size() < 3 || tokens.size() % 3 != 0) {
+    LOG(ERROR) << "Malformed geometry string: " << geometry_string;
+    return geometry;
+  }
+
+  std::vector<float> float_tokens;
+  float_tokens.reserve(tokens.size());
+  for (const auto& token : tokens) {
+    double float_token;
+    if (!base::StringToDouble(token, &float_token)) {
+      LOG(ERROR) << "Unable to convert token=" << token
+                 << " to double from geometry string: " << geometry_string;
+      return geometry;
+    }
+    float_tokens.push_back(float_token);
+  }
+
+  geometry.reserve(float_tokens.size() / 3);
+  for (size_t i = 0; i < float_tokens.size(); i += 3) {
+    geometry.push_back(webrtc::Point(float_tokens[i + 0], float_tokens[i + 1],
+                                     float_tokens[i + 2]));
+  }
+
+  return geometry;
 }
 
 }  // namespace content

@@ -5,6 +5,7 @@
 #import "chrome/browser/ui/cocoa/passwords/manage_passwords_bubble_manage_view_controller.h"
 
 #include "base/mac/foundation_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #import "chrome/browser/ui/cocoa/passwords/manage_password_item_view_controller.h"
 #include "chrome/browser/ui/cocoa/passwords/manage_passwords_controller_test.h"
@@ -12,23 +13,6 @@
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller_mock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
-
-@interface ManagePasswordsBubbleManageViewTestDelegate
-    : NSObject<ManagePasswordsBubbleContentViewDelegate> {
-  BOOL dismissed_;
-}
-@property(readonly) BOOL dismissed;
-@end
-
-@implementation ManagePasswordsBubbleManageViewTestDelegate
-
-@synthesize dismissed = dismissed_;
-
-- (void)viewShouldDismiss {
-  dismissed_ = YES;
-}
-
-@end
 
 namespace {
 
@@ -39,13 +23,10 @@ class ManagePasswordsBubbleManageViewControllerTest
 
   void SetUp() override {
     ManagePasswordsControllerTest::SetUp();
-    delegate_.reset(
-        [[ManagePasswordsBubbleManageViewTestDelegate alloc] init]);
+    delegate_.reset([[ContentViewDelegateMock alloc] init]);
   }
 
-  ManagePasswordsBubbleManageViewTestDelegate* delegate() {
-    return delegate_.get();
-  }
+  ContentViewDelegateMock* delegate() { return delegate_.get(); }
 
   ManagePasswordsBubbleManageViewController* controller() {
     if (!controller_) {
@@ -59,7 +40,7 @@ class ManagePasswordsBubbleManageViewControllerTest
 
  private:
   base::scoped_nsobject<ManagePasswordsBubbleManageViewController> controller_;
-  base::scoped_nsobject<ManagePasswordsBubbleManageViewTestDelegate> delegate_;
+  base::scoped_nsobject<ContentViewDelegateMock> delegate_;
   DISALLOW_COPY_AND_ASSIGN(ManagePasswordsBubbleManageViewControllerTest);
 };
 
@@ -86,15 +67,15 @@ TEST_F(ManagePasswordsBubbleManageViewControllerTest,
        ShouldShowAllPasswordItemsWhenPasswordsExistForSite) {
   // Add a few password entries.
   autofill::PasswordFormMap map;
-  autofill::PasswordForm form1;
-  form1.username_value = base::ASCIIToUTF16("username1");
-  form1.password_value = base::ASCIIToUTF16("password1");
-  map[base::ASCIIToUTF16("username1")] = &form1;
+  scoped_ptr<autofill::PasswordForm> form1(new autofill::PasswordForm);
+  form1->username_value = base::ASCIIToUTF16("username1");
+  form1->password_value = base::ASCIIToUTF16("password1");
+  map.insert(base::ASCIIToUTF16("username1"), form1.Pass());
 
-  autofill::PasswordForm form2;
-  form2.username_value = base::ASCIIToUTF16("username2");
-  form2.password_value = base::ASCIIToUTF16("password2");
-  map[base::ASCIIToUTF16("username2")] = &form2;
+  scoped_ptr<autofill::PasswordForm> form2(new autofill::PasswordForm);
+  form2->username_value = base::ASCIIToUTF16("username2");
+  form2->password_value = base::ASCIIToUTF16("password2");
+  map.insert(base::ASCIIToUTF16("username2"), form2.Pass());
 
   // Add the entries to the model.
   ui_controller()->OnPasswordAutofilled(map);

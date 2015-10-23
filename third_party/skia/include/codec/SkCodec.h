@@ -8,13 +8,12 @@
 #ifndef SkCodec_DEFINED
 #define SkCodec_DEFINED
 
+#include "../private/SkTemplates.h"
+#include "SkColor.h"
 #include "SkEncodedFormat.h"
-#include "SkImageGenerator.h"
 #include "SkImageInfo.h"
-#include "SkScanlineDecoder.h"
 #include "SkSize.h"
 #include "SkStream.h"
-#include "SkTemplates.h"
 #include "SkTypes.h"
 
 class SkData;
@@ -22,7 +21,7 @@ class SkData;
 /**
  *  Abstraction layer directly on top of an image codec.
  */
-class SkCodec : public SkImageGenerator {
+class SkCodec : SkNoncopyable {
 public:
     /**
      *  If this stream represents an encoded image that we know how to decode,
@@ -41,15 +40,52 @@ public:
      */
     static SkCodec* NewFromData(SkData*);
 
+    virtual ~SkCodec();
+
+    /**
+     *  Return the ImageInfo associated with this codec.
+     */
+    const SkImageInfo& getInfo() const { return fInfo; }
+
     /**
      *  Return a size that approximately supports the desired scale factor.
      *  The codec may not be able to scale efficiently to the exact scale
      *  factor requested, so return a size that approximates that scale.
-     *
-     *  FIXME: Move to SkImageGenerator?
+     *  The returned value is the codec's suggestion for the closest valid
+     *  scale that it can natively support
      */
     SkISize getScaledDimensions(float desiredScale) const {
+        // Negative and zero scales are errors.
+        SkASSERT(desiredScale > 0.0f);
+        if (desiredScale <= 0.0f) {
+            return SkISize::Make(0, 0);
+        }
+
+        // Upscaling is not supported. Return the original size if the client
+        // requests an upscale.
+        if (desiredScale >= 1.0f) {
+            return this->getInfo().dimensions();
+        }
         return this->onGetScaledDimensions(desiredScale);
+    }
+
+    /**
+     *  Return (via desiredSubset) a subset which can decoded from this codec,
+     *  or false if this codec cannot decode subsets or anything similar to
+     *  desiredSubset.
+     *
+     *  @param desiredSubset In/out parameter. As input, a desired subset of
+     *      the original bounds (as specified by getInfo). If true is returned,
+     *      desiredSubset may have been modified to a subset which is
+     *      supported. Although a particular change may have been made to
+     *      desiredSubset to create something supported, it is possible other
+     *      changes could result in a valid subset.
+     *      If false is returned, desiredSubset's value is undefined.
+     *  @return true if this codec supports decoding desiredSubset (as
+     *      returned, potentially modified)
+     */
+    bool getValidSubset(SkIRect* desiredSubset) const {
+        return this->onGetValidSubset(desiredSubset);
     }
 
     /**
@@ -58,43 +94,124 @@ public:
     SkEncodedFormat getEncodedFormat() const { return this->onGetEncodedFormat(); }
 
     /**
-     *  Return an object which can be used to decode individual scanlines.
+     *  Used to describe the result of a call to getPixels().
      *
-     *  This object is owned by the SkCodec, which will handle its lifetime. The
-     *  returned object is only valid until the SkCodec is deleted or the next
-     *  call to getScanlineDecoder, whichever comes first.
-     *
-     *  Calling a second time will rewind and replace the existing one with a
-     *  new one. If the stream cannot be rewound, this will delete the existing
-     *  one and return NULL.
-     *
-     *  @param dstInfo Info of the destination. If the dimensions do not match
-     *      those of getInfo, this implies a scale.
-     *  @param options Contains decoding options, including if memory is zero
-     *      initialized.
-     *  @param ctable A pointer to a color table.  When dstInfo.colorType() is
-     *      kIndex8, this should be non-NULL and have enough storage for 256
-     *      colors.  The color table will be populated after decoding the palette.
-     *  @param ctableCount A pointer to the size of the color table.  When
-     *      dstInfo.colorType() is kIndex8, this should be non-NULL.  It will
-     *      be modified to the true size of the color table (<= 256) after
-     *      decoding the palette.
-     *  @return New SkScanlineDecoder, or NULL on failure.
-     *
-     *  NOTE: If any rows were previously decoded, this requires rewinding the
-     *  SkStream.
-     *
-     *  NOTE: The scanline decoder is owned by the SkCodec and will delete it
-     *  when the SkCodec is deleted.
+     *  Result is the union of possible results from subclasses.
      */
-    SkScanlineDecoder* getScanlineDecoder(const SkImageInfo& dstInfo, const Options* options,
-                                          SkPMColor ctable[], int* ctableCount);
+    enum Result {
+        /**
+         *  General return value for success.
+         */
+        kSuccess,
+        /**
+         *  The input is incomplete. A partial image was generated.
+         */
+        kIncompleteInput,
+        /**
+         *  The generator cannot convert to match the request, ignoring
+         *  dimensions.
+         */
+        kInvalidConversion,
+        /**
+         *  The generator cannot scale to requested size.
+         */
+        kInvalidScale,
+        /**
+         *  Parameters (besides info) are invalid. e.g. NULL pixels, rowBytes
+         *  too small, etc.
+         */
+        kInvalidParameters,
+        /**
+         *  The input did not contain a valid image.
+         */
+        kInvalidInput,
+        /**
+         *  Fulfilling this request requires rewinding the input, which is not
+         *  supported for this input.
+         */
+        kCouldNotRewind,
+        /**
+         *  This method is not implemented by this generator.
+         */
+        kUnimplemented,
+    };
 
     /**
-     *  Simplified version of getScanlineDecoder() that asserts that info is NOT
-     *  kIndex8_SkColorType and uses the default Options.
+     *  Whether or not the memory passed to getPixels is zero initialized.
      */
-    SkScanlineDecoder* getScanlineDecoder(const SkImageInfo& dstInfo);
+    enum ZeroInitialized {
+        /**
+         *  The memory passed to getPixels is zero initialized. The SkCodec
+         *  may take advantage of this by skipping writing zeroes.
+         */
+        kYes_ZeroInitialized,
+        /**
+         *  The memory passed to getPixels has not been initialized to zero,
+         *  so the SkCodec must write all zeroes to memory.
+         *
+         *  This is the default. It will be used if no Options struct is used.
+         */
+        kNo_ZeroInitialized,
+    };
+
+    /**
+     *  Additional options to pass to getPixels.
+     */
+    struct Options {
+        Options()
+            : fZeroInitialized(kNo_ZeroInitialized)
+            , fSubset(NULL)
+        {}
+
+        ZeroInitialized fZeroInitialized;
+        /**
+         *  If not NULL, represents a subset of the original image to decode.
+         *
+         *  Must be within the bounds returned by getInfo().
+         *
+         *  If the EncodedFormat is kWEBP_SkEncodedFormat (the only one which
+         *  currently supports subsets), the top and left values must be even.
+         */
+        SkIRect*        fSubset;
+    };
+
+    /**
+     *  Decode into the given pixels, a block of memory of size at
+     *  least (info.fHeight - 1) * rowBytes + (info.fWidth *
+     *  bytesPerPixel)
+     *
+     *  Repeated calls to this function should give the same results,
+     *  allowing the PixelRef to be immutable.
+     *
+     *  @param info A description of the format (config, size)
+     *         expected by the caller.  This can simply be identical
+     *         to the info returned by getInfo().
+     *
+     *         This contract also allows the caller to specify
+     *         different output-configs, which the implementation can
+     *         decide to support or not.
+     *
+     *         A size that does not match getInfo() implies a request
+     *         to scale. If the generator cannot perform this scale,
+     *         it will return kInvalidScale.
+     *
+     *  If info is kIndex8_SkColorType, then the caller must provide storage for up to 256
+     *  SkPMColor values in ctable. On success the generator must copy N colors into that storage,
+     *  (where N is the logical number of table entries) and set ctableCount to N.
+     *
+     *  If info is not kIndex8_SkColorType, then the last two parameters may be NULL. If ctableCount
+     *  is not null, it will be set to 0.
+     *
+     *  @return Result kSuccess, or another value explaining the type of failure.
+     */
+    Result getPixels(const SkImageInfo& info, void* pixels, size_t rowBytes, const Options*,
+                     SkPMColor ctable[], int* ctableCount);
+
+    /**
+     *  Simplified version of getPixels() that asserts that info is NOT kIndex8_SkColorType and
+     *  uses the default Options.
+     */
+    Result getPixels(const SkImageInfo& info, void* pixels, size_t rowBytes);
 
     /**
      *  Some images may initially report that they have alpha due to the format
@@ -118,70 +235,49 @@ protected:
 
     virtual SkEncodedFormat onGetEncodedFormat() const = 0;
 
-    /**
-     *  Override if your codec supports scanline decoding.
-     *
-     *  As in onGetPixels(), the implementation must call rewindIfNeeded() and
-     *  handle as appropriate.
-     *
-     *  @param dstInfo Info of the destination. If the dimensions do not match
-     *      those of getInfo, this implies a scale.
-     *  @param options Contains decoding options, including if memory is zero
-     *      initialized.
-     *  @param ctable A pointer to a color table.  When dstInfo.colorType() is
-     *      kIndex8, this should be non-NULL and have enough storage for 256
-     *      colors.  The color table will be populated after decoding the palette.
-     *  @param ctableCount A pointer to the size of the color table.  When
-     *      dstInfo.colorType() is kIndex8, this should be non-NULL.  It will
-     *      be modified to the true size of the color table (<= 256) after
-     *      decoding the palette.
-     *  @return New SkScanlineDecoder on success, NULL otherwise. The SkCodec
-     *      will take ownership of the returned scanline decoder.
-     */
-    virtual SkScanlineDecoder* onGetScanlineDecoder(const SkImageInfo& dstInfo,
-                                                    const Options& options,
-                                                    SkPMColor ctable[],
-                                                    int* ctableCount) {
-        return NULL;
+    virtual Result onGetPixels(const SkImageInfo& info,
+                               void* pixels, size_t rowBytes, const Options&,
+                               SkPMColor ctable[], int* ctableCount) = 0;
+
+    virtual bool onGetValidSubset(SkIRect* /* desiredSubset */) const {
+        // By default, subsets are not supported.
+        return false;
     }
 
     virtual bool onReallyHasAlpha() const { return false; }
 
-    enum RewindState {
-        kRewound_RewindState,
-        kNoRewindNecessary_RewindState,
-        kCouldNotRewind_RewindState
-    };
     /**
      *  If the stream was previously read, attempt to rewind.
-     *  @returns:
-     *      kRewound if the stream needed to be rewound, and the
-     *               rewind succeeded.
-     *      kNoRewindNecessary if the stream did not need to be
-     *                         rewound.
-     *      kCouldNotRewind if the stream needed to be rewound, and
-     *                      rewind failed.
+     *
+     *  If the stream needed to be rewound, call onRewind.
+     *  @returns true if the codec is at the right position and can be used.
+     *      false if there was a failure to rewind.
      *
      *  Subclasses MUST call this function before reading the stream (e.g. in
      *  onGetPixels). If it returns false, onGetPixels should return
      *  kCouldNotRewind.
      */
-    RewindState SK_WARN_UNUSED_RESULT rewindIfNeeded();
+    bool SK_WARN_UNUSED_RESULT rewindIfNeeded();
 
-    /*
+    /**
+     *  Called by rewindIfNeeded, if the stream needed to be rewound.
      *
+     *  Subclasses should do any set up needed after a rewind.
+     */
+    virtual bool onRewind() {
+        return true;
+    }
+
+    /**
      * Get method for the input stream
-     *
      */
     SkStream* stream() {
         return fStream.get();
     }
 
 private:
-    SkAutoTDelete<SkStream>             fStream;
-    bool                                fNeedsRewind;
-    SkAutoTDelete<SkScanlineDecoder>    fScanlineDecoder;
-
-    typedef SkImageGenerator INHERITED;
+    const SkImageInfo       fInfo;
+    SkAutoTDelete<SkStream> fStream;
+    bool                    fNeedsRewind;
 };
 #endif // SkCodec_DEFINED

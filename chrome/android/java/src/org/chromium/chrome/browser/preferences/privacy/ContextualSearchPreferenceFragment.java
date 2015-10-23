@@ -8,15 +8,12 @@ import android.os.Bundle;
 import android.preference.Preference;
 import android.preference.Preference.OnPreferenceChangeListener;
 import android.preference.PreferenceFragment;
-import android.view.Menu;
-import android.view.MenuInflater;
-import android.view.MenuItem;
 
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.contextualsearch.ContextualSearchUma;
 import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
-import org.chromium.chrome.browser.preferences.Preferences;
 
 /**
  * Fragment to manage the Contextual Search preference and to explain to the user what it does.
@@ -34,23 +31,6 @@ public class ContextualSearchPreferenceFragment extends PreferenceFragment {
         initContextualSearchSwitch();
     }
 
-    @Override
-    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
-        menu.clear();
-        menu.add(Menu.NONE, R.id.menu_id_contextual_search_learn, Menu.NONE, R.string.learn_more);
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() != R.id.menu_id_contextual_search_learn) {
-            return false;
-        }
-
-        ((Preferences) getActivity()).showUrl(R.string.learn_more,
-                R.string.contextual_search_learn_more_url);
-        return true;
-    }
-
     private void initContextualSearchSwitch() {
         ChromeSwitchPreference contextualSearchSwitch =
                 (ChromeSwitchPreference) findPreference(PREF_CONTEXTUAL_SEARCH_SWITCH);
@@ -63,7 +43,7 @@ public class ContextualSearchPreferenceFragment extends PreferenceFragment {
             @Override
             public boolean onPreferenceChange(Preference preference, Object newValue) {
                 PrefServiceBridge.getInstance().setContextualSearchState((boolean) newValue);
-                ((Preferences) getActivity()).logContextualSearchToggled((boolean) newValue);
+                ContextualSearchUma.logPreferenceChange((boolean) newValue);
                 return true;
             }
         });

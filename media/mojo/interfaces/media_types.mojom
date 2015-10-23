@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-module mojo;
+module media.interfaces;
 
 import "ui/mojo/geometry/geometry.mojom";
 
@@ -89,22 +89,29 @@ enum SampleFormat {
   Max = PlanarS32,
 };
 
-// See media/base/video_frame.h for descriptions.
-// Kept in sync with media::VideoFrame::Format via static_asserts.
+// See media/base/video_types.h for descriptions.
+// Kept in sync with media::VideoPixelFormat via static_asserts.
 enum VideoFormat {
   UNKNOWN = 0,
   YV12,
-  YV16,
   I420,
+  YV16,
   YV12A,
-  HOLE,
-  NATIVE_TEXTURE,
-  YV12J,
-  NV12,
   YV24,
+  NV12,
   ARGB,
-  YV12HD,
-  FORMAT_MAX = YV12HD,
+  XRGB,
+  UYVY,
+  FORMAT_MAX = UYVY,
+};
+
+// Kept in sync with media::ColorSpace via static_asserts.
+enum ColorSpace {
+  UNSPECIFIED = 0,
+  JPEG = 1,
+  HD_REC709 = 2,
+  SD_REC601 = 3,
+  MAX = SD_REC601,
 };
 
 // See media/base/video_decoder_config.h for descriptions.
@@ -167,9 +174,10 @@ struct VideoDecoderConfig {
   VideoCodec codec;
   VideoCodecProfile profile;
   VideoFormat format;
-  Size coded_size;
-  Rect visible_rect;
-  Size natural_size;
+  ColorSpace color_space;
+  mojo.Size coded_size;
+  mojo.Rect visible_rect;
+  mojo.Size natural_size;
   array<uint8>? extra_data;
   bool is_encrypted;
 };
@@ -190,7 +198,7 @@ struct DecryptConfig {
 };
 
 // This defines a mojo transport format for media::DecoderBuffer.
-struct MediaDecoderBuffer {
+struct DecoderBuffer {
   // See media/base/buffers.h for details.
   int64 timestamp_usec;
   int64 duration_usec;

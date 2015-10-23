@@ -15,9 +15,9 @@ using content::BrowserThread;
 
 namespace extensions {
 
-using core_api::audio::OutputDeviceInfo;
-using core_api::audio::InputDeviceInfo;
-using core_api::audio::AudioDeviceInfo;
+using api::audio::OutputDeviceInfo;
+using api::audio::InputDeviceInfo;
+using api::audio::AudioDeviceInfo;
 
 class AudioServiceImpl : public AudioService,
                          public chromeos::CrasAudioHandler::AudioObserver {
@@ -41,7 +41,7 @@ class AudioServiceImpl : public AudioService,
   // chromeos::CrasAudioHandler::AudioObserver overrides.
   void OnOutputNodeVolumeChanged(uint64_t id, int volume) override;
   void OnInputNodeGainChanged(uint64_t id, int gain) override;
-  void OnOutputMuteChanged(bool mute_on) override;
+  void OnOutputMuteChanged(bool mute_on, bool system_adjust) override;
   void OnInputMuteChanged(bool mute_on) override;
   void OnAudioNodesChanged() override;
   void OnActiveOutputNodeChanged() override;
@@ -57,7 +57,7 @@ class AudioServiceImpl : public AudioService,
   uint64_t GetIdFromStr(const std::string& id_str);
 
   // List of observers.
-  ObserverList<AudioService::Observer> observer_list_;
+  base::ObserverList<AudioService::Observer> observer_list_;
 
   chromeos::CrasAudioHandler* cras_audio_handler_;
 
@@ -199,7 +199,7 @@ void AudioServiceImpl::OnOutputNodeVolumeChanged(uint64_t id, int volume) {
   NotifyLevelChanged(id, volume);
 }
 
-void AudioServiceImpl::OnOutputMuteChanged(bool mute_on) {
+void AudioServiceImpl::OnOutputMuteChanged(bool mute_on, bool system_adjust) {
   NotifyMuteChanged(false, mute_on);
 }
 

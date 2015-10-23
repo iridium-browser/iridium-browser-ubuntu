@@ -21,9 +21,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/fake_gaia_cookie_manager_service.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
-#include "chrome/browser/signin/fake_signin_manager.h"
+#include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -36,6 +35,7 @@
 #include "components/crx_file/id_util.h"
 #include "components/guest_view/browser/guest_view_base.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
@@ -236,7 +236,8 @@ class WaitForGURLAndCloseWindow : public content::WindowedNotificationObserver {
       : WindowedNotificationObserver(
             content::NOTIFICATION_LOAD_STOP,
             content::NotificationService::AllSources()),
-        url_(url) {}
+        url_(url),
+        embedder_web_contents_(nullptr) {}
 
   // NotificationObserver:
   void Observe(int type,
@@ -281,6 +282,7 @@ class FakeGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
         auto_login_access_token_(true),
         login_ui_result_(true),
         scope_ui_result_(true),
+        scope_ui_failure_(GaiaWebAuthFlow::WINDOW_CLOSED),
         login_ui_shown_(false),
         scope_ui_shown_(false) {}
 
@@ -553,7 +555,7 @@ class IdentityTestWithSignin : public AsyncExtensionBrowserTest {
     // creating the browser so that a bunch of classes don't register as
     // observers and end up needing to unregister when the fake is substituted.
     SigninManagerFactory::GetInstance()->SetTestingFactory(
-        context, &FakeSigninManagerBase::Build);
+        context, &BuildFakeSigninManagerBase);
     ProfileOAuth2TokenServiceFactory::GetInstance()->SetTestingFactory(
         context, &BuildFakeProfileOAuth2TokenService);
     GaiaCookieManagerServiceFactory::GetInstance()->SetTestingFactory(
@@ -591,7 +593,7 @@ class IdentityTestWithSignin : public AsyncExtensionBrowserTest {
 #else
     signin_manager_->SignIn(gaia, email, "password");
 #endif
-    token_service_->IssueRefreshTokenForUser(account_id, "refresh_token");
+    token_service_->UpdateCredentials(account_id, "refresh_token");
   }
 
   FakeSigninManagerForTesting* signin_manager_;
@@ -669,7 +671,7 @@ class GetAuthTokenFunctionTest : public IdentityTestWithSignin {
   }
 
   void IssueLoginRefreshTokenForAccount(const std::string account_key) {
-    token_service_->IssueRefreshTokenForUser(account_key, "refresh_token");
+    token_service_->UpdateCredentials(account_key, "refresh_token");
   }
 
   void IssueLoginAccessTokenForAccount(const std::string account_key) {
@@ -801,7 +803,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
   func->set_mint_token_result(TestOAuth2MintTokenFlow::MINT_TOKEN_FAILURE);
   std::string error =
       utils::RunFunctionAndReturnError(func.get(), "[{}]", browser());
-  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+  EXPECT_TRUE(base::StartsWith(error, errors::kAuthFailure,
+                               base::CompareCase::INSENSITIVE_ASCII));
   EXPECT_FALSE(func->login_ui_shown());
   EXPECT_FALSE(func->scope_ui_shown());
 }
@@ -814,7 +817,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
   func->set_login_access_token_result(false);
   std::string error = utils::RunFunctionAndReturnError(
       func.get(), "[{}]", browser());
-  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+  EXPECT_TRUE(base::StartsWith(error, errors::kAuthFailure,
+                               base::CompareCase::INSENSITIVE_ASCII));
 }
 
 IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
@@ -843,7 +847,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
       TestOAuth2MintTokenFlow::MINT_TOKEN_BAD_CREDENTIALS);
   std::string error =
       utils::RunFunctionAndReturnError(func.get(), "[{}]", browser());
-  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+  EXPECT_TRUE(base::StartsWith(error, errors::kAuthFailure,
+                               base::CompareCase::INSENSITIVE_ASCII));
   EXPECT_FALSE(func->login_ui_shown());
   EXPECT_FALSE(func->scope_ui_shown());
 }
@@ -857,7 +862,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
       TestOAuth2MintTokenFlow::MINT_TOKEN_SERVICE_ERROR);
   std::string error =
       utils::RunFunctionAndReturnError(func.get(), "[{}]", browser());
-  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+  EXPECT_TRUE(base::StartsWith(error, errors::kAuthFailure,
+                               base::CompareCase::INSENSITIVE_ASCII));
   EXPECT_FALSE(func->login_ui_shown());
   EXPECT_FALSE(func->scope_ui_shown());
 }
@@ -959,7 +965,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
   func->set_mint_token_result(TestOAuth2MintTokenFlow::MINT_TOKEN_FAILURE);
   std::string error = utils::RunFunctionAndReturnError(
       func.get(), "[{\"interactive\": true}]", browser());
-  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+  EXPECT_TRUE(base::StartsWith(error, errors::kAuthFailure,
+                               base::CompareCase::INSENSITIVE_ASCII));
   EXPECT_TRUE(func->login_ui_shown());
   EXPECT_FALSE(func->scope_ui_shown());
 }
@@ -972,7 +979,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
   func->set_login_access_token_result(false);
   std::string error = utils::RunFunctionAndReturnError(
       func.get(), "[{\"interactive\": true}]", browser());
-  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+  EXPECT_TRUE(base::StartsWith(error, errors::kAuthFailure,
+                               base::CompareCase::INSENSITIVE_ASCII));
   EXPECT_TRUE(func->login_ui_shown());
   EXPECT_FALSE(func->scope_ui_shown());
 }
@@ -1076,7 +1084,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
   func->set_scope_ui_failure(GaiaWebAuthFlow::SERVICE_AUTH_ERROR);
   std::string error = utils::RunFunctionAndReturnError(
       func.get(), "[{\"interactive\": true}]", browser());
-  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+  EXPECT_TRUE(base::StartsWith(error, errors::kAuthFailure,
+                               base::CompareCase::INSENSITIVE_ASCII));
   EXPECT_FALSE(func->login_ui_shown());
   EXPECT_TRUE(func->scope_ui_shown());
 }
@@ -1498,7 +1507,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
   func->set_mint_token_result(TestOAuth2MintTokenFlow::MINT_TOKEN_FAILURE);
   std::string error = utils::RunFunctionAndReturnError(
       func.get(), "[{\"account\": { \"id\": \"2\" } }]", browser());
-  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+  EXPECT_TRUE(base::StartsWith(error, errors::kAuthFailure,
+                               base::CompareCase::INSENSITIVE_ASCII));
   EXPECT_FALSE(func->login_ui_shown());
   EXPECT_FALSE(func->scope_ui_shown());
 }
@@ -1515,7 +1525,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
   func->set_login_access_token_result(false);
   std::string error = utils::RunFunctionAndReturnError(
       func.get(), "[{\"account\": { \"id\": \"2\" } }]", browser());
-  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+  EXPECT_TRUE(base::StartsWith(error, errors::kAuthFailure,
+                               base::CompareCase::INSENSITIVE_ASCII));
 }
 
 IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,

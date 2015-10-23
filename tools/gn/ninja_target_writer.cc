@@ -18,6 +18,7 @@
 #include "tools/gn/output_file.h"
 #include "tools/gn/scheduler.h"
 #include "tools/gn/string_utils.h"
+#include "tools/gn/substitution_type.h"
 #include "tools/gn/substitution_writer.h"
 #include "tools/gn/target.h"
 #include "tools/gn/trace.h"
@@ -242,7 +243,8 @@ void NinjaTargetWriter::WriteStampForTarget(
 
   // First validate that the target's dependency is a stamp file. Otherwise,
   // we shouldn't have gotten here!
-  CHECK(EndsWith(stamp_file.value(), ".stamp", false))
+  CHECK(base::EndsWith(stamp_file.value(), ".stamp",
+                       base::CompareCase::INSENSITIVE_ASCII))
       << "Output should end in \".stamp\" for stamp file output. Instead got: "
       << "\"" << stamp_file.value() << "\"";
 

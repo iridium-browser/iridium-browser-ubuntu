@@ -78,10 +78,11 @@ AudioManagerBase::AudioManagerBase(AudioLogFactory* audio_log_factory)
       max_num_input_streams_(kDefaultMaxInputStreams),
       num_output_streams_(0),
       num_input_streams_(0),
-      // TODO(dalecurtis): Switch this to an ObserverListThreadSafe, so we don't
+      // TODO(dalecurtis): Switch this to an base::ObserverListThreadSafe, so we
+      // don't
       // block the UI thread when swapping devices.
       output_listeners_(
-          ObserverList<AudioDeviceListener>::NOTIFY_EXISTING_ONLY),
+          base::ObserverList<AudioDeviceListener>::NOTIFY_EXISTING_ONLY),
       audio_thread_("AudioThread"),
       audio_log_factory_(audio_log_factory) {
 #if defined(OS_WIN)
@@ -98,7 +99,7 @@ AudioManagerBase::AudioManagerBase(AudioLogFactory* audio_log_factory)
 #endif
 
   CHECK(audio_thread_.Start());
-  task_runner_ = audio_thread_.message_loop_proxy();
+  task_runner_ = audio_thread_.task_runner();
 }
 
 AudioManagerBase::~AudioManagerBase() {
@@ -128,7 +129,7 @@ AudioManagerBase::GetWorkerTaskRunner() {
   if (!audio_thread_.IsRunning())
     CHECK(audio_thread_.Start());
 
-  return audio_thread_.message_loop_proxy();
+  return audio_thread_.task_runner();
 }
 
 AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
@@ -263,7 +264,14 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStreamProxy(
       output_params = AudioParameters(
           AudioParameters::AUDIO_FAKE, params.channel_layout(),
           params.sample_rate(), params.bits_per_sample(),
-          params.frames_per_buffer());
+          params.frames_per_buffer(), params.effects());
+    } else if (params.effects() != output_params.effects()) {
+      // Turn off effects that weren't requested.
+      output_params = AudioParameters(
+          output_params.format(), output_params.channel_layout(),
+          output_params.channels(), output_params.sample_rate(),
+          output_params.bits_per_sample(), output_params.frames_per_buffer(),
+          params.effects() & output_params.effects());
     }
   }
 

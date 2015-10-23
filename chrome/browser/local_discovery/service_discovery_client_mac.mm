@@ -4,8 +4,8 @@
 
 #include "chrome/browser/local_discovery/service_discovery_client_mac.h"
 
-#import <Foundation/Foundation.h>
 #import <arpa/inet.h>
+#import <Foundation/Foundation.h>
 #import <net/if_dl.h>
 
 #include "base/memory/singleton.h"
@@ -13,6 +13,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
+#include "net/base/ip_address_number.h"
 
 using local_discovery::ServiceWatcherImplMac;
 using local_discovery::ServiceResolverImplMac;
@@ -124,7 +125,7 @@ scoped_ptr<ServiceWatcher> ServiceDiscoveryClientMac::CreateServiceWatcher(
   StartThreadIfNotStarted();
   VLOG(1) << "CreateServiceWatcher: " << service_type;
   return scoped_ptr<ServiceWatcher>(new ServiceWatcherImplMac(
-      service_type, callback, service_discovery_thread_->message_loop_proxy()));
+      service_type, callback, service_discovery_thread_->task_runner()));
 }
 
 scoped_ptr<ServiceResolver> ServiceDiscoveryClientMac::CreateServiceResolver(
@@ -133,7 +134,7 @@ scoped_ptr<ServiceResolver> ServiceDiscoveryClientMac::CreateServiceResolver(
   StartThreadIfNotStarted();
   VLOG(1) << "CreateServiceResolver: " << service_name;
   return scoped_ptr<ServiceResolver>(new ServiceResolverImplMac(
-      service_name, callback, service_discovery_thread_->message_loop_proxy()));
+      service_name, callback, service_discovery_thread_->task_runner()));
 }
 
 scoped_ptr<LocalDomainResolver>

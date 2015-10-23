@@ -264,6 +264,11 @@ static struct NaClDescVtbl const kNaClDescConnCapFdVtbl = {
   NaClDescPReadNotImplemented,
   NaClDescPWriteNotImplemented,
   NaClDescConnCapFdFstat,
+  NaClDescFchdirNotImplemented,
+  NaClDescFchmodNotImplemented,
+  NaClDescFsyncNotImplemented,
+  NaClDescFdatasyncNotImplemented,
+  NaClDescFtruncateNotImplemented,
   NaClDescGetdentsNotImplemented,
   NaClDescConnCapFdExternalizeSize,
   NaClDescConnCapFdExternalize,
@@ -293,12 +298,10 @@ static struct NaClDescVtbl const kNaClDescConnCapFdVtbl = {
 
 int NaClDescConnCapFdInternalize(
     struct NaClDesc               **out_desc,
-    struct NaClDescXferState      *xfer,
-    struct NaClDescQuotaInterface *quota_interface) {
+    struct NaClDescXferState      *xfer) {
   struct NaClDescConnCapFd *conn_cap;
   int rv;
 
-  UNREFERENCED_PARAMETER(quota_interface);
   conn_cap = malloc(sizeof(*conn_cap));
   if (NULL == conn_cap) {
     return -NACL_ABI_ENOMEM;

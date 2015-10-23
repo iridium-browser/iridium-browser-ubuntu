@@ -30,6 +30,7 @@
       'copresence.idl',
       'copresence_private.idl',
       'cryptotoken_private.idl',
+      'dashboard_private.json',
       'data_reduction_proxy.json',
       'debugger.json',
       'desktop_capture.json',
@@ -52,7 +53,8 @@
       'identity_private.idl',
       'image_writer_private.idl',
       'inline_install_private.idl',
-      'instance_id.idl',
+      'instance_id.json',
+      'language_settings_private.idl',
       'launcher_page.idl',
       'location.idl',
       'manifest_types.json',
@@ -91,7 +93,7 @@
       'windows.json',
     ],
     'main_schema_include_rules': [
-      'extensions/common/api:extensions::core_api::%(namespace)s',
+      'extensions/common/api:extensions::api::%(namespace)s',
     ],
     'main_non_compiled_schema_files': [
       'browsing_data.json',
@@ -104,7 +106,9 @@
 
     # ChromeOS-specific schemas.
     'chromeos_schema_files': [
+      'cast_devices_private.idl',
       'echo_private.json',
+      'enterprise_device_attributes.idl',
       'enterprise_platform_keys.idl',
       'enterprise_platform_keys_internal.idl',
       'enterprise_platform_keys_private.json',
@@ -120,6 +124,7 @@
       'platform_keys.idl',
       'platform_keys_internal.idl',
       'terminal_private.json',
+      'users_private.idl',
       'wallpaper.json',
       'wallpaper_private.json',
     ],
@@ -168,6 +173,7 @@
     ],
     'cc_dir': 'chrome/common/extensions/api',
     'root_namespace': 'extensions::api::%(namespace)s',
+    'bundle_name': 'Chrome',
     'impl_dir_': 'chrome/browser/extensions/api',
   },
 }

@@ -5,6 +5,7 @@
 #include "content/test/test_render_view_host.h"
 
 #include "base/memory/scoped_ptr.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
@@ -61,7 +62,7 @@ TestRenderWidgetHostView::~TestRenderWidgetHostView() {
 }
 
 RenderWidgetHost* TestRenderWidgetHostView::GetRenderWidgetHost() const {
-  return NULL;
+  return rwh_;
 }
 
 gfx::Vector2dF TestRenderWidgetHostView::GetLastScrollOffset() const {
@@ -224,7 +225,7 @@ TestRenderViewHost::TestRenderViewHost(
                          false /* hidden */,
                          false /* has_initialized_audio_host */),
       delete_counter_(NULL),
-      opener_route_id_(MSG_ROUTING_NONE) {
+      opener_frame_route_id_(MSG_ROUTING_NONE) {
   // TestRenderWidgetHostView installs itself into this->view_ in its
   // constructor, and deletes itself when TestRenderWidgetHostView::Destroy() is
   // called.
@@ -236,16 +237,32 @@ TestRenderViewHost::~TestRenderViewHost() {
     ++*delete_counter_;
 }
 
-bool TestRenderViewHost::CreateRenderView(
+bool TestRenderViewHost::CreateTestRenderView(
     const base::string16& frame_name,
-    int opener_route_id,
+    int opener_frame_route_id,
     int proxy_route_id,
     int32 max_page_id,
+    bool window_was_created_with_opener) {
+  FrameReplicationState replicated_state;
+  replicated_state.name = base::UTF16ToUTF8(frame_name);
+  return CreateRenderView(opener_frame_route_id, proxy_route_id, max_page_id,
+                          replicated_state, window_was_created_with_opener);
+}
+
+bool TestRenderViewHost::CreateRenderView(
+    int opener_frame_route_id,
+    int proxy_route_id,
+    int32 max_page_id,
+    const FrameReplicationState& replicated_frame_state,
     bool window_was_created_with_opener) {
   DCHECK(!IsRenderViewLive());
   set_renderer_initialized(true);
   DCHECK(IsRenderViewLive());
-  opener_route_id_ = opener_route_id;
+  opener_frame_route_id_ = opener_frame_route_id;
+  RenderFrameHost* main_frame = GetMainFrame();
+  if (main_frame)
+    static_cast<RenderFrameHostImpl*>(main_frame)->SetRenderFrameCreated(true);
+
   return true;
 }
 

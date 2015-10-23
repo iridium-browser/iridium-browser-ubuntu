@@ -10,11 +10,11 @@
 
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl_impl.h"
+#include "sandbox/linux/bpf_dsl/errorcode.h"
 #include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/linux/bpf_dsl/policy_compiler.h"
 #include "sandbox/linux/bpf_dsl/seccomp_macros.h"
 #include "sandbox/linux/bpf_dsl/syscall_set.h"
-#include "sandbox/linux/seccomp-bpf/errorcode.h"
 #include "sandbox/linux/system_headers/linux_filter.h"
 #include "sandbox/linux/system_headers/linux_seccomp.h"
 
@@ -368,12 +368,12 @@ uint32_t Verifier::EvaluateBPF(const std::vector<struct sock_filter>& program,
       case BPF_RET: {
         uint32_t r = Ret(&state, insn, err);
         switch (r & SECCOMP_RET_ACTION) {
-          case SECCOMP_RET_TRAP:
-          case SECCOMP_RET_ERRNO:
-          case SECCOMP_RET_TRACE:
           case SECCOMP_RET_ALLOW:
+          case SECCOMP_RET_ERRNO:
+          case SECCOMP_RET_KILL:
+          case SECCOMP_RET_TRACE:
+          case SECCOMP_RET_TRAP:
             break;
-          case SECCOMP_RET_KILL:     // We don't ever generate this
           case SECCOMP_RET_INVALID:  // Should never show up in BPF program
           default:
             *err = "Unexpected return code found in BPF program";

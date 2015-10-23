@@ -6,12 +6,14 @@
  */
 
 #include "SkOSFile.h"
-
+#include "SkString.h"
 #include "SkTFitsIn.h"
+#include "SkTemplates.h"
 #include "SkTypes.h"
 
 #include <dirent.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -100,7 +102,7 @@ struct SkOSFileIterData {
     DIR* fDIR;
     SkString fPath, fSuffix;
 };
-SK_COMPILE_ASSERT(sizeof(SkOSFileIterData) <= SkOSFile::Iter::kStorageSize, not_enough_space);
+static_assert(sizeof(SkOSFileIterData) <= SkOSFile::Iter::kStorageSize, "not_enough_space");
 
 SkOSFile::Iter::Iter() {
     SkNEW_PLACEMENT(fSelf.get(), SkOSFileIterData);

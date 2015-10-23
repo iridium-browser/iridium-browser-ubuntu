@@ -69,7 +69,6 @@
         {
             "type": "@WebInspector.ActionDelegate",
             "actionId": "main.toggle-element-search",
-            "contextTypes": ["WebInspector.InspectElementModeController"],
             "className": "WebInspector.InspectElementModeController.ToggleSearchActionDelegate",
             "bindings": [
                 {
@@ -144,26 +143,17 @@
         },
         {
             "type": "@WebInspector.ActionDelegate",
-            "actionId": "main.toggle-device-mode",
-            "className": "WebInspector.AdvancedApp.ToggleDeviceModeActionDelegate",
-            "condition": "can_dock",
-            "bindings": [
-                {
-                    "platform": "windows,linux",
-                    "shortcut": "Shift+Ctrl+M"
-                },
-                {
-                    "platform": "mac",
-                    "shortcut": "Shift+Meta+M"
-                }
-            ]
+            "actionId": "main.inspect-devices",
+            "title": "Inspect devices\u2026",
+            "className": "WebInspector.Main.InspectDevicesActionDelegate"
         },
         {
             "type": "drawer-view",
             "name": "rendering",
             "title": "Rendering",
             "order": "11",
-            "className": "WebInspector.RenderingOptions.View"
+            "className": "WebInspector.RenderingOptions.View",
+            "experiment": "!materialDesign"
         },
         {
             "type": "@WebInspector.ToolbarItem.Provider",
@@ -174,10 +164,9 @@
         },
         {
             "type": "@WebInspector.ToolbarItem.Provider",
-            "className": "WebInspector.AdvancedApp.EmulationButtonProvider",
-            "condition": "can_dock",
-            "order": 1,
-            "location": "main-toolbar-left"
+            "separator": true,
+            "location": "main-toolbar-left",
+            "order": 100
         },
         {
             "type": "@WebInspector.ToolbarItem.Provider",
@@ -187,14 +176,20 @@
         },
         {
             "type": "@WebInspector.ToolbarItem.Provider",
-            "className": "WebInspector.InspectorView.ToggleDrawerButtonProvider",
-            "order": 2,
+            "separator": true,
+            "order": 98,
             "location": "main-toolbar-right"
         },
         {
             "type": "@WebInspector.ToolbarItem.Provider",
-            "className": "WebInspector.DockController.ButtonProvider",
-            "order": 4,
+            "className": "WebInspector.Main.MainMenuItem",
+            "order": 99,
+            "location": "main-toolbar-right"
+        },
+        {
+            "type": "@WebInspector.ToolbarItem.Provider",
+            "className": "WebInspector.DockController.CloseButtonProvider",
+            "order": 100,
             "location": "main-toolbar-right"
         },
         {
@@ -207,6 +202,12 @@
         },
         {
             "type": "setting",
+            "settingName": "networkConditions",
+            "settingType": "object",
+            "defaultValue": { "throughput": -1, "latency": 0 }
+        },
+        {
+            "type": "setting",
             "category": "",
             "title": "Disable JavaScript",
             "settingName": "javaScriptDisabled",
@@ -216,10 +217,15 @@
         {
             "type": "setting",
             "category": "Appearance",
-            "title": "Split panels vertically when docked to right",
-            "settingName": "splitVerticallyWhenDockedToRight",
-            "settingType": "boolean",
-            "defaultValue": true
+            "title": "Panel layout:",
+            "settingName": "sidebarPosition",
+            "settingType": "enum",
+            "defaultValue": "auto",
+            "options": [
+                ["horizontal", "bottom"],
+                ["vertical", "right"],
+                ["auto", "auto"]
+            ]
         },
         {
             "type": "setting",
@@ -260,6 +266,27 @@
             "className": "WebInspector.HandlerRegistry.OpenAnchorLocationSettingUI"
         },
         {
+            "type": "@WebInspector.ToolbarItem.Provider",
+            "className": "WebInspector.RenderingOptions.ButtonProvider",
+            "order": 1,
+            "location": "elements-toolbar",
+            "experiment": "materialDesign"
+        },
+        {
+            "type": "@WebInspector.ToolbarItem.Provider",
+            "separator": "true",
+            "order": 2,
+            "location": "elements-toolbar",
+            "experiment": "materialDesign"
+        },
+        {
+            "type": "context-menu-item",
+            "location": "mainMenu/navigate",
+            "order": 100,
+            "title": "Inspect devices\u2026",
+            "actionId": "main.inspect-devices"
+        },
+        {
             "type": "setting",
             "settingName": "showPaintRects",
             "settingType": "boolean",
@@ -274,12 +301,6 @@
         {
             "type": "setting",
             "settingName": "showFPSCounter",
-            "settingType": "boolean",
-            "defaultValue": false
-        },
-        {
-            "type": "setting",
-            "settingName": "continuousPainting",
             "settingType": "boolean",
             "defaultValue": false
         },

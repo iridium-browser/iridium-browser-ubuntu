@@ -20,6 +20,7 @@
 #include "cc/playback/picture_pile.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_host_common.h"
+#include "skia/ext/analysis_canvas.h"
 #include "third_party/skia/include/utils/SkPictureUtils.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -74,7 +75,8 @@ void RasterizeAndRecordBenchmark::DidUpdateLayers(LayerTreeHost* host) {
   DCHECK(!results_.get());
   results_ = make_scoped_ptr(new base::DictionaryValue);
   results_->SetInteger("pixels_recorded", record_results_.pixels_recorded);
-  results_->SetInteger("picture_memory_usage", record_results_.bytes_used);
+  results_->SetInteger("picture_memory_usage",
+                       static_cast<int>(record_results_.bytes_used));
 
   for (int i = 0; i < RecordingSource::RECORDING_MODE_COUNT; i++) {
     std::string name = base::StringPrintf("record_time%s_ms", kModeSuffixes[i]);
@@ -108,8 +110,7 @@ scoped_ptr<MicroBenchmarkImpl> RasterizeAndRecordBenchmark::CreateBenchmarkImpl(
 void RasterizeAndRecordBenchmark::RunOnLayer(PictureLayer* layer) {
   DCHECK(host_);
 
-  gfx::Rect visible_layer_rect = gfx::ScaleToEnclosingRect(
-      layer->visible_content_rect(), 1.f / layer->contents_scale_x());
+  gfx::Rect visible_layer_rect = layer->visible_layer_rect();
   if (visible_layer_rect.IsEmpty())
     return;
 
@@ -151,6 +152,11 @@ void RasterizeAndRecordBenchmark::RunOnPictureLayer(
       do {
         picture = Picture::Create(visible_layer_rect, painter, tile_grid_size,
                                   false, mode);
+        if (picture->ShouldBeAnalyzedForSolidColor()) {
+          gfx::Size layer_size = layer->paint_properties().bounds;
+          skia::AnalysisCanvas canvas(layer_size.width(), layer_size.height());
+          picture->Raster(&canvas, nullptr, gfx::Rect(), 1.f);
+        }
         if (memory_used) {
           // Verify we are recording the same thing each time.
           DCHECK(memory_used == picture->ApproximateMemoryUsage());
@@ -218,18 +224,19 @@ void RasterizeAndRecordBenchmark::RunOnDisplayListLayer(
                      kTimeCheckInterval);
 
       do {
-        const bool use_cached_picture = true;
-        display_list =
-            DisplayItemList::Create(visible_layer_rect, use_cached_picture);
-        painter->PaintContentsToDisplayList(
-            display_list.get(), visible_layer_rect, painting_control);
-        display_list->CreateAndCacheSkPicture();
+        display_list = painter->PaintContentsToDisplayList(visible_layer_rect,
+                                                           painting_control);
+        if (display_list->ShouldBeAnalyzedForSolidColor()) {
+          gfx::Size layer_size = layer->paint_properties().bounds;
+          skia::AnalysisCanvas canvas(layer_size.width(), layer_size.height());
+          display_list->Raster(&canvas, nullptr, gfx::Rect(), 1.f);
+        }
 
         if (memory_used) {
           // Verify we are recording the same thing each time.
-          DCHECK(memory_used == display_list->PictureMemoryUsage());
+          DCHECK_EQ(memory_used, display_list->ApproximateMemoryUsage());
         } else {
-          memory_used = display_list->PictureMemoryUsage();
+          memory_used = display_list->ApproximateMemoryUsage();
         }
 
         timer.NextLap();
@@ -241,7 +248,8 @@ void RasterizeAndRecordBenchmark::RunOnDisplayListLayer(
     }
 
     if (mode_index == RecordingSource::RECORD_NORMALLY) {
-      record_results_.bytes_used += memory_used;
+      record_results_.bytes_used +=
+          memory_used + painter->GetApproximateUnsharedMemoryUsage();
       record_results_.pixels_recorded +=
           visible_layer_rect.width() * visible_layer_rect.height();
     }

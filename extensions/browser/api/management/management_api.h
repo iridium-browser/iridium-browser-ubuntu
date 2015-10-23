@@ -7,10 +7,12 @@
 
 #include "base/compiler_specific.h"
 #include "base/scoped_observer.h"
+#include "base/strings/string16.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "extensions/browser/api/management/management_api_delegate.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_event_histogram_value.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/browser/extension_registry_observer.h"
 
@@ -134,10 +136,8 @@ class ManagementUninstallFunctionBase : public UIThreadExtensionFunction {
  public:
   ManagementUninstallFunctionBase();
 
-  static void SetAutoConfirmForTest(bool should_proceed);
-
-  void ExtensionUninstallAccepted();
-  void ExtensionUninstallCanceled();
+  void OnExtensionUninstallDialogClosed(bool did_start_uninstall,
+                                        const base::string16& error);
 
  protected:
   ~ManagementUninstallFunctionBase() override;
@@ -145,10 +145,11 @@ class ManagementUninstallFunctionBase : public UIThreadExtensionFunction {
                            bool show_confirm_dialog);
 
  private:
-  // If should_uninstall is true, this method does the actual uninstall.
-  // If |show_uninstall_dialog|, then this function will be called by one of the
-  // Accepted/Canceled callbacks. Otherwise, it's called directly from RunAsync.
-  void Finish(bool should_uninstall);
+  // Uninstalls the extension without showing the dialog.
+  void UninstallExtension();
+
+  // Finishes and responds to the extension.
+  void Finish(bool did_start_uninstall, const std::string& error);
 
   std::string target_extension_id_;
 
@@ -243,7 +244,9 @@ class ManagementEventRouter : public ExtensionRegistryObserver {
                               extensions::UninstallReason reason) override;
 
   // Dispatches management api events to listening extensions.
-  void BroadcastEvent(const Extension* extension, const char* event_name);
+  void BroadcastEvent(const Extension* extension,
+                      events::HistogramValue histogram_value,
+                      const char* event_name);
 
   content::BrowserContext* browser_context_;
 

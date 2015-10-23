@@ -28,10 +28,13 @@ namespace {
 
 enum HttpHeaderParserEvent {
   HEADER_PARSER_INVOKED = 0,
-  HEADER_HTTP_09_RESPONSE = 1,
+  // Obsolete: HEADER_HTTP_09_RESPONSE = 1,
   HEADER_ALLOWED_TRUNCATED_HEADERS = 2,
   HEADER_SKIPPED_WS_PREFIX = 3,
   HEADER_SKIPPED_NON_WS_PREFIX = 4,
+  HEADER_HTTP_09_RESPONSE_OVER_HTTP = 5,
+  HEADER_HTTP_09_RESPONSE_OVER_SSL = 6,
+  HEADER_HTTP_09_ON_REUSED_SOCKET = 7,
   NUM_HEADER_EVENTS
 };
 
@@ -74,16 +77,16 @@ bool HeadersContainMultipleCopiesOfField(const HttpResponseHeaders& headers,
   return false;
 }
 
-base::Value* NetLogSendRequestBodyCallback(
+scoped_ptr<base::Value> NetLogSendRequestBodyCallback(
     uint64 length,
     bool is_chunked,
     bool did_merge,
     NetLogCaptureMode /* capture_mode */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("length", static_cast<int>(length));
   dict->SetBoolean("is_chunked", is_chunked);
   dict->SetBoolean("did_merge", did_merge);
-  return dict;
+  return dict.Pass();
 }
 
 // Returns true if |error_code| is an error for which we give the server a
@@ -768,37 +771,40 @@ int HttpStreamParser::HandleReadHeaderResult(int result) {
   if (result == 0)
     result = ERR_CONNECTION_CLOSED;
 
-  if (result < 0 && result != ERR_CONNECTION_CLOSED) {
-    io_state_ = STATE_DONE;
-    return result;
-  }
-  // If we've used the connection before, then we know it is not a HTTP/0.9
-  // response and return ERR_CONNECTION_CLOSED.
-  if (result == ERR_CONNECTION_CLOSED && read_buf_->offset() == 0 &&
-      connection_->is_reused()) {
-    io_state_ = STATE_DONE;
-    return result;
-  }
-
-  // Record our best estimate of the 'response time' as the time when we read
-  // the first bytes of the response headers.
-  if (read_buf_->offset() == 0 && result != ERR_CONNECTION_CLOSED)
-    response_->response_time = base::Time::Now();
-
   if (result == ERR_CONNECTION_CLOSED) {
-    // The connection closed before we detected the end of the headers.
+    // The connection closed without getting any more data.
     if (read_buf_->offset() == 0) {
-      // The connection was closed before any data was sent. Likely an error
-      // rather than empty HTTP/0.9 response.
       io_state_ = STATE_DONE;
-      return ERR_EMPTY_RESPONSE;
-    } else if (request_->url.SchemeIsCryptographic()) {
-      // The connection was closed in the middle of the headers. For HTTPS we
-      // don't parse partial headers. Return a different error code so that we
-      // know that we shouldn't attempt to retry the request.
+      // If the connection has not been reused, it may have been a 0-length
+      // HTTP/0.9 responses, but it was most likely an error, so just return
+      // ERR_EMPTY_RESPONSE instead. If the connection was reused, just pass
+      // on the original connection close error, as rather than being an
+      // empty HTTP/0.9 response it's much more likely the server closed the
+      // socket before it received the request.
+      if (!connection_->is_reused())
+        return ERR_EMPTY_RESPONSE;
+      return result;
+    }
+
+    // Accepting truncated headers over HTTPS is a potential security
+    // vulnerability, so just return an error in that case.
+    //
+    // If response_header_start_offset_ is -1, this may be a < 8 byte HTTP/0.9
+    // response. However, accepting such a response over HTTPS would allow a
+    // MITM to truncate an HTTP/1.x status line to look like a short HTTP/0.9
+    // response if the peer put a record boundary at the first 8 bytes. To
+    // ensure that all response headers received over HTTPS are pristine, treat
+    // such responses as errors.
+    //
+    // TODO(mmenke):  Returning ERR_RESPONSE_HEADERS_TRUNCATED when a response
+    // looks like an HTTP/0.9 response is weird.  Should either come up with
+    // another error code, or, better, disable HTTP/0.9 over HTTPS (and give
+    // that a new error code).
+    if (request_->url.SchemeIsCryptographic()) {
       io_state_ = STATE_DONE;
       return ERR_RESPONSE_HEADERS_TRUNCATED;
     }
+
     // Parse things as well as we can and let the caller decide what to do.
     int end_offset;
     if (response_header_start_offset_ >= 0) {
@@ -808,7 +814,7 @@ int HttpStreamParser::HandleReadHeaderResult(int result) {
       RecordHeaderParserEvent(HEADER_ALLOWED_TRUNCATED_HEADERS);
     } else {
       // The response is apparently using HTTP/0.9.  Treat the entire response
-      // the body.
+      // as the body.
       end_offset = 0;
     }
     int rv = ParseResponseHeaders(end_offset);
@@ -816,6 +822,16 @@ int HttpStreamParser::HandleReadHeaderResult(int result) {
       return rv;
     return result;
   }
+
+  if (result < 0) {
+    io_state_ = STATE_DONE;
+    return result;
+  }
+
+  // Record our best estimate of the 'response time' as the time when we read
+  // the first bytes of the response headers.
+  if (read_buf_->offset() == 0)
+    response_->response_time = base::Time::Now();
 
   read_buf_->set_offset(read_buf_->offset() + result);
   DCHECK_LE(read_buf_->offset(), read_buf_->capacity());
@@ -929,7 +945,14 @@ int HttpStreamParser::ParseResponseHeaders(int end_offset) {
   } else {
     // Enough data was read -- there is no status line.
     headers = new HttpResponseHeaders(std::string("HTTP/0.9 200 OK"));
-    RecordHeaderParserEvent(HEADER_HTTP_09_RESPONSE);
+
+    if (request_->url.SchemeIsCryptographic()) {
+      RecordHeaderParserEvent(HEADER_HTTP_09_RESPONSE_OVER_SSL);
+    } else {
+      RecordHeaderParserEvent(HEADER_HTTP_09_RESPONSE_OVER_HTTP);
+    }
+    if (connection_->is_reused())
+      RecordHeaderParserEvent(HEADER_HTTP_09_ON_REUSED_SOCKET);
   }
 
   // Check for multiple Content-Length headers with no Transfer-Encoding header.
@@ -963,16 +986,25 @@ void HttpStreamParser::CalculateResponseBodySize() {
   // Figure how to determine EOF:
 
   // For certain responses, we know the content length is always 0. From
-  // RFC 2616 Section 4.3 Message Body:
+  // RFC 7230 Section 3.3 Message Body:
   //
-  // For response messages, whether or not a message-body is included with
-  // a message is dependent on both the request method and the response
-  // status code (section 6.1.1). All responses to the HEAD request method
-  // MUST NOT include a message-body, even though the presence of entity-
-  // header fields might lead one to believe they do. All 1xx
-  // (informational), 204 (no content), and 304 (not modified) responses
-  // MUST NOT include a message-body. All other responses do include a
-  // message-body, although it MAY be of zero length.
+  // The presence of a message body in a response depends on both the
+  // request method to which it is responding and the response status code
+  // (Section 3.1.2).  Responses to the HEAD request method (Section 4.3.2
+  // of [RFC7231]) never include a message body because the associated
+  // response header fields (e.g., Transfer-Encoding, Content-Length,
+  // etc.), if present, indicate only what their values would have been if
+  // the request method had been GET (Section 4.3.1 of [RFC7231]). 2xx
+  // (Successful) responses to a CONNECT request method (Section 4.3.6 of
+  // [RFC7231]) switch to tunnel mode instead of having a message body.
+  // All 1xx (Informational), 204 (No Content), and 304 (Not Modified)
+  // responses do not include a message body.  All other responses do
+  // include a message body, although the body might be of zero length.
+  //
+  // From RFC 7231 Section 6.3.6 205 Reset Content:
+  //
+  // Since the 205 status code implies that no additional content will be
+  // provided, a server MUST NOT generate a payload in a 205 response.
   if (response_->headers->response_code() / 100 == 1) {
     response_body_length_ = 0;
   } else {

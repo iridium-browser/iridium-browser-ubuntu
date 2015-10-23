@@ -11,20 +11,19 @@ import android.util.Log;
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
-import org.chromium.base.CalledByNative;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGenerator;
+import org.chromium.sync.ModelType;
 import org.chromium.sync.internal_api.pub.PassphraseType;
-import org.chromium.sync.internal_api.pub.base.ModelType;
+import org.json.JSONArray;
+import org.json.JSONException;
 
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
-import java.util.SortedSet;
-import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -48,22 +47,53 @@ public class ProfileSyncService {
         public void syncStateChanged();
     }
 
+    /**
+     * Callback for getAllNodes.
+     */
+    public static class GetAllNodesCallback {
+        private String mNodesString;
+
+        // Invoked when getAllNodes completes.
+        public void onResult(String nodesString) {
+            mNodesString = nodesString;
+        }
+
+        // Returns the result of GetAllNodes as a JSONArray.
+        @VisibleForTesting
+        public JSONArray getNodesAsJsonArray() throws JSONException {
+            return new JSONArray(mNodesString);
+        }
+    }
+
     private static final String TAG = "ProfileSyncService";
 
     @VisibleForTesting
     public static final String SESSION_TAG_PREFIX = "session_sync";
 
+    private static final int[] ALL_SELECTABLE_TYPES = new int[] {
+        ModelType.AUTOFILL,
+        ModelType.BOOKMARKS,
+        ModelType.PASSWORDS,
+        ModelType.PREFERENCES,
+        ModelType.PROXY_TABS,
+        ModelType.TYPED_URLS
+    };
+
     private static ProfileSyncService sProfileSyncService;
 
     @VisibleForTesting
-    protected final Context mContext;
+    // Cannot be final because it is initialized in {@link init()}.
+    protected Context mContext;
 
     // Sync state changes more often than listeners are added/removed, so using CopyOnWrite.
     private final List<SyncStateChangedListener> mListeners =
             new CopyOnWriteArrayList<SyncStateChangedListener>();
 
-    // Native ProfileSyncServiceAndroid object. Can not be final since we set it to 0 in destroy().
-    private final long mNativeProfileSyncServiceAndroid;
+    /**
+     * Native ProfileSyncServiceAndroid object. Cannot be final because it is initialized in
+     * {@link init()}.
+     */
+    private long mNativeProfileSyncServiceAndroid;
 
     /**
      * A helper method for retrieving the application-wide SyncSetupManager.
@@ -87,10 +117,16 @@ public class ProfileSyncService {
         sProfileSyncService = profileSyncService;
     }
 
-    /**
-     * This is called pretty early in our application. Avoid any blocking operations here.
-     */
     protected ProfileSyncService(Context context) {
+        init(context);
+    }
+
+    /**
+     * This is called pretty early in our application. Avoid any blocking operations here. init()
+     * is a separate function to enable a test subclass of ProfileSyncService to completely stub out
+     * ProfileSyncService.
+     */
+    protected void init(Context context) {
         ThreadUtils.assertOnUiThread();
         // We should store the application context, as we outlive any activity which may create us.
         mContext = context.getApplicationContext();
@@ -132,16 +168,6 @@ public class ProfileSyncService {
         nativeSignOutSync(mNativeProfileSyncServiceAndroid);
     }
 
-    /**
-     * Signs in to sync, using the currently signed-in account.
-     */
-    public void syncSignIn() {
-        nativeSignInSync(mNativeProfileSyncServiceAndroid);
-        // Notify listeners right away that the sync state has changed (native side does not do
-        // this)
-        syncStateChanged();
-    }
-
     public String querySyncStatus() {
         ThreadUtils.assertOnUiThread();
         return nativeQuerySyncStatusSummary(mNativeProfileSyncServiceAndroid);
@@ -159,10 +185,7 @@ public class ProfileSyncService {
             return;
         }
         String sessionTag = SESSION_TAG_PREFIX + uniqueTag;
-        if (!nativeSetSyncSessionsId(mNativeProfileSyncServiceAndroid, sessionTag)) {
-            Log.e(TAG, "Unable to write session sync tag. "
-                    + "This may lead to unexpected tab sync behavior.");
-        }
+        nativeSetSyncSessionsId(mNativeProfileSyncServiceAndroid, sessionTag);
     }
 
     /**
@@ -301,9 +324,9 @@ public class ProfileSyncService {
         nativeEnableEncryptEverything(mNativeProfileSyncServiceAndroid);
     }
 
-    public void setEncryptionPassphrase(String passphrase, boolean isGaia) {
+    public void setEncryptionPassphrase(String passphrase) {
         assert isSyncInitialized();
-        nativeSetEncryptionPassphrase(mNativeProfileSyncServiceAndroid, passphrase, isGaia);
+        nativeSetEncryptionPassphrase(mNativeProfileSyncServiceAndroid, passphrase);
     }
 
     public boolean isCryptographerReady() {
@@ -328,9 +351,9 @@ public class ProfileSyncService {
      *
      * @return Set of active data types.
      */
-    public Set<ModelType> getActiveDataTypes() {
-        long modelTypeSelection = nativeGetActiveDataTypes(mNativeProfileSyncServiceAndroid);
-        return modelTypeSelectionToSet(modelTypeSelection);
+    public Set<Integer> getActiveDataTypes() {
+        int[] activeDataTypes = nativeGetActiveDataTypes(mNativeProfileSyncServiceAndroid);
+        return modelTypeArrayToSet(activeDataTypes);
     }
 
     /**
@@ -340,63 +363,26 @@ public class ProfileSyncService {
      *
      * @return Set of preferred types.
      */
-    public Set<ModelType> getPreferredDataTypes() {
-        long modelTypeSelection = nativeGetPreferredDataTypes(mNativeProfileSyncServiceAndroid);
-        return modelTypeSelectionToSet(modelTypeSelection);
+    public Set<Integer> getPreferredDataTypes() {
+        int[] modelTypeArray = nativeGetPreferredDataTypes(mNativeProfileSyncServiceAndroid);
+        return modelTypeArrayToSet(modelTypeArray);
     }
 
-    @VisibleForTesting
-    public static Set<ModelType> modelTypeSelectionToSet(long modelTypeSelection) {
-        Set<ModelType> syncTypes = new HashSet<ModelType>();
-        if ((modelTypeSelection & ModelTypeSelection.AUTOFILL) != 0) {
-            syncTypes.add(ModelType.AUTOFILL);
+    private static Set<Integer> modelTypeArrayToSet(int[] modelTypeArray) {
+        Set<Integer> modelTypeSet = new HashSet<Integer>();
+        for (int i = 0; i < modelTypeArray.length; i++) {
+            modelTypeSet.add(modelTypeArray[i]);
         }
-        if ((modelTypeSelection & ModelTypeSelection.AUTOFILL_PROFILE) != 0) {
-            syncTypes.add(ModelType.AUTOFILL_PROFILE);
+        return modelTypeSet;
+    }
+
+    private static int[] modelTypeSetToArray(Set<Integer> modelTypeSet) {
+        int[] modelTypeArray = new int[modelTypeSet.size()];
+        int i = 0;
+        for (int modelType : modelTypeSet) {
+            modelTypeArray[i++] = modelType;
         }
-        if ((modelTypeSelection & ModelTypeSelection.AUTOFILL_WALLET) != 0) {
-            syncTypes.add(ModelType.AUTOFILL_WALLET);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.BOOKMARK) != 0) {
-            syncTypes.add(ModelType.BOOKMARK);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.EXPERIMENTS) != 0) {
-            syncTypes.add(ModelType.EXPERIMENTS);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.NIGORI) != 0) {
-            syncTypes.add(ModelType.NIGORI);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.PASSWORD) != 0) {
-            syncTypes.add(ModelType.PASSWORD);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.SESSION) != 0) {
-            syncTypes.add(ModelType.SESSION);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.TYPED_URL) != 0) {
-            syncTypes.add(ModelType.TYPED_URL);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.HISTORY_DELETE_DIRECTIVE) != 0) {
-            syncTypes.add(ModelType.HISTORY_DELETE_DIRECTIVE);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.DEVICE_INFO) != 0) {
-            syncTypes.add(ModelType.DEVICE_INFO);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.PROXY_TABS) != 0) {
-            syncTypes.add(ModelType.PROXY_TABS);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.FAVICON_IMAGE) != 0) {
-            syncTypes.add(ModelType.FAVICON_IMAGE);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.FAVICON_TRACKING) != 0) {
-            syncTypes.add(ModelType.FAVICON_TRACKING);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.SUPERVISED_USER_SETTING) != 0) {
-            syncTypes.add(ModelType.MANAGED_USER_SETTING);
-        }
-        if ((modelTypeSelection & ModelTypeSelection.SUPERVISED_USER_WHITELIST) != 0) {
-            syncTypes.add(ModelType.MANAGED_USER_WHITELIST);
-        }
-        return syncTypes;
+        return modelTypeArray;
     }
 
     public boolean hasKeepEverythingSynced() {
@@ -411,25 +397,9 @@ public class ProfileSyncService {
      * @param enabledTypes   The set of types to enable. Ignored (can be null) if
      *                       syncEverything is true.
      */
-    public void setPreferredDataTypes(boolean syncEverything, Set<ModelType> enabledTypes) {
-        long modelTypeSelection = 0;
-        if (syncEverything || enabledTypes.contains(ModelType.AUTOFILL)) {
-            modelTypeSelection |= ModelTypeSelection.AUTOFILL;
-        }
-        if (syncEverything || enabledTypes.contains(ModelType.BOOKMARK)) {
-            modelTypeSelection |= ModelTypeSelection.BOOKMARK;
-        }
-        if (syncEverything || enabledTypes.contains(ModelType.PASSWORD)) {
-            modelTypeSelection |= ModelTypeSelection.PASSWORD;
-        }
-        if (syncEverything || enabledTypes.contains(ModelType.PROXY_TABS)) {
-            modelTypeSelection |= ModelTypeSelection.PROXY_TABS;
-        }
-        if (syncEverything || enabledTypes.contains(ModelType.TYPED_URL)) {
-            modelTypeSelection |= ModelTypeSelection.TYPED_URL;
-        }
-        nativeSetPreferredDataTypes(
-                mNativeProfileSyncServiceAndroid, syncEverything, modelTypeSelection);
+    public void setPreferredDataTypes(boolean syncEverything, Set<Integer> enabledTypes) {
+        nativeSetPreferredDataTypes(mNativeProfileSyncServiceAndroid, syncEverything, syncEverything
+                ? ALL_SELECTABLE_TYPES : modelTypeSetToArray(enabledTypes));
     }
 
     public void setSyncSetupCompleted() {
@@ -440,8 +410,14 @@ public class ProfileSyncService {
         return nativeHasSyncSetupCompleted(mNativeProfileSyncServiceAndroid);
     }
 
-    public boolean isStartSuppressed() {
-        return nativeIsStartSuppressed(mNativeProfileSyncServiceAndroid);
+    public boolean isSyncRequested() {
+        return nativeIsSyncRequested(mNativeProfileSyncServiceAndroid);
+    }
+
+    // TODO(maxbogue): Remove this annotation once this method is used outside of tests.
+    @VisibleForTesting
+    public boolean isSyncActive() {
+        return nativeIsSyncActive(mNativeProfileSyncServiceAndroid);
     }
 
     /**
@@ -491,15 +467,15 @@ public class ProfileSyncService {
     /**
      * Starts the sync engine.
      */
-    public void enableSync() {
-        nativeEnableSync(mNativeProfileSyncServiceAndroid);
+    public void requestStart() {
+        nativeRequestStart(mNativeProfileSyncServiceAndroid);
     }
 
     /**
      * Stops the sync engine.
      */
-    public void disableSync() {
-        nativeDisableSync(mNativeProfileSyncServiceAndroid);
+    public void requestStop() {
+        nativeRequestStop(mNativeProfileSyncServiceAndroid);
     }
 
     /**
@@ -532,32 +508,12 @@ public class ProfileSyncService {
         nativeOverrideNetworkResourcesForTest(mNativeProfileSyncServiceAndroid, networkResources);
     }
 
-    @CalledByNative
-    private static String modelTypeSelectionToStringForTest(long modelTypeSelection) {
-        SortedSet<String> set = new TreeSet<String>();
-        Set<ModelType> filteredTypes = ModelType.filterOutNonInvalidationTypes(
-                modelTypeSelectionToSet(modelTypeSelection));
-        for (ModelType type : filteredTypes) {
-            set.add(type.toString());
-        }
-        StringBuilder sb = new StringBuilder();
-        Iterator<String> it = set.iterator();
-        if (it.hasNext()) {
-            sb.append(it.next());
-            while (it.hasNext()) {
-                sb.append(", ");
-                sb.append(it.next());
-            }
-        }
-        return sb.toString();
-    }
-
     /**
      * @return Whether sync is enabled to sync urls or open tabs with a non custom passphrase.
      */
     public boolean isSyncingUrlsWithKeystorePassphrase() {
         return isSyncInitialized()
-            && getPreferredDataTypes().contains(ModelType.TYPED_URL)
+            && getPreferredDataTypes().contains(ModelType.TYPED_URLS)
             && getPassphraseType().equals(PassphraseType.KEYSTORE_PASSPHRASE);
     }
 
@@ -586,15 +542,30 @@ public class ProfileSyncService {
                                     prompted);
     }
 
+    /**
+     * Invokes the onResult method of the callback from native code.
+     */
+    @CalledByNative
+    private static void onGetAllNodesResult(GetAllNodesCallback callback, String nodes) {
+        callback.onResult(nodes);
+    }
+
+    /**
+     * Retrieves a JSON version of local Sync data via the native GetAllNodes method.
+     * This method is asynchronous; the result will be sent to the callback.
+     */
+    @VisibleForTesting
+    public void getAllNodes(GetAllNodesCallback callback) {
+        nativeGetAllNodes(mNativeProfileSyncServiceAndroid, callback);
+    }
+
     // Native methods
     private native long nativeInit();
-    private native void nativeEnableSync(long nativeProfileSyncServiceAndroid);
-    private native void nativeDisableSync(long nativeProfileSyncServiceAndroid);
+    private native void nativeRequestStart(long nativeProfileSyncServiceAndroid);
+    private native void nativeRequestStop(long nativeProfileSyncServiceAndroid);
     private native void nativeFlushDirectory(long nativeProfileSyncServiceAndroid);
-    private native void nativeSignInSync(long nativeProfileSyncServiceAndroid);
     private native void nativeSignOutSync(long nativeProfileSyncServiceAndroid);
-    private native boolean nativeSetSyncSessionsId(
-            long nativeProfileSyncServiceAndroid, String tag);
+    private native void nativeSetSyncSessionsId(long nativeProfileSyncServiceAndroid, String tag);
     private native String nativeQuerySyncStatusSummary(long nativeProfileSyncServiceAndroid);
     private native int nativeGetAuthError(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsSyncInitialized(long nativeProfileSyncServiceAndroid);
@@ -610,7 +581,7 @@ public class ProfileSyncService {
     private native boolean nativeSetDecryptionPassphrase(
             long nativeProfileSyncServiceAndroid, String passphrase);
     private native void nativeSetEncryptionPassphrase(
-            long nativeProfileSyncServiceAndroid, String passphrase, boolean isGaia);
+            long nativeProfileSyncServiceAndroid, String passphrase);
     private native boolean nativeIsCryptographerReady(long nativeProfileSyncServiceAndroid);
     private native int nativeGetPassphraseType(long nativeProfileSyncServiceAndroid);
     private native boolean nativeHasExplicitPassphraseTime(long nativeProfileSyncServiceAndroid);
@@ -623,15 +594,16 @@ public class ProfileSyncService {
     private native String nativeGetSyncEnterCustomPassphraseBodyText(
             long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsSyncKeystoreMigrationDone(long nativeProfileSyncServiceAndroid);
-    private native long nativeGetActiveDataTypes(long nativeProfileSyncServiceAndroid);
-    private native long nativeGetPreferredDataTypes(long nativeProfileSyncServiceAndroid);
+    private native int[] nativeGetActiveDataTypes(long nativeProfileSyncServiceAndroid);
+    private native int[] nativeGetPreferredDataTypes(long nativeProfileSyncServiceAndroid);
     private native void nativeSetPreferredDataTypes(
-            long nativeProfileSyncServiceAndroid, boolean syncEverything, long modelTypeSelection);
+            long nativeProfileSyncServiceAndroid, boolean syncEverything, int[] modelTypeArray);
     private native void nativeSetSetupInProgress(
             long nativeProfileSyncServiceAndroid, boolean inProgress);
     private native void nativeSetSyncSetupCompleted(long nativeProfileSyncServiceAndroid);
     private native boolean nativeHasSyncSetupCompleted(long nativeProfileSyncServiceAndroid);
-    private native boolean nativeIsStartSuppressed(long nativeProfileSyncServiceAndroid);
+    private native boolean nativeIsSyncRequested(long nativeProfileSyncServiceAndroid);
+    private native boolean nativeIsSyncActive(long nativeProfileSyncServiceAndroid);
     private native boolean nativeHasKeepEverythingSynced(long nativeProfileSyncServiceAndroid);
     private native boolean nativeHasUnrecoverableError(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsPassphrasePrompted(long nativeProfileSyncServiceAndroid);
@@ -641,4 +613,6 @@ public class ProfileSyncService {
     private native long nativeGetLastSyncedTimeForTest(long nativeProfileSyncServiceAndroid);
     private native void nativeOverrideNetworkResourcesForTest(
             long nativeProfileSyncServiceAndroid, long networkResources);
+    private native void nativeGetAllNodes(
+            long nativeProfileSyncServiceAndroid, GetAllNodesCallback callback);
 }

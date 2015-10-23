@@ -18,18 +18,16 @@
 #include "base/process/process_handle.h"
 #include "base/strings/string_util.h"
 #include "base/test/test_reg_util_win.h"
+#include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
-#include "base/time/time.h"
 #include "base/version.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/setup/setup_util.h"
-#include "chrome/installer/setup/update_active_setup_version_work_item.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
-#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/installer_state.h"
 #include "chrome/installer/util/updating_app_registration_data.h"
@@ -37,24 +35,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
-
-class SetupUtilTest : public testing::Test {
- protected:
-  SetupUtilTest() {}
-
-  void SetUp() override {
-    ASSERT_TRUE(test_dir_.CreateUniqueTempDir());
-    registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER);
-    registry_override_manager_.OverrideRegistry(HKEY_LOCAL_MACHINE);
-  }
-
-  base::ScopedTempDir test_dir_;
-
- private:
-  registry_util::RegistryOverrideManager registry_override_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(SetupUtilTest);
-};
 
 // The privilege tested in ScopeTokenPrivilege tests below.
 // Use SE_RESTORE_NAME as it is one of the many privileges that is available,
@@ -90,7 +70,7 @@ bool CurrentProcessHasPrivilege(const wchar_t* privilege_name) {
 
   // There is no point getting a buffer to store more than |privilege_name|\0 as
   // anything longer will obviously not be equal to |privilege_name|.
-  const DWORD desired_size = wcslen(privilege_name);
+  const DWORD desired_size = static_cast<DWORD>(wcslen(privilege_name));
   const DWORD buffer_size = desired_size + 1;
   scoped_ptr<wchar_t[]> name_buffer(new wchar_t[buffer_size]);
   for (int i = privileges->PrivilegeCount - 1; i >= 0 ; --i) {
@@ -107,131 +87,55 @@ bool CurrentProcessHasPrivilege(const wchar_t* privilege_name) {
 
 }  // namespace
 
-TEST_F(SetupUtilTest, UpdateLastOSUpgradeHandledByActiveSetup) {
-  BrowserDistribution* chrome_dist =
-      BrowserDistribution::GetSpecificDistribution(
-          BrowserDistribution::CHROME_BROWSER);
-  const base::string16 active_setup_path(
-      InstallUtil::GetActiveSetupPath(chrome_dist));
-
-  base::win::RegKey test_key;
-  base::string16 unused_tmp;
-
-  EXPECT_EQ(ERROR_FILE_NOT_FOUND,
-            test_key.Open(HKEY_LOCAL_MACHINE, active_setup_path.c_str(),
-                          KEY_QUERY_VALUE));
-  // The WorkItem assume the ActiveSetup key itself already exists and only
-  // handles the Version entry, create it now, but don't fill the "Version"
-  // entry just yet.
-  EXPECT_EQ(ERROR_SUCCESS,
-            test_key.Create(HKEY_LOCAL_MACHINE, active_setup_path.c_str(),
-                            KEY_QUERY_VALUE));
-  EXPECT_EQ(ERROR_FILE_NOT_FOUND, test_key.ReadValue(L"Version", &unused_tmp));
-
-  // Test returns false when no Active Setup version present (and doesn't alter
-  // that state).
-  EXPECT_FALSE(
-      installer::UpdateLastOSUpgradeHandledByActiveSetup(chrome_dist));
-  EXPECT_EQ(ERROR_FILE_NOT_FOUND, test_key.ReadValue(L"Version", &unused_tmp));
-
-  {
-    UpdateActiveSetupVersionWorkItem active_setup_work_item(
-        active_setup_path, UpdateActiveSetupVersionWorkItem::UPDATE);
-    active_setup_work_item.Do();
-    EXPECT_EQ(ERROR_SUCCESS, test_key.ReadValue(L"Version", &unused_tmp));
-  }
-
-  // Test returns false with default Active Setup version.
-  EXPECT_FALSE(
-      installer::UpdateLastOSUpgradeHandledByActiveSetup(chrome_dist));
-  EXPECT_EQ(ERROR_SUCCESS, test_key.ReadValue(L"Version", &unused_tmp));
-
-  // Run through |kIterations| sequences of bumping the OS upgrade version |i|
-  // times and simulating a regular update |kIterations-i| times, confirming
-  // that handling any number of OS upgrades only results in a single hit and
-  // that no amount of regular updates after that result in any hit.
-  const size_t kIterations = 4U;
-  for (size_t i = 0U; i < kIterations; ++i) {
-    SCOPED_TRACE(i);
-    // Bump the OS_UPGRADES component |i| times.
-    for (size_t j = 0; j < i; ++j) {
-      UpdateActiveSetupVersionWorkItem active_setup_work_item(
-          active_setup_path, UpdateActiveSetupVersionWorkItem::
-                                 UPDATE_AND_BUMP_OS_UPGRADES_COMPONENT);
-      active_setup_work_item.Do();
-    }
-
-    // There should be a single OS upgrade to handle if the OS_UPGRADES
-    // component was bumped at least once.
-    EXPECT_EQ(i > 0, installer::UpdateLastOSUpgradeHandledByActiveSetup(
-                         chrome_dist));
-
-    // We should only be told to handle the latest OS upgrade once above.
-    EXPECT_FALSE(
-        installer::UpdateLastOSUpgradeHandledByActiveSetup(chrome_dist));
-    EXPECT_FALSE(
-        installer::UpdateLastOSUpgradeHandledByActiveSetup(chrome_dist));
-
-    // Run |kIterations-i| regular updates.
-    for (size_t j = i; j < kIterations; ++j) {
-      UpdateActiveSetupVersionWorkItem active_setup_work_item(
-          active_setup_path, UpdateActiveSetupVersionWorkItem::UPDATE);
-      active_setup_work_item.Do();
-    }
-
-    // No amount of regular updates should trigger an OS upgrade to be handled.
-    EXPECT_FALSE(
-        installer::UpdateLastOSUpgradeHandledByActiveSetup(chrome_dist));
-    EXPECT_FALSE(
-        installer::UpdateLastOSUpgradeHandledByActiveSetup(chrome_dist));
-  }
-}
-
 // Test that we are parsing Chrome version correctly.
-TEST_F(SetupUtilTest, GetMaxVersionFromArchiveDirTest) {
+TEST(SetupUtilTest, GetMaxVersionFromArchiveDirTest) {
   // Create a version dir
-  base::FilePath chrome_dir = test_dir_.path().AppendASCII("1.0.0.0");
+  base::ScopedTempDir test_dir;
+  ASSERT_TRUE(test_dir.CreateUniqueTempDir());
+  base::FilePath chrome_dir = test_dir.path().AppendASCII("1.0.0.0");
   base::CreateDirectory(chrome_dir);
   ASSERT_TRUE(base::PathExists(chrome_dir));
   scoped_ptr<Version> version(
-      installer::GetMaxVersionFromArchiveDir(test_dir_.path()));
+      installer::GetMaxVersionFromArchiveDir(test_dir.path()));
   ASSERT_EQ(version->GetString(), "1.0.0.0");
 
   base::DeleteFile(chrome_dir, true);
-  ASSERT_FALSE(base::PathExists(chrome_dir));
-  ASSERT_TRUE(installer::GetMaxVersionFromArchiveDir(test_dir_.path()) == NULL);
+  ASSERT_FALSE(base::PathExists(chrome_dir)) << chrome_dir.value();
+  ASSERT_TRUE(installer::GetMaxVersionFromArchiveDir(test_dir.path()) == NULL);
 
-  chrome_dir = test_dir_.path().AppendASCII("ABC");
+  chrome_dir = test_dir.path().AppendASCII("ABC");
   base::CreateDirectory(chrome_dir);
   ASSERT_TRUE(base::PathExists(chrome_dir));
-  ASSERT_TRUE(installer::GetMaxVersionFromArchiveDir(test_dir_.path()) == NULL);
+  ASSERT_TRUE(installer::GetMaxVersionFromArchiveDir(test_dir.path()) == NULL);
 
-  chrome_dir = test_dir_.path().AppendASCII("2.3.4.5");
+  chrome_dir = test_dir.path().AppendASCII("2.3.4.5");
   base::CreateDirectory(chrome_dir);
   ASSERT_TRUE(base::PathExists(chrome_dir));
-  version.reset(installer::GetMaxVersionFromArchiveDir(test_dir_.path()));
+  version.reset(installer::GetMaxVersionFromArchiveDir(test_dir.path()));
   ASSERT_EQ(version->GetString(), "2.3.4.5");
 
   // Create multiple version dirs, ensure that we select the greatest.
-  chrome_dir = test_dir_.path().AppendASCII("9.9.9.9");
+  chrome_dir = test_dir.path().AppendASCII("9.9.9.9");
   base::CreateDirectory(chrome_dir);
   ASSERT_TRUE(base::PathExists(chrome_dir));
-  chrome_dir = test_dir_.path().AppendASCII("1.1.1.1");
+  chrome_dir = test_dir.path().AppendASCII("1.1.1.1");
   base::CreateDirectory(chrome_dir);
   ASSERT_TRUE(base::PathExists(chrome_dir));
 
-  version.reset(installer::GetMaxVersionFromArchiveDir(test_dir_.path()));
+  version.reset(installer::GetMaxVersionFromArchiveDir(test_dir.path()));
   ASSERT_EQ(version->GetString(), "9.9.9.9");
 }
 
-TEST_F(SetupUtilTest, DeleteFileFromTempProcess) {
+TEST(SetupUtilTest, DeleteFileFromTempProcess) {
+  base::ScopedTempDir test_dir;
+  ASSERT_TRUE(test_dir.CreateUniqueTempDir());
   base::FilePath test_file;
-  base::CreateTemporaryFileInDir(test_dir_.path(), &test_file);
+  base::CreateTemporaryFileInDir(test_dir.path(), &test_file);
   ASSERT_TRUE(base::PathExists(test_file));
   base::WriteFile(test_file, "foo", 3);
   EXPECT_TRUE(installer::DeleteFileFromTempProcess(test_file, 0));
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
-  EXPECT_FALSE(base::PathExists(test_file));
+  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout() * 3);
+  EXPECT_FALSE(base::PathExists(test_file)) << test_file.value();
 }
 
 // Note: This test is only valid when run at high integrity (i.e. it will fail
@@ -266,6 +170,11 @@ TEST(SetupUtilTest, ScopedTokenPrivilegeAlreadyEnabled) {
   }
 
   ASSERT_FALSE(CurrentProcessHasPrivilege(kTestedPrivilege));
+}
+
+TEST(SetupUtilTest, GuidToSquid) {
+  ASSERT_EQ(installer::GuidToSquid(L"EDA620E3-AA98-3846-B81E-3493CB2E0E02"),
+            L"3E026ADE89AA64838BE14339BCE2E020");
 }
 
 const char kAdjustProcessPriority[] = "adjust-process-priority";
@@ -354,7 +263,7 @@ namespace {
 
 // A test fixture that configures an InstallationState and an InstallerState
 // with a product being updated.
-class FindArchiveToPatchTest : public SetupUtilTest {
+class FindArchiveToPatchTest : public testing::Test {
  protected:
   class FakeInstallationState : public installer::InstallationState {
   };
@@ -377,8 +286,12 @@ class FindArchiveToPatchTest : public SetupUtilTest {
     }
   };
 
+  FindArchiveToPatchTest() {}
+
   void SetUp() override {
-    SetupUtilTest::SetUp();
+    ASSERT_TRUE(test_dir_.CreateUniqueTempDir());
+    registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER);
+    registry_override_manager_.OverrideRegistry(HKEY_LOCAL_MACHINE);
     product_version_ = Version("30.0.1559.0");
     max_version_ = Version("47.0.1559.0");
 
@@ -405,7 +318,6 @@ class FindArchiveToPatchTest : public SetupUtilTest {
 
   void TearDown() override {
     original_state_.reset();
-    SetupUtilTest::TearDown();
   }
 
   base::FilePath GetArchivePath(const Version& version) const {
@@ -447,10 +359,16 @@ class FindArchiveToPatchTest : public SetupUtilTest {
 
   static const bool kSystemInstall_;
   static const BrowserDistribution::Type kProductType_;
+  base::ScopedTempDir test_dir_;
   Version product_version_;
   Version max_version_;
   scoped_ptr<FakeInstallationState> original_state_;
   scoped_ptr<installer::InstallerState> installer_state_;
+
+ private:
+  registry_util::RegistryOverrideManager registry_override_manager_;
+
+  DISALLOW_COPY_AND_ASSIGN(FindArchiveToPatchTest);
 };
 
 const bool FindArchiveToPatchTest::kSystemInstall_ = false;
@@ -462,7 +380,7 @@ const BrowserDistribution::Type FindArchiveToPatchTest::kProductType_ =
 // Test that the path to the advertised product version is found.
 TEST_F(FindArchiveToPatchTest, ProductVersionFound) {
   base::FilePath patch_source(installer::FindArchiveToPatch(
-      *original_state_, *installer_state_));
+      *original_state_, *installer_state_, base::Version()));
   EXPECT_EQ(GetProductVersionArchivePath().value(), patch_source.value());
 }
 
@@ -472,13 +390,13 @@ TEST_F(FindArchiveToPatchTest, MaxVersionFound) {
   // The patch file is absent.
   ASSERT_TRUE(base::DeleteFile(GetProductVersionArchivePath(), false));
   base::FilePath patch_source(installer::FindArchiveToPatch(
-      *original_state_, *installer_state_));
+      *original_state_, *installer_state_, base::Version()));
   EXPECT_EQ(GetMaxVersionArchivePath().value(), patch_source.value());
 
   // The product doesn't appear to be installed, so the max version is found.
   UninstallProduct();
   patch_source = installer::FindArchiveToPatch(
-      *original_state_, *installer_state_);
+      *original_state_, *installer_state_, base::Version());
   EXPECT_EQ(GetMaxVersionArchivePath().value(), patch_source.value());
 }
 
@@ -490,11 +408,31 @@ TEST_F(FindArchiveToPatchTest, NoVersionFound) {
   ASSERT_TRUE(base::DeleteFile(GetMaxVersionArchivePath(), false));
 
   base::FilePath patch_source(installer::FindArchiveToPatch(
-      *original_state_, *installer_state_));
+      *original_state_, *installer_state_, base::Version()));
   EXPECT_EQ(base::FilePath::StringType(), patch_source.value());
 }
 
+TEST_F(FindArchiveToPatchTest, DesiredVersionFound) {
+  base::FilePath patch_source1(installer::FindArchiveToPatch(
+    *original_state_, *installer_state_, product_version_));
+  EXPECT_EQ(GetProductVersionArchivePath().value(), patch_source1.value());
+  base::FilePath patch_source2(installer::FindArchiveToPatch(
+    *original_state_, *installer_state_, max_version_));
+  EXPECT_EQ(GetMaxVersionArchivePath().value(), patch_source2.value());
+}
+
+TEST_F(FindArchiveToPatchTest, DesiredVersionNotFound) {
+  base::FilePath patch_source(installer::FindArchiveToPatch(
+    *original_state_, *installer_state_, base::Version("1.2.3.4")));
+  EXPECT_EQ(base::FilePath().value(), patch_source.value());
+}
+
+#if defined(GOOGLE_CHROME_BUILD)
 namespace {
+const bool kSystemLevel = false;
+const HKEY kRootKey = kSystemLevel ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+const wchar_t kVersionString[] = L"30.0.1574.0";
+const wchar_t kMultiChannel[] = L"2.0-dev-multi-chromeframe";
 
 class MigrateMultiToSingleTest : public testing::Test {
  protected:
@@ -502,22 +440,9 @@ class MigrateMultiToSingleTest : public testing::Test {
     registry_override_manager_.OverrideRegistry(kRootKey);
   }
 
-  static const bool kSystemLevel = false;
-  static const HKEY kRootKey;
-  static const wchar_t kVersionString[];
-  static const wchar_t kMultiChannel[];
-
  private:
   registry_util::RegistryOverrideManager registry_override_manager_;
 };
-
-const bool MigrateMultiToSingleTest::kSystemLevel;
-const HKEY MigrateMultiToSingleTest::kRootKey =
-    kSystemLevel ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-const wchar_t MigrateMultiToSingleTest::kVersionString[] = L"30.0.1574.0";
-const wchar_t MigrateMultiToSingleTest::kMultiChannel[] =
-    L"2.0-dev-multi-chromeframe";
-
 }  // namespace
 
 // Test migrating Chrome Frame from multi to single.
@@ -577,6 +502,7 @@ TEST_F(MigrateMultiToSingleTest, ChromeFrame) {
                                   BrowserDistribution::CHROME_BINARIES));
   EXPECT_EQ(L"2.0-dev-multi", binaries.channel().value());
 }
+#endif
 
 TEST(SetupUtilTest, ContainsUnsupportedSwitch) {
   EXPECT_FALSE(installer::ContainsUnsupportedSwitch(
@@ -592,5 +518,6 @@ TEST(SetupUtilTest, GetRegistrationDataCommandKey) {
   UpdatingAppRegistrationData reg_data(app_guid);
   base::string16 key =
       installer::GetRegistrationDataCommandKey(reg_data, L"test_name");
-  EXPECT_TRUE(EndsWith(key, app_guid + L"\\Commands\\test_name", true));
+  EXPECT_TRUE(base::EndsWith(key, app_guid + L"\\Commands\\test_name",
+                             base::CompareCase::SENSITIVE));
 }

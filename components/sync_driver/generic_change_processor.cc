@@ -7,6 +7,7 @@
 #include "base/location.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "components/sync_driver/sync_api_component_factory.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_error.h"
@@ -115,12 +116,12 @@ GenericChangeProcessor::GenericChangeProcessor(
         new base::WeakPtrFactory<syncer::AttachmentService>(
             attachment_service_.get()));
     attachment_service_proxy_ = syncer::AttachmentServiceProxy(
-        base::MessageLoopProxy::current(),
+        base::ThreadTaskRunnerHandle::Get(),
         attachment_service_weak_ptr_factory_->GetWeakPtr());
     UploadAllAttachmentsNotOnServer();
   } else {
     attachment_service_proxy_ = syncer::AttachmentServiceProxy(
-        base::MessageLoopProxy::current(),
+        base::ThreadTaskRunnerHandle::Get(),
         base::WeakPtr<syncer::AttachmentService>());
   }
 }
@@ -493,22 +494,10 @@ syncer::SyncError GenericChangeProcessor::HandleActionAdd(
     syncer::AttachmentIdSet* new_attachments) {
   // TODO(sync): Handle other types of creation (custom parents, folders,
   // etc.).
-  syncer::ReadNode root_node(&trans);
   const syncer::SyncDataLocal sync_data_local(change.sync_data());
-  if (root_node.InitTypeRoot(sync_data_local.GetDataType()) !=
-      syncer::BaseNode::INIT_OK) {
-    syncer::SyncError error(FROM_HERE,
-                            syncer::SyncError::DATATYPE_ERROR,
-                            "Failed to look up root node for type " + type_str,
-                            type_);
-    error_handler()->OnSingleDataTypeUnrecoverableError(error);
-    NOTREACHED();
-    LOG(ERROR) << "Create: no root node.";
-    return error;
-  }
   syncer::WriteNode::InitUniqueByCreationResult result =
-      sync_node->InitUniqueByCreation(
-          sync_data_local.GetDataType(), root_node, sync_data_local.GetTag());
+      sync_node->InitUniqueByCreation(sync_data_local.GetDataType(),
+                                      sync_data_local.GetTag());
   if (result != syncer::WriteNode::INIT_SUCCESS) {
     std::string error_prefix = "Failed to create " + type_str + " node: " +
                                change.location().ToString() + ", ";

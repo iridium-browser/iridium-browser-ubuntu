@@ -54,14 +54,11 @@ struct TestConfig {
   bool expect_extended_master_secret = false;
   std::string psk;
   std::string psk_identity;
-  bool renegotiate = false;
-  bool allow_unsafe_legacy_renegotiation = false;
   std::string srtp_profiles;
   bool enable_ocsp_stapling = false;
   std::string expected_ocsp_response;
   bool enable_signed_cert_timestamps = false;
   std::string expected_signed_cert_timestamps;
-  bool fastradio_padding = false;
   int min_version = 0;
   int max_version = 0;
   int mtu = 0;
@@ -78,6 +75,17 @@ struct TestConfig {
   std::string export_context;
   bool use_export_context = false;
   bool reject_peer_renegotiations = false;
+  bool no_legacy_server_connect = false;
+  bool tls_unique = false;
+  bool use_async_private_key = false;
+  bool expect_ticket_renewal = false;
+  bool expect_no_session = false;
+  bool use_ticket_callback = false;
+  bool renew_ticket = false;
+  bool enable_client_custom_extension = false;
+  bool enable_server_custom_extension = false;
+  bool custom_extension_skip = false;
+  bool custom_extension_fail_add = false;
 };
 
 bool ParseConfig(int argc, char **argv, TestConfig *out_config);

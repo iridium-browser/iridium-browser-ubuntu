@@ -29,8 +29,10 @@ FakeContentLayerClient::BitmapData::~BitmapData() {
 }
 
 FakeContentLayerClient::FakeContentLayerClient()
-    : fill_with_nonsolid_color_(false), last_canvas_(NULL) {
-}
+    : fill_with_nonsolid_color_(false),
+      last_canvas_(nullptr),
+      last_painting_control_(PAINTING_BEHAVIOR_NORMAL),
+      reported_memory_usage_(0) {}
 
 FakeContentLayerClient::~FakeContentLayerClient() {
 }
@@ -71,10 +73,15 @@ void FakeContentLayerClient::PaintContents(
   }
 }
 
-void FakeContentLayerClient::PaintContentsToDisplayList(
-    DisplayItemList* display_list,
+scoped_refptr<DisplayItemList>
+FakeContentLayerClient::PaintContentsToDisplayList(
     const gfx::Rect& clip,
     PaintingControlSetting painting_control) {
+  // Cached picture is used because unit tests expect to be able to
+  // use GatherPixelRefs.
+  const bool use_cached_picture = true;
+  scoped_refptr<DisplayItemList> display_list =
+      DisplayItemList::Create(clip, use_cached_picture);
   SkPictureRecorder recorder;
   skia::RefPtr<SkCanvas> canvas;
   skia::RefPtr<SkPicture> picture;
@@ -128,8 +135,15 @@ void FakeContentLayerClient::PaintContentsToDisplayList(
   }
 
   display_list->CreateAndAppendItem<EndClipDisplayItem>();
+
+  display_list->Finalize();
+  return display_list;
 }
 
 bool FakeContentLayerClient::FillsBoundsCompletely() const { return false; }
+
+size_t FakeContentLayerClient::GetApproximateUnsharedMemoryUsage() const {
+  return reported_memory_usage_;
+}
 
 }  // namespace cc

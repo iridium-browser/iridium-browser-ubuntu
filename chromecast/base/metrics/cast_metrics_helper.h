@@ -12,7 +12,7 @@
 #include "base/time/time.h"
 
 namespace base {
-class MessageLoopProxy;
+class SingleThreadTaskRunner;
 }
 
 namespace chromecast {
@@ -58,7 +58,7 @@ class CastMetricsHelper {
   static CastMetricsHelper* GetInstance();
 
   explicit CastMetricsHelper(
-      scoped_refptr<base::MessageLoopProxy> message_loop_proxy);
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   virtual ~CastMetricsHelper();
 
   // This function updates the info and stores the startup time of the current
@@ -79,20 +79,9 @@ class CastMetricsHelper {
   // Logs UMA record of the time the app made its first paint.
   virtual void LogTimeToFirstPaint();
 
-  // Logs UMA record of the elapsed time from the app launch
-  // to the time first video frame is displayed.
-  virtual void LogTimeToDisplayVideo();
-
   // Logs UMA record of the time needed to re-buffer A/V.
   virtual void LogTimeToBufferAv(BufferingType buffering_type,
                                  base::TimeDelta time);
-
-  virtual void ResetVideoFrameSampling();
-
-  // Logs UMA statistics for video decoder and rendering data.
-  // Negative values are considered invalid and will not be logged.
-  virtual void LogFramesPer5Seconds(int displayed_frames, int dropped_frames,
-                                    int delayed_frames, int error_frames);
 
   // Returns metrics name with app name between prefix and suffix.
   virtual std::string GetMetricsNameWithAppName(
@@ -112,8 +101,8 @@ class CastMetricsHelper {
   virtual void SetRecordActionCallback(const RecordActionCallback& callback);
 
  protected:
-  // Creates a CastMetricsHelper instance with no MessageLoopProxy. This should
-  // only be used by tests, since invoking any non-overridden methods on this
+  // Creates a CastMetricsHelper instance with no task runner. This should only
+  // be used by tests, since invoking any non-overridden methods on this
   // instance will cause a failure.
   CastMetricsHelper();
 
@@ -134,7 +123,7 @@ class CastMetricsHelper {
   void LogMediumTimeHistogramEvent(const std::string& name,
                                    const base::TimeDelta& value);
 
-  scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   // Start time of the most recent app.
   base::TimeTicks app_start_time_;
@@ -143,13 +132,6 @@ class CastMetricsHelper {
   std::string app_id_;
   std::string session_id_;
   std::string sdk_version_;
-
-  // Whether a new app start time has been stored but not recorded.
-  // After the startup time has been used to generate an UMA event,
-  // this is set to false.
-  bool new_startup_time_;
-
-  base::TimeTicks previous_video_stat_sample_time_;
 
   MetricsSink* metrics_sink_;
   // Default RecordAction callback when metrics_sink_ is not set.

@@ -10,6 +10,10 @@
 namespace task_manager {
 namespace browsertest_util {
 
+// For the old task manager browser tests, we must call this to disable the
+// use of the new implementation and revert back to the old one.
+void EnableOldTaskManager();
+
 // Runs the message loop, observing the task manager, until there are exactly
 // |resource_count| many resources whose titles match the pattern
 // |title_pattern|. The match is done via string_util's base::MatchPattern, so
@@ -58,6 +62,9 @@ base::string16 MatchPrint(const char* title);       // "Print: " + title
 base::string16 MatchAnyPrint();                     // "Print: *"
 base::string16 MatchSubframe(const char* title);    // "Subframe: " + title
 base::string16 MatchAnySubframe();                  // "Subframe: *"
+// "Utility: " + title
+base::string16 MatchUtility(const base::string16& title);
+base::string16 MatchAnyUtility();                   // "Utility: *"
 
 }  // namespace browsertest_util
 }  // namespace task_manager

@@ -10,14 +10,17 @@
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/mock_settings_observer.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/content_settings_details.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/browser/website_settings_info.h"
+#include "components/content_settings/core/browser/website_settings_registry.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/base/static_cookie_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -33,6 +36,12 @@ class HostContentSettingsMapTest : public testing::Test {
   }
 
  protected:
+  const std::string& GetPrefName(ContentSettingsType type) {
+    return content_settings::WebsiteSettingsRegistry::GetInstance()
+        ->Get(type)
+        ->pref_name();
+  }
+
   base::MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
 };
@@ -324,11 +333,6 @@ TEST_F(HostContentSettingsMapTest, ObserveDefaultPref) {
       profile.GetHostContentSettingsMap();
 
   PrefService* prefs = profile.GetPrefs();
-
-  // Make a copy of the default pref value so we can reset it later.
-  scoped_ptr<base::Value> default_value(prefs->FindPreference(
-      prefs::kDefaultContentSettings)->GetValue()->DeepCopy());
-
   GURL host("http://example.com");
 
   host_content_settings_map->SetDefaultContentSetting(
@@ -337,18 +341,17 @@ TEST_F(HostContentSettingsMapTest, ObserveDefaultPref) {
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
 
-  // Make a copy of the pref's new value so we can reset it later.
-  scoped_ptr<base::Value> new_value(prefs->FindPreference(
-      prefs::kDefaultContentSettings)->GetValue()->DeepCopy());
-
+  const content_settings::WebsiteSettingsInfo* info =
+      content_settings::WebsiteSettingsRegistry::GetInstance()->Get(
+          CONTENT_SETTINGS_TYPE_IMAGES);
   // Clearing the backing pref should also clear the internal cache.
-  prefs->Set(prefs::kDefaultContentSettings, *default_value);
+  prefs->ClearPref(info->default_value_pref_name());
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
 
   // Reseting the pref to its previous value should update the cache.
-  prefs->Set(prefs::kDefaultContentSettings, *new_value);
+  prefs->SetInteger(info->default_value_pref_name(), CONTENT_SETTING_BLOCK);
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
@@ -362,8 +365,10 @@ TEST_F(HostContentSettingsMapTest, ObserveExceptionPref) {
   PrefService* prefs = profile.GetPrefs();
 
   // Make a copy of the default pref value so we can reset it later.
-  scoped_ptr<base::Value> default_value(prefs->FindPreference(
-      prefs::kContentSettingsPatternPairs)->GetValue()->DeepCopy());
+  scoped_ptr<base::Value> default_value(
+      prefs->FindPreference(GetPrefName(CONTENT_SETTINGS_TYPE_IMAGES))
+          ->GetValue()
+          ->DeepCopy());
 
   ContentSettingsPattern pattern =
        ContentSettingsPattern::FromString("[*.]example.com");
@@ -384,17 +389,19 @@ TEST_F(HostContentSettingsMapTest, ObserveExceptionPref) {
                 host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
 
   // Make a copy of the pref's new value so we can reset it later.
-  scoped_ptr<base::Value> new_value(prefs->FindPreference(
-      prefs::kContentSettingsPatternPairs)->GetValue()->DeepCopy());
+  scoped_ptr<base::Value> new_value(
+      prefs->FindPreference(GetPrefName(CONTENT_SETTINGS_TYPE_IMAGES))
+          ->GetValue()
+          ->DeepCopy());
 
   // Clearing the backing pref should also clear the internal cache.
-  prefs->Set(prefs::kContentSettingsPatternPairs, *default_value);
+  prefs->Set(GetPrefName(CONTENT_SETTINGS_TYPE_IMAGES), *default_value);
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
 
   // Reseting the pref to its previous value should update the cache.
-  prefs->Set(prefs::kContentSettingsPatternPairs, *new_value);
+  prefs->Set(GetPrefName(CONTENT_SETTINGS_TYPE_IMAGES), *new_value);
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
@@ -404,8 +411,8 @@ TEST_F(HostContentSettingsMapTest, HostTrimEndingDotCheck) {
   TestingProfile profile;
   HostContentSettingsMap* host_content_settings_map =
       profile.GetHostContentSettingsMap();
-  CookieSettings* cookie_settings =
-      CookieSettings::Factory::GetForProfile(&profile).get();
+  content_settings::CookieSettings* cookie_settings =
+      CookieSettingsFactory::GetForProfile(&profile).get();
 
   ContentSettingsPattern pattern =
        ContentSettingsPattern::FromString("[*.]example.com");
@@ -680,13 +687,13 @@ TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeOnly) {
 
   // Set utf-8 data.
   {
-    DictionaryPrefUpdate update(
-        prefs, prefs::kContentSettingsPatternPairs);
+    DictionaryPrefUpdate update(prefs,
+                                GetPrefName(CONTENT_SETTINGS_TYPE_PLUGINS));
     base::DictionaryValue* all_settings_dictionary = update.Get();
     ASSERT_TRUE(NULL != all_settings_dictionary);
 
     base::DictionaryValue* dummy_payload = new base::DictionaryValue;
-    dummy_payload->SetInteger("images", CONTENT_SETTING_ALLOW);
+    dummy_payload->SetInteger("setting", CONTENT_SETTING_ALLOW);
     all_settings_dictionary->SetWithoutPathExpansion("[*.]\xC4\x87ira.com,*",
                                                      dummy_payload);
   }
@@ -694,7 +701,7 @@ TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeOnly) {
   profile.GetHostContentSettingsMap();
 
   const base::DictionaryValue* all_settings_dictionary =
-      prefs->GetDictionary(prefs::kContentSettingsImagesPatternPairs);
+      prefs->GetDictionary(GetPrefName(CONTENT_SETTINGS_TYPE_PLUGINS));
   const base::DictionaryValue* result = NULL;
   EXPECT_FALSE(all_settings_dictionary->GetDictionaryWithoutPathExpansion(
       "[*.]\xC4\x87ira.com,*", &result));
@@ -707,22 +714,22 @@ TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeOnly) {
 TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeAndPunycode) {
   TestingProfile profile;
 
-  scoped_ptr<base::Value> value(base::JSONReader::Read(
-      "{\"[*.]\\xC4\\x87ira.com,*\":{\"images\":1}}"));
-  profile.GetPrefs()->Set(prefs::kContentSettingsPatternPairs, *value);
+  scoped_ptr<base::Value> value(base::JSONReader::DeprecatedRead(
+      "{\"[*.]\\xC4\\x87ira.com,*\":{\"setting\":1}}"));
+  profile.GetPrefs()->Set(GetPrefName(CONTENT_SETTINGS_TYPE_COOKIES), *value);
 
   // Set punycode equivalent, with different setting.
-  scoped_ptr<base::Value> puny_value(base::JSONReader::Read(
-      "{\"[*.]xn--ira-ppa.com,*\":{\"images\":2}}"));
-  profile.GetPrefs()->Set(
-      prefs::kContentSettingsPatternPairs, *puny_value);
+  scoped_ptr<base::Value> puny_value(base::JSONReader::DeprecatedRead(
+      "{\"[*.]xn--ira-ppa.com,*\":{\"setting\":2}}"));
+  profile.GetPrefs()->Set(GetPrefName(CONTENT_SETTINGS_TYPE_COOKIES),
+                          *puny_value);
 
   // Initialize the content map.
   profile.GetHostContentSettingsMap();
 
-  const base::DictionaryValue* content_setting_prefs =
-      profile.GetPrefs()->GetDictionary(
-          prefs::kContentSettingsImagesPatternPairs);
+  const base::DictionaryValue& content_setting_prefs =
+      *profile.GetPrefs()->GetDictionary(
+          GetPrefName(CONTENT_SETTINGS_TYPE_COOKIES));
   std::string prefs_as_json;
   base::JSONWriter::Write(content_setting_prefs, &prefs_as_json);
   EXPECT_STREQ("{\"[*.]xn--ira-ppa.com,*\":{\"setting\":2}}",
@@ -1021,71 +1028,4 @@ TEST_F(HostContentSettingsMapTest, AddContentSettingsObserver) {
       CONTENT_SETTINGS_TYPE_IMAGES,
       std::string(),
       CONTENT_SETTING_DEFAULT);
-}
-
-TEST_F(HostContentSettingsMapTest, OverrideAllowedWebsiteSetting) {
-  TestingProfile profile;
-  HostContentSettingsMap* host_content_settings_map =
-      profile.GetHostContentSettingsMap();
-  GURL host("http://example.com/");
-  ContentSettingsPattern pattern =
-      ContentSettingsPattern::FromString("[*.]example.com");
-  host_content_settings_map->SetContentSetting(
-      pattern,
-      ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_GEOLOCATION,
-      std::string(),
-      CONTENT_SETTING_ALLOW);
-
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string()));
-
-  // Disabling should override an allowed exception.
-  host_content_settings_map->SetContentSettingOverride(
-      CONTENT_SETTINGS_TYPE_GEOLOCATION, false);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string()));
-
-  host_content_settings_map->SetContentSettingOverride(
-      CONTENT_SETTINGS_TYPE_GEOLOCATION, true);
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string()));
-}
-
-TEST_F(HostContentSettingsMapTest, OverrideAllowedDefaultSetting) {
-  TestingProfile profile;
-  HostContentSettingsMap* host_content_settings_map =
-      profile.GetHostContentSettingsMap();
-
-  // Check setting defaults.
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetDefaultContentSetting(
-                CONTENT_SETTINGS_TYPE_IMAGES, NULL));
-
-  GURL host("http://example.com/");
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
-
-  // Disabling should override an allowed default setting.
-  host_content_settings_map->SetContentSettingOverride(
-      CONTENT_SETTINGS_TYPE_IMAGES, false);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
-
-  // Enabling shouldn't override positively.
-  host_content_settings_map->SetContentSettingOverride(
-      CONTENT_SETTINGS_TYPE_IMAGES, true);
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
-  host_content_settings_map->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_IMAGES, CONTENT_SETTING_BLOCK);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_IMAGES, std::string()));
 }

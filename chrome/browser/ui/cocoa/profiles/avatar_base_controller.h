@@ -10,6 +10,8 @@
 #import "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/browser_window.h"
+#import "chrome/browser/ui/cocoa/has_weak_browser_pointer.h"
+#include "components/signin/core/browser/signin_header_helper.h"
 
 @class BaseBubbleController;
 class Browser;
@@ -18,7 +20,7 @@ class ProfileInfoUpdateObserver;
 // This view controller manages the button that sits in the top of the
 // window frame when using multi-profiles, and shows information about the
 // current profile. Clicking the button will open the profile menu.
-@interface AvatarBaseController : NSViewController {
+@interface AvatarBaseController : NSViewController<HasWeakBrowserPointer> {
  @protected
   Browser* browser_;
 
@@ -48,6 +50,8 @@ class ProfileInfoUpdateObserver;
 
 @interface AvatarBaseController (ExposedForTesting)
 - (BaseBubbleController*)menuController;
+
+- (BOOL)isCtrlPressed;
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_PROFILES_AVATAR_BASE_CONTROLLER_H_

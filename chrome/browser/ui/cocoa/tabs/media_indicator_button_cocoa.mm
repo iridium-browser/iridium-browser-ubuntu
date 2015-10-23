@@ -5,11 +5,23 @@
 #import "chrome/browser/ui/cocoa/tabs/media_indicator_button_cocoa.h"
 
 #include "base/logging.h"
+#include "base/mac/foundation_util.h"
 #include "base/thread_task_runner_handle.h"
+#import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #include "content/public/browser/user_metrics.h"
 #include "ui/gfx/animation/animation.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/image/image.h"
+
+namespace {
+
+// The minimum required click-to-select area of an inactive tab before allowing
+// the click-to-mute functionality to be enabled.  This value is in terms of
+// some percentage of the MediaIndicatorButton's width.  See comments in the
+// updateEnabledForMuteToggle method.
+const int kMinMouseSelectableAreaPercent = 250;
+
+}  // namespace
 
 @implementation MediaIndicatorButton
 
@@ -64,10 +76,11 @@ class FadeAnimationDelegate : public gfx::AnimationDelegate {
     return;
 
   if (nextState != TAB_MEDIA_STATE_NONE) {
-    [self setImage:chrome::GetTabMediaIndicatorImage(nextState).ToNSImage()];
+    [self
+        setImage:chrome::GetTabMediaIndicatorImage(nextState, nil).ToNSImage()];
     affordanceImage_.reset(
-        [chrome::GetTabMediaIndicatorAffordanceImage(nextState).ToNSImage()
-               retain]);
+        [chrome::GetTabMediaIndicatorAffordanceImage(nextState, nil)
+                .ToNSImage() retain]);
   }
 
   if ((mediaState_ == TAB_MEDIA_STATE_AUDIO_PLAYING &&
@@ -96,16 +109,14 @@ class FadeAnimationDelegate : public gfx::AnimationDelegate {
     }
   }
 
-  [self setEnabled:(chrome::IsTabAudioMutingFeatureEnabled() &&
-                    (nextState == TAB_MEDIA_STATE_AUDIO_PLAYING ||
-                     nextState == TAB_MEDIA_STATE_AUDIO_MUTING))];
+  mediaState_ = nextState;
+
+  [self updateEnabledForMuteToggle];
 
   // An indicator state change should be made visible immediately, instead of
   // the user being surprised when their mouse leaves the button.
   if ([self hoverState] == kHoverStateMouseOver)
     [self setHoverState:kHoverStateNone];
-
-  mediaState_ = nextState;
 
   [self setNeedsDisplay:YES];
 }
@@ -126,6 +137,41 @@ class FadeAnimationDelegate : public gfx::AnimationDelegate {
 - (void)setClickTarget:(id)target withAction:(SEL)action {
   clickTarget_ = target;
   clickAction_ = action;
+}
+
+- (void)mouseDown:(NSEvent*)theEvent {
+  // Do not handle this left-button mouse event if any modifier keys are being
+  // held down.  Instead, the Tab should react (e.g., selection or drag start).
+  if ([theEvent modifierFlags] & NSDeviceIndependentModifierFlagsMask) {
+    [self setHoverState:kHoverStateNone];  // Turn off hover.
+    [[self nextResponder] mouseDown:theEvent];
+    return;
+  }
+  [super mouseDown:theEvent];
+}
+
+- (void)mouseEntered:(NSEvent*)theEvent {
+  // If any modifier keys are being held down, do not turn on hover.
+  if ([theEvent modifierFlags] & NSDeviceIndependentModifierFlagsMask) {
+    [self setHoverState:kHoverStateNone];
+    return;
+  }
+  [super mouseEntered:theEvent];
+}
+
+- (void)mouseMoved:(NSEvent*)theEvent {
+  // If any modifier keys are being held down, turn off hover.
+  if ([theEvent modifierFlags] & NSDeviceIndependentModifierFlagsMask) {
+    [self setHoverState:kHoverStateNone];
+    return;
+  }
+  [super mouseMoved:theEvent];
+}
+
+- (void)rightMouseDown:(NSEvent*)theEvent {
+  // All right-button mouse events should be handled by the Tab.
+  [self setHoverState:kHoverStateNone];  // Turn off hover.
+  [[self nextResponder] rightMouseDown:theEvent];
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
@@ -170,6 +216,24 @@ class FadeAnimationDelegate : public gfx::AnimationDelegate {
     NOTREACHED();
 
   [clickTarget_ performSelector:clickAction_ withObject:self];
+}
+
+- (void)updateEnabledForMuteToggle {
+  BOOL enable = chrome::AreExperimentalMuteControlsEnabled() &&
+      (mediaState_ == TAB_MEDIA_STATE_AUDIO_PLAYING ||
+       mediaState_ == TAB_MEDIA_STATE_AUDIO_MUTING);
+
+  // If the tab is not the currently-active tab, make sure it is wide enough
+  // before enabling click-to-mute.  This ensures that there is enough click
+  // area for the user to activate a tab rather than unintentionally muting it.
+  TabView* const tabView = base::mac::ObjCCast<TabView>([self superview]);
+  if (enable && tabView && ([tabView state] != NSOnState)) {
+    const int requiredWidth =
+        NSWidth([self frame]) * kMinMouseSelectableAreaPercent / 100;
+    enable = ([tabView widthOfLargestSelectableRegion] >= requiredWidth);
+  }
+
+  [self setEnabled:enable];
 }
 
 @end

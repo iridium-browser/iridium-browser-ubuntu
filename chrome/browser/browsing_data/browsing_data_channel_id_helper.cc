@@ -5,9 +5,11 @@
 #include "chrome/browser/browsing_data/browsing_data_channel_id_helper.h"
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/url_request/url_request_context.h"
@@ -50,7 +52,7 @@ class BrowsingDataChannelIDHelperImpl
   // it's true when StartFetching() is called in the UI thread, and it's reset
   // after we notify the callback in the UI thread.
   // This member is only mutated on the UI thread.
-  bool is_fetching_;
+  bool is_fetching_ = false;
 
   scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
 
@@ -62,7 +64,7 @@ class BrowsingDataChannelIDHelperImpl
 
 BrowsingDataChannelIDHelperImpl::BrowsingDataChannelIDHelperImpl(
     net::URLRequestContextGetter* request_context)
-    : is_fetching_(false), request_context_getter_(request_context) {
+    : request_context_getter_(request_context) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
@@ -192,18 +194,16 @@ void CannedBrowsingDataChannelIDHelper::StartFetching(
     return;
   // We post a task to emulate async fetching behavior.
   completion_callback_ = callback;
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&CannedBrowsingDataChannelIDHelper::FinishFetching,
-                 this));
+      base::Bind(&CannedBrowsingDataChannelIDHelper::FinishFetching, this));
 }
 
 void CannedBrowsingDataChannelIDHelper::FinishFetching() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   net::ChannelIDStore::ChannelIDList channel_id_list;
-  for (ChannelIDMap::iterator i = channel_id_map_.begin();
-       i != channel_id_map_.end(); ++i)
-    channel_id_list.push_back(i->second);
+  for (const auto& pair : channel_id_map_)
+    channel_id_list.push_back(pair.second);
   completion_callback_.Run(channel_id_list);
 }
 

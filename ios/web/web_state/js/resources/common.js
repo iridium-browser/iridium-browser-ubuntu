@@ -17,9 +17,12 @@ goog.require('__crWeb.base');
 __gCrWeb['common'] = {};
 
 /* Beginning of anonymous object. */
-new function() {
-  // JSON safe object to protect against custom implementation of Object.toJSON
-  // in host pages.
+(function() {
+  /**
+   * JSON safe object to protect against custom implementation of Object.toJSON
+   * in host pages.
+   * @constructor
+   */
   __gCrWeb['common'].JSONSafeObject = function JSONSafeObject() {
   };
 
@@ -47,13 +50,17 @@ new function() {
    * DOM.
    */
   __gCrWeb.common.isElementVisible = function(element) {
-    while (element !== document) {
-      var style = window.getComputedStyle(element);
-      if (style.display === 'none' || style.visibility === 'hidden') {
-        return false;
+    /** @type {Node} */
+    var node = element;
+    while (node && node !== document) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        var style = window.getComputedStyle(/** @type {Element} */(node));
+        if (style.display === 'none' || style.visibility === 'hidden') {
+          return false;
+        }
       }
       // Move up the tree and test again.
-      element = element.parentNode;
+      node = node.parentNode;
     }
     // Test reached the top of the DOM without finding a concealed ancestor.
     return true;
@@ -273,7 +280,7 @@ new function() {
    __gCrWeb.common.sanitizeValueForInputElement = function(
        proposedValue, element) {
     if (!proposedValue) {
-      return null;
+      return '';
     }
 
     // Method HTMLInputElement::sanitizeValue() calls InputType::sanitizeValue()
@@ -382,7 +389,7 @@ new function() {
     if (isNaN(sanitizedValue)) {
       return '';
     }
-    return sanitizedValue;
+    return sanitizedValue.toString();
   };
 
   /**
@@ -538,7 +545,9 @@ new function() {
     // First attempt is from the name / id supplied.
     var form = document.forms.namedItem(name);
     if (form) {
-      return form;
+      if (form.nodeType !== Node.ELEMENT_NODE)
+        return null;
+      return /** @type {Element} */(form);
     }
     // Second attempt is from the prefixed index position of the form in
     // document.forms.
@@ -623,18 +632,18 @@ new function() {
    * Checks whether an <object> node is plugin content (as <object> can also be
    * used to embed images).
    * @param {HTMLElement} node The <object> node to check.
-   * @return {Boolean} Whether the node appears to be a plugin.
+   * @return {boolean} Whether the node appears to be a plugin.
    * @private
    */
   var objectNodeIsPlugin_ = function(node) {
     return node.hasAttribute('classid') ||
-    (node.hasAttribute('type') && node.type.indexOf('image/') != 0);
+           (node.hasAttribute('type') && node.type.indexOf('image/') != 0);
   };
 
   /**
    * Checks whether plugin a node has fallback content.
    * @param {HTMLElement} node The node to check.
-   * @return {Boolean} Whether the node has fallback.
+   * @return {boolean} Whether the node has fallback.
    * @private
    */
   var pluginHasFallbackContent_ = function(node) {
@@ -684,4 +693,4 @@ new function() {
     }
     return false;
   };
-}  // End of anonymous object
+}());  // End of anonymous object

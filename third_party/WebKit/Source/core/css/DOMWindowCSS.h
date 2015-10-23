@@ -38,13 +38,14 @@
 
 namespace blink {
 
+class ExceptionState;
+
 class DOMWindowCSS : public RefCountedWillBeGarbageCollected<DOMWindowCSS>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<DOMWindowCSS> create();
-
-    bool supports(const String& property, const String& value) const;
-    bool supports(const String& conditionText) const;
+    static bool supports(const String& property, const String& value);
+    static bool supports(const String& conditionText);
+    static String escape(const String& ident, ExceptionState&);
 
     DEFINE_INLINE_TRACE() { }
 

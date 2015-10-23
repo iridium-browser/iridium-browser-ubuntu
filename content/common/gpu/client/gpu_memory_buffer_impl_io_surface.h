@@ -5,7 +5,7 @@
 #ifndef CONTENT_COMMON_GPU_CLIENT_GPU_MEMORY_BUFFER_IMPL_IO_SURFACE_H_
 #define CONTENT_COMMON_GPU_CLIENT_GPU_MEMORY_BUFFER_IMPL_IO_SURFACE_H_
 
-#include <IOSurface/IOSurfaceAPI.h>
+#include <IOSurface/IOSurface.h>
 
 #include "base/mac/scoped_cftyperef.h"
 #include "content/common/gpu/client/gpu_memory_buffer_impl.h"
@@ -18,7 +18,8 @@ class GpuMemoryBufferImplIOSurface : public GpuMemoryBufferImpl {
   static scoped_ptr<GpuMemoryBufferImpl> CreateFromHandle(
       const gfx::GpuMemoryBufferHandle& handle,
       const gfx::Size& size,
-      Format format,
+      gfx::BufferFormat format,
+      gfx::BufferUsage usage,
       const DestructionCallback& callback);
 
   // Overridden from gfx::GpuMemoryBuffer:
@@ -30,12 +31,14 @@ class GpuMemoryBufferImplIOSurface : public GpuMemoryBufferImpl {
  private:
   GpuMemoryBufferImplIOSurface(gfx::GpuMemoryBufferId id,
                                const gfx::Size& size,
-                               Format format,
+                               gfx::BufferFormat format,
                                const DestructionCallback& callback,
-                               IOSurfaceRef io_surface);
+                               IOSurfaceRef io_surface,
+                               uint32_t lock_flags);
   ~GpuMemoryBufferImplIOSurface() override;
 
   base::ScopedCFTypeRef<IOSurfaceRef> io_surface_;
+  uint32_t lock_flags_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemoryBufferImplIOSurface);
 };

@@ -4,7 +4,6 @@
 
 #include "extensions/browser/guest_view/extension_view/extension_view_guest.h"
 
-#include "base/strings/string_util.h"
 #include "components/crx_file/id_util.h"
 #include "components/guest_view/browser/guest_view_event.h"
 #include "content/public/browser/render_process_host.h"
@@ -19,7 +18,7 @@
 using content::WebContents;
 using guest_view::GuestViewBase;
 using guest_view::GuestViewEvent;
-using namespace extensions::core_api;
+using namespace extensions::api;
 
 namespace extensions {
 
@@ -28,10 +27,7 @@ const char ExtensionViewGuest::Type[] = "extensionview";
 
 ExtensionViewGuest::ExtensionViewGuest(
     content::WebContents* owner_web_contents)
-    : GuestView<ExtensionViewGuest>(owner_web_contents),
-      extension_view_guest_delegate_(
-          extensions::ExtensionsAPIClient::Get()
-              ->CreateExtensionViewGuestDelegate(this)) {
+    : GuestView<ExtensionViewGuest>(owner_web_contents) {
 }
 
 ExtensionViewGuest::~ExtensionViewGuest() {
@@ -43,7 +39,7 @@ GuestViewBase* ExtensionViewGuest::Create(
   return new ExtensionViewGuest(owner_web_contents);
 }
 
-void ExtensionViewGuest::NavigateGuest(const std::string& src,
+bool ExtensionViewGuest::NavigateGuest(const std::string& src,
                                        bool force_navigation) {
   GURL url = extension_url_.Resolve(src);
 
@@ -51,20 +47,19 @@ void ExtensionViewGuest::NavigateGuest(const std::string& src,
   // then navigate to about:blank.
   bool url_not_allowed = (url != GURL(url::kAboutBlankURL)) &&
       (url.GetOrigin() != extension_url_.GetOrigin());
-  if (!url.is_valid() || url_not_allowed) {
-    NavigateGuest(url::kAboutBlankURL, true /* force_navigation */);
-    return;
-  }
+  if (!url.is_valid() || url_not_allowed)
+    return NavigateGuest(url::kAboutBlankURL, true /* force_navigation */);
 
-  if (!force_navigation && (view_page_ == url))
-    return;
+  if (!force_navigation && (url_ == url))
+    return false;
 
   web_contents()->GetRenderProcessHost()->FilterURL(false, &url);
   web_contents()->GetController().LoadURL(url, content::Referrer(),
                                           ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
                                           std::string());
 
-  view_page_ = url;
+  url_ = url;
+  return true;
 }
 
 // GuestViewBase implementation.
@@ -104,11 +99,7 @@ void ExtensionViewGuest::CreateWebContents(
 
 void ExtensionViewGuest::DidInitialize(
     const base::DictionaryValue& create_params) {
-  extension_function_dispatcher_.reset(
-      new extensions::ExtensionFunctionDispatcher(browser_context(), this));
-
-  if (extension_view_guest_delegate_)
-    extension_view_guest_delegate_->DidInitialize();
+  ExtensionsAPIClient::Get()->AttachWebContentsHelpers(web_contents());
 
   ApplyAttributes(create_params);
 }
@@ -133,17 +124,10 @@ void ExtensionViewGuest::DidCommitProvisionalLoadForFrame(
   if (render_frame_host->GetParent())
     return;
 
-  view_page_ = url;
-
-  // Gets chrome-extension://extensionid/ prefix.
-  std::string prefix = url.GetWithEmptyPath().spec();
-  std::string relative_url = url.spec();
-
-  // Removes the prefix.
-  ReplaceFirstSubstringAfterOffset(&relative_url, 0, prefix, "");
+  url_ = url;
 
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  args->SetString(guest_view::kUrl, relative_url);
+  args->SetString(guest_view::kUrl, url_.spec());
   DispatchEventToView(
       new GuestViewEvent(extensionview::kEventLoadCommit, args.Pass()));
 }
@@ -151,26 +135,10 @@ void ExtensionViewGuest::DidCommitProvisionalLoadForFrame(
 void ExtensionViewGuest::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
-  if (attached() && (params.url.GetOrigin() != view_page_.GetOrigin())) {
+  if (attached() && (params.url.GetOrigin() != url_.GetOrigin())) {
     bad_message::ReceivedBadMessage(web_contents()->GetRenderProcessHost(),
                                     bad_message::EVG_BAD_ORIGIN);
   }
-}
-
-bool ExtensionViewGuest::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(ExtensionViewGuest, message)
-  IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
-  IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
-}
-
-// Private
-void ExtensionViewGuest::OnRequest(
-    const ExtensionHostMsg_Request_Params& params) {
-  extension_function_dispatcher_->Dispatch(params,
-                                           web_contents()->GetRenderViewHost());
 }
 
 void ExtensionViewGuest::ApplyAttributes(const base::DictionaryValue& params) {

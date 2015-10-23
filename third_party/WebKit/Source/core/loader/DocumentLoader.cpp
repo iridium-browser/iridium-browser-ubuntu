@@ -34,17 +34,23 @@
 #include "core/dom/DocumentParser.h"
 #include "core/dom/WeakIdentifierMap.h"
 #include "core/events/Event.h"
+#include "core/fetch/CSSStyleSheetResource.h"
 #include "core/fetch/FetchInitiatorTypeNames.h"
+#include "core/fetch/FetchRequest.h"
+#include "core/fetch/ImageResource.h"
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/fetch/ResourceLoader.h"
+#include "core/fetch/ScriptResource.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/Settings.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/parser/HTMLDocumentParser.h"
 #include "core/html/parser/TextResourceDecoder.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/loader/FrameFetchContext.h"
 #include "core/loader/FrameLoader.h"
@@ -53,8 +59,6 @@
 #include "core/loader/appcache/ApplicationCacheHost.h"
 #include "core/page/FrameTree.h"
 #include "core/page/Page.h"
-#include "core/frame/Settings.h"
-#include "core/inspector/ConsoleMessage.h"
 #include "platform/Logging.h"
 #include "platform/ThreadedDataReceiver.h"
 #include "platform/UserGestureIndicator.h"
@@ -68,6 +72,7 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebMimeRegistry.h"
 #include "wtf/Assertions.h"
+#include "wtf/TemporaryChange.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -83,33 +88,47 @@ DocumentLoader::DocumentLoader(LocalFrame* frame, const ResourceRequest& req, co
     , m_originalRequest(req)
     , m_substituteData(substituteData)
     , m_request(req)
-    , m_committed(false)
     , m_isClientRedirect(false)
     , m_replacesCurrentHistoryItem(false)
     , m_navigationType(NavigationTypeOther)
-    , m_loadingMainResource(false)
+    , m_documentLoadTiming(*this)
     , m_timeOfLastDataReceived(0.0)
     , m_applicationCacheHost(ApplicationCacheHost::create(this))
+    , m_state(NotStarted)
+    , m_inDataReceived(false)
+    , m_dataBuffer(SharedBuffer::create())
 {
 }
 
 FrameLoader* DocumentLoader::frameLoader() const
 {
     if (!m_frame)
-        return 0;
+        return nullptr;
     return &m_frame->loader();
 }
 
 ResourceLoader* DocumentLoader::mainResourceLoader() const
 {
-    return m_mainResource ? m_mainResource->loader() : 0;
+    return m_mainResource ? m_mainResource->loader() : nullptr;
 }
 
 DocumentLoader::~DocumentLoader()
 {
     ASSERT(!m_frame || !isLoading());
-    clearMainResourceHandle();
-    m_applicationCacheHost->dispose();
+    ASSERT(!m_mainResource);
+    ASSERT(!m_applicationCacheHost);
+}
+
+DEFINE_TRACE(DocumentLoader)
+{
+    visitor->trace(m_frame);
+    visitor->trace(m_fetcher);
+    // TODO(sof): start tracing ResourcePtr<>s (and m_mainResource.)
+    visitor->trace(m_writer);
+    visitor->trace(m_archive);
+    visitor->trace(m_documentLoadTiming);
+    visitor->trace(m_applicationCacheHost);
+    visitor->trace(m_contentSecurityPolicy);
 }
 
 unsigned long DocumentLoader::mainResourceIdentifier() const
@@ -121,7 +140,7 @@ Document* DocumentLoader::document() const
 {
     if (m_frame && m_frame->loader().documentLoader() == this)
         return m_frame->document();
-    return 0;
+    return nullptr;
 }
 
 const ResourceRequest& DocumentLoader::originalRequest() const
@@ -137,6 +156,35 @@ const ResourceRequest& DocumentLoader::request() const
 const KURL& DocumentLoader::url() const
 {
     return m_request.url();
+}
+
+void DocumentLoader::startPreload(Resource::Type type, FetchRequest& request)
+{
+    ASSERT(type == Resource::Script || type == Resource::CSSStyleSheet || type == Resource::Image || type == Resource::ImportResource);
+    ResourcePtr<Resource> resource;
+    switch (type) {
+    case Resource::Image:
+        resource = ImageResource::fetch(request, fetcher());
+        break;
+    case Resource::Script:
+        resource = ScriptResource::fetch(request, fetcher());
+        break;
+    case Resource::CSSStyleSheet:
+        resource = CSSStyleSheetResource::fetch(request, fetcher());
+        break;
+    default: // Resource::ImportResource
+        resource = RawResource::fetchImport(request, fetcher());
+        break;
+    }
+
+    if (resource)
+        fetcher()->preloadStarted(resource.get());
+}
+
+void DocumentLoader::didChangePerformanceTiming()
+{
+    if (frameLoader())
+        frameLoader()->client()->didChangePerformanceTiming();
 }
 
 void DocumentLoader::updateForSameDocumentNavigation(const KURL& newURL, SameDocumentNavigationSource sameDocumentNavigationSource)
@@ -163,11 +211,12 @@ void DocumentLoader::mainReceivedError(const ResourceError& error)
 {
     ASSERT(!error.isNull());
     ASSERT(!mainResourceLoader() || !mainResourceLoader()->defersLoading() || InspectorInstrumentation::isDebuggerPaused(m_frame));
-    m_applicationCacheHost->failedLoadingMainResource();
+    if (m_applicationCacheHost)
+        m_applicationCacheHost->failedLoadingMainResource();
     if (!frameLoader())
         return;
     m_mainDocumentError = error;
-    clearMainResourceLoader();
+    m_state = MainResourceDone;
     frameLoader()->receivedMainResourceError(this, error);
     clearMainResourceHandle();
 }
@@ -178,18 +227,18 @@ void DocumentLoader::mainReceivedError(const ResourceError& error)
 // but not loads initiated by child frames' data sources -- that's the WebFrame's job.
 void DocumentLoader::stopLoading()
 {
-    RefPtrWillBeRawPtr<LocalFrame> protectFrame(m_frame);
-    RefPtr<DocumentLoader> protectLoader(this);
+    RefPtrWillBeRawPtr<LocalFrame> protectFrame(m_frame.get());
+    RefPtrWillBeRawPtr<DocumentLoader> protectLoader(this);
 
-    m_fetcher->stopFetching();
     if (isLoading())
         cancelMainResourceLoad(ResourceError::cancelledError(m_request.url()));
+    m_fetcher->stopFetching();
 }
 
 void DocumentLoader::commitIfReady()
 {
-    if (!m_committed) {
-        m_committed = true;
+    if (m_state < Committed) {
+        m_state = Committed;
         frameLoader()->commitProvisionalLoad();
     }
 }
@@ -199,7 +248,7 @@ bool DocumentLoader::isLoading() const
     if (document() && document()->hasActiveParser())
         return true;
 
-    return m_loadingMainResource || m_fetcher->isFetching();
+    return (m_state > NotStarted && m_state < MainResourceDone) || m_fetcher->isFetching();
 }
 
 void DocumentLoader::notifyFinished(Resource* resource)
@@ -207,7 +256,7 @@ void DocumentLoader::notifyFinished(Resource* resource)
     ASSERT_UNUSED(resource, m_mainResource == resource);
     ASSERT(m_mainResource);
 
-    RefPtr<DocumentLoader> protect(this);
+    RefPtrWillBeRawPtr<DocumentLoader> protect(this);
 
     if (!m_mainResource->errorOccurred() && !m_mainResource->wasCanceled()) {
         finishedLoading(m_mainResource->loadFinishTime());
@@ -221,7 +270,7 @@ void DocumentLoader::finishedLoading(double finishTime)
 {
     ASSERT(!mainResourceLoader() || !mainResourceLoader()->defersLoading() || InspectorInstrumentation::isDebuggerPaused(m_frame));
 
-    RefPtr<DocumentLoader> protect(this);
+    RefPtrWillBeRawPtr<DocumentLoader> protect(this);
 
     double responseEndTime = finishTime;
     if (!responseEndTime)
@@ -245,7 +294,7 @@ void DocumentLoader::finishedLoading(double finishTime)
 
     if (!m_mainDocumentError.isNull())
         return;
-    clearMainResourceLoader();
+    m_state = MainResourceDone;
 
     // If the document specified an application cache manifest, it violates the author's intent if we store it in the memory cache
     // and deny the appcache the chance to intercept it in the future, so remove from the memory cache.
@@ -267,7 +316,7 @@ bool DocumentLoader::isRedirectAfterPost(const ResourceRequest& newRequest, cons
     return false;
 }
 
-bool DocumentLoader::shouldContinueForNavigationPolicy(const ResourceRequest& request, ContentSecurityPolicyDisposition shouldCheckMainWorldContentSecurityPolicy, NavigationPolicy policy, bool isTransitionNavigation)
+bool DocumentLoader::shouldContinueForNavigationPolicy(const ResourceRequest& request, ContentSecurityPolicyDisposition shouldCheckMainWorldContentSecurityPolicy, NavigationPolicy policy)
 {
     // Don't ask if we are loading an empty URL.
     if (request.url().isEmpty() || m_substituteData.isValid())
@@ -285,7 +334,7 @@ bool DocumentLoader::shouldContinueForNavigationPolicy(const ResourceRequest& re
         return false;
     }
 
-    policy = frameLoader()->client()->decidePolicyForNavigation(request, this, policy, isTransitionNavigation);
+    policy = frameLoader()->client()->decidePolicyForNavigation(request, this, policy);
     if (policy == NavigationPolicyCurrentTab)
         return true;
     if (policy == NavigationPolicyIgnore)
@@ -350,7 +399,7 @@ void DocumentLoader::willSendRequest(ResourceRequest& newRequest, const Resource
         return;
 
     appendRedirect(newRequest.url());
-    frameLoader()->client()->dispatchDidReceiveServerRedirectForProvisionalLoad();
+    frameLoader()->receivedMainResourceRedirect(m_request.url());
     if (!shouldContinueForNavigationPolicy(newRequest, CheckContentSecurityPolicy))
         cancelMainResourceLoad(ResourceError::cancelledError(m_request.url()));
 }
@@ -409,7 +458,7 @@ void DocumentLoader::responseReceived(Resource* resource, const ResourceResponse
 {
     ASSERT_UNUSED(resource, m_mainResource == resource);
     ASSERT_UNUSED(handle, !handle);
-    RefPtr<DocumentLoader> protect(this);
+    RefPtrWillBeRawPtr<DocumentLoader> protect(this);
     ASSERT(frame());
 
     m_applicationCacheHost->didReceiveResponseForMainResource(response);
@@ -492,6 +541,7 @@ void DocumentLoader::ensureWriter(const AtomicString& mimeType, const KURL& over
 
 void DocumentLoader::commitData(const char* bytes, size_t length)
 {
+    ASSERT(m_state < MainResourceDone);
     ensureWriter(m_response.mimeType());
 
     // This can happen if document.close() is called by an event handler while
@@ -500,6 +550,9 @@ void DocumentLoader::commitData(const char* bytes, size_t length)
         cancelMainResourceLoad(ResourceError::cancelledError(m_request.url()));
         return;
     }
+
+    if (length)
+        m_state = DataReceived;
 
     m_writer->addData(bytes, length);
 }
@@ -512,11 +565,41 @@ void DocumentLoader::dataReceived(Resource* resource, const char* data, unsigned
     ASSERT(!m_response.isNull());
     ASSERT(!mainResourceLoader() || !mainResourceLoader()->defersLoading());
 
+    if (m_inDataReceived) {
+        // If this function is reentered, defer processing of the additional
+        // data to the top-level invocation. Reentrant calls can occur because
+        // of web platform (mis-)features that require running a nested message
+        // loop:
+        // - alert(), confirm(), prompt()
+        // - Detach of plugin elements.
+        // - Synchronous XMLHTTPRequest
+        m_dataBuffer->append(data, length);
+        return;
+    }
+
     // Both unloading the old page and parsing the new page may execute JavaScript which destroys the datasource
     // by starting a new load, so retain temporarily.
-    RefPtrWillBeRawPtr<LocalFrame> protectFrame(m_frame);
-    RefPtr<DocumentLoader> protectLoader(this);
+    RefPtrWillBeRawPtr<LocalFrame> protectFrame(m_frame.get());
+    RefPtrWillBeRawPtr<DocumentLoader> protectLoader(this);
 
+    TemporaryChange<bool> reentrancyProtector(m_inDataReceived, true);
+    processData(data, length);
+
+    // Process data received in reentrant invocations. Note that the
+    // invocations of processData() may queue more data in reentrant
+    // invocations, so iterate until it's empty.
+    const char* segment;
+    unsigned pos = 0;
+    while (unsigned length = m_dataBuffer->getSomeData(segment, pos)) {
+        processData(segment, length);
+        pos += length;
+    }
+    // All data has been consumed, so flush the buffer.
+    m_dataBuffer->clear();
+}
+
+void DocumentLoader::processData(const char* data, unsigned length)
+{
     m_applicationCacheHost->mainResourceDataReceived(data, length);
     m_timeOfLastDataReceived = monotonicallyIncreasingTime();
 
@@ -543,25 +626,33 @@ void DocumentLoader::appendRedirect(const KURL& url)
     m_redirectChain.append(url);
 }
 
+bool DocumentLoader::loadingMultipartContent() const
+{
+    return mainResourceLoader() ? mainResourceLoader()->loadingMultipartContent() : false;
+}
+
 void DocumentLoader::detachFromFrame()
 {
     ASSERT(m_frame);
-    RefPtrWillBeRawPtr<LocalFrame> protectFrame(m_frame);
-    RefPtr<DocumentLoader> protectLoader(this);
+    RefPtrWillBeRawPtr<LocalFrame> protectFrame(m_frame.get());
+    RefPtrWillBeRawPtr<DocumentLoader> protectLoader(this);
 
     // It never makes sense to have a document loader that is detached from its
     // frame have any loads active, so go ahead and kill all the loads.
     stopLoading();
 
-    m_fetcher->clearContext();
-    m_applicationCacheHost->setApplicationCache(0);
-    WeakIdentifierMap<DocumentLoader>::notifyObjectDestroyed(this);
-    m_frame = 0;
-}
+    // If that load cancellation triggered another detach, leave.
+    // (fast/frames/detach-frame-nested-no-crash.html is an example of this.)
+    if (!m_frame)
+        return;
 
-void DocumentLoader::clearMainResourceLoader()
-{
-    m_loadingMainResource = false;
+    m_fetcher->clearContext();
+
+    m_applicationCacheHost->detachFromDocumentLoader();
+    m_applicationCacheHost.clear();
+    WeakIdentifierMap<DocumentLoader>::notifyObjectDestroyed(this);
+    clearMainResourceHandle();
+    m_frame = nullptr;
 }
 
 void DocumentLoader::clearMainResourceHandle()
@@ -569,7 +660,7 @@ void DocumentLoader::clearMainResourceHandle()
     if (!m_mainResource)
         return;
     m_mainResource->removeClient(this);
-    m_mainResource = 0;
+    m_mainResource = nullptr;
 }
 
 bool DocumentLoader::maybeCreateArchive()
@@ -659,12 +750,12 @@ bool DocumentLoader::maybeLoadEmpty()
 
 void DocumentLoader::startLoadingMainResource()
 {
-    RefPtr<DocumentLoader> protect(this);
+    RefPtrWillBeRawPtr<DocumentLoader> protect(this);
     m_mainDocumentError = ResourceError();
     timing().markNavigationStart();
     ASSERT(!m_mainResource);
-    ASSERT(!m_loadingMainResource);
-    m_loadingMainResource = true;
+    ASSERT(m_state == NotStarted);
+    m_state = Provisional;
 
     if (maybeLoadEmpty())
         return;
@@ -685,12 +776,14 @@ void DocumentLoader::startLoadingMainResource()
     DEFINE_STATIC_LOCAL(ResourceLoaderOptions, mainResourceLoadOptions,
         (DoNotBufferData, AllowStoredCredentials, ClientRequestedCredentials, CheckContentSecurityPolicy, DocumentContext));
     FetchRequest cachedResourceRequest(request, FetchInitiatorTypeNames::document, mainResourceLoadOptions);
-    m_mainResource = m_fetcher->fetchMainResource(cachedResourceRequest, m_substituteData);
+    m_mainResource = RawResource::fetchMainResource(cachedResourceRequest, fetcher(), m_substituteData);
     if (!m_mainResource) {
         m_request = ResourceRequest();
         // If the load was aborted by clearing m_request, it's possible the ApplicationCacheHost
         // is now in a state where starting an empty load will be inconsistent. Replace it with
         // a new ApplicationCacheHost.
+        if (m_applicationCacheHost)
+            m_applicationCacheHost->detachFromDocumentLoader();
         m_applicationCacheHost = ApplicationCacheHost::create(this);
         maybeLoadEmpty();
         return;
@@ -709,7 +802,7 @@ void DocumentLoader::startLoadingMainResource()
 
 void DocumentLoader::cancelMainResourceLoad(const ResourceError& resourceError)
 {
-    RefPtr<DocumentLoader> protect(this);
+    RefPtrWillBeRawPtr<DocumentLoader> protect(this);
     ResourceError error = resourceError.isNull() ? ResourceError::cancelledError(m_request.url()) : resourceError;
 
     if (mainResourceLoader())
@@ -750,8 +843,6 @@ PassRefPtrWillBeRawPtr<DocumentWriter> DocumentLoader::createWriterFor(const Doc
     if (ownerDocument) {
         document->setCookieURL(ownerDocument->cookieURL());
         document->setSecurityOrigin(ownerDocument->securityOrigin());
-        if (ownerDocument->isTransitionDocument())
-            document->setIsTransitionDocument(true);
     }
 
     frame->loader().didBeginDocument(dispatch);
@@ -766,12 +857,6 @@ const AtomicString& DocumentLoader::mimeType() const
     return m_response.mimeType();
 }
 
-void DocumentLoader::setUserChosenEncoding(const String& charset)
-{
-    if (m_writer)
-        m_writer->setUserChosenEncoding(charset);
-}
-
 // This is only called by FrameLoader::replaceDocumentWhileExecutingJavaScriptURL()
 void DocumentLoader::replaceDocumentWhileExecutingJavaScriptURL(const DocumentInit& init, const String& source, Document* ownerDocument)
 {
@@ -780,5 +865,7 @@ void DocumentLoader::replaceDocumentWhileExecutingJavaScriptURL(const DocumentIn
         m_writer->appendReplacingData(source);
     endWriting(m_writer.get());
 }
+
+DEFINE_WEAK_IDENTIFIER_MAP(DocumentLoader);
 
 } // namespace blink

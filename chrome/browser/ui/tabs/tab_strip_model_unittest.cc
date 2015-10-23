@@ -26,18 +26,19 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/test/web_contents_tester.h"
 #include "extensions/common/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::SiteInstance;
 using content::WebContents;
+using content::WebContentsTester;
 using extensions::Extension;
 
 namespace {
@@ -216,9 +217,6 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
 
       actual += base::IntToString(GetID(model.GetWebContentsAt(i)));
 
-      if (model.IsAppTab(i))
-        actual += "a";
-
       if (model.IsTabPinned(i))
         actual += "p";
     }
@@ -249,11 +247,11 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
       model->SetTabPinned(i, true);
 
     ui::ListSelectionModel selection_model;
-    std::vector<std::string> selection;
-    base::SplitStringAlongWhitespace(selected_tabs, &selection);
-    for (size_t i = 0; i < selection.size(); ++i) {
+    for (const base::StringPiece& sel : base::SplitStringPiece(
+             selected_tabs, base::kWhitespaceASCII,
+             base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
       int value;
-      ASSERT_TRUE(base::StringToInt(selection[i], &value));
+      ASSERT_TRUE(base::StringToInt(sel, &value));
       selection_model.AddIndexToSelection(value);
     }
     selection_model.set_active(selection_model.selected_indices()[0]);
@@ -1911,138 +1909,6 @@ TEST_F(TabStripModelTest, MAYBE_FastShutdown) {
   }
 }
 
-// Tests various permutations of apps.
-TEST_F(TabStripModelTest, Apps) {
-  TabStripDummyDelegate delegate;
-  TabStripModel tabstrip(&delegate, profile());
-  MockTabStripModelObserver observer(&tabstrip);
-  tabstrip.AddObserver(&observer);
-
-  EXPECT_TRUE(tabstrip.empty());
-
-  typedef MockTabStripModelObserver::State State;
-
-#if defined(OS_WIN)
-  base::FilePath path(FILE_PATH_LITERAL("c:\\foo"));
-#elif defined(OS_POSIX)
-  base::FilePath path(FILE_PATH_LITERAL("/foo"));
-#endif
-
-  base::DictionaryValue manifest;
-  manifest.SetString("name", "hi!");
-  manifest.SetString("version", "1");
-  manifest.SetString("app.launch.web_url", "http://www.google.com");
-  std::string error;
-  scoped_refptr<Extension> extension_app(
-      Extension::Create(path, extensions::Manifest::INVALID_LOCATION,
-                        manifest, Extension::NO_FLAGS, &error));
-  WebContents* contents1 = CreateWebContentsWithID(1);
-  extensions::TabHelper::CreateForWebContents(contents1);
-  extensions::TabHelper::FromWebContents(contents1)
-      ->SetExtensionApp(extension_app.get());
-  WebContents* contents2 = CreateWebContentsWithID(2);
-  extensions::TabHelper::CreateForWebContents(contents2);
-  extensions::TabHelper::FromWebContents(contents2)
-      ->SetExtensionApp(extension_app.get());
-  WebContents* contents3 = CreateWebContentsWithID(3);
-
-  // Note! The ordering of these tests is important, each subsequent test
-  // builds on the state established in the previous. This is important if you
-  // ever insert tests rather than append.
-
-  // Initial state, tab3 only and selected.
-  tabstrip.AppendWebContents(contents3, true);
-
-  observer.ClearStates();
-
-  // Attempt to insert tab1 (an app tab) at position 1. This isn't a legal
-  // position and tab1 should end up at position 0.
-  {
-    tabstrip.InsertWebContentsAt(1, contents1, TabStripModel::ADD_NONE);
-
-    ASSERT_EQ(1, observer.GetStateCount());
-    State state(contents1, 0, MockTabStripModelObserver::INSERT);
-    EXPECT_TRUE(observer.StateEquals(0, state));
-
-    // And verify the state.
-    EXPECT_EQ("1ap 3", GetTabStripStateString(tabstrip));
-
-    observer.ClearStates();
-  }
-
-  // Insert tab 2 at position 1.
-  {
-    tabstrip.InsertWebContentsAt(1, contents2, TabStripModel::ADD_NONE);
-
-    ASSERT_EQ(1, observer.GetStateCount());
-    State state(contents2, 1, MockTabStripModelObserver::INSERT);
-    EXPECT_TRUE(observer.StateEquals(0, state));
-
-    // And verify the state.
-    EXPECT_EQ("1ap 2ap 3", GetTabStripStateString(tabstrip));
-
-    observer.ClearStates();
-  }
-
-  // Try to move tab 3 to position 0. This isn't legal and should be ignored.
-  {
-    tabstrip.MoveWebContentsAt(2, 0, false);
-
-    ASSERT_EQ(0, observer.GetStateCount());
-
-    // And verify the state didn't change.
-    EXPECT_EQ("1ap 2ap 3", GetTabStripStateString(tabstrip));
-
-    observer.ClearStates();
-  }
-
-  // Try to move tab 0 to position 3. This isn't legal and should be ignored.
-  {
-    tabstrip.MoveWebContentsAt(0, 2, false);
-
-    ASSERT_EQ(0, observer.GetStateCount());
-
-    // And verify the state didn't change.
-    EXPECT_EQ("1ap 2ap 3", GetTabStripStateString(tabstrip));
-
-    observer.ClearStates();
-  }
-
-  // Try to move tab 0 to position 1. This is a legal move.
-  {
-    tabstrip.MoveWebContentsAt(0, 1, false);
-
-    ASSERT_EQ(1, observer.GetStateCount());
-    State state(contents1, 1, MockTabStripModelObserver::MOVE);
-    state.src_index = 0;
-    EXPECT_TRUE(observer.StateEquals(0, state));
-
-    // And verify the state didn't change.
-    EXPECT_EQ("2ap 1ap 3", GetTabStripStateString(tabstrip));
-
-    observer.ClearStates();
-  }
-
-  // Remove tab3 and insert at position 0. It should be forced to position 2.
-  {
-    tabstrip.DetachWebContentsAt(2);
-    observer.ClearStates();
-
-    tabstrip.InsertWebContentsAt(0, contents3, TabStripModel::ADD_NONE);
-
-    ASSERT_EQ(1, observer.GetStateCount());
-    State state(contents3, 2, MockTabStripModelObserver::INSERT);
-    EXPECT_TRUE(observer.StateEquals(0, state));
-
-    // And verify the state didn't change.
-    EXPECT_EQ("2ap 1ap 3", GetTabStripStateString(tabstrip));
-
-    observer.ClearStates();
-  }
-
-  tabstrip.CloseAllTabs();
-}
-
 // Tests various permutations of pinning tabs.
 TEST_F(TabStripModelTest, Pinning) {
   TabStripDummyDelegate delegate;
@@ -2309,6 +2175,55 @@ TEST_F(TabStripModelTest, DiscardWebContentsAt) {
   ASSERT_EQ(2, tabstrip.count());
   EXPECT_FALSE(tabstrip.IsTabDiscarded(0));
   EXPECT_FALSE(tabstrip.IsTabDiscarded(1));
+
+  tabstrip.CloseAllTabs();
+}
+
+// Makes sure that reloading a discarded tab without activating it unmarks the
+// tab as discarded so it won't reload on activation.
+TEST_F(TabStripModelTest, ReloadDiscardedTabContextMenu) {
+  TabStripDummyDelegate delegate;
+  TabStripModel tabstrip(&delegate, profile());
+
+  // Create 2 tabs because the active tab cannot be discarded.
+  tabstrip.AppendWebContents(CreateWebContents(), true);
+  content::WebContents* test_contents =
+      WebContentsTester::CreateTestWebContents(browser_context(), nullptr);
+  tabstrip.AppendWebContents(test_contents, false);  // Opened in background.
+
+  // Navigate to a web page. This is necessary to set a current entry in memory
+  // so the reload can happen.
+  WebContentsTester::For(test_contents)
+      ->NavigateAndCommit(GURL("chrome://newtab"));
+  EXPECT_FALSE(tabstrip.IsTabDiscarded(1));
+
+  tabstrip.DiscardWebContentsAt(1);
+  EXPECT_TRUE(tabstrip.IsTabDiscarded(1));
+
+  tabstrip.GetWebContentsAt(1)->GetController().Reload(false);
+  EXPECT_FALSE(tabstrip.IsTabDiscarded(1));
+
+  tabstrip.CloseAllTabs();
+}
+
+// Makes sure that the last active time property is saved even though the tab is
+// discarded.
+TEST_F(TabStripModelTest, DiscardedTabKeepsLastActiveTime) {
+  TabStripDummyDelegate delegate;
+  TabStripModel tabstrip(&delegate, profile());
+
+  tabstrip.AppendWebContents(CreateWebContents(), true);
+  WebContents* test_contents = CreateWebContents();
+  tabstrip.AppendWebContents(test_contents, false);
+
+  // Simulate an old inactive tab about to get discarded.
+  base::TimeTicks new_last_active_time =
+      base::TimeTicks::Now() - base::TimeDelta::FromMinutes(35);
+  test_contents->SetLastActiveTime(new_last_active_time);
+  EXPECT_EQ(new_last_active_time, test_contents->GetLastActiveTime());
+
+  WebContents* null_contents = tabstrip.DiscardWebContentsAt(1);
+  EXPECT_EQ(new_last_active_time, null_contents->GetLastActiveTime());
 
   tabstrip.CloseAllTabs();
 }
@@ -2662,8 +2577,6 @@ TEST_F(TabStripModelTest, TabBlockedState) {
   // Setup a SingleWebContentsDialogManager for tab |contents2|.
   web_modal::WebContentsModalDialogManager* modal_dialog_manager =
       web_modal::WebContentsModalDialogManager::FromWebContents(contents2);
-  web_modal::PopupManager popup_manager(NULL);
-  popup_manager.RegisterWith(contents2);
 
   // Show a dialog that blocks tab |contents2|.
   // DummySingleWebContentsDialogManager doesn't care about the

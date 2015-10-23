@@ -92,7 +92,8 @@ void WebrtcAudioPrivateEventService::SignalEvent() {
     if (router->ExtensionHasEventListener(extension_id, kEventName) &&
         extension->permissions_data()->HasAPIPermission("webrtcAudioPrivate")) {
       scoped_ptr<Event> event(
-          new Event(kEventName, make_scoped_ptr(new base::ListValue()).Pass()));
+          new Event(events::WEBRTC_AUDIO_PRIVATE_ON_SINKS_CHANGED, kEventName,
+                    make_scoped_ptr(new base::ListValue()).Pass()));
       router->DispatchEventToExtension(extension_id, event.Pass());
     }
   }

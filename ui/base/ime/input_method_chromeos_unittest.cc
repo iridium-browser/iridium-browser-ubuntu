@@ -16,15 +16,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/ime/chromeos/composition_text.h"
+#include "ui/base/ime/chromeos/composition_text_chromeos.h"
 #include "ui/base/ime/chromeos/ime_bridge.h"
 #include "ui/base/ime/chromeos/mock_ime_candidate_window_handler.h"
 #include "ui/base/ime/chromeos/mock_ime_engine_handler.h"
 #include "ui/base/ime/dummy_text_input_client.h"
 #include "ui/base/ime/input_method_delegate.h"
 #include "ui/base/ime/text_input_client.h"
-#include "ui/base/ime/text_input_focus_manager.h"
-#include "ui/base/ui_base_switches_util.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/dom/dom_code.h"
@@ -75,10 +73,10 @@ class TestableInputMethodChromeOS : public InputMethodChromeOS {
   };
 
   // Overridden from InputMethodChromeOS:
-  void ProcessKeyEventPostIME(const ui::KeyEvent& key_event,
+  void ProcessKeyEventPostIME(ui::KeyEvent* key_event,
                               bool handled) override {
     InputMethodChromeOS::ProcessKeyEventPostIME(key_event, handled);
-    process_key_event_post_ime_args_.event = &key_event;
+    process_key_event_post_ime_args_.event = key_event;
     process_key_event_post_ime_args_.handled = handled;
     ++process_key_event_post_ime_call_count_;
   }
@@ -200,7 +198,8 @@ class InputMethodChromeOSTest : public internal::InputMethodDelegate,
                                 public DummyTextInputClient {
  public:
   InputMethodChromeOSTest()
-      : dispatched_key_event_(ui::ET_UNKNOWN, ui::VKEY_UNKNOWN, ui::EF_NONE) {
+      : dispatched_key_event_(ui::ET_UNKNOWN, ui::VKEY_UNKNOWN, ui::EF_NONE),
+        stop_propagation_post_ime_(false) {
     ResetFlags();
   }
 
@@ -220,19 +219,12 @@ class InputMethodChromeOSTest : public internal::InputMethodDelegate,
         mock_ime_candidate_window_handler_.get());
 
     ime_.reset(new TestableInputMethodChromeOS(this));
-    if (switches::IsTextInputFocusManagerEnabled())
-      TextInputFocusManager::GetInstance()->FocusTextInputClient(this);
-    else
-      ime_->SetFocusedTextInputClient(this);
+    ime_->SetFocusedTextInputClient(this);
   }
 
   void TearDown() override {
-    if (ime_.get()) {
-      if (switches::IsTextInputFocusManagerEnabled())
-        TextInputFocusManager::GetInstance()->BlurTextInputClient(this);
-      else
-        ime_->SetFocusedTextInputClient(NULL);
-    }
+    if (ime_.get())
+      ime_->SetFocusedTextInputClient(NULL);
     ime_.reset();
     chromeos::IMEBridge::Get()->SetCurrentEngineHandler(NULL);
     chromeos::IMEBridge::Get()->SetCandidateWindowHandler(NULL);
@@ -244,9 +236,12 @@ class InputMethodChromeOSTest : public internal::InputMethodDelegate,
   }
 
   // Overridden from ui::internal::InputMethodDelegate:
-  bool DispatchKeyEventPostIME(const ui::KeyEvent& event) override {
-    dispatched_key_event_ = event;
-    return false;
+  ui::EventDispatchDetails DispatchKeyEventPostIME(
+      ui::KeyEvent* event) override {
+    dispatched_key_event_ = *event;
+    if (stop_propagation_post_ime_)
+      event->StopPropagation();
+    return ui::EventDispatchDetails();
   }
 
   // Overridden from ui::TextInputClient:
@@ -338,6 +333,8 @@ class InputMethodChromeOSTest : public internal::InputMethodDelegate,
   scoped_ptr<chromeos::MockIMECandidateWindowHandler>
       mock_ime_candidate_window_handler_;
 
+  bool stop_propagation_post_ime_;
+
   DISALLOW_COPY_AND_ASSIGN(InputMethodChromeOSTest);
 };
 
@@ -347,12 +344,6 @@ TEST_F(InputMethodChromeOSTest, GetInputLocale) {
   // ui::InputMethodChromeOS does not support the API.
   ime_->OnFocus();
   EXPECT_EQ("", ime_->GetInputLocale());
-}
-
-TEST_F(InputMethodChromeOSTest, IsActive) {
-  ime_->OnFocus();
-  // ui::InputMethodChromeOS always returns true.
-  EXPECT_TRUE(ime_->IsActive());
 }
 
 TEST_F(InputMethodChromeOSTest, GetInputTextType) {
@@ -377,30 +368,21 @@ TEST_F(InputMethodChromeOSTest, CanComposeInline) {
 TEST_F(InputMethodChromeOSTest, GetTextInputClient) {
   ime_->OnFocus();
   EXPECT_EQ(this, ime_->GetTextInputClient());
-  if (switches::IsTextInputFocusManagerEnabled())
-    TextInputFocusManager::GetInstance()->BlurTextInputClient(this);
-  else
-    ime_->SetFocusedTextInputClient(NULL);
+  ime_->SetFocusedTextInputClient(NULL);
   EXPECT_EQ(NULL, ime_->GetTextInputClient());
 }
 
 TEST_F(InputMethodChromeOSTest, GetInputTextType_WithoutFocusedClient) {
   ime_->OnFocus();
   EXPECT_EQ(TEXT_INPUT_TYPE_NONE, ime_->GetTextInputType());
-  if (switches::IsTextInputFocusManagerEnabled())
-    TextInputFocusManager::GetInstance()->BlurTextInputClient(this);
-  else
-    ime_->SetFocusedTextInputClient(NULL);
+  ime_->SetFocusedTextInputClient(NULL);
   input_type_ = TEXT_INPUT_TYPE_PASSWORD;
   ime_->OnTextInputTypeChanged(this);
   // The OnTextInputTypeChanged() call above should be ignored since |this| is
   // not the current focused client.
   EXPECT_EQ(TEXT_INPUT_TYPE_NONE, ime_->GetTextInputType());
 
-  if (switches::IsTextInputFocusManagerEnabled())
-    TextInputFocusManager::GetInstance()->FocusTextInputClient(this);
-  else
-    ime_->SetFocusedTextInputClient(this);
+  ime_->SetFocusedTextInputClient(this);
   ime_->OnTextInputTypeChanged(this);
   EXPECT_EQ(TEXT_INPUT_TYPE_PASSWORD, ime_->GetTextInputType());
 }
@@ -408,28 +390,19 @@ TEST_F(InputMethodChromeOSTest, GetInputTextType_WithoutFocusedClient) {
 TEST_F(InputMethodChromeOSTest, GetInputTextType_WithoutFocusedWindow) {
   ime_->OnFocus();
   EXPECT_EQ(TEXT_INPUT_TYPE_NONE, ime_->GetTextInputType());
-  if (switches::IsTextInputFocusManagerEnabled())
-    TextInputFocusManager::GetInstance()->BlurTextInputClient(this);
-  else
-    ime_->OnBlur();
+  ime_->OnBlur();
   input_type_ = TEXT_INPUT_TYPE_PASSWORD;
   ime_->OnTextInputTypeChanged(this);
   // The OnTextInputTypeChanged() call above should be ignored since the top-
   // level window which the ime_ is attached to is not currently focused.
   EXPECT_EQ(TEXT_INPUT_TYPE_NONE, ime_->GetTextInputType());
 
-  if (switches::IsTextInputFocusManagerEnabled())
-    TextInputFocusManager::GetInstance()->FocusTextInputClient(this);
-  else
-    ime_->OnFocus();
+  ime_->OnFocus();
   ime_->OnTextInputTypeChanged(this);
   EXPECT_EQ(TEXT_INPUT_TYPE_PASSWORD, ime_->GetTextInputType());
 }
 
 TEST_F(InputMethodChromeOSTest, GetInputTextType_WithoutFocusedWindow2) {
-  if (switches::IsTextInputFocusManagerEnabled())
-    return;
-
   EXPECT_EQ(TEXT_INPUT_TYPE_NONE, ime_->GetTextInputType());
   input_type_ = TEXT_INPUT_TYPE_PASSWORD;
   ime_->OnTextInputTypeChanged(this);
@@ -540,10 +513,6 @@ TEST_F(InputMethodChromeOSTest, Focus_Scenario) {
   EXPECT_EQ(TEXT_INPUT_MODE_KANA,
             mock_ime_engine_handler_->last_text_input_context().mode);
 
-  // When IsTextInputFocusManagerEnabled, InputMethod::SetFocusedTextInputClient
-  // is not supported and it's no-op.
-  if (switches::IsTextInputFocusManagerEnabled())
-    return;
   // Confirm that FocusOut is called when set focus to NULL client.
   ime_->SetFocusedTextInputClient(NULL);
   EXPECT_EQ(3, mock_ime_engine_handler_->focus_in_call_count());
@@ -917,7 +886,7 @@ TEST_F(InputMethodChromeOSKeyEventTest, KeyEventDelayResponseTest) {
   // Do key event.
   input_type_ = TEXT_INPUT_TYPE_TEXT;
   ime_->OnTextInputTypeChanged(this);
-  ime_->DispatchKeyEvent(event);
+  ime_->DispatchKeyEvent(&event);
 
   // Check before state.
   const ui::KeyEvent* key_event =
@@ -955,7 +924,7 @@ TEST_F(InputMethodChromeOSKeyEventTest, MultiKeyEventDelayResponseTest) {
   ui::KeyEvent event(ui::ET_KEY_PRESSED, ui::VKEY_B, kFlags);
 
   // Do key event.
-  ime_->DispatchKeyEvent(event);
+  ime_->DispatchKeyEvent(&event);
   const ui::KeyEvent* key_event =
       mock_ime_engine_handler_->last_processed_key_event();
   EXPECT_EQ(ui::VKEY_B, key_event->key_code());
@@ -967,7 +936,7 @@ TEST_F(InputMethodChromeOSKeyEventTest, MultiKeyEventDelayResponseTest) {
   // Do key event again.
   ui::KeyEvent event2(ui::ET_KEY_PRESSED, ui::VKEY_C, kFlags);
 
-  ime_->DispatchKeyEvent(event2);
+  ime_->DispatchKeyEvent(&event2);
   const ui::KeyEvent* key_event2 =
       mock_ime_engine_handler_->last_processed_key_event();
   EXPECT_EQ(ui::VKEY_C, key_event2->key_code());
@@ -1012,6 +981,31 @@ TEST_F(InputMethodChromeOSKeyEventTest, MultiKeyEventDelayResponseTest) {
   EXPECT_EQ(L'C', inserted_char_);
 }
 
-// TODO(nona): Introduce ProcessKeyEventPostIME tests(crbug.com/156593).
+TEST_F(InputMethodChromeOSKeyEventTest, StopPropagationTest) {
+  // Preparation
+  input_type_ = TEXT_INPUT_TYPE_TEXT;
+  ime_->OnTextInputTypeChanged(this);
+
+  // Do key event with event being stopped propagation.
+  stop_propagation_post_ime_ = true;
+  ui::KeyEvent eventA(ui::ET_KEY_PRESSED, ui::VKEY_A, EF_NONE);
+  eventA.set_character(L'A');
+  ime_->DispatchKeyEvent(&eventA);
+  mock_ime_engine_handler_->last_passed_callback().Run(false);
+
+  const ui::KeyEvent* key_event =
+      mock_ime_engine_handler_->last_processed_key_event();
+  EXPECT_EQ(ui::VKEY_A, key_event->key_code());
+  EXPECT_EQ(0, inserted_char_);
+
+  // Do key event with event not being stopped propagation.
+  stop_propagation_post_ime_ = false;
+  ime_->DispatchKeyEvent(&eventA);
+  mock_ime_engine_handler_->last_passed_callback().Run(false);
+
+  key_event = mock_ime_engine_handler_->last_processed_key_event();
+  EXPECT_EQ(ui::VKEY_A, key_event->key_code());
+  EXPECT_EQ(L'A', inserted_char_);
+}
 
 }  // namespace ui

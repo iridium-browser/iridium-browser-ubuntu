@@ -2,13 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import benchmark
+from core import perf_benchmark
 
 from measurements import page_cycler
 import page_sets
+from telemetry import benchmark
 
 
-class _PageCycler(benchmark.Benchmark):
+class _PageCycler(perf_benchmark.PerfBenchmark):
   options = {'pageset_repeat': 6}
   cold_load_percent = 50  # % of page visits for which a cold load is forced
 
@@ -96,7 +97,7 @@ class PageCyclerIntlJaZh(_PageCycler):
     return 'page_cycler.intl_ja_zh'
 
 
-@benchmark.Disabled('xp')  # crbug.com/434366
+@benchmark.Disabled('xp', 'android')  # crbug.com/434366, crbug.com/506903
 class PageCyclerIntlKoThVi(_PageCycler):
   """Page load time for a variety of pages in Korean, Thai and Vietnamese.
 
@@ -161,7 +162,6 @@ class PageCyclerNetsimTop10(_PageCycler):
         report_speed_index = options.report_speed_index,
         clear_cache_before_each_run = True)
 
-
 @benchmark.Enabled('android')
 class PageCyclerTop10Mobile(_PageCycler):
   """Page load time benchmark for the top 10 mobile web pages.
@@ -173,9 +173,13 @@ class PageCyclerTop10Mobile(_PageCycler):
   def Name(cls):
     return 'page_cycler.top_10_mobile'
 
-  def CreatePageSet(self, options):
-    return page_sets.Top10MobilePageSet(run_no_page_interactions=True)
-
+  def CreateStorySet(self, options):
+    # Disable the taobao.com page since it's crashing. crbug.com/509690
+    stories = page_sets.Top10MobilePageSet(run_no_page_interactions=True)
+    found = next((x for x in stories if 'taobao.com' in x.url), None)
+    if found:
+      stories.RemoveStory(found)
+    return stories
 
 @benchmark.Disabled
 class PageCyclerKeyMobileSites(_PageCycler):
@@ -200,8 +204,9 @@ class PageCyclerToughLayoutCases(_PageCycler):
     return 'page_cycler.tough_layout_cases'
 
 
-# crbug.com/273986: This test is flakey on Windows.
-@benchmark.Disabled('win')
+# crbug.com/273986: This test is flakey on Windows Chrome.
+@benchmark.Enabled('android', 'chromeos', 'linux', 'ios', 'mac',
+                   'mandoline-release', 'mandoline-debug')
 class PageCyclerTypical25(_PageCycler):
   """Page load time benchmark for a 25 typical web pages.
 
@@ -213,27 +218,35 @@ class PageCyclerTypical25(_PageCycler):
   def Name(cls):
     return 'page_cycler.typical_25'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     return page_sets.Typical25PageSet(run_no_page_interactions=True)
 
-# crbug.com/273986: This test is flakey on Windows.
-@benchmark.Disabled  # crbug.com/463346: Test is crashing Chrome.
-class PageCyclerOopifTypical25(_PageCycler):
-  """ A varation of the benchmark above, but running in --site-per-process
-  to allow measuring performance of out-of-process iframes.
-  """
+
+@benchmark.Disabled('reference', 'android')
+class PageCyclerBasicOopifIsolated(_PageCycler):
+  """ A benchmark measuring performance of out-of-process iframes. """
+  page_set = page_sets.OopifBasicPageSet
+
   @classmethod
   def Name(cls):
-    return 'page_cycler_oopif.typical_25'
+    return 'page_cycler_site_isolation.basic_oopif'
 
-  def CustomizeBrowserOptions(self, options):
+  def SetExtraBrowserOptions(self, options):
     options.AppendExtraBrowserArgs(['--site-per-process'])
 
-  def CreatePageSet(self, options):
-    return page_sets.Typical25PageSet(run_no_page_interactions=True)
+
+@benchmark.Disabled('reference')  # crbug.com/523346
+class PageCyclerBasicOopif(_PageCycler):
+  """ A benchmark measuring performance of the out-of-process iframes page
+  set, without running in out-of-process iframes mode.. """
+  page_set = page_sets.OopifBasicPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.basic_oopif'
 
 
-@benchmark.Disabled # crbug.com/443730
+@benchmark.Disabled  # crbug.com/443730
 class PageCyclerBigJs(_PageCycler):
   page_set = page_sets.BigJsPageSet
   @classmethod

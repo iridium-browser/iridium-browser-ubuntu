@@ -41,11 +41,13 @@ class NET_EXPORT_PRIVATE Input {
   // Creates an empty Input, one from which no data can be read.
   Input();
 
+  // Creates an Input from a constant array |data|.
+  template <size_t N>
+  explicit Input(const uint8_t(&data)[N])
+      : data_(data), len_(N) {}
+
   // Creates an Input from the given |data| and |len|.
   Input(const uint8_t* data, size_t len);
-
-  // Creates an Input from the given string |s|.
-  explicit Input(const std::string& s);
 
   // Returns the length in bytes of an Input's data.
   size_t Length() const { return len_; }
@@ -58,6 +60,9 @@ class NET_EXPORT_PRIVATE Input {
   // instead. This method should only be used where using a ByteReader truly
   // is not an option.
   const uint8_t* UnsafeData() const { return data_; }
+
+  // Returns a copy of the data represented by this object as a std::string.
+  std::string AsString() const;
 
  private:
   const uint8_t* data_;

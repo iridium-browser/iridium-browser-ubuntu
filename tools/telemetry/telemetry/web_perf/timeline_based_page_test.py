@@ -7,7 +7,7 @@ from telemetry.page import page_test
 class TimelineBasedPageTest(page_test.PageTest):
   """Page test that collects metrics with TimelineBasedMeasurement."""
   def __init__(self, tbm):
-    super(TimelineBasedPageTest, self).__init__('RunPageInteractions')
+    super(TimelineBasedPageTest, self).__init__()
     self._measurement = tbm
 
   @property
@@ -16,14 +16,13 @@ class TimelineBasedPageTest(page_test.PageTest):
 
   def WillNavigateToPage(self, page, tab):
     tracing_controller = tab.browser.platform.tracing_controller
-    self._measurement.WillRunUserStory(
+    self._measurement.WillRunStoryForPageTest(
         tracing_controller, page.GetSyntheticDelayCategories())
 
   def ValidateAndMeasurePage(self, page, tab, results):
     """Collect all possible metrics and added them to results."""
     tracing_controller = tab.browser.platform.tracing_controller
-    self._measurement.Measure(tracing_controller, results)
+    self._measurement.MeasureForPageTest(tracing_controller, results)
 
-  def CleanUpAfterPage(self, page, tab):
-    tracing_controller = tab.browser.platform.tracing_controller
-    self._measurement.DidRunUserStory(tracing_controller)
+  def DidRunPage(self, platform):
+    self._measurement.DidRunStoryForPageTest(platform.tracing_controller)

@@ -20,15 +20,18 @@
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/tools/quic/quic_epoll_connection_helper.h"
 #include "net/tools/quic/test_tools/mock_epoll_server.h"
-#include "net/tools/quic/test_tools/quic_test_utils.h"
+#include "net/tools/quic/test_tools/mock_quic_server_session_visitor.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using net::test::kTestPort;
 using net::test::BuildUnsizedDataPacket;
 using net::test::NoOpFramerVisitor;
 using net::test::QuicVersionMax;
 using net::test::QuicVersionMin;
 using net::test::ValueRestore;
+using net::test::MockPacketWriter;
+
 using testing::Args;
 using testing::Assign;
 using testing::DoAll;
@@ -162,7 +165,7 @@ class QuicTimeWaitListManagerTest : public ::testing::Test {
     header.fec_flag = false;
     header.is_in_fec_group = NOT_IN_FEC_GROUP;
     header.fec_group = 0;
-    QuicStreamFrame stream_frame(1, false, 0, MakeIOVector("data"));
+    QuicStreamFrame stream_frame(1, false, 0, StringPiece("data"));
     QuicFrame frame(&stream_frame);
     QuicFrames frames;
     frames.push_back(frame);
@@ -170,7 +173,7 @@ class QuicTimeWaitListManagerTest : public ::testing::Test {
         BuildUnsizedDataPacket(&framer_, header, frames));
     EXPECT_TRUE(packet != nullptr);
     char buffer[kMaxPacketSize];
-    scoped_ptr<QuicEncryptedPacket> encrypted(framer_.EncryptPacket(
+    scoped_ptr<QuicEncryptedPacket> encrypted(framer_.EncryptPayload(
         ENCRYPTION_NONE, sequence_number, *packet, buffer, kMaxPacketSize));
     EXPECT_TRUE(encrypted != nullptr);
     return encrypted->Clone();
@@ -223,8 +226,7 @@ class ValidatePublicResetPacketPredicate
   QuicPacketSequenceNumber sequence_number_;
 };
 
-
-Matcher<const std::tr1::tuple<const char*, int> > PublicResetPacketEq(
+Matcher<const std::tr1::tuple<const char*, int>> PublicResetPacketEq(
     QuicConnectionId connection_id,
     QuicPacketSequenceNumber sequence_number) {
   return MakeMatcher(new ValidatePublicResetPacketPredicate(connection_id,

@@ -285,6 +285,10 @@ void WebUIScreenLocker::Signout() {
   chromeos::ScreenLocker::default_screen_locker()->Signout();
 }
 
+bool WebUIScreenLocker::IsUserWhitelisted(const std::string& user_id) {
+  NOTREACHED();
+  return true;
+}
 ////////////////////////////////////////////////////////////////////////////////
 // LockWindow::Observer:
 
@@ -375,16 +379,12 @@ void WebUIScreenLocker::OnKeyboardBoundsChanging(
     const gfx::Rect& new_bounds) {
   if (new_bounds.IsEmpty()) {
     // Keyboard has been hidden.
-    if (GetOobeUI()) {
+    if (GetOobeUI())
       GetOobeUI()->GetCoreOobeActor()->ShowControlBar(true);
-      GetOobeUI()->GetCoreOobeActor()->SetKeyboardState(false, new_bounds);
-    }
   } else {
     // Keyboard has been shown.
-    if (GetOobeUI()) {
+    if (GetOobeUI())
       GetOobeUI()->GetCoreOobeActor()->ShowControlBar(false);
-      GetOobeUI()->GetCoreOobeActor()->SetKeyboardState(true, new_bounds);
-    }
   }
 }
 

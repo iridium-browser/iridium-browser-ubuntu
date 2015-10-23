@@ -183,17 +183,17 @@ class QuicSentPacketManagerTest : public ::testing::TestWithParam<bool> {
     RetransmittableFrames* frames = nullptr;
     if (retransmittable) {
       frames = new RetransmittableFrames(ENCRYPTION_NONE);
-      frames->AddStreamFrame(
-          new QuicStreamFrame(kStreamId, false, 0, IOVector()));
+      frames->AddFrame(
+          QuicFrame(new QuicStreamFrame(kStreamId, false, 0, StringPiece())));
     }
     return SerializedPacket(sequence_number, PACKET_6BYTE_SEQUENCE_NUMBER,
-                            packets_.back(), 0u, frames);
+                            packets_.back(), 0u, frames, false, false);
   }
 
   SerializedPacket CreateFecPacket(QuicPacketSequenceNumber sequence_number) {
     packets_.push_back(new QuicEncryptedPacket(nullptr, kDefaultLength));
     SerializedPacket serialized(sequence_number, PACKET_6BYTE_SEQUENCE_NUMBER,
-                                packets_.back(), 0u, nullptr);
+                                packets_.back(), 0u, nullptr, false, false);
     serialized.is_fec_packet = true;
     return serialized;
   }
@@ -214,8 +214,8 @@ class QuicSentPacketManagerTest : public ::testing::TestWithParam<bool> {
                              kDefaultLength, HAS_RETRANSMITTABLE_DATA))
                     .Times(1).WillOnce(Return(true));
     SerializedPacket packet(CreateDataPacket(sequence_number));
-    packet.retransmittable_frames->AddStreamFrame(
-        new QuicStreamFrame(1, false, 0, IOVector()));
+    packet.retransmittable_frames->AddFrame(
+        QuicFrame(new QuicStreamFrame(1, false, 0, StringPiece())));
     manager_.OnPacketSent(&packet, 0, clock_.Now(),
                           packet.packet->length(), NOT_RETRANSMISSION,
                           HAS_RETRANSMITTABLE_DATA);
@@ -549,6 +549,8 @@ TEST_F(QuicSentPacketManagerTest, MarkLostThenReviveAndDontRetransmitPacket) {
 }
 
 TEST_F(QuicSentPacketManagerTest, TruncatedAck) {
+  ValueRestore<bool> old_flag(&FLAGS_quic_disable_truncated_ack_handling,
+                              false);
   SendDataPacket(1);
   RetransmitAndSendPacket(1, 2);
   RetransmitAndSendPacket(2, 3);
@@ -1117,6 +1119,10 @@ TEST_F(QuicSentPacketManagerTest, NewRetransmissionTimeout) {
   EXPECT_CALL(*send_algorithm_, SetFromConfig(_, _));
   EXPECT_CALL(*send_algorithm_, PacingRate())
       .WillRepeatedly(Return(QuicBandwidth::Zero()));
+  if (FLAGS_quic_limit_pacing_burst) {
+    EXPECT_CALL(*send_algorithm_, GetCongestionWindow())
+        .WillOnce(Return(10 * kDefaultTCPMSS));
+  }
   manager_.SetFromConfig(client_config);
   EXPECT_TRUE(QuicSentPacketManagerPeer::GetUseNewRto(&manager_));
 
@@ -1577,6 +1583,8 @@ TEST_F(QuicSentPacketManagerTest, NegotiateNewRTOFromOptionsAtClient) {
 }
 
 TEST_F(QuicSentPacketManagerTest, NegotiateReceiveWindowFromOptions) {
+  ValueRestore<bool> old_flag(&FLAGS_quic_use_conservative_receive_buffer,
+                              false);
   EXPECT_EQ(kDefaultSocketReceiveBuffer,
             QuicSentPacketManagerPeer::GetReceiveWindow(&manager_));
 
@@ -1588,6 +1596,10 @@ TEST_F(QuicSentPacketManagerTest, NegotiateReceiveWindowFromOptions) {
               SetMaxCongestionWindow(kMinSocketReceiveBuffer * 0.95));
   EXPECT_CALL(*send_algorithm_, PacingRate())
       .WillRepeatedly(Return(QuicBandwidth::Zero()));
+  if (FLAGS_quic_limit_pacing_burst) {
+    EXPECT_CALL(*send_algorithm_, GetCongestionWindow())
+        .WillOnce(Return(10 * kDefaultTCPMSS));
+  }
   EXPECT_CALL(*network_change_visitor_, OnCongestionWindowChange());
   EXPECT_CALL(*network_change_visitor_, OnRttChange());
   manager_.SetFromConfig(client_config);
@@ -1601,12 +1613,57 @@ TEST_F(QuicSentPacketManagerTest, NegotiateReceiveWindowFromOptions) {
         QuicTime::Delta::Zero()));
     EXPECT_EQ(QuicTime::Delta::Zero(),
               manager_.TimeUntilSend(clock_.Now(), HAS_RETRANSMITTABLE_DATA));
-    EXPECT_CALL(*send_algorithm_, OnPacketSent(_, BytesInFlight(), i,
-                                               1024, HAS_RETRANSMITTABLE_DATA))
+    EXPECT_CALL(*send_algorithm_, OnPacketSent(_, BytesInFlight(), i, 1024,
+                                               HAS_RETRANSMITTABLE_DATA))
         .WillOnce(Return(true));
     SerializedPacket packet(CreatePacket(i, true));
-    manager_.OnPacketSent(&packet, 0, clock_.Now(), 1024,
-                          NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA);
+    manager_.OnPacketSent(&packet, 0, clock_.Now(), 1024, NOT_RETRANSMISSION,
+                          HAS_RETRANSMITTABLE_DATA);
+  }
+  EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _))
+      .WillOnce(Return(QuicTime::Delta::Infinite()));
+  EXPECT_EQ(QuicTime::Delta::Infinite(),
+            manager_.TimeUntilSend(clock_.Now(), HAS_RETRANSMITTABLE_DATA));
+}
+
+TEST_F(QuicSentPacketManagerTest,
+       NegotiateConservativeReceiveWindowFromOptions) {
+  ValueRestore<bool> old_flag(&FLAGS_quic_use_conservative_receive_buffer,
+                              true);
+  EXPECT_EQ(kDefaultSocketReceiveBuffer,
+            QuicSentPacketManagerPeer::GetReceiveWindow(&manager_));
+
+  // Try to set a size below the minimum and ensure it gets set to the min.
+  QuicConfig client_config;
+  QuicConfigPeer::SetReceivedSocketReceiveBuffer(&client_config, 1024);
+  EXPECT_CALL(*send_algorithm_, SetFromConfig(_, _));
+  EXPECT_CALL(*send_algorithm_,
+              SetMaxCongestionWindow(kMinSocketReceiveBuffer * 0.6));
+  EXPECT_CALL(*send_algorithm_, PacingRate())
+      .WillRepeatedly(Return(QuicBandwidth::Zero()));
+  if (FLAGS_quic_limit_pacing_burst) {
+    EXPECT_CALL(*send_algorithm_, GetCongestionWindow())
+        .WillOnce(Return(10 * kDefaultTCPMSS));
+  }
+  EXPECT_CALL(*network_change_visitor_, OnCongestionWindowChange());
+  EXPECT_CALL(*network_change_visitor_, OnRttChange());
+  manager_.SetFromConfig(client_config);
+
+  EXPECT_EQ(kMinSocketReceiveBuffer,
+            QuicSentPacketManagerPeer::GetReceiveWindow(&manager_));
+
+  // Ensure the smaller send window only allows 16 packets to be sent.
+  for (QuicPacketSequenceNumber i = 1; i <= 16; ++i) {
+    EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _))
+        .WillOnce(Return(QuicTime::Delta::Zero()));
+    EXPECT_EQ(QuicTime::Delta::Zero(),
+              manager_.TimeUntilSend(clock_.Now(), HAS_RETRANSMITTABLE_DATA));
+    EXPECT_CALL(*send_algorithm_, OnPacketSent(_, BytesInFlight(), i, 1024,
+                                               HAS_RETRANSMITTABLE_DATA))
+        .WillOnce(Return(true));
+    SerializedPacket packet(CreatePacket(i, true));
+    manager_.OnPacketSent(&packet, 0, clock_.Now(), 1024, NOT_RETRANSMISSION,
+                          HAS_RETRANSMITTABLE_DATA);
   }
   EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _))
       .WillOnce(Return(QuicTime::Delta::Infinite()));
@@ -1624,12 +1681,12 @@ TEST_F(QuicSentPacketManagerTest, ReceiveWindowLimited) {
         QuicTime::Delta::Zero()));
     EXPECT_EQ(QuicTime::Delta::Zero(),
               manager_.TimeUntilSend(clock_.Now(), HAS_RETRANSMITTABLE_DATA));
-    EXPECT_CALL(*send_algorithm_, OnPacketSent(_, BytesInFlight(), i,
-                                               1024, HAS_RETRANSMITTABLE_DATA))
+    EXPECT_CALL(*send_algorithm_, OnPacketSent(_, BytesInFlight(), i, 1024,
+                                               HAS_RETRANSMITTABLE_DATA))
         .WillOnce(Return(true));
     SerializedPacket packet(CreatePacket(i, true));
-    manager_.OnPacketSent(&packet, 0, clock_.Now(), 1024,
-                          NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA);
+    manager_.OnPacketSent(&packet, 0, clock_.Now(), 1024, NOT_RETRANSMISSION,
+                          HAS_RETRANSMITTABLE_DATA);
   }
   EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _))
       .WillOnce(Return(QuicTime::Delta::Infinite()));

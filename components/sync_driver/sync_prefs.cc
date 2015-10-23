@@ -77,16 +77,13 @@ void SyncPrefs::RegisterProfilePrefs(
 #endif
 
   registry->RegisterBooleanPref(prefs::kSyncHasAuthError, false);
-
   registry->RegisterStringPref(prefs::kSyncSessionsGUID, std::string());
-
   registry->RegisterIntegerPref(prefs::kSyncRemainingRollbackTries, 0);
-
   registry->RegisterBooleanPref(prefs::kSyncPassphrasePrompted, false);
-
   registry->RegisterIntegerPref(prefs::kSyncMemoryPressureWarningCount, -1);
-
   registry->RegisterBooleanPref(prefs::kSyncShutdownCleanly, false);
+  registry->RegisterDictionaryPref(prefs::kSyncInvalidationVersions);
+  registry->RegisterStringPref(prefs::kSyncLastRunVersion, std::string());
 }
 
 void SyncPrefs::AddSyncPrefObserver(SyncPrefObserver* sync_pref_observer) {
@@ -107,6 +104,10 @@ void SyncPrefs::ClearPreferences() {
   pref_service_->ClearPref(prefs::kSyncEncryptionBootstrapToken);
   pref_service_->ClearPref(prefs::kSyncKeystoreEncryptionBootstrapToken);
   pref_service_->ClearPref(prefs::kSyncPassphrasePrompted);
+  pref_service_->ClearPref(prefs::kSyncMemoryPressureWarningCount);
+  pref_service_->ClearPref(prefs::kSyncShutdownCleanly);
+  pref_service_->ClearPref(prefs::kSyncInvalidationVersions);
+  pref_service_->ClearPref(prefs::kSyncLastRunVersion);
 
   // TODO(nick): The current behavior does not clear
   // e.g. prefs::kSyncBookmarks.  Is that really what we want?
@@ -120,7 +121,7 @@ bool SyncPrefs::HasSyncSetupCompleted() const {
 void SyncPrefs::SetSyncSetupCompleted() {
   DCHECK(CalledOnValidThread());
   pref_service_->SetBoolean(prefs::kSyncHasSetupCompleted, true);
-  SetStartSuppressed(false);
+  SetSyncRequested(true);
 }
 
 bool SyncPrefs::SyncHasAuthError() const {
@@ -133,14 +134,17 @@ void SyncPrefs::SetSyncAuthError(bool error) {
   pref_service_->SetBoolean(prefs::kSyncHasAuthError, error);
 }
 
-bool SyncPrefs::IsStartSuppressed() const {
+bool SyncPrefs::IsSyncRequested() const {
   DCHECK(CalledOnValidThread());
-  return pref_service_->GetBoolean(prefs::kSyncSuppressStart);
+  // IsSyncRequested is the inverse of the old SuppressStart pref.
+  // Since renaming a pref value is hard, here we still use the old one.
+  return !pref_service_->GetBoolean(prefs::kSyncSuppressStart);
 }
 
-void SyncPrefs::SetStartSuppressed(bool is_suppressed) {
+void SyncPrefs::SetSyncRequested(bool is_requested) {
   DCHECK(CalledOnValidThread());
-  pref_service_->SetBoolean(prefs::kSyncSuppressStart, is_suppressed);
+  // See IsSyncRequested for why we use this pref and !is_requested.
+  pref_service_->SetBoolean(prefs::kSyncSuppressStart, !is_requested);
 }
 
 base::Time SyncPrefs::GetLastSyncedTime() const {
@@ -197,8 +201,8 @@ syncer::ModelTypeSet SyncPrefs::GetPreferredDataTypes(
 void SyncPrefs::SetPreferredDataTypes(syncer::ModelTypeSet registered_types,
                                       syncer::ModelTypeSet preferred_types) {
   DCHECK(CalledOnValidThread());
-  DCHECK(registered_types.HasAll(preferred_types));
   preferred_types = ResolvePrefGroups(registered_types, preferred_types);
+  DCHECK(registered_types.HasAll(preferred_types));
   for (syncer::ModelTypeSet::Iterator i = registered_types.First(); i.Good();
        i.Inc()) {
     SetDataTypePreferred(i.Get(), preferred_types.Has(i.Get()));
@@ -252,9 +256,11 @@ const char* SyncPrefs::GetPrefNameForDataType(syncer::ModelType data_type) {
     case syncer::AUTOFILL:
       return prefs::kSyncAutofill;
     case syncer::AUTOFILL_PROFILE:
-      return prefs::kSyncAutofillWallet;
-    case syncer::AUTOFILL_WALLET_DATA:
       return prefs::kSyncAutofillProfile;
+    case syncer::AUTOFILL_WALLET_DATA:
+      return prefs::kSyncAutofillWallet;
+    case syncer::AUTOFILL_WALLET_METADATA:
+      return prefs::kSyncAutofillWalletMetadata;
     case syncer::THEMES:
       return prefs::kSyncThemes;
     case syncer::TYPED_URLS:
@@ -351,6 +357,7 @@ void SyncPrefs::RegisterPrefGroups() {
 
   pref_groups_[syncer::AUTOFILL].Put(syncer::AUTOFILL_PROFILE);
   pref_groups_[syncer::AUTOFILL].Put(syncer::AUTOFILL_WALLET_DATA);
+  pref_groups_[syncer::AUTOFILL].Put(syncer::AUTOFILL_WALLET_METADATA);
 
   pref_groups_[syncer::EXTENSIONS].Put(syncer::EXTENSION_SETTINGS);
 
@@ -426,7 +433,6 @@ void SyncPrefs::SetDataTypePreferred(syncer::ModelType type,
 syncer::ModelTypeSet SyncPrefs::ResolvePrefGroups(
     syncer::ModelTypeSet registered_types,
     syncer::ModelTypeSet types) const {
-  DCHECK(registered_types.HasAll(types));
   syncer::ModelTypeSet types_with_groups = types;
   for (PrefGroupsMap::const_iterator i = pref_groups_.begin();
        i != pref_groups_.end();
@@ -475,6 +481,42 @@ void SyncPrefs::SetCleanShutdown(bool value) {
   pref_service_->SetBoolean(prefs::kSyncShutdownCleanly, value);
 }
 
+void SyncPrefs::GetInvalidationVersions(
+    std::map<syncer::ModelType, int64>* invalidation_versions) const {
+  const base::DictionaryValue* invalidation_dictionary =
+      pref_service_->GetDictionary(prefs::kSyncInvalidationVersions);
+  syncer::ModelTypeSet protocol_types = syncer::ProtocolTypes();
+  for (auto iter = protocol_types.First(); iter.Good(); iter.Inc()) {
+    std::string key = syncer::ModelTypeToString(iter.Get());
+    std::string version_str;
+    if (!invalidation_dictionary->GetString(key, &version_str))
+      continue;
+    int64 version = 0;
+    if (!base::StringToInt64(version_str, &version))
+      continue;
+    (*invalidation_versions)[iter.Get()] = version;
+  }
+}
+
+void SyncPrefs::UpdateInvalidationVersions(
+    const std::map<syncer::ModelType, int64>& invalidation_versions) {
+  scoped_ptr<base::DictionaryValue> invalidation_dictionary(
+      new base::DictionaryValue());
+  for (const auto& map_iter : invalidation_versions) {
+    std::string version_str = base::Int64ToString(map_iter.second);
+    invalidation_dictionary->SetString(
+        syncer::ModelTypeToString(map_iter.first), version_str);
+  }
+  pref_service_->Set(prefs::kSyncInvalidationVersions,
+                     *invalidation_dictionary);
+}
+
+std::string SyncPrefs::GetLastRunVersion() const {
+  return pref_service_->GetString(prefs::kSyncLastRunVersion);
+}
+
+void SyncPrefs::SetLastRunVersion(const std::string& current_version) {
+  pref_service_->SetString(prefs::kSyncLastRunVersion, current_version);
+}
+
 }  // namespace sync_driver
-
-

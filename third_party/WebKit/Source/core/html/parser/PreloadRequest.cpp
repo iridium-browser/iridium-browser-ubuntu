@@ -29,14 +29,24 @@ FetchRequest PreloadRequest::resourceRequest(Document* document)
     FetchInitiatorInfo initiatorInfo;
     initiatorInfo.name = AtomicString(m_initiatorName);
     initiatorInfo.position = m_initiatorPosition;
-    FetchRequest request(ResourceRequest(completeURL(document)), initiatorInfo);
+    ResourceRequest resourceRequest(completeURL(document));
+    resourceRequest.setHTTPReferrer(SecurityPolicy::generateReferrer(m_referrerPolicy, resourceRequest.url(), document->outgoingReferrer()));
+    FetchRequest request(resourceRequest, initiatorInfo);
+
+    if (m_resourceType == Resource::ImportResource) {
+        SecurityOrigin* securityOrigin = document->contextDocument()->securityOrigin();
+        bool sameOrigin = securityOrigin->canRequest(request.url());
+        request.setCrossOriginAccessControl(securityOrigin,
+            sameOrigin ? AllowStoredCredentials : DoNotAllowStoredCredentials,
+            ClientDidNotRequestCredentials);
+    }
 
     if (m_isCORSEnabled)
         request.setCrossOriginAccessControl(document->securityOrigin(), m_allowCredentials);
 
     request.setDefer(m_defer);
     request.setResourceWidth(m_resourceWidth);
-    request.setClientHintsPreferences(m_clientHintsPreferences);
+    request.clientHintsPreferences().updateFrom(m_clientHintsPreferences);
 
     return request;
 }

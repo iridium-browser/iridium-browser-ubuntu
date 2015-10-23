@@ -7,7 +7,6 @@
 
 #include "base/id_map.h"
 #include "components/guest_view/browser/guest_view.h"
-#include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/guest_view/app_view/app_view_guest_delegate.h"
 
 namespace extensions {
@@ -18,27 +17,29 @@ class ExtensionHost;
 // AppViewGuest is created on attachment. That is, when a guest WebContents is
 // associated with a particular embedder WebContents. This happens on calls to
 // the connect API.
-class AppViewGuest : public guest_view::GuestView<AppViewGuest>,
-                     public ExtensionFunctionDispatcher::Delegate {
+class AppViewGuest : public guest_view::GuestView<AppViewGuest> {
  public:
   static const char Type[];
 
   // Completes the creation of a WebContents associated with the provided
-  // |guest_extensions_id|.
+  // |guest_extension_id| and |guest_instance_id| for the given
+  // |browser_context|.
+  // |guest_render_process_host| is the RenderProcessHost and |url| is the
+  // resource GURL of the extension instance making this request. If there is
+  // any mismatch between the expected |guest_instance_id| and
+  // |guest_extension_id| provided and the recorded copies from when the the
+  // <appview> was created, the RenderProcessHost of the extension instance
+  // behind this request will be killed.
   static bool CompletePendingRequest(
       content::BrowserContext* browser_context,
       const GURL& url,
       int guest_instance_id,
-      const std::string& guest_extension_id);
+      const std::string& guest_extension_id,
+      content::RenderProcessHost* guest_render_process_host);
 
   static GuestViewBase* Create(content::WebContents* owner_web_contents);
 
-  // ExtensionFunctionDispatcher::Delegate implementation.
-  WindowController* GetExtensionWindowController() const override;
-  content::WebContents* GetAssociatedWebContents() const override;
-
-  // content::WebContentsObserver implementation.
-  bool OnMessageReceived(const IPC::Message& message) override;
+  static std::vector<int> GetAllRegisteredInstanceIdsForTesting();
 
   // content::WebContentsDelegate implementation.
   bool HandleContextMenu(const content::ContextMenuParams& params) override;
@@ -66,8 +67,6 @@ class AppViewGuest : public guest_view::GuestView<AppViewGuest>,
 
   ~AppViewGuest() override;
 
-  void OnRequest(const ExtensionHostMsg_Request_Params& params);
-
   void CompleteCreateWebContents(const GURL& url,
                                  const Extension* guest_extension,
                                  const WebContentsCreatedCallback& callback);
@@ -78,7 +77,6 @@ class AppViewGuest : public guest_view::GuestView<AppViewGuest>,
 
   GURL url_;
   std::string guest_extension_id_;
-  scoped_ptr<ExtensionFunctionDispatcher> extension_function_dispatcher_;
   scoped_ptr<AppViewGuestDelegate> app_view_guest_delegate_;
   scoped_ptr<AppDelegate> app_delegate_;
 

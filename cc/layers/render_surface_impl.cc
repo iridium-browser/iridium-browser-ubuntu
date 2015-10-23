@@ -28,9 +28,6 @@ namespace cc {
 RenderSurfaceImpl::RenderSurfaceImpl(LayerImpl* owning_layer)
     : owning_layer_(owning_layer),
       surface_property_changed_(false),
-      draw_opacity_is_animating_(false),
-      target_surface_transforms_are_animating_(false),
-      screen_space_transforms_are_animating_(false),
       is_clipped_(false),
       contributes_to_drawn_surface_(false),
       draw_opacity_(1),
@@ -74,6 +71,31 @@ int RenderSurfaceImpl::OwningLayerId() const {
   return owning_layer_ ? owning_layer_->id() : 0;
 }
 
+bool RenderSurfaceImpl::HasReplica() const {
+  return owning_layer_->has_replica();
+}
+
+gfx::Transform RenderSurfaceImpl::ReplicaDrawTransform() const {
+  return replica_draw_transform_;
+}
+
+int RenderSurfaceImpl::TransformTreeIndex() const {
+  return owning_layer_->transform_tree_index();
+}
+
+int RenderSurfaceImpl::ClipTreeIndex() const {
+  return owning_layer_->clip_tree_index();
+}
+
+int RenderSurfaceImpl::EffectTreeIndex() const {
+  return owning_layer_->effect_tree_index();
+}
+
+int RenderSurfaceImpl::TargetEffectTreeIndex() const {
+  if (!owning_layer_->parent() || !owning_layer_->parent()->render_target())
+    return -1;
+  return owning_layer_->parent()->render_target()->effect_tree_index();
+}
 
 void RenderSurfaceImpl::SetClipRect(const gfx::Rect& clip_rect) {
   if (clip_rect_ == clip_rect)
@@ -89,6 +111,20 @@ void RenderSurfaceImpl::SetContentRect(const gfx::Rect& content_rect) {
 
   surface_property_changed_ = true;
   content_rect_ = content_rect;
+}
+
+void RenderSurfaceImpl::SetContentRectFromPropertyTrees(
+    const gfx::Rect& content_rect) {
+  if (content_rect_from_property_trees_ == content_rect)
+    return;
+
+  surface_property_changed_ = true;
+  content_rect_from_property_trees_ = content_rect;
+}
+
+void RenderSurfaceImpl::SetAccumulatedContentRect(
+    const gfx::Rect& content_rect) {
+  accumulated_content_rect_ = content_rect;
 }
 
 bool RenderSurfaceImpl::SurfacePropertyChanged() const {
@@ -157,9 +193,9 @@ void RenderSurfaceImpl::AppendQuads(RenderPass* render_pass,
                                     LayerImpl* mask_layer,
                                     AppendQuadsData* append_quads_data,
                                     RenderPassId render_pass_id) {
-  gfx::Rect visible_content_rect =
+  gfx::Rect visible_layer_rect =
       occlusion_in_content_space.GetUnoccludedContentRect(content_rect_);
-  if (visible_content_rect.IsEmpty())
+  if (visible_layer_rect.IsEmpty())
     return;
 
   SharedQuadState* shared_quad_state =
@@ -173,11 +209,11 @@ void RenderSurfaceImpl::AppendQuads(RenderPass* render_pass,
     DebugBorderDrawQuad* debug_border_quad =
         render_pass->CreateAndAppendDrawQuad<DebugBorderDrawQuad>();
     debug_border_quad->SetNew(shared_quad_state, content_rect_,
-                              visible_content_rect, debug_border_color,
+                              visible_layer_rect, debug_border_color,
                               debug_border_width);
   }
 
-  ResourceProvider::ResourceId mask_resource_id = 0;
+  ResourceId mask_resource_id = 0;
   gfx::Size mask_texture_size;
   gfx::Vector2dF mask_uv_scale;
   if (mask_layer && mask_layer->DrawsContent() &&
@@ -186,10 +222,9 @@ void RenderSurfaceImpl::AppendQuads(RenderPass* render_pass,
     gfx::Vector2dF owning_layer_draw_scale =
         MathUtil::ComputeTransform2dScaleComponents(
             owning_layer_->draw_transform(), 1.f);
-    gfx::SizeF unclipped_mask_target_size = gfx::ScaleSize(
-        owning_layer_->content_bounds(),
-        owning_layer_draw_scale.x(),
-        owning_layer_draw_scale.y());
+    gfx::SizeF unclipped_mask_target_size =
+        gfx::ScaleSize(owning_layer_->bounds(), owning_layer_draw_scale.x(),
+                       owning_layer_draw_scale.y());
     mask_uv_scale = gfx::Vector2dF(
         content_rect_.width() / unclipped_mask_target_size.width(),
         content_rect_.height() / unclipped_mask_target_size.height());
@@ -198,19 +233,12 @@ void RenderSurfaceImpl::AppendQuads(RenderPass* render_pass,
   DCHECK(owning_layer_->draw_properties().target_space_transform.IsScale2d());
   gfx::Vector2dF owning_layer_to_target_scale =
       owning_layer_->draw_properties().target_space_transform.Scale2d();
-  owning_layer_to_target_scale.Scale(owning_layer_->contents_scale_x(),
-                                     owning_layer_->contents_scale_y());
 
   RenderPassDrawQuad* quad =
       render_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  quad->SetNew(shared_quad_state,
-               content_rect_,
-               visible_content_rect,
-               render_pass_id,
-               mask_resource_id,
-               mask_uv_scale,
-               mask_texture_size,
-               owning_layer_->filters(),
+  quad->SetNew(shared_quad_state, content_rect_, visible_layer_rect,
+               render_pass_id, mask_resource_id, mask_uv_scale,
+               mask_texture_size, owning_layer_->filters(),
                owning_layer_to_target_scale,
                owning_layer_->background_filters());
 }

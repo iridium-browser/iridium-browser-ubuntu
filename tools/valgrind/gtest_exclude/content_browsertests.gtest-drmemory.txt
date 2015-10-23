@@ -33,10 +33,6 @@ BrowserSideNavigationBrowserTest.FailedNavigation
 # http://crbug.com/464029
 WebRtcBrowserTest.CallAndModifyStream
 
-# http://crbug.com/464033
-RenderFrameHostImplBrowserTest.IsFocused_AtLoad
-RenderFrameHostImplBrowserTest.IsFocused_Widget
-
 # http://crbug.com/470507
 SRC_ClearKey/EncryptedMediaTest.Playback_VideoClearAudio_WebM/0
 
@@ -45,3 +41,21 @@ PluginTest.VerifyPluginWindowRect
 
 # http://crbug.com/484852
 PluginTest.NPObjectIdentity
+
+# http://crbug.com/500070
+DumpAccessibilityEventsTest.AccessibilityEventsListboxNext
+
+# https://crbug.com/500576
+NavigationControllerBrowserTest.DontIgnoreBackAfterNavEntryLimit
+
+# https://crbug.com/504186
+WebRtcBrowserTest.CallInsideIframe
+
+# https://crbug.com/504187
+# https://crbug.com/517977
+WebRtcGetUserMediaBrowserTest.*
+
+# https://crbug.com/517977
+WebRtcBrowserTest.AddTwoMediaStreamsToOnePC
+WebRtcBrowserTest.CanSetupCallAndSendDtmf
+WebRtcBrowserTest.NegotiateNonCryptoCall

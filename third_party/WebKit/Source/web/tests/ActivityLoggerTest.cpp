@@ -15,15 +15,14 @@
 #include <gtest/gtest.h>
 #include <v8.h>
 
-namespace {
+namespace blink {
 
 using blink::FrameTestHelpers::WebViewHelper;
 using blink::FrameTestHelpers::pumpPendingRequestsDoNotUse;
-using namespace blink;
 
 class TestActivityLogger : public V8DOMActivityLogger {
 public:
-    virtual ~TestActivityLogger() { }
+    ~TestActivityLogger() override { }
 
     void logGetter(const String& apiName) override
     {
@@ -67,6 +66,7 @@ protected:
         V8DOMActivityLogger::setActivityLogger(isolatedWorldId, String(), adoptPtr(m_activityLogger));
         m_webViewHelper.initialize(true);
         m_scriptController = &m_webViewHelper.webViewImpl()->mainFrameImpl()->frame()->script();
+        FrameTestHelpers::loadFrame(m_webViewHelper.webViewImpl()->mainFrame(), "about:blank");
     }
 
     void executeScriptInMainWorld(const String& script) const
@@ -98,7 +98,7 @@ private:
     static const int extensionGroup = 0;
 
     WebViewHelper m_webViewHelper;
-    ScriptController* m_scriptController;
+    RawPtrWillBePersistent<ScriptController> m_scriptController;
     // TestActivityLogger is owned by a static table within V8DOMActivityLogger
     // and should be alive as long as not overwritten.
     TestActivityLogger* m_activityLogger;
@@ -524,4 +524,4 @@ TEST_F(ActivityLoggerTest, RequestResource)
     ASSERT_TRUE(verifyActivities(expectedActivities));
 }
 
-} // namespace
+} // namespace blink

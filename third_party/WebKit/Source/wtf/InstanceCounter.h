@@ -46,6 +46,7 @@ inline const char* extractNameFunction()
     return WTF_PRETTY_FUNCTION;
 }
 
+
 template<typename T>
 inline void incrementInstanceCount(T* p)
 {

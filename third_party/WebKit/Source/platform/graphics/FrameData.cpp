@@ -35,6 +35,7 @@ FrameData::FrameData()
     , m_haveMetadata(false)
     , m_isComplete(false)
     , m_hasAlpha(true)
+    , m_isLazyDecoded(false)
     , m_frameBytes(0)
 {
 }
@@ -50,11 +51,11 @@ bool FrameData::clear(bool clearMetadata)
         m_haveMetadata = false;
 
     m_orientation = DefaultImageOrientation;
+    m_isLazyDecoded = false;
     m_frameBytes = 0;
 
-    if (!m_frame.isNull()) {
-        m_frame.reset();
-
+    if (m_frame) {
+        m_frame.clear();
         return true;
     }
     return false;

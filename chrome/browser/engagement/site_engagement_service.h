@@ -5,13 +5,84 @@
 #ifndef CHROME_BROWSER_ENGAGEMENT_SITE_ENGAGEMENT_SERVICE_H_
 #define CHROME_BROWSER_ENGAGEMENT_SITE_ENGAGEMENT_SERVICE_H_
 
-#include <map>
-
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/time/default_clock.h"
+#include "base/time/time.h"
 #include "components/keyed_service/core/keyed_service.h"
+
+namespace base {
+class DictionaryValue;
+}
 
 class GURL;
 class Profile;
+
+class SiteEngagementScore {
+ public:
+  // Keys used in the content settings dictionary.
+  static const char* kRawScoreKey;
+  static const char* kPointsAddedTodayKey;
+  static const char* kLastEngagementTimeKey;
+
+  // The maximum number of points that are allowed.
+  static const double kMaxPoints;
+
+  // The maximum number of points that can be accrued in one day.
+  static const double kMaxPointsPerDay;
+
+  // The number of points given for a navigation.
+  static const double kNavigationPoints;
+
+  // Decaying works by removing a portion of the score periodically. This
+  // constant determines how often that happens.
+  static const int kDecayPeriodInDays;
+
+  // How much the score decays after every kDecayPeriodInDays.
+  static const double kDecayPoints;
+
+  // The SiteEngagementService does not take ownership of |clock|. It is the
+  // responsibility of the caller to make sure |clock| outlives this
+  // SiteEngagementScore.
+  SiteEngagementScore(base::Clock* clock,
+                      const base::DictionaryValue& score_dict);
+  ~SiteEngagementScore();
+
+  double Score() const;
+  void AddPoints(double points);
+
+  // Updates the content settings dictionary |score_dict| with the current score
+  // fields. Returns true if |score_dict| changed, otherwise return false.
+  bool UpdateScoreDict(base::DictionaryValue* score_dict);
+
+ private:
+  friend class SiteEngagementScoreTest;
+
+  // This version of the constructor is used in unit tests.
+  explicit SiteEngagementScore(base::Clock* clock);
+
+  // Determine the score, accounting for any decay.
+  double DecayedScore() const;
+
+  // The clock used to vend times. Enables time travelling in tests. Owned by
+  // the SiteEngagementService.
+  base::Clock* clock_;
+
+  // |raw_score_| is the score before any decay is applied.
+  double raw_score_;
+
+  // The points added 'today' are tracked to avoid adding more than
+  // kMaxPointsPerDay on any one day. 'Today' is defined in local time.
+  double points_added_today_;
+
+  // The last time the score was updated for engagement. Used in conjunction
+  // with |points_added_today_| to avoid adding more than kMaxPointsPerDay on
+  // any one day.
+  base::Time last_engagement_time_;
+
+  DISALLOW_COPY_AND_ASSIGN(SiteEngagementScore);
+};
 
 // Stores and retrieves the engagement score of an origin.
 //
@@ -40,11 +111,14 @@ class SiteEngagementService : public KeyedService {
   // origin for this URL.
   int GetScore(const GURL& url);
 
+  // Returns the sum of engagement points awarded to all sites.
+  int GetTotalEngagementPoints();
+
  private:
   Profile* profile_;
 
-  // Temporary non-persistent score database for testing.
-  std::map<GURL, int> scores_;
+  // The clock used to vend times.
+  base::DefaultClock clock_;
 
   DISALLOW_COPY_AND_ASSIGN(SiteEngagementService);
 };

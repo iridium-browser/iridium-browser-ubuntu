@@ -26,12 +26,13 @@
  */
 
 #include "talk/app/webrtc/audiotrack.h"
+#include "talk/app/webrtc/fakemetricsobserver.h"
 #include "talk/app/webrtc/jsepicecandidate.h"
 #include "talk/app/webrtc/jsepsessiondescription.h"
 #include "talk/app/webrtc/mediastreamsignaling.h"
 #include "talk/app/webrtc/streamcollection.h"
 #include "talk/app/webrtc/test/fakeconstraints.h"
-#include "talk/app/webrtc/test/fakedtlsidentityservice.h"
+#include "talk/app/webrtc/test/fakedtlsidentitystore.h"
 #include "talk/app/webrtc/test/fakemediastreamsignaling.h"
 #include "talk/app/webrtc/videotrack.h"
 #include "talk/app/webrtc/webrtcsession.h"
@@ -54,6 +55,7 @@
 #include "webrtc/base/network.h"
 #include "webrtc/base/physicalsocketserver.h"
 #include "webrtc/base/ssladapter.h"
+#include "webrtc/base/sslidentity.h"
 #include "webrtc/base/sslstreamadapter.h"
 #include "webrtc/base/stringutils.h"
 #include "webrtc/base/thread.h"
@@ -78,9 +80,9 @@ using rtc::Thread;
 using webrtc::CreateSessionDescription;
 using webrtc::CreateSessionDescriptionObserver;
 using webrtc::CreateSessionDescriptionRequest;
-using webrtc::DTLSIdentityRequestObserver;
-using webrtc::DTLSIdentityServiceInterface;
+using webrtc::DtlsIdentityStoreInterface;
 using webrtc::FakeConstraints;
+using webrtc::FakeMetricsObserver;
 using webrtc::IceCandidateCollection;
 using webrtc::JsepIceCandidate;
 using webrtc::JsepSessionDescription;
@@ -156,8 +158,6 @@ static const char kSdpWithRtx[] =
     "a=rtpmap:96 rtx/90000\r\n"
     "a=fmtp:96 apt=0\r\n";
 
-static const int kAudioJitterBufferMaxPackets = 50;
-
 // Add some extra |newlines| to the |message| after |line|.
 static void InjectAfter(const std::string& line,
                         const std::string& newlines,
@@ -166,33 +166,6 @@ static void InjectAfter(const std::string& line,
   rtc::replace_substrs(line.c_str(), line.length(),
                              tmp.c_str(), tmp.length(), message);
 }
-
-class FakeMetricsObserver : public webrtc::MetricsObserverInterface {
- public:
-  FakeMetricsObserver() { Reset(); }
-  void Reset() {
-    memset(peer_connection_metrics_counters_, 0,
-           sizeof(peer_connection_metrics_counters_));
-    memset(peer_connection_metrics_name_, 0,
-           sizeof(peer_connection_metrics_name_));
-  }
-
-  void IncrementCounter(webrtc::PeerConnectionMetricsCounter type) override {
-    peer_connection_metrics_counters_[type]++;
-  }
-  void AddHistogramSample(webrtc::PeerConnectionMetricsName type,
-                          int value) override {
-    ASSERT(peer_connection_metrics_name_[type] == 0);
-    peer_connection_metrics_name_[type] = value;
-  }
-
-  int peer_connection_metrics_counters_
-      [webrtc::kPeerConnectionMetricsCounter_Max];
-  int peer_connection_metrics_name_[webrtc::kPeerConnectionMetricsCounter_Max];
-
-  int AddRef() override { return 1; }
-  int Release() override { return 1; }
-};
 
 class MockIceObserver : public webrtc::IceObserver {
  public:
@@ -362,7 +335,8 @@ class WebRtcSessionTest : public testing::Test {
       stun_server_(cricket::TestStunServer::Create(Thread::Current(),
                                                    stun_socket_addr_)),
       turn_server_(Thread::Current(), kTurnUdpIntAddr, kTurnUdpExtAddr),
-      mediastream_signaling_(channel_manager_.get()) {
+      mediastream_signaling_(channel_manager_.get()),
+      metrics_observer_(new rtc::RefCountedObject<FakeMetricsObserver>()) {
     tdesc_factory_->set_protocol(cricket::ICEPROTO_HYBRID);
 
     cricket::ServerAddresses stun_servers;
@@ -384,7 +358,7 @@ class WebRtcSessionTest : public testing::Test {
   }
 
   void Init(
-      DTLSIdentityServiceInterface* identity_service,
+      rtc::scoped_ptr<webrtc::DtlsIdentityStoreInterface> dtls_identity_store,
       const PeerConnectionInterface::RTCConfiguration& rtc_configuration) {
     ASSERT_TRUE(session_.get() == NULL);
     session_.reset(new WebRtcSessionForTest(
@@ -398,52 +372,44 @@ class WebRtcSessionTest : public testing::Test {
     EXPECT_EQ(PeerConnectionInterface::kIceGatheringNew,
         observer_.ice_gathering_state_);
 
-    EXPECT_TRUE(session_->Initialize(options_, constraints_.get(),
-                                     identity_service, rtc_configuration));
-    session_->set_metrics_observer(&metrics_observer_);
+    EXPECT_TRUE(session_->Initialize(
+        options_, constraints_.get(), dtls_identity_store.Pass(),
+        rtc_configuration));
+    session_->set_metrics_observer(metrics_observer_);
   }
 
   void Init() {
     PeerConnectionInterface::RTCConfiguration configuration;
-    configuration.type = PeerConnectionInterface::kAll;
-    configuration.bundle_policy =
-        PeerConnectionInterface::kBundlePolicyBalanced;
-    configuration.audio_jitter_buffer_max_packets =
-        kAudioJitterBufferMaxPackets;
-    Init(NULL, configuration);
+    Init(nullptr, configuration);
   }
 
   void InitWithIceTransport(
       PeerConnectionInterface::IceTransportsType ice_transport_type) {
     PeerConnectionInterface::RTCConfiguration configuration;
     configuration.type = ice_transport_type;
-    configuration.bundle_policy =
-        PeerConnectionInterface::kBundlePolicyBalanced;
-    configuration.audio_jitter_buffer_max_packets =
-        kAudioJitterBufferMaxPackets;
-    Init(NULL, configuration);
+    Init(nullptr, configuration);
   }
 
   void InitWithBundlePolicy(
       PeerConnectionInterface::BundlePolicy bundle_policy) {
     PeerConnectionInterface::RTCConfiguration configuration;
-    configuration.type = PeerConnectionInterface::kAll;
     configuration.bundle_policy = bundle_policy;
-    configuration.audio_jitter_buffer_max_packets =
-        kAudioJitterBufferMaxPackets;
-    Init(NULL, configuration);
+    Init(nullptr, configuration);
+  }
+
+  void InitWithRtcpMuxPolicy(
+      PeerConnectionInterface::RtcpMuxPolicy rtcp_mux_policy) {
+    PeerConnectionInterface::RTCConfiguration configuration;
+    configuration.rtcp_mux_policy = rtcp_mux_policy;
+    Init(nullptr, configuration);
   }
 
   void InitWithDtls(bool identity_request_should_fail = false) {
-    FakeIdentityService* identity_service = new FakeIdentityService();
-    identity_service->set_should_fail(identity_request_should_fail);
+    rtc::scoped_ptr<FakeDtlsIdentityStore> dtls_identity_store(
+        new FakeDtlsIdentityStore());
+    dtls_identity_store->set_should_fail(identity_request_should_fail);
     PeerConnectionInterface::RTCConfiguration configuration;
-    configuration.type = PeerConnectionInterface::kAll;
-    configuration.bundle_policy =
-        PeerConnectionInterface::kBundlePolicyBalanced;
-    configuration.audio_jitter_buffer_max_packets =
-        kAudioJitterBufferMaxPackets;
-    Init(identity_service, configuration);
+    Init(dtls_identity_store.Pass(), configuration);
   }
 
   void InitWithDtmfCodec() {
@@ -557,9 +523,9 @@ class WebRtcSessionTest : public testing::Test {
     ASSERT_EQ(0U, video_content->cryptos().size());
 
     if (dtls) {
-      EXPECT_EQ(std::string(cricket::kMediaProtocolSavpf),
+      EXPECT_EQ(std::string(cricket::kMediaProtocolDtlsSavpf),
                 audio_content->protocol());
-      EXPECT_EQ(std::string(cricket::kMediaProtocolSavpf),
+      EXPECT_EQ(std::string(cricket::kMediaProtocolDtlsSavpf),
                 video_content->protocol());
     } else {
       EXPECT_EQ(std::string(cricket::kMediaProtocolAvpf),
@@ -574,7 +540,8 @@ class WebRtcSessionTest : public testing::Test {
     desc_factory_->set_secure(cricket::SEC_DISABLED);
     std::string identity_name = "WebRTC" +
         rtc::ToString(rtc::CreateRandomId());
-    identity_.reset(rtc::SSLIdentity::Generate(identity_name));
+    // Confirmed to work with KT_RSA and KT_ECDSA.
+    identity_.reset(rtc::SSLIdentity::Generate(identity_name, rtc::KT_DEFAULT));
     tdesc_factory_->set_identity(identity_.get());
     tdesc_factory_->set_secure(cricket::SEC_REQUIRED);
   }
@@ -1034,21 +1001,27 @@ class WebRtcSessionTest : public testing::Test {
     ExpectedBestConnection best_connection_after_initial_ice_converged_;
 
     void VerifyBestConnectionAfterIceConverge(
-        const FakeMetricsObserver& metrics_observer) const {
+        const rtc::scoped_refptr<FakeMetricsObserver> metrics_observer) const {
       Verify(metrics_observer, best_connection_after_initial_ice_converged_);
     }
 
    private:
-    void Verify(const FakeMetricsObserver& metrics_observer,
+    void Verify(const rtc::scoped_refptr<FakeMetricsObserver> metrics_observer,
                 const ExpectedBestConnection& expected) const {
       EXPECT_EQ(
-          metrics_observer
-              .peer_connection_metrics_counters_[webrtc::kBestConnections_IPv4],
+          metrics_observer->GetEnumCounter(webrtc::kEnumCounterAddressFamily,
+                                           webrtc::kBestConnections_IPv4),
           expected.ipv4_count_);
       EXPECT_EQ(
-          metrics_observer
-              .peer_connection_metrics_counters_[webrtc::kBestConnections_IPv6],
+          metrics_observer->GetEnumCounter(webrtc::kEnumCounterAddressFamily,
+                                           webrtc::kBestConnections_IPv6),
           expected.ipv6_count_);
+      // This is used in the loopback call so there is only single host to host
+      // candidate pair.
+      EXPECT_EQ(metrics_observer->GetEnumCounter(
+                    webrtc::kEnumCounterIceCandidatePairTypeUdp,
+                    webrtc::kIceCandidatePairHostHost),
+                1);
     }
   };
 
@@ -1123,7 +1096,8 @@ class WebRtcSessionTest : public testing::Test {
     std::string sdp;
     offer->ToString(&sdp);
     SessionDescriptionInterface* desc =
-        webrtc::CreateSessionDescription(JsepSessionDescription::kAnswer, sdp);
+        webrtc::CreateSessionDescription(
+            JsepSessionDescription::kAnswer, sdp, nullptr);
     ASSERT_TRUE(desc != NULL);
     SetRemoteDescriptionWithoutError(desc);
 
@@ -1147,7 +1121,7 @@ class WebRtcSessionTest : public testing::Test {
                    observer_.ice_connection_state_,
                    kIceCandidatesTimeout);
 
-    metrics_observer_.Reset();
+    metrics_observer_->Reset();
 
     // Clearing the rules, session should move back to completed state.
     loopback_network_manager.ClearRules(fss_.get());
@@ -1292,7 +1266,7 @@ class WebRtcSessionTest : public testing::Test {
   MockIceObserver observer_;
   cricket::FakeVideoMediaChannel* video_channel_;
   cricket::FakeVoiceMediaChannel* voice_channel_;
-  FakeMetricsObserver metrics_observer_;
+  rtc::scoped_refptr<FakeMetricsObserver> metrics_observer_;
 };
 
 TEST_F(WebRtcSessionTest, TestInitializeWithDtls) {
@@ -1704,7 +1678,10 @@ TEST_F(WebRtcSessionTest, TestSetLocalNonDtlsAnswerWhenDtlsOn) {
 // a DTLS fingerprint when DTLS is required.
 TEST_F(WebRtcSessionTest, TestSetRemoteNonDtlsAnswerWhenDtlsOn) {
   MAYBE_SKIP_TEST(rtc::SSLStreamAdapter::HaveDtlsSrtp);
+  // Enable both SDES and DTLS, so that offer won't be outright rejected as a
+  // result of using the "UDP/TLS/RTP/SAVPF" profile.
   InitWithDtls();
+  session_->SetSdesPolicy(cricket::SEC_ENABLED);
   SessionDescriptionInterface* offer = CreateOffer();
   cricket::MediaSessionOptions options;
   options.recv_video = true;
@@ -2614,6 +2591,146 @@ TEST_F(WebRtcSessionTest, TestSetRemoteDescriptionInvalidIceCredentials) {
   EXPECT_FALSE(session_->SetRemoteDescription(modified_offer, &error));
 }
 
+// Test that if the remote description indicates the peer requested ICE restart
+// (via a new ufrag or pwd), the old ICE candidates are not copied,
+// and vice versa.
+TEST_F(WebRtcSessionTest, TestSetRemoteDescriptionWithIceRestart) {
+  Init();
+  scoped_ptr<SessionDescriptionInterface> offer(CreateRemoteOffer());
+
+  // Create the first offer.
+  std::string sdp;
+  ModifyIceUfragPwdLines(offer.get(), "0123456789012345",
+                         "abcdefghijklmnopqrstuvwx", &sdp);
+  SessionDescriptionInterface* offer1 =
+      CreateSessionDescription(JsepSessionDescription::kOffer, sdp, NULL);
+  cricket::Candidate candidate1(1, "udp", rtc::SocketAddress("1.1.1.1", 5000),
+                                0, "", "", "relay", 0, "");
+  JsepIceCandidate ice_candidate1(kMediaContentName0, kMediaContentIndex0,
+                                  candidate1);
+  EXPECT_TRUE(offer1->AddCandidate(&ice_candidate1));
+  SetRemoteDescriptionWithoutError(offer1);
+  EXPECT_EQ(1, session_->remote_description()->candidates(0)->count());
+
+  // The second offer has the same ufrag and pwd but different address.
+  sdp.clear();
+  ModifyIceUfragPwdLines(offer.get(), "0123456789012345",
+                         "abcdefghijklmnopqrstuvwx", &sdp);
+  SessionDescriptionInterface* offer2 =
+      CreateSessionDescription(JsepSessionDescription::kOffer, sdp, NULL);
+  candidate1.set_address(rtc::SocketAddress("1.1.1.1", 6000));
+  JsepIceCandidate ice_candidate2(kMediaContentName0, kMediaContentIndex0,
+                                  candidate1);
+  EXPECT_TRUE(offer2->AddCandidate(&ice_candidate2));
+  SetRemoteDescriptionWithoutError(offer2);
+  EXPECT_EQ(2, session_->remote_description()->candidates(0)->count());
+
+  // The third offer has a different ufrag and different address.
+  sdp.clear();
+  ModifyIceUfragPwdLines(offer.get(), "0123456789012333",
+                         "abcdefghijklmnopqrstuvwx", &sdp);
+  SessionDescriptionInterface* offer3 =
+      CreateSessionDescription(JsepSessionDescription::kOffer, sdp, NULL);
+  candidate1.set_address(rtc::SocketAddress("1.1.1.1", 7000));
+  JsepIceCandidate ice_candidate3(kMediaContentName0, kMediaContentIndex0,
+                                  candidate1);
+  EXPECT_TRUE(offer3->AddCandidate(&ice_candidate3));
+  SetRemoteDescriptionWithoutError(offer3);
+  EXPECT_EQ(1, session_->remote_description()->candidates(0)->count());
+
+  // The fourth offer has no candidate but a different ufrag/pwd.
+  sdp.clear();
+  ModifyIceUfragPwdLines(offer.get(), "0123456789012444",
+                         "abcdefghijklmnopqrstuvyz", &sdp);
+  SessionDescriptionInterface* offer4 =
+      CreateSessionDescription(JsepSessionDescription::kOffer, sdp, NULL);
+  SetRemoteDescriptionWithoutError(offer4);
+  EXPECT_EQ(0, session_->remote_description()->candidates(0)->count());
+}
+
+// Test that candidates sent to the "video" transport do not get pushed down to
+// the "audio" transport channel when bundling using TransportProxy.
+TEST_F(WebRtcSessionTest, TestIgnoreCandidatesForUnusedTransportWhenBundling) {
+  AddInterface(rtc::SocketAddress(kClientAddrHost1, kClientAddrPort));
+
+  InitWithBundlePolicy(PeerConnectionInterface::kBundlePolicyBalanced);
+  mediastream_signaling_.SendAudioVideoStream1();
+
+  PeerConnectionInterface::RTCOfferAnswerOptions options;
+  options.use_rtp_mux = true;
+
+  SessionDescriptionInterface* offer = CreateRemoteOffer();
+  SetRemoteDescriptionWithoutError(offer);
+
+  SessionDescriptionInterface* answer = CreateAnswer(NULL);
+  SetLocalDescriptionWithoutError(answer);
+
+  EXPECT_EQ(session_->GetTransportProxy("audio")->impl(),
+            session_->GetTransportProxy("video")->impl());
+
+  cricket::Transport* t = session_->GetTransport("audio");
+
+  // Checks if one of the transport channels contains a connection using a given
+  // port.
+  auto connection_with_remote_port = [t](int port) {
+    cricket::TransportStats stats;
+    t->GetStats(&stats);
+    for (auto& chan_stat : stats.channel_stats) {
+      for (auto& conn_info : chan_stat.connection_infos) {
+        if (conn_info.remote_candidate.address().port() == port) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  EXPECT_FALSE(connection_with_remote_port(5000));
+  EXPECT_FALSE(connection_with_remote_port(5001));
+  EXPECT_FALSE(connection_with_remote_port(6000));
+
+  // The way the *_WAIT checks work is they only wait if the condition fails,
+  // which does not help in the case where state is not changing. This is
+  // problematic in this test since we want to verify that adding a video
+  // candidate does _not_ change state. So we interleave candidates and assume
+  // that messages are executed in the order they were posted.
+
+  // First audio candidate.
+  cricket::Candidate candidate0;
+  candidate0.set_address(rtc::SocketAddress("1.1.1.1", 5000));
+  candidate0.set_component(1);
+  candidate0.set_protocol("udp");
+  JsepIceCandidate ice_candidate0(kMediaContentName0, kMediaContentIndex0,
+                                  candidate0);
+  EXPECT_TRUE(session_->ProcessIceMessage(&ice_candidate0));
+
+  // Video candidate.
+  cricket::Candidate candidate1;
+  candidate1.set_address(rtc::SocketAddress("1.1.1.1", 6000));
+  candidate1.set_component(1);
+  candidate1.set_protocol("udp");
+  JsepIceCandidate ice_candidate1(kMediaContentName1, kMediaContentIndex1,
+                                  candidate1);
+  EXPECT_TRUE(session_->ProcessIceMessage(&ice_candidate1));
+
+  // Second audio candidate.
+  cricket::Candidate candidate2;
+  candidate2.set_address(rtc::SocketAddress("1.1.1.1", 5001));
+  candidate2.set_component(1);
+  candidate2.set_protocol("udp");
+  JsepIceCandidate ice_candidate2(kMediaContentName0, kMediaContentIndex0,
+                                  candidate2);
+  EXPECT_TRUE(session_->ProcessIceMessage(&ice_candidate2));
+
+  EXPECT_TRUE_WAIT(connection_with_remote_port(5000), 1000);
+  EXPECT_TRUE_WAIT(connection_with_remote_port(5001), 1000);
+
+  // No need here for a _WAIT check since we are checking that state hasn't
+  // changed: if this is false we would be doing waits for nothing and if this
+  // is true then there will be no messages processed anyways.
+  EXPECT_FALSE(connection_with_remote_port(6000));
+}
+
 // kBundlePolicyBalanced bundle policy and answer contains BUNDLE.
 TEST_F(WebRtcSessionTest, TestBalancedBundleInAnswer) {
   InitWithBundlePolicy(PeerConnectionInterface::kBundlePolicyBalanced);
@@ -2787,6 +2904,46 @@ TEST_F(WebRtcSessionTest, TestMaxBundleWithSetRemoteDescriptionFirst) {
 
   EXPECT_EQ(session_->GetTransportProxy("audio")->impl(),
             session_->GetTransportProxy("video")->impl());
+}
+
+TEST_F(WebRtcSessionTest, TestRequireRtcpMux) {
+  InitWithRtcpMuxPolicy(PeerConnectionInterface::kRtcpMuxPolicyRequire);
+  mediastream_signaling_.SendAudioVideoStream1();
+
+  PeerConnectionInterface::RTCOfferAnswerOptions options;
+  SessionDescriptionInterface* offer = CreateOffer(options);
+  SetLocalDescriptionWithoutError(offer);
+
+  EXPECT_FALSE(session_->GetTransportProxy("audio")->impl()->HasChannel(2));
+  EXPECT_FALSE(session_->GetTransportProxy("video")->impl()->HasChannel(2));
+
+  mediastream_signaling_.SendAudioVideoStream2();
+  SessionDescriptionInterface* answer =
+      CreateRemoteAnswer(session_->local_description());
+  SetRemoteDescriptionWithoutError(answer);
+
+  EXPECT_FALSE(session_->GetTransportProxy("audio")->impl()->HasChannel(2));
+  EXPECT_FALSE(session_->GetTransportProxy("video")->impl()->HasChannel(2));
+}
+
+TEST_F(WebRtcSessionTest, TestNegotiateRtcpMux) {
+  InitWithRtcpMuxPolicy(PeerConnectionInterface::kRtcpMuxPolicyNegotiate);
+  mediastream_signaling_.SendAudioVideoStream1();
+
+  PeerConnectionInterface::RTCOfferAnswerOptions options;
+  SessionDescriptionInterface* offer = CreateOffer(options);
+  SetLocalDescriptionWithoutError(offer);
+
+  EXPECT_TRUE(session_->GetTransportProxy("audio")->impl()->HasChannel(2));
+  EXPECT_TRUE(session_->GetTransportProxy("video")->impl()->HasChannel(2));
+
+  mediastream_signaling_.SendAudioVideoStream2();
+  SessionDescriptionInterface* answer =
+      CreateRemoteAnswer(session_->local_description());
+  SetRemoteDescriptionWithoutError(answer);
+
+  EXPECT_FALSE(session_->GetTransportProxy("audio")->impl()->HasChannel(2));
+  EXPECT_FALSE(session_->GetTransportProxy("video")->impl()->HasChannel(2));
 }
 
 // This test verifies that SetLocalDescription and SetRemoteDescription fails
@@ -3431,7 +3588,7 @@ TEST_F(WebRtcSessionTest, TestSctpDataChannelSendPortParsing) {
   ASSERT_TRUE(ch != NULL);
   ASSERT_EQ(1UL, ch->send_codecs().size());
   EXPECT_EQ(cricket::kGoogleSctpDataCodecId, ch->send_codecs()[0].id);
-  EXPECT_TRUE(!strcmp(cricket::kGoogleSctpDataCodecName,
+  EXPECT_EQ(0, strcmp(cricket::kGoogleSctpDataCodecName,
                       ch->send_codecs()[0].name.c_str()));
   EXPECT_TRUE(ch->send_codecs()[0].GetParam(cricket::kCodecParamPort,
                                             &portnum));
@@ -3439,7 +3596,7 @@ TEST_F(WebRtcSessionTest, TestSctpDataChannelSendPortParsing) {
 
   ASSERT_EQ(1UL, ch->recv_codecs().size());
   EXPECT_EQ(cricket::kGoogleSctpDataCodecId, ch->recv_codecs()[0].id);
-  EXPECT_TRUE(!strcmp(cricket::kGoogleSctpDataCodecName,
+  EXPECT_EQ(0, strcmp(cricket::kGoogleSctpDataCodecName,
                       ch->recv_codecs()[0].name.c_str()));
   EXPECT_TRUE(ch->recv_codecs()[0].GetParam(cricket::kCodecParamPort,
                                             &portnum));
@@ -3765,6 +3922,38 @@ TEST_F(WebRtcSessionTest, TestSetSocketOptionBeforeBundle) {
   EXPECT_TRUE(session_->voice_channel()->transport_channel()->GetOption(
       rtc::Socket::Option::OPT_RCVBUF, &option_val));
   EXPECT_EQ(8000, option_val);
+}
+
+// Test creating a session, request multiple offers, destroy the session
+// and make sure we got success/failure callbacks for all of the requests.
+// Background: crbug.com/507307
+TEST_F(WebRtcSessionTest, CreateOffersAndShutdown) {
+  Init();
+
+  rtc::scoped_refptr<WebRtcSessionCreateSDPObserverForTest> observers[100];
+  PeerConnectionInterface::RTCOfferAnswerOptions options;
+  options.offer_to_receive_audio =
+      RTCOfferAnswerOptions::kOfferToReceiveMediaTrue;
+
+  for (auto& o : observers) {
+    o = new WebRtcSessionCreateSDPObserverForTest();
+    session_->CreateOffer(o, options);
+  }
+
+  session_.reset();
+
+  // Make sure we process pending messages on the current (signaling) thread
+  // before checking we we got our callbacks.  Quit() will do this and then
+  // immediately exit.  We won't need the queue after this point anyway.
+  rtc::Thread::Current()->Quit();
+
+  for (auto& o : observers) {
+    // We expect to have received a notification now even if the session was
+    // terminated.  The offer creation may or may not have succeeded, but we
+    // must have received a notification which, so the only invalid state
+    // is kInit.
+    EXPECT_NE(WebRtcSessionCreateSDPObserverForTest::kInit, o->state());
+  }
 }
 
 // TODO(bemasc): Add a TestIceStatesBundle with BUNDLE enabled.  That test

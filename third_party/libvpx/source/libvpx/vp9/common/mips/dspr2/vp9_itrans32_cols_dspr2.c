@@ -14,8 +14,9 @@
 #include "./vp9_rtcd.h"
 #include "vp9/common/vp9_common.h"
 #include "vp9/common/vp9_blockd.h"
-#include "vp9/common/vp9_idct.h"
 #include "vp9/common/mips/dspr2/vp9_common_dspr2.h"
+#include "vpx_dsp/txfm_common.h"
+#include "vpx_ports/mem.h"
 
 #if HAVE_DSPR2
 void vp9_idct32_cols_add_blk_dspr2(int16_t *input, uint8_t *dest,
@@ -40,17 +41,17 @@ void vp9_idct32_cols_add_blk_dspr2(int16_t *input, uint8_t *dest,
   int i, temp21;
   uint8_t *dest_pix, *dest_pix1;
   const int const_2_power_13 = 8192;
-  uint8_t *cm = vp9_ff_cropTbl;
+  uint8_t *cm = vpx_ff_cropTbl;
 
-  /* prefetch vp9_ff_cropTbl */
-  vp9_prefetch_load(vp9_ff_cropTbl);
-  vp9_prefetch_load(vp9_ff_cropTbl +  32);
-  vp9_prefetch_load(vp9_ff_cropTbl +  64);
-  vp9_prefetch_load(vp9_ff_cropTbl +  96);
-  vp9_prefetch_load(vp9_ff_cropTbl + 128);
-  vp9_prefetch_load(vp9_ff_cropTbl + 160);
-  vp9_prefetch_load(vp9_ff_cropTbl + 192);
-  vp9_prefetch_load(vp9_ff_cropTbl + 224);
+  /* prefetch vpx_ff_cropTbl */
+  prefetch_load(vpx_ff_cropTbl);
+  prefetch_load(vpx_ff_cropTbl +  32);
+  prefetch_load(vpx_ff_cropTbl +  64);
+  prefetch_load(vpx_ff_cropTbl +  96);
+  prefetch_load(vpx_ff_cropTbl + 128);
+  prefetch_load(vpx_ff_cropTbl + 160);
+  prefetch_load(vpx_ff_cropTbl + 192);
+  prefetch_load(vpx_ff_cropTbl + 224);
 
   for (i = 0; i < 32; ++i) {
     dest_pix = dest + i;

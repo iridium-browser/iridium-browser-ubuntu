@@ -30,6 +30,7 @@ class GLHelper;
 class CONTENT_EXPORT BufferQueue {
  public:
   BufferQueue(scoped_refptr<cc::ContextProvider> context_provider,
+              unsigned int texture_target,
               unsigned int internalformat,
               GLHelper* gl_helper,
               BrowserGpuMemoryBufferManager* gpu_memory_buffer_manager,
@@ -42,6 +43,8 @@ class CONTENT_EXPORT BufferQueue {
   void SwapBuffers(const gfx::Rect& damage);
   void PageFlipComplete();
   void Reshape(const gfx::Size& size, float scale_factor);
+
+  void RecreateBuffers();
 
   unsigned int current_texture_id() const { return current_surface_.texture; }
   unsigned int fbo() const { return fbo_; }
@@ -76,11 +79,14 @@ class CONTENT_EXPORT BufferQueue {
   // Return a surface, available to be drawn into.
   AllocatedSurface GetNextSurface();
 
+  AllocatedSurface RecreateBuffer(AllocatedSurface* surface);
+
   gfx::Size size_;
   scoped_refptr<cc::ContextProvider> context_provider_;
   unsigned int fbo_;
   size_t allocated_count_;
-  unsigned int internalformat_;
+  unsigned int texture_target_;
+  unsigned int internal_format_;
   AllocatedSurface current_surface_;  // This surface is currently bound.
   AllocatedSurface displayed_surface_;  // The surface currently on the screen.
   std::vector<AllocatedSurface> available_surfaces_;  // These are free for use.

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/extensions/api/messaging/native_message_process_host.h"
+
 #include "base/bind.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
@@ -18,11 +20,10 @@
 #include "base/threading/platform_thread.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
-#include "chrome/browser/extensions/api/messaging/native_message_process_host.h"
 #include "chrome/browser/extensions/api/messaging/native_messaging_test_util.h"
 #include "chrome/browser/extensions/api/messaging/native_process_launcher.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/features/feature_channel.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/common/extension.h"
@@ -80,7 +81,7 @@ class FakeLauncher : public NativeProcessLauncher {
 
   void Launch(const GURL& origin,
               const std::string& native_host_name,
-              LaunchedCallback callback) const override {
+              const LaunchedCallback& callback) const override {
     callback.Run(NativeProcessLauncher::RESULT_SUCCESS,
                  base::Process(), read_file_.Pass(), write_file_.Pass());
   }
@@ -95,7 +96,7 @@ class NativeMessagingTest : public ::testing::Test,
                             public base::SupportsWeakPtr<NativeMessagingTest> {
  protected:
   NativeMessagingTest()
-      : current_channel_(chrome::VersionInfo::CHANNEL_DEV),
+      : current_channel_(version_info::Channel::DEV),
         thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
         channel_closed_(false) {}
 
@@ -113,7 +114,7 @@ class NativeMessagingTest : public ::testing::Test,
     last_message_ = message;
 
     // Parse the message.
-    base::Value* parsed = base::JSONReader::Read(message);
+    base::Value* parsed = base::JSONReader::DeprecatedRead(message);
     base::DictionaryValue* dict_value;
     if (parsed && parsed->GetAsDictionary(&dict_value)) {
       last_message_parsed_.reset(dict_value);
@@ -201,13 +202,13 @@ TEST_F(NativeMessagingTest, SingleSendMessageWrite) {
 #if defined(OS_WIN)
   base::string16 pipe_name = base::StringPrintf(
       L"\\\\.\\pipe\\chrome.nativeMessaging.out.%llx", base::RandUint64());
-  base::File write_handle(
+  base::File write_handle = base::File::CreateForAsyncHandle(
       CreateNamedPipeW(pipe_name.c_str(),
                        PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED |
                            FILE_FLAG_FIRST_PIPE_INSTANCE,
                        PIPE_TYPE_BYTE, 1, 0, 0, 5000, NULL));
   ASSERT_TRUE(write_handle.IsValid());
-  base::File read_handle(
+  base::File read_handle = base::File::CreateForAsyncHandle(
       CreateFileW(pipe_name.c_str(), GENERIC_READ, 0, NULL, OPEN_EXISTING,
                   FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL));
   ASSERT_TRUE(read_handle.IsValid());

@@ -12,7 +12,6 @@
 #include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/menu_manager.h"
 #include "chrome/browser/profiles/profile.h"
@@ -107,6 +106,16 @@ int GetVisibilityStringId(
   return string_id;
 }
 
+// Returns true if the given |extension| is required to remain installed by
+// policy.
+bool IsExtensionRequiredByPolicy(const Extension* extension,
+                                 Profile* profile) {
+  extensions::ManagementPolicy* policy =
+      extensions::ExtensionSystem::Get(profile)->management_policy();
+  return !policy->UserMayModifySettings(extension, nullptr) ||
+         policy->MustRemainInstalled(extension, nullptr);
+}
+
 }  // namespace
 
 ExtensionContextMenuModel::ExtensionContextMenuModel(
@@ -170,11 +179,7 @@ bool ExtensionContextMenuModel::IsCommandIdEnabled(int command_id) const {
     return extension_action_ &&
         extension_action_->HasPopup(SessionTabHelper::IdForTab(web_contents));
   } else if (command_id == UNINSTALL) {
-    // Some extension types can not be uninstalled.
-    extensions::ManagementPolicy* policy =
-        extensions::ExtensionSystem::Get(profile_)->management_policy();
-    return policy->UserMayModifySettings(extension, nullptr) &&
-           !policy->MustRemainInstalled(extension, nullptr);
+    return !IsExtensionRequiredByPolicy(extension, profile_);
   }
   return true;
 }
@@ -227,11 +232,13 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id,
       break;
     }
     case UNINSTALL: {
-      AddRef();  // Balanced in Accepted() and Canceled()
+      AddRef();  // Balanced in OnExtensionUninstallDialogClosed().
       extension_uninstall_dialog_.reset(
           extensions::ExtensionUninstallDialog::Create(
               profile_, browser_->window()->GetNativeWindow(), this));
-      extension_uninstall_dialog_->ConfirmUninstall(extension);
+      extension_uninstall_dialog_->ConfirmUninstall(
+          extension, extensions::UNINSTALL_REASON_USER_INITIATED,
+          extensions::UNINSTALL_SOURCE_TOOLBAR_CONTEXT_MENU);
       break;
     }
     case MANAGE: {
@@ -248,19 +255,9 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id,
   }
 }
 
-void ExtensionContextMenuModel::ExtensionUninstallAccepted() {
-  if (GetExtension()) {
-    extensions::ExtensionSystem::Get(profile_)
-        ->extension_service()
-        ->UninstallExtension(extension_id_,
-                             extensions::UNINSTALL_REASON_USER_INITIATED,
-                             base::Bind(&base::DoNothing),
-                             NULL);
-  }
-  Release();
-}
-
-void ExtensionContextMenuModel::ExtensionUninstallCanceled() {
+void ExtensionContextMenuModel::OnExtensionUninstallDialogClosed(
+    bool did_start_uninstall,
+    const base::string16& error) {
   Release();
 }
 
@@ -306,8 +303,19 @@ void ExtensionContextMenuModel::InitMenu(const Extension* extension,
   if (!is_component_ || extensions::OptionsPageInfo::HasOptionsPage(extension))
     AddItemWithStringId(CONFIGURE, IDS_EXTENSIONS_OPTIONS_MENU_ITEM);
 
-  if (!is_component_)
-    AddItem(UNINSTALL, l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
+  if (!is_component_) {
+    bool is_required_by_policy =
+        IsExtensionRequiredByPolicy(extension, profile_);
+    int message_id = is_required_by_policy ?
+        IDS_EXTENSIONS_INSTALLED_BY_ADMIN : IDS_EXTENSIONS_UNINSTALL;
+    AddItem(UNINSTALL, l10n_util::GetStringUTF16(message_id));
+    if (is_required_by_policy) {
+      int uninstall_index = GetIndexOfCommandId(UNINSTALL);
+      SetIcon(uninstall_index,
+              ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+                  IDR_OMNIBOX_HTTPS_POLICY_WARNING));
+    }
+  }
 
   // Add a toggle visibility (show/hide) if the extension icon is shown on the
   // toolbar.

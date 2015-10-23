@@ -5,19 +5,43 @@
 #include "config.h"
 #include "core/frame/EventHandlerRegistry.h"
 
-#include "core/events/ThreadLocalEventNames.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLFrameOwnerElement.h"
-#include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 
 namespace blink {
 
+namespace {
+
+inline bool isTouchEventType(const AtomicString& eventType)
+{
+    return eventType == EventTypeNames::touchstart
+        || eventType == EventTypeNames::touchmove
+        || eventType == EventTypeNames::touchend
+        || eventType == EventTypeNames::touchcancel;
+}
+
+inline bool isPointerEventType(const AtomicString& eventType)
+{
+    return eventType == EventTypeNames::gotpointercapture
+        || eventType == EventTypeNames::lostpointercapture
+        || eventType == EventTypeNames::pointercancel
+        || eventType == EventTypeNames::pointerdown
+        || eventType == EventTypeNames::pointerenter
+        || eventType == EventTypeNames::pointerleave
+        || eventType == EventTypeNames::pointermove
+        || eventType == EventTypeNames::pointerout
+        || eventType == EventTypeNames::pointerover
+        || eventType == EventTypeNames::pointerup;
+}
+
+} // namespace
+
 EventHandlerRegistry::EventHandlerRegistry(FrameHost& frameHost)
-    : m_frameHost(frameHost)
+    : m_frameHost(&frameHost)
 {
 }
 
@@ -33,6 +57,10 @@ bool EventHandlerRegistry::eventTypeToClass(const AtomicString& eventType, Event
     } else if (eventType == EventTypeNames::wheel || eventType == EventTypeNames::mousewheel) {
         *result = WheelEvent;
     } else if (isTouchEventType(eventType)) {
+        *result = TouchEvent;
+    } else if (isPointerEventType(eventType)) {
+        // The EventHandlerClass is still TouchEvent below since we are firing PointerEvents only from
+        // EventHandler::handleTouchEvent for now. See crbug.com/476565.
         *result = TouchEvent;
 #if ENABLE(ASSERT)
     } else if (eventType == EventTypeNames::load || eventType == EventTypeNames::mousemove || eventType == EventTypeNames::touchstart) {
@@ -133,7 +161,10 @@ void EventHandlerRegistry::didMoveIntoFrameHost(EventTarget& target)
         EventHandlerClass handlerClass;
         if (!eventTypeToClass(eventTypes[i], &handlerClass))
             continue;
-        for (unsigned count = target.getEventListeners(eventTypes[i]).size(); count > 0; --count)
+        EventListenerVector* listeners = target.getEventListeners(eventTypes[i]);
+        if (!listeners)
+            continue;
+        for (unsigned count = listeners->size(); count > 0; --count)
             didAddEventHandler(target, handlerClass);
     }
 }
@@ -165,7 +196,7 @@ void EventHandlerRegistry::didRemoveAllEventHandlers(EventTarget& target)
 
 void EventHandlerRegistry::notifyHasHandlersChanged(EventHandlerClass handlerClass, bool hasActiveHandlers)
 {
-    ScrollingCoordinator* scrollingCoordinator = m_frameHost.page().scrollingCoordinator();
+    ScrollingCoordinator* scrollingCoordinator = m_frameHost->page().scrollingCoordinator();
 
     switch (handlerClass) {
     case ScrollEvent:
@@ -177,7 +208,7 @@ void EventHandlerRegistry::notifyHasHandlersChanged(EventHandlerClass handlerCla
             scrollingCoordinator->updateHaveWheelEventHandlers();
         break;
     case TouchEvent:
-        m_frameHost.chrome().client().needTouchEvents(hasActiveHandlers);
+        m_frameHost->chromeClient().needTouchEvents(hasActiveHandlers);
         break;
 #if ENABLE(ASSERT)
     case EventsForTesting:
@@ -191,13 +222,14 @@ void EventHandlerRegistry::notifyHasHandlersChanged(EventHandlerClass handlerCla
 
 void EventHandlerRegistry::notifyDidAddOrRemoveEventHandlerTarget(EventHandlerClass handlerClass)
 {
-    ScrollingCoordinator* scrollingCoordinator = m_frameHost.page().scrollingCoordinator();
+    ScrollingCoordinator* scrollingCoordinator = m_frameHost->page().scrollingCoordinator();
     if (scrollingCoordinator && handlerClass == TouchEvent)
         scrollingCoordinator->touchEventTargetRectsDidChange();
 }
 
 DEFINE_TRACE(EventHandlerRegistry)
 {
+    visitor->trace(m_frameHost);
     visitor->template registerWeakMembers<EventHandlerRegistry, &EventHandlerRegistry::clearWeakMembers>(this);
 }
 
@@ -210,9 +242,9 @@ void EventHandlerRegistry::clearWeakMembers(Visitor* visitor)
         for (const auto& eventTarget : *targets) {
             Node* node = eventTarget.key->toNode();
             LocalDOMWindow* window = eventTarget.key->toDOMWindow();
-            if (node && !visitor->isHeapObjectAlive(node)) {
+            if (node && !Heap::isHeapObjectAlive(node)) {
                 deadTargets.append(node);
-            } else if (window && !visitor->isHeapObjectAlive(window)) {
+            } else if (window && !Heap::isHeapObjectAlive(window)) {
                 deadTargets.append(window);
             }
         }
@@ -258,13 +290,13 @@ void EventHandlerRegistry::checkConsistency() const
             if (Node* node = eventTarget.key->toNode()) {
                 // See the comment for |documentDetached| if either of these assertions fails.
                 ASSERT(node->document().frameHost());
-                ASSERT(node->document().frameHost() == &m_frameHost);
+                ASSERT(node->document().frameHost() == m_frameHost);
             } else if (LocalDOMWindow* window = eventTarget.key->toDOMWindow()) {
                 // If any of these assertions fail, LocalDOMWindow failed to unregister its handlers
                 // properly.
                 ASSERT(window->frame());
                 ASSERT(window->frame()->host());
-                ASSERT(window->frame()->host() == &m_frameHost);
+                ASSERT(window->frame()->host() == m_frameHost);
             }
         }
     }

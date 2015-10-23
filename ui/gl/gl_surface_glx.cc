@@ -47,7 +47,7 @@ bool g_glx_get_msc_rate_oml_supported = false;
 
 bool g_glx_sgi_video_sync_supported = false;
 
-static const base::TimeDelta kGetVSyncParametersMinPeriod =
+static const int kGetVSyncParametersMinSeconds =
 #if defined(OS_LINUX)
     // See crbug.com/373489
     // On Linux, querying the vsync parameters might burn CPU for up to an
@@ -55,9 +55,9 @@ static const base::TimeDelta kGetVSyncParametersMinPeriod =
     // 5 seconds is chosen somewhat abitrarily as a balance between:
     //  a) Drift in the phase of our signal.
     //  b) Potential janks from periodically pegging the CPU.
-    base::TimeDelta::FromSeconds(5);
+    5;
 #else
-    base::TimeDelta::FromSeconds(0);
+    0;
 #endif
 
 class OMLSyncControlVSyncProvider
@@ -261,10 +261,10 @@ class SGIVideoSyncVSyncProvider
 
   void GetVSyncParameters(
       const VSyncProvider::UpdateVSyncCallback& callback) override {
-    if (kGetVSyncParametersMinPeriod > base::TimeDelta()) {
+    if (kGetVSyncParametersMinSeconds > 0) {
       base::TimeTicks now = base::TimeTicks::Now();
       base::TimeDelta delta = now - last_get_vsync_parameters_time_;
-      if (delta < kGetVSyncParametersMinPeriod)
+      if (delta.InSeconds() < kGetVSyncParametersMinSeconds)
         return;
       last_get_vsync_parameters_time_ = now;
     }
@@ -540,13 +540,13 @@ bool NativeViewGLSurfaceGLX::IsOffscreen() {
   return false;
 }
 
-bool NativeViewGLSurfaceGLX::SwapBuffers() {
+gfx::SwapResult NativeViewGLSurfaceGLX::SwapBuffers() {
   TRACE_EVENT2("gpu", "NativeViewGLSurfaceGLX:RealSwapBuffers",
       "width", GetSize().width(),
       "height", GetSize().height());
 
   glXSwapBuffers(g_display, GetDrawableHandle());
-  return true;
+  return gfx::SwapResult::SWAP_ACK;
 }
 
 gfx::Size NativeViewGLSurfaceGLX::GetSize() {
@@ -567,11 +567,13 @@ void* NativeViewGLSurfaceGLX::GetConfig() {
   return config_;
 }
 
-bool NativeViewGLSurfaceGLX::PostSubBuffer(
-    int x, int y, int width, int height) {
+gfx::SwapResult NativeViewGLSurfaceGLX::PostSubBuffer(int x,
+                                                      int y,
+                                                      int width,
+                                                      int height) {
   DCHECK(gfx::g_driver_glx.ext.b_GLX_MESA_copy_sub_buffer);
   glXCopySubBufferMESA(g_display, GetDrawableHandle(), x, y, width, height);
-  return true;
+  return gfx::SwapResult::SWAP_ACK;
 }
 
 VSyncProvider* NativeViewGLSurfaceGLX::GetVSyncProvider() {
@@ -617,9 +619,9 @@ bool UnmappedNativeViewGLSurfaceGLX::IsOffscreen() {
   return true;
 }
 
-bool UnmappedNativeViewGLSurfaceGLX::SwapBuffers() {
+gfx::SwapResult UnmappedNativeViewGLSurfaceGLX::SwapBuffers() {
   NOTREACHED() << "Attempted to call SwapBuffers on an unmapped window.";
-  return false;
+  return gfx::SwapResult::SWAP_FAILED;
 }
 
 gfx::Size UnmappedNativeViewGLSurfaceGLX::GetSize() {

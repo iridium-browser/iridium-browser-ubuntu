@@ -1,0 +1,135 @@
+/* Copyright 2015 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+:host {
+  @apply(--downloads-shared-style);
+  align-items: center;
+  background: rgb(63, 85, 102);
+  color: white;
+  content-sizing: padding-box;
+  display: flex;
+  height: 56px;
+}
+
+#title,
+#search {
+  flex: 1 0 var(--downloads-side-column-basis);
+}
+
+#title h1 {
+  -webkit-margin-end: 0;
+  -webkit-margin-start: 24px;
+  font-size: 107.7%;
+  font-weight: normal;
+  margin-bottom: 0;
+  margin-top: 0;
+}
+
+#actions {
+  display: flex;
+  flex: none;
+  width: var(--downloads-item-width);
+}
+
+#actions cr-button {
+  -webkit-margin-end: 8px;
+}
+
+#actions,
+#search-term {
+  color: rgb(192, 199, 205);
+}
+
+#search {
+  -webkit-padding-end: 10px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: flex-end;
+}
+
+#search paper-input-container {
+  margin-top: 2px;
+  max-width: 200px;
+  padding: 2px 0;
+  width: 100%;
+}
+
+#search-term {
+  --paper-input-container-color: rgb(192, 199, 205);
+  --paper-input-container-focus-color: rgb(192, 199, 205);
+  --paper-input-container-input: {
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+  };
+  --paper-input-container-input-color: rgb(192, 199, 205);
+  z-index: 0;
+}
+
+#search-term input[type='search']::-webkit-search-decoration,
+#search-term input[type='search']::-webkit-search-cancel-button,
+#search-term input[type='search']::-webkit-search-results-button {
+  -webkit-appearance: none;
+}
+
+paper-icon-button {
+  --iron-icon-height: 20px;
+  --iron-icon-width: 20px;
+  --paper-icon-button: {
+    height: 20px;
+    padding: 6px;
+    width: 20px;
+  };
+}
+
+#search-term paper-icon-button {
+  --iron-icon-height: 16px;
+  --iron-icon-width: 16px;
+  --paper-icon-button: {
+    -webkit-margin-end: -8px;
+    height: 16px;
+    padding: 8px;
+    width: 16px;
+  };
+  position: absolute;
+  right: 0;
+  top: -4px;
+  z-index: 1;
+}
+
+:host-context([dir='rtl']) #search-term paper-icon-button {
+  left: 0;
+  right: auto;
+}
+
+#more {
+  --paper-menu-button: {
+    padding: 0;
+  };
+  -webkit-margin-start: 16px;
+}
+
+paper-item {
+  -webkit-user-select: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+paper-item:hover {
+  background: #eaeaea;  /* TODO(dbeam): real color? */
+}
+
+@media not all and (max-width: 1024px) {
+  /* Hide vertical dot menu when there's enough room for #actions. */
+  paper-menu-button {
+    display: none;
+  }
+}
+
+@media all and (max-width: 1024px) {
+  /* Hide #actions for narrow windows; they're shown in a vertical dot menu. */
+  #actions {
+    display: none;
+  }
+}

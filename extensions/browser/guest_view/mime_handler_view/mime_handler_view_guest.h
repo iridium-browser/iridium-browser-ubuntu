@@ -7,7 +7,6 @@
 
 #include "base/memory/weak_ptr.h"
 #include "components/guest_view/browser/guest_view.h"
-#include "extensions/browser/extension_function_dispatcher.h"
 
 namespace content {
 class WebContents;
@@ -50,17 +49,13 @@ class StreamContainer {
   base::WeakPtrFactory<StreamContainer> weak_factory_;
 };
 
-class MimeHandlerViewGuest : public guest_view::GuestView<MimeHandlerViewGuest>,
-                             public ExtensionFunctionDispatcher::Delegate {
+class MimeHandlerViewGuest :
+    public guest_view::GuestView<MimeHandlerViewGuest> {
  public:
   static guest_view::GuestViewBase* Create(
       content::WebContents* owner_web_contents);
 
   static const char Type[];
-
-  // ExtensionFunctionDispatcher::Delegate implementation.
-  WindowController* GetExtensionWindowController() const override;
-  content::WebContents* GetAssociatedWebContents() const override;
 
   // GuestViewBase implementation.
   const char* GetAPINamespace() const override;
@@ -69,13 +64,8 @@ class MimeHandlerViewGuest : public guest_view::GuestView<MimeHandlerViewGuest>,
                          const WebContentsCreatedCallback& callback) override;
   void DidAttachToEmbedder() override;
   void DidInitialize(const base::DictionaryValue& create_params) override;
+  bool ShouldHandleFindRequestsForEmbedder() const override;
   bool ZoomPropagatesFromEmbedderToGuest() const override;
-
-  // content::BrowserPluginGuestDelegate implementation
-  bool Find(int request_id,
-            const base::string16& search_text,
-            const blink::WebFindOptions& options) override;
-  bool StopFinding(content::StopFindAction action) override;
 
   // WebContentsDelegate implementation.
   content::WebContents* OpenURLFromTab(
@@ -86,17 +76,10 @@ class MimeHandlerViewGuest : public guest_view::GuestView<MimeHandlerViewGuest>,
                              const blink::WebGestureEvent& event) override;
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* source) override;
-  void FindReply(content::WebContents* web_contents,
-                 int request_id,
-                 int number_of_matches,
-                 const gfx::Rect& selection_rect,
-                 int active_match_ordinal,
-                 bool final_update) override;
   bool SaveFrame(const GURL& url, const content::Referrer& referrer) override;
 
   // content::WebContentsObserver implementation.
   void DocumentOnLoadCompletedInMainFrame() override;
-  bool OnMessageReceived(const IPC::Message& message) override;
 
   std::string view_id() const { return view_id_; }
   base::WeakPtr<StreamContainer> GetStream() const;
@@ -106,10 +89,7 @@ class MimeHandlerViewGuest : public guest_view::GuestView<MimeHandlerViewGuest>,
   ~MimeHandlerViewGuest() override;
 
  private:
-  void OnRequest(const ExtensionHostMsg_Request_Params& params);
-
   scoped_ptr<MimeHandlerViewGuestDelegate> delegate_;
-  scoped_ptr<ExtensionFunctionDispatcher> extension_function_dispatcher_;
   scoped_ptr<StreamContainer> stream_;
   std::string view_id_;
 

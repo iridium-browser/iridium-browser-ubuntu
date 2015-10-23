@@ -13,7 +13,7 @@ import distutils.version
 import os
 
 from chromite.cbuildbot import archive_lib
-from chromite.cbuildbot import cbuildbot_config
+from chromite.cbuildbot import config_lib
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import tree_status
@@ -49,6 +49,8 @@ class ChromeCommitter(object):
     self._dryrun = dryrun
     self._lkgm = None
     self._old_lkgm = None
+    self.site_config = config_lib.LoadConfigFromFile()
+
 
   def CheckoutChromeLKGM(self):
     """Checkout chromeos LKGM file for chrome into tmp checkout dir."""
@@ -89,13 +91,23 @@ class ChromeCommitter(object):
     return sorted(new_canary_versions, key=lv,
                   reverse=True)[0:self._CANDIDATES_TO_CONSIDER]
 
+  def GetCanariesForChromeLKGM(self):
+    """Grabs a list of builders that are important for the Chrome LKGM."""
+    builders = []
+    for build_name, conf in self.site_config.iteritems():
+      if (conf['build_type'] == constants.CANARY_TYPE and
+          conf['critical_for_chrome'] and not conf['child_configs']):
+        builders.append(build_name)
+
+    return builders
+
   def FindNewLKGM(self):
     """Finds a new LKGM for chrome from previous chromeos releases."""
     versions = self._GetLatestCanaryVersions()
     if not versions:
       raise LKGMNotFound('No valid LKGM found newer than the old LKGM.')
 
-    canaries = cbuildbot_config.GetCanariesForChromeLKGM()
+    canaries = self.GetCanariesForChromeLKGM()
     logging.info('Considering the following versions: %s', ' '.join(versions))
     logging.info('Using scores from the following canaries: %s',
                  ' '.join(canaries))
@@ -192,7 +204,7 @@ class ChromeCommitter(object):
 
   def UpdateLatestFiles(self):
     """Update the LATEST files since LKGM, in Google Storage."""
-    ext_cfgs, int_cfgs = cbuildbot_config.FindFullConfigsForBoard(board=None)
+    ext_cfgs, int_cfgs = self.site_config.FindFullConfigsForBoard(board=None)
     versions = self._GetLatestCanaryVersions() + [self._old_lkgm]
     tasks = [[cfg, versions] for cfg in ext_cfgs + int_cfgs]
     parallel.RunTasksInProcessPool(self.UpdateLatestFilesForBot, tasks,

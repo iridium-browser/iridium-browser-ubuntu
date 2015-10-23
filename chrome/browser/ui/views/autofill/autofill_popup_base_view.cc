@@ -6,7 +6,8 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/ui/autofill/popup_constants.h"
 #include "ui/views/border.h"
 #include "ui/views/focus/focus_manager.h"
@@ -29,9 +30,9 @@ const SkColor AutofillPopupBaseView::kWarningTextColor =
 
 AutofillPopupBaseView::AutofillPopupBaseView(
     AutofillPopupViewDelegate* delegate,
-    views::FocusManager* focus_manager)
+    views::Widget* parent_widget)
     : delegate_(delegate),
-      focus_manager_(focus_manager),
+      parent_widget_(parent_widget),
       weak_ptr_factory_(this) {}
 
 AutofillPopupBaseView::~AutofillPopupBaseView() {
@@ -45,11 +46,13 @@ AutofillPopupBaseView::~AutofillPopupBaseView() {
 void AutofillPopupBaseView::DoShow() {
   const bool initialize_widget = !GetWidget();
   if (initialize_widget) {
-    focus_manager_->RegisterAccelerator(
+    parent_widget_->AddObserver(this);
+    views::FocusManager* focus_manager = parent_widget_->GetFocusManager();
+    focus_manager->RegisterAccelerator(
         ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE),
         ui::AcceleratorManager::kNormalPriority,
         this);
-    focus_manager_->RegisterAccelerator(
+    focus_manager->RegisterAccelerator(
         ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE),
         ui::AcceleratorManager::kNormalPriority,
         this);
@@ -60,7 +63,7 @@ void AutofillPopupBaseView::DoShow() {
     views::Widget* widget = new views::Widget;
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
     params.delegate = this;
-    params.parent = container_view();
+    params.parent = parent_widget_->GetNativeView();
     widget->Init(params);
     widget->SetContentsView(this);
 
@@ -99,8 +102,15 @@ void AutofillPopupBaseView::DoHide() {
   }
 }
 
+void AutofillPopupBaseView::OnWidgetBoundsChanged(views::Widget* widget,
+                                                  const gfx::Rect& new_bounds) {
+  DCHECK_EQ(widget, parent_widget_);
+  HideController();
+}
+
 void AutofillPopupBaseView::RemoveObserver() {
-  focus_manager_->UnregisterAccelerators(this);
+  parent_widget_->GetFocusManager()->UnregisterAccelerators(this);
+  parent_widget_->RemoveObserver(this);
   views::WidgetFocusManager::GetInstance()->RemoveFocusChangeListener(this);
 }
 
@@ -136,10 +146,9 @@ void AutofillPopupBaseView::OnMouseExited(const ui::MouseEvent& event) {
   // Pressing return causes the cursor to hide, which will generate an
   // OnMouseExited event. Pressing return should activate the current selection
   // via AcceleratorPressed, so we need to let that run first.
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&AutofillPopupBaseView::ClearSelection,
-                 weak_ptr_factory_.GetWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&AutofillPopupBaseView::ClearSelection,
+                            weak_ptr_factory_.GetWeakPtr()));
 }
 
 void AutofillPopupBaseView::OnMouseMoved(const ui::MouseEvent& event) {

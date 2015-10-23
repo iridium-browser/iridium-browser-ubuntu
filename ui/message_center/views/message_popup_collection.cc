@@ -112,9 +112,13 @@ void MessagePopupCollection::MarkAllPopupsShown() {
 }
 
 void MessagePopupCollection::UpdateWidgets() {
+  if (message_center_->IsMessageCenterVisible()) {
+    DCHECK_EQ(0u, message_center_->GetPopupNotifications().size());
+    return;
+  }
+
   NotificationList::PopupNotifications popups =
       message_center_->GetPopupNotifications();
-
   if (popups.empty()) {
     CloseAllWidgets();
     return;
@@ -171,8 +175,8 @@ void MessagePopupCollection::UpdateWidgets() {
     else
       base -= view_height + kToastMarginY;
 
-    if (views::ViewsDelegate::views_delegate) {
-      views::ViewsDelegate::views_delegate->NotifyAccessibilityEvent(
+    if (views::ViewsDelegate::GetInstance()) {
+      views::ViewsDelegate::GetInstance()->NotifyAccessibilityEvent(
           toast, ui::AX_EVENT_ALERT);
     }
 

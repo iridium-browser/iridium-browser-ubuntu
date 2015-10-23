@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
+#include "src/rewriter.h"
 
 #include "src/ast.h"
 #include "src/parser.h"
-#include "src/rewriter.h"
 #include "src/scopes.h"
 
 namespace v8 {
@@ -83,7 +82,7 @@ void Processor::VisitBlock(Block* node) {
   // with some JS VMs: For instance, using smjs, print(eval('var x = 7'))
   // returns 'undefined'. To obtain the same behavior with v8, we need
   // to prevent rewriting in that case.
-  if (!node->is_initializer_block()) Process(node->statements());
+  if (!node->ignore_completion_value()) Process(node->statements());
 }
 
 
@@ -211,7 +210,7 @@ EXPRESSION_NODE_LIST(DEF_VISIT)
 // Assumes code has been parsed.  Mutates the AST, so the AST should not
 // continue to be used in the case of failure.
 bool Rewriter::Rewrite(ParseInfo* info) {
-  FunctionLiteral* function = info->function();
+  FunctionLiteral* function = info->literal();
   DCHECK(function != NULL);
   Scope* scope = function->scope();
   DCHECK(scope != NULL);
@@ -248,4 +247,5 @@ bool Rewriter::Rewrite(ParseInfo* info) {
 }
 
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

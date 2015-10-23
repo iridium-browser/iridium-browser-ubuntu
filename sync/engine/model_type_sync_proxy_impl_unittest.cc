@@ -14,9 +14,9 @@
 #include "sync/test/engine/mock_model_type_sync_worker.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
-static const ModelType kModelType = PREFERENCES;
+static const syncer::ModelType kModelType = syncer::PREFERENCES;
 
 // Tests the sync engine parts of ModelTypeSyncProxyImpl.
 //
@@ -206,8 +206,8 @@ void ModelTypeSyncProxyImplTest::UpdateFromServer(int64 version_offset,
 
   UpdateResponseDataList list;
   list.push_back(data);
-  type_sync_proxy_->OnUpdateReceived(
-      data_type_state_, list, UpdateResponseDataList());
+  type_sync_proxy_->OnUpdateReceived(data_type_state_, list,
+                                     UpdateResponseDataList());
 }
 
 void ModelTypeSyncProxyImplTest::PendingUpdateFromServer(
@@ -217,14 +217,13 @@ void ModelTypeSyncProxyImplTest::PendingUpdateFromServer(
     const std::string& key_name) {
   const std::string tag_hash = GenerateTagHash(tag);
   UpdateResponseData data = mock_worker_->UpdateFromServer(
-      version_offset,
-      tag_hash,
+      version_offset, tag_hash,
       GenerateEncryptedSpecifics(tag, value, key_name));
 
   UpdateResponseDataList list;
   list.push_back(data);
-  type_sync_proxy_->OnUpdateReceived(
-      data_type_state_, UpdateResponseDataList(), list);
+  type_sync_proxy_->OnUpdateReceived(data_type_state_, UpdateResponseDataList(),
+                                     list);
 }
 
 void ModelTypeSyncProxyImplTest::TombstoneFromServer(int64 version_offset,
@@ -237,8 +236,8 @@ void ModelTypeSyncProxyImplTest::TombstoneFromServer(int64 version_offset,
 
   UpdateResponseDataList list;
   list.push_back(data);
-  type_sync_proxy_->OnUpdateReceived(
-      data_type_state_, list, UpdateResponseDataList());
+  type_sync_proxy_->OnUpdateReceived(data_type_state_, list,
+                                     UpdateResponseDataList());
 }
 
 bool ModelTypeSyncProxyImplTest::HasPendingUpdate(
@@ -246,8 +245,7 @@ bool ModelTypeSyncProxyImplTest::HasPendingUpdate(
   const std::string client_tag_hash = GenerateTagHash(tag);
   const UpdateResponseDataList list = type_sync_proxy_->GetPendingUpdates();
   for (UpdateResponseDataList::const_iterator it = list.begin();
-       it != list.end();
-       ++it) {
+       it != list.end(); ++it) {
     if (it->client_tag_hash == client_tag_hash)
       return true;
   }
@@ -260,8 +258,7 @@ UpdateResponseData ModelTypeSyncProxyImplTest::GetPendingUpdate(
   const std::string client_tag_hash = GenerateTagHash(tag);
   const UpdateResponseDataList list = type_sync_proxy_->GetPendingUpdates();
   for (UpdateResponseDataList::const_iterator it = list.begin();
-       it != list.end();
-       ++it) {
+       it != list.end(); ++it) {
     if (it->client_tag_hash == client_tag_hash)
       return *it;
   }
@@ -283,8 +280,8 @@ void ModelTypeSyncProxyImplTest::SuccessfulCommitResponse(
 void ModelTypeSyncProxyImplTest::UpdateDesiredEncryptionKey(
     const std::string& key_name) {
   data_type_state_.encryption_key_name = key_name;
-  type_sync_proxy_->OnUpdateReceived(
-      data_type_state_, UpdateResponseDataList(), UpdateResponseDataList());
+  type_sync_proxy_->OnUpdateReceived(data_type_state_, UpdateResponseDataList(),
+                                     UpdateResponseDataList());
 }
 
 void ModelTypeSyncProxyImplTest::SetServerEncryptionKey(
@@ -294,7 +291,7 @@ void ModelTypeSyncProxyImplTest::SetServerEncryptionKey(
 
 std::string ModelTypeSyncProxyImplTest::GenerateTagHash(
     const std::string& tag) {
-  return syncable::GenerateSyncableHash(kModelType, tag);
+  return syncer::syncable::GenerateSyncableHash(kModelType, tag);
 }
 
 sync_pb::EntitySpecifics ModelTypeSyncProxyImplTest::GenerateSpecifics(
@@ -313,7 +310,7 @@ sync_pb::EntitySpecifics ModelTypeSyncProxyImplTest::GenerateEncryptedSpecifics(
     const std::string& value,
     const std::string& key_name) {
   sync_pb::EntitySpecifics specifics;
-  AddDefaultFieldValue(kModelType, &specifics);
+  syncer::AddDefaultFieldValue(kModelType, &specifics);
   specifics.mutable_encrypted()->set_key_name(key_name);
   specifics.mutable_encrypted()->set_blob("BLOB" + key_name);
   return specifics;

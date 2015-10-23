@@ -9,11 +9,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
-#include "media/video/capture/video_capture_device.h"
+#include "media/capture/video/video_capture_device.h"
 
 namespace content {
 class VideoCaptureBufferPool;
 class VideoCaptureController;
+class VideoCaptureGpuJpegDecoder;
 
 // Receives events from the VideoCaptureDevice and posts them to a |controller_|
 // on the IO thread. An instance of this class may safely outlive its target
@@ -30,7 +31,8 @@ class VideoCaptureController;
 // manages the necessary entities to interact with the GPU process, notably an
 // offscreen Context to avoid janking the UI thread.
 class CONTENT_EXPORT VideoCaptureDeviceClient
-    : public media::VideoCaptureDevice::Client {
+    : public media::VideoCaptureDevice::Client,
+      public base::SupportsWeakPtr<VideoCaptureDeviceClient> {
  public:
   VideoCaptureDeviceClient(
       const base::WeakPtr<VideoCaptureController>& controller,
@@ -53,8 +55,10 @@ class CONTENT_EXPORT VideoCaptureDeviceClient
                                  const media::VideoCaptureFormat& frame_format,
                                  int clockwise_rotation,
                                  const base::TimeTicks& timestamp) override;
-  scoped_ptr<Buffer> ReserveOutputBuffer(media::VideoPixelFormat format,
-                                         const gfx::Size& dimensions) override;
+  scoped_ptr<Buffer> ReserveOutputBuffer(
+      const gfx::Size& dimensions,
+      media::VideoCapturePixelFormat format,
+      media::VideoPixelStorage storage) override;
   void OnIncomingCapturedBuffer(scoped_ptr<Buffer> buffer,
                                 const media::VideoCaptureFormat& frame_format,
                                 const base::TimeTicks& timestamp) override;
@@ -64,13 +68,42 @@ class CONTENT_EXPORT VideoCaptureDeviceClient
       const base::TimeTicks& timestamp) override;
   void OnError(const std::string& reason) override;
   void OnLog(const std::string& message) override;
+  double GetBufferPoolUtilization() const override;
 
  private:
+  // Reserve output buffer into which I420 contents can be copied directly.
+  // The dimensions of the frame is described by |dimensions|, and requested
+  // output buffer format is specified by |storage|. The reserved output buffer
+  // is returned; and the pointer to Y plane is stored at [y_plane_data], U
+  // plane is stored at [u_plane_data], V plane is stored at [v_plane_data].
+  // Returns an nullptr if allocation fails.
+  //
+  // When requested |storage| is PIXEL_STORAGE_CPU, a single shared memory
+  // chunk is reserved; whereas for PIXEL_STORAGE_GPUMEMORYBUFFER, three
+  // GpuMemoryBuffers in R_8 format representing I420 planes are reserved. The
+  // output buffers stay reserved and mapped for use until the Buffer objects
+  // are destroyed or returned.
+  scoped_ptr<Buffer> ReserveI420OutputBuffer(const gfx::Size& dimensions,
+                                             media::VideoPixelStorage storage,
+                                             uint8** y_plane_data,
+                                             uint8** u_plane_data,
+                                             uint8** v_plane_data);
+
   // The controller to which we post events.
   const base::WeakPtr<VideoCaptureController> controller_;
 
+  // Hardware JPEG decoder.
+  scoped_ptr<VideoCaptureGpuJpegDecoder> external_jpeg_decoder_;
+
+  // Whether |external_jpeg_decoder_| has been initialized.
+  bool external_jpeg_decoder_initialized_;
+
   // The pool of shared-memory buffers used for capturing.
   const scoped_refptr<VideoCaptureBufferPool> buffer_pool_;
+
+  // Indication to the Client to copy-transform the incoming data into
+  // GpuMemoryBuffers.
+  const bool use_gpu_memory_buffers_;
 
   // Internal delegate for GpuMemoryBuffer-into-VideoFrame wrapping.
   class TextureWrapHelper;
@@ -79,7 +112,7 @@ class CONTENT_EXPORT VideoCaptureDeviceClient
   // lives.
   const scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner_;
 
-  media::VideoPixelFormat last_captured_pixel_format_;
+  media::VideoCapturePixelFormat last_captured_pixel_format_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureDeviceClient);
 };

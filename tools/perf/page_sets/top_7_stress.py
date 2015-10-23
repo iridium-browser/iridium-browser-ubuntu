@@ -2,7 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry.page import shared_page_state
+from telemetry import story
 
 
 def _GetCurrentLocation(action_runner):
@@ -19,8 +20,8 @@ class Top7StressPage(page_module.Page):
   def __init__(self, url, page_set, name=''):
     super(Top7StressPage, self).__init__(
         url=url, page_set=page_set, name=name,
+        shared_page_state_class=shared_page_state.SharedDesktopPageState,
         credentials_path = 'data/credentials.json')
-    self.user_agent_type = 'desktop'
     self.archive_data_file = 'data/top_7_stress.json'
 
   def RunPageInteractions(self, action_runner):
@@ -305,20 +306,19 @@ class FacebookPage(Top7StressPage):
         'document.documentElement.scrollHeight - window.innerHeight - '
         'window.pageYOffset > 0')
 
-class Top7StressPageSet(page_set_module.PageSet):
+class Top7StressPageSet(story.StorySet):
 
   """ Pages hand-picked for stress testing. """
 
   def __init__(self):
     super(Top7StressPageSet, self).__init__(
-      user_agent_type='desktop',
       archive_data_file='data/top_7_stress.json',
-      bucket=page_set_module.PARTNER_BUCKET)
+      cloud_storage_bucket=story.PARTNER_BUCKET)
 
-    self.AddUserStory(GoogleWebSearchPage(self))
-    self.AddUserStory(GmailPage(self))
-    self.AddUserStory(GoogleCalendarPage(self))
-    self.AddUserStory(GooglePlusPage(self))
-    self.AddUserStory(BlogspotPage(self))
-    self.AddUserStory(WordpressPage(self))
-    self.AddUserStory(FacebookPage(self))
+    self.AddStory(GoogleWebSearchPage(self))
+    self.AddStory(GmailPage(self))
+    self.AddStory(GoogleCalendarPage(self))
+    self.AddStory(GooglePlusPage(self))
+    self.AddStory(BlogspotPage(self))
+    self.AddStory(WordpressPage(self))
+    self.AddStory(FacebookPage(self))

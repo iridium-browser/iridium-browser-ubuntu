@@ -41,12 +41,11 @@ public:
     static const unsigned short paddingHeight = 4;
 
     LayoutImage(Element*);
-    virtual ~LayoutImage();
-    virtual void destroy() override;
+    ~LayoutImage() override;
 
     static LayoutImage* createAnonymous(Document*);
 
-    void setImageResource(PassOwnPtr<LayoutImageResource>);
+    void setImageResource(PassOwnPtrWillBeRawPtr<LayoutImageResource>);
 
     LayoutImageResource* imageResource() { return m_imageResource.get(); }
     const LayoutImageResource* imageResource() const { return m_imageResource.get(); }
@@ -62,57 +61,56 @@ public:
     inline void setImageDevicePixelRatio(float factor) { m_imageDevicePixelRatio = factor; }
     float imageDevicePixelRatio() const { return m_imageDevicePixelRatio; }
 
-    virtual void intrinsicSizeChanged() override
+    void intrinsicSizeChanged() override
     {
         if (m_imageResource)
             imageChanged(m_imageResource->imagePtr());
     }
 
-    virtual const char* name() const override { return "LayoutImage"; }
+    const char* name() const override { return "LayoutImage"; }
 
 protected:
-    virtual bool needsPreferredWidthsRecalculation() const override final;
-    virtual LayoutBox* embeddedContentBox() const override final;
-    virtual void computeIntrinsicRatioInformation(FloatSize& intrinsicSize, double& intrinsicRatio) const override final;
+    bool needsPreferredWidthsRecalculation() const final;
+    LayoutBox* embeddedContentBox() const final;
+    void computeIntrinsicRatioInformation(FloatSize& intrinsicSize, double& intrinsicRatio) const final;
 
-    virtual void imageChanged(WrappedImagePtr, const IntRect* = 0) override;
+    void imageChanged(WrappedImagePtr, const IntRect* = nullptr) override;
 
-    virtual void paint(const PaintInfo&, const LayoutPoint&) override final;
+    void paint(const PaintInfo&, const LayoutPoint&) final;
 
-    virtual void layout() override;
-    virtual bool updateImageLoadingPriorities() override final;
+    void layout() override;
+    bool updateImageLoadingPriorities() final;
 
-    virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectLayoutImage || LayoutReplaced::isOfType(type); }
+    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectLayoutImage || LayoutReplaced::isOfType(type); }
 
-    virtual PaintInvalidationReason invalidatePaintIfNeeded(PaintInvalidationState&, const LayoutBoxModelObject&) override;
+    void willBeDestroyed() override;
+
+    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
 
 private:
-    virtual bool isImage() const override { return true; }
+    bool isImage() const override { return true; }
 
-    virtual void paintReplaced(const PaintInfo&, const LayoutPoint&) override;
+    void paintReplaced(const PaintInfo&, const LayoutPoint&) override;
 
-    virtual bool foregroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect, unsigned maxDepthToTest) const override final;
-    virtual bool computeBackgroundIsKnownToBeObscured() override final;
+    bool foregroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect, unsigned maxDepthToTest) const final;
+    bool computeBackgroundIsKnownToBeObscured() final;
 
-    virtual bool backgroundShouldAlwaysBeClipped() const override { return true; }
+    bool backgroundShouldAlwaysBeClipped() const override { return true; }
 
-    virtual LayoutUnit minimumReplacedHeight() const override;
+    LayoutUnit minimumReplacedHeight() const override;
 
-    virtual void notifyFinished(Resource*) override final;
-    virtual bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override final;
+    void notifyFinished(Resource*) final;
+    bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) final;
 
-    virtual bool boxShadowShouldBeAppliedToBackground(BackgroundBleedAvoidance, InlineFlowBox*) const override final;
+    bool boxShadowShouldBeAppliedToBackground(BackgroundBleedAvoidance, InlineFlowBox*) const final;
 
     void invalidatePaintAndMarkForLayoutIfNeeded();
     void updateIntrinsicSizeIfNeeded(const LayoutSize&);
     // Update the size of the image to be rendered. Object-fit may cause this to be different from the CSS box's content rect.
     void updateInnerContentRect();
 
-    // Returns true if the image intersects the viewport visible to the user.
-    bool intersectsVisibleViewport();
-
     // Text to display as long as the image isn't available.
-    OwnPtr<LayoutImageResource> m_imageResource;
+    OwnPtrWillBePersistent<LayoutImageResource> m_imageResource;
     bool m_didIncrementVisuallyNonEmptyPixelCount;
     bool m_isGeneratedContent;
     float m_imageDevicePixelRatio;

@@ -23,7 +23,6 @@
 #include "SkStream.h"
 #include "SkString.h"
 #include "SkTemplates.h"
-#include "SkThread.h"
 #include "SkTypeface_win.h"
 #include "SkTypefaceCache.h"
 #include "SkUtils.h"
@@ -1224,11 +1223,6 @@ static void rgb_to_lcd16(const SkGdiRGB* SK_RESTRICT src, size_t srcRB, const Sk
     }
 }
 
-static inline unsigned clamp255(unsigned x) {
-    SkASSERT(x <= 256);
-    return x - (x >> 8);
-}
-
 void SkScalerContext_GDI::generateImage(const SkGlyph& glyph) {
     SkASSERT(fDDC);
 
@@ -1624,7 +1618,7 @@ DWORD SkScalerContext_GDI::getGDIGlyphPath(const SkGlyph& glyph, UINT flags,
 }
 
 void SkScalerContext_GDI::generatePath(const SkGlyph& glyph, SkPath* path) {
-    SkASSERT(&glyph && path);
+    SkASSERT(path);
     SkASSERT(fDDC);
 
     path->reset();
@@ -1768,9 +1762,7 @@ SkAdvancedTypefaceMetrics* LogFontTypeface::onGetAdvancedTypefaceMetrics(
     info = new SkAdvancedTypefaceMetrics;
     info->fEmSize = otm.otmEMSquare;
     info->fLastGlyphID = SkToU16(glyphCount - 1);
-    info->fStyle = 0;
     tchar_to_skstring(lf.lfFaceName, &info->fFontName);
-    info->fFlags = SkAdvancedTypefaceMetrics::kEmpty_FontFlag;
     // If bit 1 is set, the font may not be embedded in a document.
     // If bit 1 is clear, the font can be embedded.
     // If bit 2 is set, the embedding is read-only.
@@ -1788,13 +1780,6 @@ SkAdvancedTypefaceMetrics* LogFontTypeface::onGetAdvancedTypefaceMetrics(
         (otm.otmTextMetrics.tmPitchAndFamily & TMPF_TRUETYPE)) {
         info->fType = SkAdvancedTypefaceMetrics::kTrueType_Font;
     } else {
-        info->fType = SkAdvancedTypefaceMetrics::kOther_Font;
-        info->fItalicAngle = 0;
-        info->fAscent = 0;
-        info->fDescent = 0;
-        info->fStemV = 0;
-        info->fCapHeight = 0;
-        info->fBBox = SkIRect::MakeEmpty();
         goto ReturnInfo;
     }
 
@@ -1870,7 +1855,7 @@ ReturnInfo:
 //Length of GUID representation from create_id, including NULL terminator.
 #define BASE64_GUID_ID_LEN SK_ARRAY_COUNT(BASE64_GUID_ID)
 
-SK_COMPILE_ASSERT(BASE64_GUID_ID_LEN < LF_FACESIZE, GUID_longer_than_facesize);
+static_assert(BASE64_GUID_ID_LEN < LF_FACESIZE, "GUID_longer_than_facesize");
 
 /**
    NameID 6 Postscript names cannot have the character '/'.

@@ -310,9 +310,7 @@ void AutofillMetricsTest::SetUp() {
   // Setup account tracker.
   signin_client_.reset(new TestSigninClient(autofill_client_.GetPrefs()));
   account_tracker_.reset(new AccountTrackerService());
-  account_tracker_->Initialize(
-      autofill_client_.GetIdentityProvider()->GetTokenService(),
-      signin_client_.get());
+  account_tracker_->Initialize(signin_client_.get());
 
   personal_data_.reset(new TestPersonalDataManager());
   personal_data_->set_database(autofill_client_.GetDatabase());
@@ -355,7 +353,6 @@ TEST_F(AutofillMetricsTest, QualityMetrics) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
@@ -496,7 +493,6 @@ TEST_F(AutofillMetricsTest, Rappor_LowMismatchRate_NoMetricsReported) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
@@ -539,7 +535,6 @@ TEST_F(AutofillMetricsTest, Rappor_NoDataServerAndHeuristic_NoMetricsReported) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
@@ -582,7 +577,6 @@ TEST_F(AutofillMetricsTest, Rappor_HighServerMismatchRate_MetricsReported) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
@@ -635,7 +629,6 @@ TEST_F(AutofillMetricsTest, Rappor_HighHeuristicMismatchRate_MetricsReported) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
@@ -689,7 +682,6 @@ TEST_F(AutofillMetricsTest, PredictedMetricsWithAutocomplete) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field1;
   test::CreateTestFormField("Select", "select", "USA", "select-one", &field1);
@@ -783,7 +775,6 @@ TEST_F(AutofillMetricsTest, SaneMetricsWithCacheMismatch) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
 
@@ -924,7 +915,6 @@ TEST_F(AutofillMetricsTest, StoredProfileCountAutofillableFormSubmission) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   // Three fields is enough to make it an autofillable form.
   FormFieldData field;
@@ -956,7 +946,6 @@ TEST_F(AutofillMetricsTest, StoredProfileCountNonAutofillableFormSubmission) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   // Two fields is not enough to make it an autofillable form.
   FormFieldData field;
@@ -976,6 +965,55 @@ TEST_F(AutofillMetricsTest, StoredProfileCountNonAutofillableFormSubmission) {
   // logged.
   histogram_tester.ExpectTotalCount(
       "Autofill.StoredProfileCountAtAutofillableFormSubmission", 0);
+}
+
+// Verify that when submitting an autofillable form, the proper number of edited
+// fields is logged.
+TEST_F(AutofillMetricsTest, NumberOfEditedAutofilledFields) {
+  // Construct a fillable form.
+  FormData form;
+  form.name = ASCIIToUTF16("TestForm");
+  form.origin = GURL("http://example.com/form.html");
+  form.action = GURL("http://example.com/submit.html");
+
+  std::vector<ServerFieldType> heuristic_types, server_types;
+
+  // Three fields is enough to make it an autofillable form.
+  FormFieldData field;
+  test::CreateTestFormField("Autofilled", "autofilled", "Elvis Aaron Presley",
+                            "text", &field);
+  field.is_autofilled = true;
+  form.fields.push_back(field);
+  heuristic_types.push_back(NAME_FULL);
+  server_types.push_back(NAME_FULL);
+
+  test::CreateTestFormField("Autofill Failed", "autofillfailed",
+                            "buddy@gmail.com", "text", &field);
+  field.is_autofilled = true;
+  form.fields.push_back(field);
+  heuristic_types.push_back(EMAIL_ADDRESS);
+  server_types.push_back(EMAIL_ADDRESS);
+
+  test::CreateTestFormField("Phone", "phone", "2345678901", "tel", &field);
+  field.is_autofilled = true;
+  form.fields.push_back(field);
+  heuristic_types.push_back(PHONE_HOME_CITY_AND_NUMBER);
+  server_types.push_back(PHONE_HOME_CITY_AND_NUMBER);
+
+  autofill_manager_->AddSeenForm(form, heuristic_types, server_types);
+
+  base::HistogramTester histogram_tester;
+  // Simulate text input in the first and second fields.
+  autofill_manager_->OnTextFieldDidChange(form, form.fields[0], TimeTicks());
+  autofill_manager_->OnTextFieldDidChange(form, form.fields[1], TimeTicks());
+
+  // Simulate form submission.
+  autofill_manager_->SubmitForm(form, TimeTicks::Now());
+
+  // An autofillable form was submitted, and the number of edited autofilled
+  // fields is logged.
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.NumberOfEditedAutofilledFieldsAtSubmission", 2, 1);
 }
 
 // Verify that we correctly log metrics regarding developer engagement.
@@ -1091,7 +1129,6 @@ TEST_F(AutofillMetricsTest, AddressSuggestionsCount) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1158,7 +1195,6 @@ TEST_F(AutofillMetricsTest, CreditCardInteractedFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1207,7 +1243,6 @@ TEST_F(AutofillMetricsTest, CreditCardShownFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1285,7 +1320,6 @@ TEST_F(AutofillMetricsTest, CreditCardSelectedFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1306,12 +1340,11 @@ TEST_F(AutofillMetricsTest, CreditCardSelectedFormEvents) {
   {
     // Simulating selecting a masked card server suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "10000000-0000-0000-0000-000000000002", 0); // masked server card
+    std::string guid(
+        "10000000-0000-0000-0000-000000000002");  // masked server card
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields[2],
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.CreditCard",
         AutofillMetrics::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SELECTED, 1);
@@ -1328,16 +1361,14 @@ TEST_F(AutofillMetricsTest, CreditCardSelectedFormEvents) {
   {
     // Simulating selecting multiple times a masked card server.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "10000000-0000-0000-0000-000000000002", 0); // masked server card
+    std::string guid(
+        "10000000-0000-0000-0000-000000000002");  // masked server card
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields[2],
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields[2],
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.CreditCard",
         AutofillMetrics::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SELECTED, 2);
@@ -1362,7 +1393,6 @@ TEST_F(AutofillMetricsTest, CreditCardFilledFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1383,12 +1413,10 @@ TEST_F(AutofillMetricsTest, CreditCardFilledFormEvents) {
   {
     // Simulating filling a local card suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "10000000-0000-0000-0000-000000000001", 0); // local card
+    std::string guid("10000000-0000-0000-0000-000000000001");  // local card
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.CreditCard",
         AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED, 1);
@@ -1404,12 +1432,11 @@ TEST_F(AutofillMetricsTest, CreditCardFilledFormEvents) {
   {
     // Simulating filling a masked card server suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "10000000-0000-0000-0000-000000000002", 0); // masked server card
+    std::string guid(
+        "10000000-0000-0000-0000-000000000002");  // masked server card
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->OnDidGetRealPan(AutofillClient::SUCCESS,
                                        "6011000990139424");
     histogram_tester.ExpectBucketCount(
@@ -1435,12 +1462,11 @@ TEST_F(AutofillMetricsTest, CreditCardFilledFormEvents) {
   {
     // Simulating filling a full card server suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "10000000-0000-0000-0000-000000000003", 0); // full server card
+    std::string guid(
+        "10000000-0000-0000-0000-000000000003");  // full server card
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.CreditCard",
         AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED, 1);
@@ -1456,16 +1482,13 @@ TEST_F(AutofillMetricsTest, CreditCardFilledFormEvents) {
   {
     // Simulating filling multiple times.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "10000000-0000-0000-0000-000000000001", 0); // local card
+    std::string guid("10000000-0000-0000-0000-000000000001");  // local card
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.CreditCard",
         AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED, 2);
@@ -1488,7 +1511,6 @@ TEST_F(AutofillMetricsTest, CreditCardGetRealPanDuration) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1509,11 +1531,11 @@ TEST_F(AutofillMetricsTest, CreditCardGetRealPanDuration) {
   {
     // Simulating filling a masked card server suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid("10000000-0000-0000-0000-000000000002",
-                             0);  // masked server card
+    // Masked server card.
+    std::string guid("10000000-0000-0000-0000-000000000002");
     autofill_manager_->FillOrPreviewForm(
         AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->OnDidGetRealPan(AutofillClient::SUCCESS,
                                        "6011000990139424");
     histogram_tester.ExpectTotalCount(
@@ -1534,11 +1556,11 @@ TEST_F(AutofillMetricsTest, CreditCardGetRealPanDuration) {
   {
     // Simulating filling a masked card server suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid("10000000-0000-0000-0000-000000000002",
-                             0);  // masked server card
+    // Masked server card.
+    std::string guid("10000000-0000-0000-0000-000000000002");
     autofill_manager_->FillOrPreviewForm(
         AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->OnDidGetRealPan(AutofillClient::PERMANENT_FAILURE,
                                        std::string());
     histogram_tester.ExpectTotalCount(
@@ -1561,7 +1583,6 @@ TEST_F(AutofillMetricsTest, CreditCardSubmittedFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1600,12 +1621,10 @@ TEST_F(AutofillMetricsTest, CreditCardSubmittedFormEvents) {
     // Simulating submission with filled local data.
     base::HistogramTester histogram_tester;
     autofill_manager_->OnQueryFormFieldAutofill(0, form, field, gfx::Rect());
-    SuggestionBackendID guid(
-        "10000000-0000-0000-0000-000000000001", 0); // local card
+    std::string guid("10000000-0000-0000-0000-000000000001");  // local card
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->SubmitForm(form, TimeTicks::Now());
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.CreditCard",
@@ -1623,12 +1642,11 @@ TEST_F(AutofillMetricsTest, CreditCardSubmittedFormEvents) {
     // Simulating submission with filled server data.
     base::HistogramTester histogram_tester;
     autofill_manager_->OnQueryFormFieldAutofill(0, form, field, gfx::Rect());
-    SuggestionBackendID guid(
-        "10000000-0000-0000-0000-000000000003", 0); // full server card
+    std::string guid(
+        "10000000-0000-0000-0000-000000000003");  // full server card
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->SubmitForm(form, TimeTicks::Now());
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.CreditCard",
@@ -1645,12 +1663,11 @@ TEST_F(AutofillMetricsTest, CreditCardSubmittedFormEvents) {
   {
     // Simulating submission with a masked card server suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "10000000-0000-0000-0000-000000000002", 0); // masked server card
+    std::string guid(
+        "10000000-0000-0000-0000-000000000002");  // masked server card
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->OnDidGetRealPan(AutofillClient::SUCCESS,
                                        "6011000990139424");
     histogram_tester.ExpectBucketCount(
@@ -1753,7 +1770,6 @@ TEST_F(AutofillMetricsTest, CreditCardWillSubmitFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1792,11 +1808,10 @@ TEST_F(AutofillMetricsTest, CreditCardWillSubmitFormEvents) {
     // Simulating submission with filled local data.
     base::HistogramTester histogram_tester;
     autofill_manager_->OnQueryFormFieldAutofill(0, form, field, gfx::Rect());
-    SuggestionBackendID guid("10000000-0000-0000-0000-000000000001",
-                             0);  // local card
+    std::string guid("10000000-0000-0000-0000-000000000001");  // local card
     autofill_manager_->FillOrPreviewForm(
         AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->WillSubmitForm(form, TimeTicks::Now());
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.CreditCard",
@@ -1814,11 +1829,11 @@ TEST_F(AutofillMetricsTest, CreditCardWillSubmitFormEvents) {
     // Simulating submission with filled server data.
     base::HistogramTester histogram_tester;
     autofill_manager_->OnQueryFormFieldAutofill(0, form, field, gfx::Rect());
-    SuggestionBackendID guid("10000000-0000-0000-0000-000000000003",
-                             0);  // full server card
+    // Full server card.
+    std::string guid("10000000-0000-0000-0000-000000000003");
     autofill_manager_->FillOrPreviewForm(
         AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->WillSubmitForm(form, TimeTicks::Now());
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.CreditCard",
@@ -1835,11 +1850,11 @@ TEST_F(AutofillMetricsTest, CreditCardWillSubmitFormEvents) {
   {
     // Simulating submission with a masked card server suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid("10000000-0000-0000-0000-000000000002",
-                             0);  // masked server card
+    // Masked server card.
+    std::string guid("10000000-0000-0000-0000-000000000002");
     autofill_manager_->FillOrPreviewForm(
         AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(guid, SuggestionBackendID()));
+        autofill_manager_->MakeFrontendID(guid, std::string()));
     autofill_manager_->OnDidGetRealPan(AutofillClient::SUCCESS,
                                        "6011000990139424");
     histogram_tester.ExpectBucketCount(
@@ -1934,7 +1949,6 @@ TEST_F(AutofillMetricsTest, AddressInteractedFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1987,7 +2001,6 @@ TEST_F(AutofillMetricsTest, AddressShownFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2063,7 +2076,6 @@ TEST_F(AutofillMetricsTest, AddressFilledFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2084,12 +2096,10 @@ TEST_F(AutofillMetricsTest, AddressFilledFormEvents) {
   {
     // Simulating selecting/filling a local profile suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "00000000-0000-0000-0000-000000000001", 0); // local profile
+    std::string guid("00000000-0000-0000-0000-000000000001");  // local profile
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(SuggestionBackendID(), guid));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(std::string(), guid));
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.Address",
         AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED, 1);
@@ -2105,12 +2115,10 @@ TEST_F(AutofillMetricsTest, AddressFilledFormEvents) {
   {
     // Simulating selecting/filling a server profile suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "00000000-0000-0000-0000-000000000002", 0); // server profile
+    std::string guid("00000000-0000-0000-0000-000000000002");  // server profile
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(SuggestionBackendID(), guid));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(std::string(), guid));
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.Address",
         AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED, 1);
@@ -2126,16 +2134,13 @@ TEST_F(AutofillMetricsTest, AddressFilledFormEvents) {
   {
     // Simulating selecting/filling a local profile suggestion.
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "00000000-0000-0000-0000-000000000001", 0); // local profile
+    std::string guid("00000000-0000-0000-0000-000000000001");  // local profile
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(SuggestionBackendID(), guid));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(std::string(), guid));
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(SuggestionBackendID(), guid));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(std::string(), guid));
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.Address",
         AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED, 2);
@@ -2156,7 +2161,6 @@ TEST_F(AutofillMetricsTest, AddressSubmittedFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2195,12 +2199,10 @@ TEST_F(AutofillMetricsTest, AddressSubmittedFormEvents) {
     // Simulating submission with filled local data.
     base::HistogramTester histogram_tester;
     autofill_manager_->OnQueryFormFieldAutofill(0, form, field, gfx::Rect());
-    SuggestionBackendID guid(
-        "00000000-0000-0000-0000-000000000001", 0); // local profile
+    std::string guid("00000000-0000-0000-0000-000000000001");  // local profile
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(SuggestionBackendID(), guid));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(std::string(), guid));
     autofill_manager_->SubmitForm(form, TimeTicks::Now());
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.Address",
@@ -2218,12 +2220,10 @@ TEST_F(AutofillMetricsTest, AddressSubmittedFormEvents) {
     // Simulating submission with filled server data.
     base::HistogramTester histogram_tester;
     autofill_manager_->OnQueryFormFieldAutofill(0, form, field, gfx::Rect());
-    SuggestionBackendID guid(
-        "00000000-0000-0000-0000-000000000002", 0); // server profile
+    std::string guid("00000000-0000-0000-0000-000000000002");  // server profile
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(SuggestionBackendID(), guid));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(std::string(), guid));
     autofill_manager_->SubmitForm(form, TimeTicks::Now());
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.Address",
@@ -2305,7 +2305,6 @@ TEST_F(AutofillMetricsTest, AddressWillSubmitFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2344,11 +2343,10 @@ TEST_F(AutofillMetricsTest, AddressWillSubmitFormEvents) {
     // Simulating submission with filled local data.
     base::HistogramTester histogram_tester;
     autofill_manager_->OnQueryFormFieldAutofill(0, form, field, gfx::Rect());
-    SuggestionBackendID guid("00000000-0000-0000-0000-000000000001",
-                             0);  // local profile
+    std::string guid("00000000-0000-0000-0000-000000000001");  // local profile
     autofill_manager_->FillOrPreviewForm(
         AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(SuggestionBackendID(), guid));
+        autofill_manager_->MakeFrontendID(std::string(), guid));
     autofill_manager_->WillSubmitForm(form, TimeTicks::Now());
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.Address",
@@ -2366,11 +2364,10 @@ TEST_F(AutofillMetricsTest, AddressWillSubmitFormEvents) {
     // Simulating submission with filled server data.
     base::HistogramTester histogram_tester;
     autofill_manager_->OnQueryFormFieldAutofill(0, form, field, gfx::Rect());
-    SuggestionBackendID guid("00000000-0000-0000-0000-000000000002",
-                             0);  // server profile
+    std::string guid("00000000-0000-0000-0000-000000000002");  // server profile
     autofill_manager_->FillOrPreviewForm(
         AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(SuggestionBackendID(), guid));
+        autofill_manager_->MakeFrontendID(std::string(), guid));
     autofill_manager_->WillSubmitForm(form, TimeTicks::Now());
     histogram_tester.ExpectBucketCount(
         "Autofill.FormEvents.Address",
@@ -2442,7 +2439,6 @@ TEST_F(AutofillMetricsTest, CreditCardFormEventsAreSegmented) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2551,7 +2547,6 @@ TEST_F(AutofillMetricsTest, AddressFormEventsAreSegmented) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2651,7 +2646,6 @@ TEST_F(AutofillMetricsTest, UserHappinessFormLoadAndSubmission) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   test::CreateTestFormField("Name", "name", "", "text", &field);
@@ -2777,7 +2771,6 @@ TEST_F(AutofillMetricsTest, UserHappinessFormInteraction) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   test::CreateTestFormField("Name", "name", "", "text", &field);
@@ -2839,12 +2832,10 @@ TEST_F(AutofillMetricsTest, UserHappinessFormInteraction) {
   // Simulate editing an autofilled field.
   {
     base::HistogramTester histogram_tester;
-    SuggestionBackendID guid(
-        "00000000-0000-0000-0000-000000000001", 0);
+    std::string guid("00000000-0000-0000-0000-000000000001");
     autofill_manager_->FillOrPreviewForm(
-        AutofillDriver::FORM_DATA_ACTION_FILL,
-        0, form, form.fields.front(),
-        autofill_manager_->MakeFrontendID(SuggestionBackendID(), guid));
+        AutofillDriver::FORM_DATA_ACTION_FILL, 0, form, form.fields.front(),
+        autofill_manager_->MakeFrontendID(std::string(), guid));
     autofill_manager_->OnTextFieldDidChange(form, form.fields.front(),
                                             TimeTicks());
     // Simulate a second keystroke; make sure we don't log the metric twice.
@@ -2883,7 +2874,6 @@ TEST_F(AutofillMetricsTest, FormFillDuration) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   test::CreateTestFormField("Name", "name", "", "text", &field);

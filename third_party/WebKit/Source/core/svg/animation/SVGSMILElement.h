@@ -26,6 +26,7 @@
 #ifndef SVGSMILElement_h
 #define SVGSMILElement_h
 
+#include "core/CoreExport.h"
 #include "core/SVGNames.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/SVGTests.h"
@@ -43,16 +44,16 @@ template<typename T> class EventSender;
 typedef EventSender<SVGSMILElement> SMILEventSender;
 
 // This class implements SMIL interval timing model as needed for SVG animation.
-class SVGSMILElement : public SVGElement, public SVGTests {
+class CORE_EXPORT SVGSMILElement : public SVGElement, public SVGTests {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SVGSMILElement);
 public:
     SVGSMILElement(const QualifiedName&, Document&);
-    virtual ~SVGSMILElement();
+    ~SVGSMILElement() override;
 
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
-    virtual void svgAttributeChanged(const QualifiedName&) override;
-    virtual InsertionNotificationRequest insertedInto(ContainerNode*) override;
-    virtual void removedFrom(ContainerNode*) override;
+    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    void svgAttributeChanged(const QualifiedName&) override;
+    InsertionNotificationRequest insertedInto(ContainerNode*) override;
+    void removedFrom(ContainerNode*) override;
 
     virtual bool hasValidAttributeType() = 0;
     virtual bool hasValidAttributeName();
@@ -135,7 +136,7 @@ protected:
     void unscheduleIfScheduled();
 
 private:
-    virtual void buildPendingResource() override;
+    void buildPendingResource() override;
     void clearResourceAndEventBaseReferences();
     void clearConditions();
 
@@ -143,7 +144,7 @@ private:
     void endedActiveInterval();
     virtual void updateAnimation(float percent, unsigned repeat, SVGSMILElement* resultElement) = 0;
 
-    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override { return false; }
+    bool layoutObjectIsNeeded(const ComputedStyle&) override { return false; }
 
     enum BeginOrEnd {
         Begin,
@@ -199,7 +200,7 @@ private:
         SVGSMILElement* syncBase() const { return m_syncBase.get(); }
         void setSyncBase(SVGSMILElement* element) { m_syncBase = element; }
         ConditionEventListener* eventListener() const { return m_eventListener.get(); }
-        void setEventListener(PassRefPtr<ConditionEventListener>);
+        void setEventListener(PassRefPtrWillBeRawPtr<ConditionEventListener>);
 
     private:
         Type m_type;
@@ -209,7 +210,7 @@ private:
         SMILTime m_offset;
         int m_repeat;
         RefPtrWillBeMember<SVGSMILElement> m_syncBase;
-        RefPtr<ConditionEventListener> m_eventListener;
+        RefPtrWillBeMember<ConditionEventListener> m_eventListener;
     };
     bool parseCondition(const String&, BeginOrEnd beginOrEnd);
     void parseBeginOrEnd(const String&, BeginOrEnd beginOrEnd);

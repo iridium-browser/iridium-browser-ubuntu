@@ -56,6 +56,9 @@ class ToolbarActionView : public views::MenuButton,
     // reference point for a popup when this view isn't visible.
     virtual views::MenuButton* GetOverflowReferenceView() = 0;
 
+    // Notifies the delegate that the mouse entered the view.
+    virtual void OnMouseEnteredToolbarActionView() = 0;
+
    protected:
     ~Delegate() override {}
   };
@@ -64,10 +67,6 @@ class ToolbarActionView : public views::MenuButton,
                     Profile* profile,
                     Delegate* delegate);
   ~ToolbarActionView() override;
-
-  // Modifies the given |border| in order to display a "popped out" for when
-  // an action wants to run.
-  static void DecorateWantsToRunBorder(views::LabelButtonBorder* border);
 
   // views::MenuButton:
   void GetAccessibleState(ui::AXViewState* state) override;
@@ -90,6 +89,7 @@ class ToolbarActionView : public views::MenuButton,
   // menu buttons only enter a pressed state on release (if they're draggable).
   // We should probably just pick a behavior, and stick to it.
   bool Activate() override;
+  void OnMouseEntered(const ui::MouseEvent& event) override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
   void OnMouseExited(const ui::MouseEvent& event) override;
@@ -114,12 +114,9 @@ class ToolbarActionView : public views::MenuButton,
  private:
   // views::MenuButton:
   gfx::Size GetPreferredSize() const override;
-  const char* GetClassName() const override;
   void OnDragDone() override;
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
-  void PaintChildren(const ui::PaintContext& context) override;
-  void OnPaintBorder(gfx::Canvas* canvas) override;
 
   // ToolbarActionViewDelegateViews:
   views::View* GetAsView() override;
@@ -143,6 +140,12 @@ class ToolbarActionView : public views::MenuButton,
   // Returns true if a menu was closed, false otherwise.
   bool CloseActiveMenuIfNeeded();
 
+  // Unfortunately, due to the dual-nature of a ToolbarActionView as both a
+  // label button and a menu button, activation can happen as part of either
+  // ButtonPressed() or Activate(). Handle both in this function.
+  void HandleActivation(const gfx::Point& menu_point,
+                        ui::MenuSourceType source_type);
+
   // A lock to keep the MenuButton pressed when a menu or popup is visible.
   scoped_ptr<views::MenuButton::PressedLock> pressed_lock_;
 
@@ -161,9 +164,6 @@ class ToolbarActionView : public views::MenuButton,
   // The cached value of whether or not the action wants to run on the current
   // tab.
   bool wants_to_run_;
-
-  // A special border to draw when the action wants to run.
-  scoped_ptr<views::LabelButtonBorder> wants_to_run_border_;
 
   // Responsible for running the menu.
   scoped_ptr<views::MenuRunner> menu_runner_;

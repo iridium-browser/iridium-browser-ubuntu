@@ -20,9 +20,7 @@ def CommonChecks(input_api, output_api):
       input_api,
       output_api,
       black_list=[r'pylib/symbols/.*\.py$', r'gyp/.*\.py$', r'gn/.*\.py'],
-      extra_paths_list=[
-          J(), J('..', '..', 'third_party', 'android_testrunner'),
-          J('buildbot')]))
+      extra_paths_list=[J(), J('buildbot')]))
   output.extend(input_api.canned_checks.RunPylint(
       input_api,
       output_api,
@@ -42,6 +40,7 @@ def CommonChecks(input_api, output_api):
       input_api,
       output_api,
       unit_tests=[
+          J('.', 'emma_coverage_stats_test.py'),
           J('pylib', 'base', 'test_dispatcher_unittest.py'),
           J('pylib', 'device', 'battery_utils_test.py'),
           J('pylib', 'device', 'device_utils_test.py'),

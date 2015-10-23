@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -29,7 +30,10 @@ def SetEnvironmentAndGetRuntimeDllDirs():
   vs2013_runtime_dll_dirs = None
   depot_tools_win_toolchain = \
       bool(int(os.environ.get('DEPOT_TOOLS_WIN_TOOLCHAIN', '1')))
-  if sys.platform in ('win32', 'cygwin') and depot_tools_win_toolchain:
+  # When running on a non-Windows host, only do this if the SDK has explicitly
+  # been downloaded before (in which case json_data_file will exist).
+  if ((sys.platform in ('win32', 'cygwin') and depot_tools_win_toolchain) or
+      os.path.exists(json_data_file)):
     if not os.path.exists(json_data_file):
       Update()
     with open(json_data_file, 'r') as tempf:
@@ -37,7 +41,9 @@ def SetEnvironmentAndGetRuntimeDllDirs():
 
     toolchain = toolchain_data['path']
     version = toolchain_data['version']
-    win8sdk = toolchain_data['win8sdk']
+    win_sdk = toolchain_data.get('win_sdk')
+    if not win_sdk:
+      win_sdk = toolchain_data['win8sdk']
     wdk = toolchain_data['wdk']
     # TODO(scottmg): The order unfortunately matters in these. They should be
     # split into separate keys for x86 and x64. (See CopyVsRuntimeDlls call
@@ -51,15 +57,26 @@ def SetEnvironmentAndGetRuntimeDllDirs():
     # otheroptions.express
     # values there.
     gyp_defines_dict = gyp.NameValueListToDict(gyp.ShlexEnv('GYP_DEFINES'))
-    gyp_defines_dict['windows_sdk_path'] = win8sdk
+    gyp_defines_dict['windows_sdk_path'] = win_sdk
     os.environ['GYP_DEFINES'] = ' '.join('%s=%s' % (k, pipes.quote(str(v)))
         for k, v in gyp_defines_dict.iteritems())
-    os.environ['WINDOWSSDKDIR'] = win8sdk
+    os.environ['WINDOWSSDKDIR'] = win_sdk
     os.environ['WDK_DIR'] = wdk
     # Include the VS runtime in the PATH in case it's not machine-installed.
     runtime_path = ';'.join(vs2013_runtime_dll_dirs)
     os.environ['PATH'] = runtime_path + ';' + os.environ['PATH']
   return vs2013_runtime_dll_dirs
+
+
+def _VersionNumber():
+  """Gets the standard version number ('120', '140', etc.) based on
+  GYP_MSVS_VERSION."""
+  if os.environ['GYP_MSVS_VERSION'] == '2013':
+    return '120'
+  elif os.environ['GYP_MSVS_VERSION'] == '2015':
+    return '140'
+  else:
+    raise ValueError('Unexpected GYP_MSVS_VERSION')
 
 
 def _CopyRuntimeImpl(target, source):
@@ -75,14 +92,24 @@ def _CopyRuntimeImpl(target, source):
     shutil.copy2(source, target)
 
 
-def _CopyRuntime(target_dir, source_dir, dll_pattern):
-    """Copy both the msvcr and msvcp runtime DLLs, only if the target doesn't
-    exist, but the target directory does exist."""
-    for which in ('p', 'r'):
-      dll = dll_pattern % which
-      target = os.path.join(target_dir, dll)
-      source = os.path.join(source_dir, dll)
-      _CopyRuntimeImpl(target, source)
+def _CopyRuntime2013(target_dir, source_dir, dll_pattern):
+  """Copy both the msvcr and msvcp runtime DLLs, only if the target doesn't
+  exist, but the target directory does exist."""
+  for file_part in ('p', 'r'):
+    dll = dll_pattern % file_part
+    target = os.path.join(target_dir, dll)
+    source = os.path.join(source_dir, dll)
+    _CopyRuntimeImpl(target, source)
+
+
+def _CopyRuntime2015(target_dir, source_dir, dll_pattern):
+  """Copy both the msvcp and vccorlib runtime DLLs, only if the target doesn't
+  exist, but the target directory does exist."""
+  for file_part in ('msvcp', 'vccorlib'):
+    dll = dll_pattern % file_part
+    target = os.path.join(target_dir, dll)
+    source = os.path.join(source_dir, dll)
+    _CopyRuntimeImpl(target, source)
 
 
 def CopyVsRuntimeDlls(output_dir, runtime_dirs):
@@ -93,8 +120,6 @@ def CopyVsRuntimeDlls(output_dir, runtime_dirs):
   This needs to be run after gyp has been run so that the expected target
   output directories are already created.
   """
-  assert sys.platform.startswith(('win32', 'cygwin'))
-
   x86, x64 = runtime_dirs
   out_debug = os.path.join(output_dir, 'Debug')
   out_debug_nacl64 = os.path.join(output_dir, 'Debug', 'x64')
@@ -107,19 +132,28 @@ def CopyVsRuntimeDlls(output_dir, runtime_dirs):
     os.makedirs(out_debug_nacl64)
   if os.path.exists(out_release) and not os.path.exists(out_release_nacl64):
     os.makedirs(out_release_nacl64)
-  _CopyRuntime(out_debug,          x86, 'msvc%s120d.dll')
-  _CopyRuntime(out_release,        x86, 'msvc%s120.dll')
-  _CopyRuntime(out_debug_x64,      x64, 'msvc%s120d.dll')
-  _CopyRuntime(out_release_x64,    x64, 'msvc%s120.dll')
-  _CopyRuntime(out_debug_nacl64,   x64, 'msvc%s120d.dll')
-  _CopyRuntime(out_release_nacl64, x64, 'msvc%s120.dll')
+  if os.environ.get('GYP_MSVS_VERSION') == '2015':
+    _CopyRuntime2015(out_debug,          x86, '%s140d.dll')
+    _CopyRuntime2015(out_release,        x86, '%s140.dll')
+    _CopyRuntime2015(out_debug_x64,      x64, '%s140d.dll')
+    _CopyRuntime2015(out_release_x64,    x64, '%s140.dll')
+    _CopyRuntime2015(out_debug_nacl64,   x64, '%s140d.dll')
+    _CopyRuntime2015(out_release_nacl64, x64, '%s140.dll')
+  else:
+    # VS2013 is the default.
+    _CopyRuntime2013(out_debug,          x86, 'msvc%s120d.dll')
+    _CopyRuntime2013(out_release,        x86, 'msvc%s120.dll')
+    _CopyRuntime2013(out_debug_x64,      x64, 'msvc%s120d.dll')
+    _CopyRuntime2013(out_release_x64,    x64, 'msvc%s120.dll')
+    _CopyRuntime2013(out_debug_nacl64,   x64, 'msvc%s120d.dll')
+    _CopyRuntime2013(out_release_nacl64, x64, 'msvc%s120.dll')
 
   # Copy the PGO runtime library to the release directories.
   if os.environ.get('GYP_MSVS_OVERRIDE_PATH'):
     pgo_x86_runtime_dir = os.path.join(os.environ.get('GYP_MSVS_OVERRIDE_PATH'),
                                        'VC', 'bin')
     pgo_x64_runtime_dir = os.path.join(pgo_x86_runtime_dir, 'amd64')
-    pgo_runtime_dll = 'pgort120.dll'
+    pgo_runtime_dll = 'pgort' + _VersionNumber() + '.dll'
     source_x86 = os.path.join(pgo_x86_runtime_dir, pgo_runtime_dll)
     if os.path.exists(source_x86):
       _CopyRuntimeImpl(os.path.join(out_release, pgo_runtime_dll), source_x86)
@@ -144,27 +178,38 @@ def CopyDlls(target_dir, configuration, target_cpu):
 
   x64_runtime, x86_runtime = vs2013_runtime_dll_dirs
   runtime_dir = x64_runtime if target_cpu == 'x64' else x86_runtime
-  _CopyRuntime(target_dir, runtime_dir, 'msvc%s120.dll')
+  _CopyRuntime2013(
+      target_dir, runtime_dir, 'msvc%s' + _VersionNumber() + '.dll')
   if configuration == 'Debug':
-    _CopyRuntime(target_dir, runtime_dir, 'msvc%s120d.dll')
+    _CopyRuntime2013(
+        target_dir, runtime_dir, 'msvc%s' + _VersionNumber() + 'd.dll')
 
 
 def _GetDesiredVsToolchainHashes():
   """Load a list of SHA1s corresponding to the toolchains that we want installed
   to build with."""
-  sha1path = os.path.join(script_dir, 'toolchain_vs2013.hash')
-  with open(sha1path, 'rb') as f:
-    return f.read().strip().splitlines()
+  if os.environ.get('GYP_MSVS_VERSION') == '2015':
+    return ['49ae4b60d898182fc3f521c2fcda82c453915011']
+  else:
+    # Default to VS2013.
+    return ['ee7d718ec60c2dc5d255bbe325909c2021a7efef']
 
 
-def Update():
+def Update(force=False):
   """Requests an update of the toolchain to the specific hashes we have at
   this revision. The update outputs a .json of the various configuration
   information required to pass to gyp which we use in |GetToolchainDir()|.
   """
+  if force != False and force != '--force':
+    print >>sys.stderr, 'Unknown parameter "%s"' % force
+    return 1
+  if force == '--force' or os.path.exists(json_data_file):
+    force = True
+
   depot_tools_win_toolchain = \
       bool(int(os.environ.get('DEPOT_TOOLS_WIN_TOOLCHAIN', '1')))
-  if sys.platform in ('win32', 'cygwin') and depot_tools_win_toolchain:
+  if ((sys.platform in ('win32', 'cygwin') or force) and
+        depot_tools_win_toolchain):
     import find_depot_tools
     depot_tools_path = find_depot_tools.add_depot_tools_to_path()
     get_toolchain_args = [
@@ -174,6 +219,8 @@ def Update():
                     'get_toolchain_if_necessary.py'),
         '--output-json', json_data_file,
       ] + _GetDesiredVsToolchainHashes()
+    if force:
+      get_toolchain_args.append('--force')
     subprocess.check_call(get_toolchain_args)
 
   return 0
@@ -204,8 +251,6 @@ runtime_dirs = "%s"
 
 
 def main():
-  if not sys.platform.startswith(('win32', 'cygwin')):
-    return 0
   commands = {
       'update': Update,
       'get_toolchain_dir': GetToolchainDir,

@@ -4,6 +4,7 @@
 
 #include "content/browser/webui/web_ui_impl.h"
 
+#include "base/debug/dump_without_crashing.h"
 #include "base/json/json_writer.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -36,7 +37,7 @@ base::string16 WebUI::GetJavascriptCall(
     if (i > 0)
       parameters += base::char16(',');
 
-    base::JSONWriter::Write(arg_list[i], &json);
+    base::JSONWriter::Write(*arg_list[i], &json);
     parameters += base::UTF8ToUTF16(json);
   }
   return base::ASCIIToUTF16(function_name) +
@@ -83,15 +84,6 @@ void WebUIImpl::OnWebUISend(const GURL& source_url,
 
 void WebUIImpl::RenderViewCreated(RenderViewHost* render_view_host) {
   controller_->RenderViewCreated(render_view_host);
-
-  // Do not attempt to set the toolkit property if WebUI is not enabled, e.g.,
-  // the bookmarks manager page.
-  if (!(bindings_ & BINDINGS_POLICY_WEB_UI))
-    return;
-
-#if defined(TOOLKIT_VIEWS)
-  render_view_host->SetWebUIProperty("toolkit", "views");
-#endif  // defined(TOOLKIT_VIEWS)
 }
 
 WebContents* WebUIImpl::GetWebContents() const {
@@ -228,8 +220,19 @@ void WebUIImpl::AddMessageHandler(WebUIMessageHandler* handler) {
 
 void WebUIImpl::ExecuteJavascript(const base::string16& javascript) {
   RenderFrameHost* target_frame = TargetFrame();
-  if (target_frame)
+  if (target_frame) {
+    if (!(ChildProcessSecurityPolicyImpl::GetInstance()->HasWebUIBindings(
+              target_frame->GetProcess()->GetID()) ||
+          // It's possible to load about:blank in a Web UI renderer.
+          // See http://crbug.com/42547
+          target_frame->GetLastCommittedURL().spec() == url::kAboutBlankURL)) {
+      // Don't crash when we try to inject JavaScript into a non-WebUI page, but
+      // upload a crash report anyways. http://crbug.com/516690
+      base::debug::DumpWithoutCrashing();
+      return;
+    }
     target_frame->ExecuteJavaScript(javascript);
+  }
 }
 
 RenderFrameHost* WebUIImpl::TargetFrame() {

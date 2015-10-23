@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
@@ -20,11 +21,11 @@
 #include "chrome/test/base/testing_profile_manager.h"
 #include "chromeos/cryptohome/system_salt_getter.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "components/invalidation/fake_invalidation_handler.h"
-#include "components/invalidation/invalidation_service.h"
-#include "components/invalidation/invalidator_state.h"
-#include "components/invalidation/profile_invalidation_provider.h"
-#include "components/invalidation/ticl_invalidation_service.h"
+#include "components/invalidation/impl/fake_invalidation_handler.h"
+#include "components/invalidation/impl/profile_invalidation_provider.h"
+#include "components/invalidation/impl/ticl_invalidation_service.h"
+#include "components/invalidation/public/invalidation_service.h"
+#include "components/invalidation/public/invalidator_state.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "content/public/browser/browser_context.h"
@@ -41,14 +42,14 @@ const char kAffiliatedUserID1[] = "test_1@example.com";
 const char kAffiliatedUserID2[] = "test_2@example.com";
 const char kUnaffiliatedUserID[] = "test@other_domain.test";
 
-KeyedService* BuildProfileInvalidationProvider(
+scoped_ptr<KeyedService> BuildProfileInvalidationProvider(
     content::BrowserContext* context) {
   scoped_ptr<invalidation::FakeInvalidationService> invalidation_service(
       new invalidation::FakeInvalidationService);
   invalidation_service->SetInvalidatorState(
       syncer::TRANSIENT_INVALIDATION_ERROR);
-  return new invalidation::ProfileInvalidationProvider(
-      invalidation_service.Pass());
+  return make_scoped_ptr(new invalidation::ProfileInvalidationProvider(
+      invalidation_service.Pass()));
 }
 
 }  // namespace

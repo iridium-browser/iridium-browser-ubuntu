@@ -20,7 +20,6 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/webui/options/core_options_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/browser/google_util.h"
@@ -195,14 +194,18 @@ GURL GetReauthURL(Profile* profile, const std::string& account_id) {
   AccountTrackerService::AccountInfo info =
       AccountTrackerServiceFactory::GetForProfile(profile)->
           GetAccountInfo(account_id);
+  return GetReauthURLWithEmail(info.email);
+}
 
+GURL GetReauthURLWithEmail(const std::string& email) {
   signin_metrics::Source source = switches::IsNewAvatarMenu() ?
       signin_metrics::SOURCE_REAUTH : signin_metrics::SOURCE_SETTINGS;
 
   GURL url = signin::GetPromoURL(
       source, true /* auto_close */,
       switches::IsNewAvatarMenu() /* is_constrained */);
-  url = net::AppendQueryParameter(url, "email", info.email);
+
+  url = net::AppendQueryParameter(url, "email", email);
   url = net::AppendQueryParameter(url, "validateEmail", "1");
   return net::AppendQueryParameter(url, "readOnlyEmail", "1");
 }

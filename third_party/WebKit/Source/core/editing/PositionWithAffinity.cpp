@@ -7,24 +7,33 @@
 
 namespace blink {
 
-PositionWithAffinity::PositionWithAffinity(const Position& position, EAffinity affinity)
+template <typename Strategy>
+PositionWithAffinityTemplate<Strategy>::PositionWithAffinityTemplate(const PositionAlgorithm<Strategy>& position, TextAffinity affinity)
     : m_position(position)
     , m_affinity(affinity)
 {
 }
 
-PositionWithAffinity::PositionWithAffinity()
-    : m_affinity(DOWNSTREAM)
+template <typename Strategy>
+PositionWithAffinityTemplate<Strategy>::PositionWithAffinityTemplate()
+    : m_affinity(TextAffinity::Downstream)
 {
 }
 
-PositionWithAffinity::~PositionWithAffinity()
+template <typename Strategy>
+PositionWithAffinityTemplate<Strategy>::~PositionWithAffinityTemplate()
 {
 }
 
-DEFINE_TRACE(PositionWithAffinity)
+template <typename Strategy>
+bool PositionWithAffinityTemplate<Strategy>::operator==(const PositionWithAffinityTemplate& other) const
 {
-    visitor->trace(m_position);
+    if (isNull())
+        return other.isNull();
+    return m_affinity == other.m_affinity && m_position == other.m_position;
 }
+
+template class CORE_TEMPLATE_EXPORT PositionWithAffinityTemplate<EditingStrategy>;
+template class CORE_TEMPLATE_EXPORT PositionWithAffinityTemplate<EditingInComposedTreeStrategy>;
 
 } // namespace blink

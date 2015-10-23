@@ -8,14 +8,14 @@
 #include <map>
 
 #include "ash/ash_export.h"
-#include "ash/display/display_controller.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/shell_observer.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "chromeos/accelerometer/accelerometer_reader.h"
 #include "chromeos/accelerometer/accelerometer_types.h"
 #include "content/public/browser/screen_orientation_delegate.h"
-#include "third_party/WebKit/public/platform/WebScreenOrientationLockType.h"
+#include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationLockType.h"
 #include "ui/aura/window_observer.h"
 #include "ui/gfx/display.h"
 #include "ui/wm/public/activation_change_observer.h"
@@ -36,7 +36,7 @@ class ASH_EXPORT ScreenOrientationController
       public aura::WindowObserver,
       public chromeos::AccelerometerReader::Observer,
       public content::ScreenOrientationDelegate,
-      public DisplayController::Observer,
+      public WindowTreeHostManager::Observer,
       public ShellObserver {
  public:
   // Observer that reports changes to the state of ScreenOrientationProvider's
@@ -76,8 +76,10 @@ class ASH_EXPORT ScreenOrientationController
                           gfx::Display::RotationSource source);
 
   // aura::client::ActivationChangeObserver:
-  void OnWindowActivated(aura::Window* gained_active,
-                         aura::Window* lost_active) override;
+  void OnWindowActivated(
+      aura::client::ActivationChangeObserver::ActivationReason reason,
+      aura::Window* gained_active,
+      aura::Window* lost_active) override;
 
   // aura::WindowObserver:
   void OnWindowVisibilityChanged(aura::Window* window, bool visible) override;
@@ -94,7 +96,7 @@ class ASH_EXPORT ScreenOrientationController
   bool ScreenOrientationProviderSupported() override;
   void Unlock(content::WebContents* web_contents) override;
 
-  // DisplayController::Observer:
+  // WindowTreeHostManager::Observer:
   void OnDisplayConfigurationChanged() override;
 
   // ShellObserver:
@@ -179,7 +181,7 @@ class ASH_EXPORT ScreenOrientationController
   gfx::Display::Rotation current_rotation_;
 
   // Rotation Lock observers.
-  ObserverList<Observer> observers_;
+  base::ObserverList<Observer> observers_;
 
   // Tracks all windows that have requested a lock, as well as the requested
   // orientation.

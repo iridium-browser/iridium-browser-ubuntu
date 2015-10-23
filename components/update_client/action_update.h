@@ -15,6 +15,7 @@
 #include "base/version.h"
 #include "components/update_client/action.h"
 #include "components/update_client/component_unpacker.h"
+#include "components/update_client/crx_downloader.h"
 #include "components/update_client/update_client.h"
 #include "components/update_client/update_engine.h"
 #include "url/gurl.h"
@@ -24,8 +25,12 @@ namespace update_client {
 class UpdateChecker;
 
 // Defines a template method design pattern for ActionUpdate. This class
-// implements the common code for updating a CRX using either differential or
-// full updates algorithm.
+// implements the common code for updating a single CRX using either
+// a differential or a full update algorithm.
+// TODO(sorin): further refactor this class to enforce that there is a 1:1
+// relationship between one instance of this class and one CRX id. In other
+// words, make the CRX id and its associated CrxUpdateItem data structure
+// a member of this class instead of passing them around as function parameters.
 class ActionUpdate : public Action, protected ActionImpl {
  public:
   ActionUpdate();
@@ -53,14 +58,14 @@ class ActionUpdate : public Action, protected ActionImpl {
   // Called when progress is being made downloading a CRX. The progress may
   // not monotonically increase due to how the CRX downloader switches between
   // different downloaders and fallback urls.
-  void DownloadProgress(const std::string& crx_id,
+  void DownloadProgress(const std::string& id,
                         const CrxDownloader::Result& download_result);
 
   // Called when the CRX package has been downloaded to a temporary location.
-  void DownloadComplete(const std::string& crx_id,
+  void DownloadComplete(const std::string& id,
                         const CrxDownloader::Result& download_result);
 
-  void Install(const std::string& crx_id, const base::FilePath& crx_path);
+  void Install(const std::string& id, const base::FilePath& crx_path);
 
   // TODO(sorin): refactor the public interface of ComponentUnpacker so
   // that these calls can run on the main thread.
@@ -74,9 +79,15 @@ class ActionUpdate : public Action, protected ActionImpl {
                                         ComponentUnpacker::Error error,
                                         int extended_error);
 
-  void DoneInstalling(const std::string& crx_id,
+  void DoneInstalling(const std::string& id,
                       ComponentUnpacker::Error error,
                       int extended_error);
+
+  // Downloads updates for one CRX id only.
+  scoped_ptr<CrxDownloader> crx_downloader_;
+
+  // Unpacks one CRX.
+  scoped_refptr<ComponentUnpacker> unpacker_;
 
   DISALLOW_COPY_AND_ASSIGN(ActionUpdate);
 };
@@ -108,7 +119,7 @@ class ActionUpdateDiff : public ActionUpdate {
   DISALLOW_COPY_AND_ASSIGN(ActionUpdateDiff);
 };
 
-class ActionUpdateFull : ActionUpdate {
+class ActionUpdateFull : public ActionUpdate {
  public:
   static scoped_ptr<Action> Create();
 

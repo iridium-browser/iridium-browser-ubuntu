@@ -19,6 +19,16 @@ from chromite.lib import portage_util
 from chromite.lib import toolchain
 
 
+class ConfigurationError(Exception):
+  """Raised when an invalid configuration is found."""
+
+
+STANDARD_FIELD_PORTDIR_OVERLAY = 'PORTDIR_OVERLAY'
+STANDARD_FIELD_CHOST = 'CHOST'
+STANDARD_FIELD_BOARD_OVERLAY = 'BOARD_OVERLAY'
+STANDARD_FIELD_BOARD_USE = 'BOARD_USE'
+STANDARD_FIELD_ARCH = 'ARCH'
+
 _PORTAGE_WRAPPER_TEMPLATE = """#!/bin/sh
 
 # If we try to use sudo when the sandbox is active, we get ugly warnings that
@@ -29,7 +39,6 @@ else
   unset LD_PRELOAD
 fi
 
-export CHROMEOS_ROOT="{source_root}"
 export CHOST="{chost}"
 export PORTAGE_CONFIGROOT="{sysroot}"
 export SYSROOT="{sysroot}"
@@ -50,6 +59,10 @@ PKG_CONFIG_LIBDIR=$(printf '%s:' "{sysroot}"/usr/*/pkgconfig)
 export PKG_CONFIG_LIBDIR
 
 export PKG_CONFIG_SYSROOT_DIR="{sysroot}"
+
+# Portage will get confused and try to "help" us by exporting this.
+# Undo that logic.
+unset PKG_CONFIG_PATH
 
 exec pkg-config "$@"
 """
@@ -136,6 +149,7 @@ class Sysroot(object):
 
     Args:
       field: Field from the standard configuration file to get.
+        One of STANDARD_FIELD_* from above.
     """
     return osutils.SourceEnvironment(self._config_file,
                                      [field], multiline=True).get(field)
@@ -209,11 +223,10 @@ class Sysroot(object):
       friendly_name: if not None, create friendly wrappers with |friendly_name|
         added to the command.
     """
-    chost = self.GetStandardField('CHOST')
+    chost = self.GetStandardField(STANDARD_FIELD_CHOST)
     for cmd in ('ebuild', 'eclean', 'emaint', 'equery', 'portageq', 'qcheck',
                 'qdepends', 'qfile', 'qlist', 'qmerge', 'qsize'):
-      args = {'sysroot': self.path, 'chost': chost, 'command': cmd,
-              'source_root': constants.SOURCE_ROOT}
+      args = {'sysroot': self.path, 'chost': chost, 'command': cmd}
       if friendly_name:
         _CreateWrapper(self._WrapperPath(cmd, friendly_name),
                        _PORTAGE_WRAPPER_TEMPLATE, **args)
@@ -250,32 +263,58 @@ class Sysroot(object):
 
     osutils.SafeSymlink(sysroot_debug, debug_symlink, sudo=True)
 
+  def _GenerateConfig(self, toolchains, board_overlays, portdir_overlays,
+                      header, **kwargs):
+    """Create common config settings for boards and bricks.
+
+    Args:
+      toolchains: ToolchainList object to use.
+      board_overlays: List of board overlays.
+      portdir_overlays: List of portage overlays.
+      header: Header comment string; must start with #.
+      kwargs: Additional configuration values to set.
+
+    Returns:
+      Configuration string.
+
+    Raises:
+      ConfigurationError: Could not generate a valid configuration.
+    """
+    config = {}
+
+    default_toolchains = toolchain.FilterToolchains(toolchains, 'default', True)
+    if not default_toolchains:
+      raise ConfigurationError('No default toolchain could be found.')
+    config['CHOST'] = default_toolchains.keys()[0]
+    config['ARCH'] = toolchain.GetArchForTarget(config['CHOST'])
+
+    config['BOARD_OVERLAY'] = '\n'.join(board_overlays)
+    config['PORTDIR_OVERLAY'] = '\n'.join(portdir_overlays)
+
+    config['MAKEOPTS'] = '-j%s' % str(multiprocessing.cpu_count())
+    config['ROOT'] = self.path + '/'
+    config['PKG_CONFIG'] = self._WrapperPath('pkg-config')
+
+    config.update(kwargs)
+
+    return '\n'.join((header, _DictToKeyValue(config)))
+
   def GenerateBoardConfig(self, board):
     """Generates the configuration for a given board.
 
     Args:
       board: board name to use to generate the configuration.
     """
-    config = {}
     toolchains = toolchain.GetToolchainsForBoard(board)
-    config['CHOST'] = toolchain.FilterToolchains(toolchains, 'default',
-                                                 True).keys()[0]
-    config['ARCH'] = toolchain.GetArchForTarget(config['CHOST'])
 
     # Compute the overlay list.
-    overlay_list = portage_util.FindOverlays(constants.BOTH_OVERLAYS, board)
+    portdir_overlays = portage_util.FindOverlays(constants.BOTH_OVERLAYS, board)
     prefix = os.path.join(constants.SOURCE_ROOT, 'src', 'third_party')
-    config['BOARD_OVERLAY'] = '\n'.join([o for o in overlay_list
-                                         if not o.startswith(prefix)])
-    config['PORTDIR_OVERLAY'] = '\n'.join(overlay_list)
-
-    config['MAKEOPTS'] = '-j%s' % str(multiprocessing.cpu_count())
-    config['BOARD_USE'] = board
-    config['ROOT'] = self.path + '/'
-    config['PKG_CONFIG'] = self._WrapperPath('pkg-config')
+    board_overlays = [o for o in portdir_overlays if not o.startswith(prefix)]
 
     header = "# Created by cros_sysroot_utils from --board=%s." % board
-    return '\n'.join((header, _DictToKeyValue(config)))
+    return self._GenerateConfig(toolchains, board_overlays, portdir_overlays,
+                                header, BOARD_USE=board)
 
   def GenerateBrickConfig(self, bricks, bsp=None):
     """Generates the configuration for a given brick stack and bsp.
@@ -284,35 +323,23 @@ class Sysroot(object):
       bricks: The brick stack, expanded, excluding the bsp.
       bsp: BSP to use.
     """
-    config = {}
-
     brick_list = bricks
     if bsp:
       brick_list = bsp.BrickStack() + brick_list
 
-    board_overlay_list = [b.OverlayDir() for b in brick_list]
-    portdir_overlay_list = ([_CHROMIUMOS_OVERLAY, _ECLASS_OVERLAY] +
-                            board_overlay_list)
+    board_overlays = [b.OverlayDir() for b in brick_list]
+    portdir_overlays = [_CHROMIUMOS_OVERLAY, _ECLASS_OVERLAY] + board_overlays
 
     # If the bsp is not set use the highest priority brick. This is meant to
     # preserve support for building with --brick.
     # TODO(bsimonnet): remove this once we remove support for --brick
     # (brbug.com/916).
     bsp = bsp or bricks[-1]
-
     toolchains = toolchain.GetToolchainsForBrick(bsp.brick_locator)
-    config['CHOST'] = toolchain.FilterToolchains(toolchains, 'default',
-                                                 True).keys()[0]
-    config['ARCH'] = toolchain.GetArchForTarget(config['CHOST'])
-
-    config['BOARD_OVERLAY'] = '\n'.join(board_overlay_list)
-    config['PORTDIR_OVERLAY'] = '\n'.join(portdir_overlay_list)
-    config['MAKEOPTS'] = '-j%s' % str(multiprocessing.cpu_count())
-    config['ROOT'] = self.path + '/'
-    config['PKG_CONFIG'] = self._WrapperPath('pkg-config')
 
     header = '# Autogenerated by chromite.lib.sysroot_lib.'
-    return '\n'.join((header, _DictToKeyValue(config)))
+    return self._GenerateConfig(toolchains, board_overlays, portdir_overlays,
+                                header)
 
   def WriteConfig(self, config):
     """Writes the configuration.
@@ -336,7 +363,7 @@ class Sysroot(object):
 
   # Source make.conf from each overlay."""]
 
-    overlay_list = self.GetStandardField('BOARD_OVERLAY')
+    overlay_list = self.GetStandardField(STANDARD_FIELD_BOARD_OVERLAY)
     boto_config = ''
     for overlay in overlay_list.splitlines():
       make_conf = os.path.join(overlay, 'make.conf')
@@ -372,7 +399,7 @@ class Sysroot(object):
       chrome_only: If True, generate only the binhost for chrome.
       local_only: If True, use binary packages from local boards only.
     """
-    board = self.GetStandardField('BOARD_USE')
+    board = self.GetStandardField(STANDARD_FIELD_BOARD_USE)
     if local_only:
       if not board:
         return ''
@@ -469,7 +496,7 @@ PORTAGE_BINHOST="$PORTAGE_BINHOST $LATEST_RELEASE_CHROME_BINHOST"
       board: Board name.
     """
     prefixes = []
-    arch = self.GetStandardField('ARCH')
+    arch = self.GetStandardField(STANDARD_FIELD_ARCH)
     if arch in _ARCH_MAPPING:
       prefixes.append(_ARCH_MAPPING[arch])
 
@@ -525,14 +552,11 @@ PORTAGE_BINHOST="$PORTAGE_BINHOST $LATEST_RELEASE_CHROME_BINHOST"
     The best make.conf possible is the ARCH-specific make.conf. If it does not
     exist, we use the generic make.conf.
     """
-    for key in (self.GetStandardField('ARCH'), 'generic'):
-      make_conf = os.path.join(
-          constants.SOURCE_ROOT, constants.CHROMIUMOS_OVERLAY_DIR, 'chromeos',
-          'config', 'make.conf.%s-target' % key)
-      if os.path.exists(make_conf):
-        link = os.path.join(self.path, 'etc', 'make.conf')
-        osutils.SafeSymlink(make_conf, link, sudo=True)
-        return
+    make_conf = os.path.join(
+        constants.SOURCE_ROOT, constants.CHROMIUMOS_OVERLAY_DIR, 'chromeos',
+        'config', 'make.conf.generic-target')
+    link = os.path.join(self.path, 'etc', 'make.conf')
+    osutils.SafeSymlink(make_conf, link, sudo=True)
 
   def _GenerateProfile(self):
     """Generates the portage profile for this sysroot.
@@ -540,7 +564,7 @@ PORTAGE_BINHOST="$PORTAGE_BINHOST $LATEST_RELEASE_CHROME_BINHOST"
     The generated portage profile depends on the profiles of all used bricks in
     order as well as the general brillo profile for this architecture.
     """
-    overlays = self.GetStandardField('BOARD_OVERLAY').splitlines()
+    overlays = self.GetStandardField(STANDARD_FIELD_BOARD_OVERLAY).splitlines()
     profile_list = [os.path.join(o, 'profiles', 'base') for o in overlays]
 
     # Keep only the profiles that exist.
@@ -549,15 +573,16 @@ PORTAGE_BINHOST="$PORTAGE_BINHOST $LATEST_RELEASE_CHROME_BINHOST"
     # Add the arch specific profile.
     # The profile list is ordered from the lowest to the highest priority. This
     # profile has to go first so that other profiles can override it.
-    arch = self.GetStandardField('ARCH')
+    arch = self.GetStandardField(STANDARD_FIELD_ARCH)
     profile_list.insert(0, 'chromiumos:default/linux/%s/brillo' % arch)
 
     generated_parent = os.path.join(self.path, 'build', 'generated_profile',
                                     'parent')
     osutils.WriteFile(
         generated_parent, '\n'.join(profile_list), sudo=True, makedirs=True)
-    osutils.SafeSymlink(os.path.dirname(generated_parent),
-                        os.path.join(self.path, 'etc', 'make.profile'),
+    profile_link = os.path.join(self.path, 'etc', 'portage', 'make.profile')
+    osutils.SafeMakedirs(os.path.dirname(profile_link), sudo=True)
+    osutils.SafeSymlink(os.path.dirname(generated_parent), profile_link,
                         sudo=True)
 
   def GeneratePortageConfig(self):

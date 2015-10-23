@@ -29,6 +29,7 @@
 
 #include <algorithm>
 
+#include "webrtc/base/criticalsection.h"
 #include "webrtc/base/gunit.h"
 #include "webrtc/base/scoped_ref_ptr.h"
 #include "webrtc/base/thread.h"
@@ -48,25 +49,25 @@ class FakeAdmTest : public testing::Test,
   }
 
   virtual void SetUp() {
-    fake_audio_capture_module_ = FakeAudioCaptureModule::Create(
-        rtc::Thread::Current());
+    fake_audio_capture_module_ = FakeAudioCaptureModule::Create();
     EXPECT_TRUE(fake_audio_capture_module_.get() != NULL);
   }
 
   // Callbacks inherited from webrtc::AudioTransport.
   // ADM is pushing data.
-  virtual int32_t RecordedDataIsAvailable(const void* audioSamples,
-                                          const uint32_t nSamples,
-                                          const uint8_t nBytesPerSample,
-                                          const uint8_t nChannels,
-                                          const uint32_t samplesPerSec,
-                                          const uint32_t totalDelayMS,
-                                          const int32_t clockDrift,
-                                          const uint32_t currentMicLevel,
-                                          const bool keyPressed,
-                                          uint32_t& newMicLevel) {
+  int32_t RecordedDataIsAvailable(const void* audioSamples,
+                                  const uint32_t nSamples,
+                                  const uint8_t nBytesPerSample,
+                                  const uint8_t nChannels,
+                                  const uint32_t samplesPerSec,
+                                  const uint32_t totalDelayMS,
+                                  const int32_t clockDrift,
+                                  const uint32_t currentMicLevel,
+                                  const bool keyPressed,
+                                  uint32_t& newMicLevel) override {
+    rtc::CritScope cs(&crit_);
     rec_buffer_bytes_ = nSamples * nBytesPerSample;
-    if ((rec_buffer_bytes_ <= 0) ||
+    if ((rec_buffer_bytes_ == 0) ||
         (rec_buffer_bytes_ > FakeAudioCaptureModule::kNumberSamples *
          FakeAudioCaptureModule::kNumberBytesPerSample)) {
       ADD_FAILURE();
@@ -79,14 +80,15 @@ class FakeAdmTest : public testing::Test,
   }
 
   // ADM is pulling data.
-  virtual int32_t NeedMorePlayData(const uint32_t nSamples,
-                                   const uint8_t nBytesPerSample,
-                                   const uint8_t nChannels,
-                                   const uint32_t samplesPerSec,
-                                   void* audioSamples,
-                                   uint32_t& nSamplesOut,
-                                   int64_t* elapsed_time_ms,
-                                   int64_t* ntp_time_ms) {
+  int32_t NeedMorePlayData(const uint32_t nSamples,
+                           const uint8_t nBytesPerSample,
+                           const uint8_t nChannels,
+                           const uint32_t samplesPerSec,
+                           void* audioSamples,
+                           uint32_t& nSamplesOut,
+                           int64_t* elapsed_time_ms,
+                           int64_t* ntp_time_ms) override {
+    rtc::CritScope cs(&crit_);
     ++pull_iterations_;
     const uint32_t audio_buffer_size = nSamples * nBytesPerSample;
     const uint32_t bytes_out = RecordedDataReceived() ?
@@ -98,8 +100,14 @@ class FakeAdmTest : public testing::Test,
     return 0;
   }
 
-  int push_iterations() const { return push_iterations_; }
-  int pull_iterations() const { return pull_iterations_; }
+  int push_iterations() const {
+    rtc::CritScope cs(&crit_);
+    return push_iterations_;
+  }
+  int pull_iterations() const {
+    rtc::CritScope cs(&crit_);
+    return pull_iterations_;
+  }
 
   rtc::scoped_refptr<FakeAudioCaptureModule> fake_audio_capture_module_;
 
@@ -117,6 +125,8 @@ class FakeAdmTest : public testing::Test,
     memcpy(audio_buffer, rec_buffer_, min_buffer_size);
     return min_buffer_size;
   }
+
+  mutable rtc::CriticalSection crit_;
 
   int push_iterations_;
   int pull_iterations_;

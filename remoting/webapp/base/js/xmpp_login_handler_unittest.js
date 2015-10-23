@@ -46,8 +46,9 @@ QUnit.module('XmppLoginHandler', {
     onError = /** @type {function(remoting.Error, string):void} */(onError_spy);
 
     loginHandler = new remoting.XmppLoginHandler(
-        'google.com', testUsername, testToken, false,
-        sendMessage, startTls, onHandshakeDone, onError);
+        'google.com', testUsername, testToken,
+        remoting.TlsMode.WITHOUT_HANDSHAKE, sendMessage, startTls,
+        onHandshakeDone, onError);
   }
 });
 
@@ -124,8 +125,8 @@ QUnit.test('should authenticate', function() {
 
 QUnit.test('use <starttls> handshake', function() {
   loginHandler = new remoting.XmppLoginHandler(
-      'google.com', testUsername, testToken, true, sendMessage,
-      startTls, onHandshakeDone, onError);
+      'google.com', testUsername, testToken, remoting.TlsMode.WITH_HANDSHAKE,
+      sendMessage, startTls, onHandshakeDone, onError);
   loginHandler.start();
 
   sinon.assert.calledWith(
@@ -137,7 +138,7 @@ QUnit.test('use <starttls> handshake', function() {
 
   loginHandler.onDataReceived(base.encodeUtf8(
       '<stream:stream from="google.com" id="78A87C70559EF28A" version="1.0" ' +
-          'xmlns:stream="http://etherx.jabber.org/streams"' +
+          'xmlns:stream="http://etherx.jabber.org/streams" ' +
           'xmlns="jabber:client">' +
         '<stream:features>' +
           '<starttls xmlns="urn:ietf:params:xml:ns:xmpp-tls">' +

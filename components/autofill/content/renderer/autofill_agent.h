@@ -141,7 +141,7 @@ class AutofillAgent : public content::RenderFrameObserver,
   virtual void openTextDataListChooser(const blink::WebInputElement& element);
   virtual void dataListOptionsChanged(const blink::WebInputElement& element);
   virtual void firstUserGestureObserved();
-  virtual void xhrSucceeded();
+  virtual void ajaxSucceeded();
 
   void OnFieldTypePredictionsAvailable(
       const std::vector<FormDataPredictions>& forms);
@@ -220,6 +220,10 @@ class AutofillAgent : public content::RenderFrameObserver,
 
   // Hides any currently showing Autofill popup.
   void HidePopup();
+
+  // Returns true if the text field change is due to a user gesture. Can be
+  // overriden in tests.
+  virtual bool IsUserGesture() const;
 
   // Formerly cached forms for all frames, now only caches forms for the current
   // frame.

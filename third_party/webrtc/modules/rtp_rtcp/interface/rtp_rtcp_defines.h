@@ -252,8 +252,6 @@ public:
     virtual void OnIncomingCSRCChanged( const int32_t id,
                                         const uint32_t CSRC,
                                         const bool added) = 0;
-
-    virtual void ResetStatistics(uint32_t ssrc) = 0;
 };
 
 class RtpAudioFeedback {
@@ -295,6 +293,17 @@ class RtcpBandwidthObserver {
   virtual ~RtcpBandwidthObserver() {}
 };
 
+class SendTimeObserver {
+ public:
+  SendTimeObserver() {}
+  virtual ~SendTimeObserver() {}
+
+  // Transport-wide sequence number and timestamp (system time in milliseconds),
+  // of when the packet was put on the wire.
+  virtual void OnPacketSent(uint16_t transport_sequence_number,
+                            int64_t send_time) = 0;
+};
+
 class RtcpRttStats {
  public:
   virtual void OnRttUpdate(int64_t rtt) = 0;
@@ -323,8 +332,6 @@ class NullRtpFeedback : public RtpFeedback {
   void OnIncomingCSRCChanged(const int32_t id,
                              const uint32_t CSRC,
                              const bool added) override {}
-
-  void ResetStatistics(uint32_t ssrc) override {}
 };
 
 // Null object version of RtpData.
@@ -352,6 +359,19 @@ class NullRtpAudioFeedback : public RtpAudioFeedback {
                             const uint8_t event,
                             const uint16_t lengthMs,
                             const uint8_t volume) override {}
+};
+
+// Statistics about packet loss for a single directional connection. All values
+// are totals since the connection initiated.
+struct RtpPacketLossStats {
+  // The number of packets lost in events where no adjacent packets were also
+  // lost.
+  uint64_t single_packet_loss_count;
+  // The number of events in which more than one adjacent packet was lost.
+  uint64_t multiple_packet_loss_event_count;
+  // The number of packets lost in events where more than one adjacent packet
+  // was lost.
+  uint64_t multiple_packet_loss_packet_count;
 };
 
 }  // namespace webrtc

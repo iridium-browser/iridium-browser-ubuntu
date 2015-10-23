@@ -6,6 +6,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
+#include "base/values.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,14 +14,14 @@
 #include "chrome/common/pref_names.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "jni/DataReductionProxySettings_jni.h"
 #include "net/proxy/proxy_server.h"
+#include "url/gurl.h"
 
 
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ScopedJavaLocalRef;
-using data_reduction_proxy::DataReductionProxyParams;
 using data_reduction_proxy::DataReductionProxySettings;
 
 DataReductionProxySettingsAndroid::DataReductionProxySettingsAndroid() {
@@ -41,7 +42,7 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyPromoAllowed(
 
 jboolean DataReductionProxySettingsAndroid::IsIncludedInAltFieldTrial(
     JNIEnv* env, jobject obj) {
-  return DataReductionProxyParams::IsIncludedInAlternativeFieldTrial();
+  return false;
 }
 
 jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyEnabled(
@@ -49,9 +50,40 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyEnabled(
   return Settings()->IsDataReductionProxyEnabled();
 }
 
+jboolean DataReductionProxySettingsAndroid::CanUseDataReductionProxy(
+    JNIEnv* env, jobject obj, jstring url) {
+  return Settings()->CanUseDataReductionProxy(
+      GURL(base::android::ConvertJavaStringToUTF16(env, url)));
+}
+
+jboolean DataReductionProxySettingsAndroid::WasLoFiModeActiveOnMainFrame(
+    JNIEnv* env, jobject obj) {
+  return Settings()->WasLoFiModeActiveOnMainFrame();
+}
+
+jboolean DataReductionProxySettingsAndroid::WasLoFiLoadImageRequestedBefore(
+    JNIEnv* env, jobject obj) {
+  return Settings()->WasLoFiLoadImageRequestedBefore();
+}
+
+void DataReductionProxySettingsAndroid::SetLoFiLoadImageRequested(
+    JNIEnv* env, jobject obj) {
+  Settings()->SetLoFiLoadImageRequested();
+}
+
 jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyManaged(
     JNIEnv* env, jobject obj) {
   return Settings()->IsDataReductionProxyManaged();
+}
+
+void DataReductionProxySettingsAndroid::IncrementLoFiSnackbarShown(
+    JNIEnv* env, jobject obj) {
+  Settings()->IncrementLoFiSnackbarShown();
+}
+
+void DataReductionProxySettingsAndroid::IncrementLoFiUserRequestsForImages(
+    JNIEnv* env, jobject obj) {
+  Settings()->IncrementLoFiUserRequestsForImages();
 }
 
 void DataReductionProxySettingsAndroid::SetDataReductionProxyEnabled(
@@ -125,6 +157,27 @@ DataReductionProxySettingsAndroid::GetDailyContentLengths(
   return ScopedJavaLocalRef<jlongArray>(env, result);
 }
 
+ScopedJavaLocalRef<jstring> DataReductionProxySettingsAndroid::GetHttpProxyList(
+    JNIEnv* env,
+    jobject obj) {
+  data_reduction_proxy::DataReductionProxyEventStore* event_store =
+      Settings()->GetEventStore();
+  if (!event_store)
+    return ConvertUTF8ToJavaString(env, std::string());
+
+  return ConvertUTF8ToJavaString(env, event_store->GetHttpProxyList());
+}
+
+ScopedJavaLocalRef<jstring>
+DataReductionProxySettingsAndroid::GetHttpsProxyList(JNIEnv* env, jobject obj) {
+  data_reduction_proxy::DataReductionProxyEventStore* event_store =
+      Settings()->GetEventStore();
+  if (!event_store)
+    return ConvertUTF8ToJavaString(env, std::string());
+
+  return ConvertUTF8ToJavaString(env, event_store->GetHttpsProxyList());
+}
+
 DataReductionProxySettings* DataReductionProxySettingsAndroid::Settings() {
   DataReductionProxySettings* settings =
       DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
@@ -133,6 +186,16 @@ DataReductionProxySettings* DataReductionProxySettingsAndroid::Settings() {
   return settings;
 }
 
+ScopedJavaLocalRef<jstring>
+DataReductionProxySettingsAndroid::GetLastBypassEvent(JNIEnv* env,
+                                                      jobject obj) {
+  data_reduction_proxy::DataReductionProxyEventStore* event_store =
+      Settings()->GetEventStore();
+  if (!event_store)
+    return ConvertUTF8ToJavaString(env, std::string());
+
+  return ConvertUTF8ToJavaString(env, event_store->SanitizedLastBypassEvent());
+}
 
 // Used by generated jni code.
 static jlong Init(JNIEnv* env, jobject obj) {

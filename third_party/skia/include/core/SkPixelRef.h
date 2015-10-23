@@ -10,34 +10,21 @@
 
 #include "SkAtomics.h"
 #include "SkBitmap.h"
+#include "SkFilterQuality.h"
 #include "SkImageInfo.h"
 #include "SkMutex.h"
+#include "SkPixmap.h"
 #include "SkRefCnt.h"
 #include "SkSize.h"
 #include "SkString.h"
 #include "SkTDArray.h"
-
-//#define xed
-
-#ifdef SK_DEBUG
-    /**
-     *  Defining SK_IGNORE_PIXELREF_SETPRELOCKED will force all pixelref
-     *  subclasses to correctly handle lock/unlock pixels. For performance
-     *  reasons, simple malloc-based subclasses call setPreLocked() to skip
-     *  the overhead of implementing these calls.
-     *
-     *  This build-flag disables that optimization, to add in debugging our
-     *  call-sites, to ensure that they correctly balance their calls of
-     *  lock and unlock.
-     */
-//    #define SK_IGNORE_PIXELREF_SETPRELOCKED
-#endif
 
 class SkColorTable;
 class SkData;
 struct SkIRect;
 
 class GrTexture;
+class SkDiscardableMemory;
 
 /** \class SkPixelRef
 
@@ -49,10 +36,7 @@ class GrTexture;
 */
 class SK_API SkPixelRef : public SkRefCnt {
 public:
-    SK_DECLARE_INST_COUNT(SkPixelRef)
-
     explicit SkPixelRef(const SkImageInfo&);
-    SkPixelRef(const SkImageInfo&, SkBaseMutex* mutex);
     virtual ~SkPixelRef();
 
     const SkImageInfo& info() const {
@@ -75,6 +59,8 @@ public:
      *  Calling lockPixels returns a LockRec struct (on success).
      */
     struct LockRec {
+        LockRec() : fPixels(NULL), fColorTable(NULL) {}
+
         void*           fPixels;
         SkColorTable*   fColorTable;
         size_t          fRowBytes;
@@ -152,7 +138,7 @@ public:
     /** Returns true if this pixelref is marked as immutable, meaning that the
         contents of its pixels will not change for the lifetime of the pixelref.
     */
-    bool isImmutable() const { return fIsImmutable; }
+    bool isImmutable() const { return fMutability != kMutable; }
 
     /** Marks this pixelref is immutable, meaning that the contents of its
         pixels will not change for the lifetime of the pixelref. This state can
@@ -192,6 +178,32 @@ public:
     SkData* refEncodedData() {
         return this->onRefEncodedData();
     }
+
+    struct LockRequest {
+        SkISize         fSize;
+        SkFilterQuality fQuality;
+    };
+
+    struct LockResult {
+        LockResult() : fPixels(NULL), fCTable(NULL) {}
+
+        void        (*fUnlockProc)(void* ctx);
+        void*       fUnlockContext;
+
+        const void* fPixels;
+        SkColorTable* fCTable;  // should be NULL unless colortype is kIndex8
+        size_t      fRowBytes;
+        SkISize     fSize;
+
+        void unlock() {
+            if (fUnlockProc) {
+                fUnlockProc(fUnlockContext);
+                fUnlockProc = NULL; // can't unlock twice!
+            }
+        }
+    };
+
+    bool requestLock(const LockRequest&, LockResult*);
 
     /** Are we really wrapping a texture instead of a bitmap?
      */
@@ -251,6 +263,13 @@ public:
         fAddedToCache.store(true);
     }
 
+    virtual SkDiscardableMemory* diagnostic_only_getDiscardable() const { return NULL; }
+
+    /**
+     *  Returns true if the pixels are generated on-the-fly (when required).
+     */
+    bool isLazyGenerated() const { return this->onIsLazyGenerated(); }
+
 protected:
     /**
      *  On success, returns true and fills out the LockRec for the pixels. On
@@ -285,6 +304,9 @@ protected:
     // default impl returns NULL.
     virtual SkData* onRefEncodedData();
 
+    // default impl does nothing.
+    virtual void onNotifyPixelsChanged();
+
     // default impl returns false.
     virtual bool onGetYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3],
                                  SkYUVColorSpace* colorSpace);
@@ -299,10 +321,14 @@ protected:
      */
     virtual size_t getAllocatedSizeInBytes() const;
 
+    virtual bool onRequestLock(const LockRequest&, LockResult*);
+
+    virtual bool onIsLazyGenerated() const { return false; }
+
     /** Return the mutex associated with this pixelref. This value is assigned
         in the constructor, and cannot change during the lifetime of the object.
     */
-    SkBaseMutex* mutex() const { return fMutex; }
+    SkBaseMutex* mutex() const { return &fMutex; }
 
     // only call from constructor. Flags this to always be locked, removing
     // the need to grab the mutex and call onLockPixels/onUnlockPixels.
@@ -310,7 +336,7 @@ protected:
     void setPreLocked(void*, size_t rowBytes, SkColorTable*);
 
 private:
-    SkBaseMutex*    fMutex; // must remain in scope for the life of this object
+    mutable SkMutex fMutex;
 
     // mostly const. fInfo.fAlpahType can be changed at runtime.
     const SkImageInfo fInfo;
@@ -318,6 +344,8 @@ private:
     // LockRec is only valid if we're in a locked state (isLocked())
     LockRec         fRec;
     int             fLockCount;
+
+    bool lockPixelsInsideMutex();
 
     // Bottom bit indicates the Gen ID is unique.
     bool genIDIsUnique() const { return SkToBool(fTaggedGenID.load() & 1); }
@@ -333,20 +361,34 @@ private:
 
     // Set true by caches when they cache content that's derived from the current pixels.
     SkAtomic<bool> fAddedToCache;
-    // can go from false to true, but never from true to false
-    bool fIsImmutable;
+
+    enum {
+        kMutable,               // PixelRefs begin mutable.
+        kTemporarilyImmutable,  // Considered immutable, but can revert to mutable.
+        kImmutable,             // Once set to this state, it never leaves.
+    } fMutability : 8;          // easily fits inside a byte
+
     // only ever set in constructor, const after that
     bool fPreLocked;
 
     void needsNewGenID();
     void callGenIDChangeListeners();
 
-    void setMutex(SkBaseMutex* mutex);
+    void setTemporarilyImmutable();
+    void restoreMutability();
+    friend class SkSurface_Raster;   // For the two methods above.
+
+    bool isPreLocked() const { return fPreLocked; }
+    friend class SkImage_Raster;
 
     // When copying a bitmap to another with the same shape and config, we can safely
     // clone the pixelref generation ID too, which makes them equivalent under caching.
     friend class SkBitmap;  // only for cloneGenID
     void cloneGenID(const SkPixelRef&);
+
+    void setImmutableWithID(uint32_t genID);
+    friend class SkImage_Gpu;
+    friend class SkImageCacherator;
 
     typedef SkRefCnt INHERITED;
 };

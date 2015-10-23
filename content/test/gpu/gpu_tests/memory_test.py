@@ -1,15 +1,15 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import gpu_test_base
 import memory_test_expectations
 import page_sets
 
-from telemetry import benchmark
-from telemetry.core.platform import tracing_category_filter
-from telemetry.core.platform import tracing_options
 from telemetry.page import page_test
 from telemetry.timeline import counter
 from telemetry.timeline import model
+from telemetry.timeline import tracing_category_filter
+from telemetry.timeline import tracing_options
 
 MEMORY_LIMIT_MB = 192
 SINGLE_TAB_LIMIT_MB = 192
@@ -64,8 +64,8 @@ test_harness_script = r"""
   }, false);
 """ % MEMORY_LIMIT_MB
 
-class _MemoryValidator(page_test.PageTest):
-  def ValidateAndMeasurePage(self, page, tab, results):
+class _MemoryValidator(gpu_test_base.ValidatorBase):
+  def ValidateAndMeasurePageInner(self, page, tab, results):
     timeline_data = tab.browser.platform.tracing_controller.Stop()
     timeline_model = model.TimelineModel(timeline_data)
     for process in timeline_model.GetAllProcesses():
@@ -99,7 +99,7 @@ class _MemoryValidator(page_test.PageTest):
     return 'Memory allocation too %s (was %d MB, should be %d MB +/- %d MB)' % (
       low_or_high, mb_used, SINGLE_TAB_LIMIT_MB, WIGGLE_ROOM_MB)
 
-class MemoryTest(benchmark.Benchmark):
+class MemoryTest(gpu_test_base.TestBase):
   """Tests GPU memory limits"""
   test = _MemoryValidator
 
@@ -107,11 +107,11 @@ class MemoryTest(benchmark.Benchmark):
   def Name(cls):
     return 'memory_test'
 
-  def CreateExpectations(self):
+  def _CreateExpectations(self):
     return memory_test_expectations.MemoryTestExpectations()
 
-  def CreatePageSet(self, options):
-    page_set = page_sets.MemoryTestsPageSet()
-    for page in page_set.pages:
+  def CreateStorySet(self, options):
+    story_set = page_sets.MemoryTestsStorySet(self.GetExpectations())
+    for page in story_set:
       page.script_to_evaluate_on_commit = test_harness_script
-    return page_set
+    return story_set

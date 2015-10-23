@@ -1,3 +1,4 @@
+*.gypcmd
 *.mk
 *.ncb
 *.opensdf
@@ -36,14 +37,15 @@
 .pc
 .project
 .pydevproject
-# Settings directory for eclipse
-/.settings
 .checkstyle
 cscope.*
 Session.vim
 tags
 Thumbs.db
 v8.log
+# Settings directories for eclipse
+/.externalToolBuilders/
+/.settings/
 /_out
 /android_emulator_sdk
 /ash/ash_unittests_run.xml
@@ -60,9 +62,11 @@ v8.log
 /build/util/support
 /build/x64/
 /build/linux/bin/eu-strip
+/build/linux/debian_*-sysroot/
 /buildtools
 # The Chrome OS build creates a /c symlink due to http://crbug.com/54866.
 /c
+/cdm
 /ceee/internal/
 /chrome/angle_unittests_run.xml
 /chrome/content_gl_tests_run.xml
@@ -94,7 +98,6 @@ v8.log
 /chrome/common/extensions/api/api.xml
 /chrome/common/extensions/api/ledger/
 /chrome/Hammer
-/chrome/installer/linux/debian_wheezy_*-sysroot/
 /chrome/installer/linux/internal
 /chrome/installer/mac/internal
 /chrome/installer/mac/third_party/xz/xz
@@ -131,11 +134,13 @@ v8.log
 /chrome/test/data/perf/third_party/
 /chrome/test/data/plugin/
 /chrome/test/data/webrtc/resources
+/chrome/test/media_router/internal
 /chrome/tools/memory
 /chrome/tools/test/reference_build
 /chrome/unit_tests_run.xml
 /chrome/web_ui_mojo_bindings.xml
 /chrome_elf/chrome_elf_resources.xml
+/chromecast/internal
 /clank
 /cloud_print/cloud_print_version_resources.xml
 /components/chrome_settings_proto_generated_compile.xml
@@ -164,6 +169,7 @@ v8.log
 /gpu/gles2_conform_test
 /gyp-mac-tool
 /internal_gyp
+/ios/build/util/CANARY_VERSION
 /ios/third_party/gcdwebserver/src
 /llvm
 /media/cast/logging/cast_logging_proto_lib.xml
@@ -251,8 +257,11 @@ v8.log
 /sync_testserver.log
 /testing/gmock
 /testing/gtest
-/testing/iossim/third_party/
 /testserver.log
+/tools/luci-go/linux64/isolate
+/tools/luci-go/mac64/isolate
+/tools/luci-go/win64/isolate.exe
+/third_party/__START__
 /third_party/accessibility-developer-tools/
 /third_party/adobe/flash/binaries
 /third_party/adobe/flash/symbols
@@ -275,27 +284,32 @@ v8.log
 /third_party/bison
 /third_party/boringssl/src
 /third_party/cacheinvalidation/cacheinvalidation_unittests_run.xml
-/third_party/cacheinvalidation/src
+/third_party/cardboard-java/src
+/third_party/catapult
 /third_party/chromeos_login_manager
 /third_party/chromeos_text_input
 /third_party/chromite
+/third_party/class-dump/src
 /third_party/cld_2/src
 /third_party/colorama/src
 /third_party/crashpad/crashpad
 /third_party/cros
 /third_party/cros_system_api
+/third_party/custom_tabs_client/src
 /third_party/cygwin
+/third_party/deqp/src
 /third_party/directxsdk
 /third_party/dom_distiller_js/dist
 /third_party/drmemory/drmemory-windows-sfx.exe
 /third_party/drmemory/unpacked
 /third_party/elfutils/src
+/third_party/errorprone/lib
 /third_party/eyesfree/src
 /third_party/ffmpeg
 /third_party/findbugs
 /third_party/flac
 /third_party/fontconfig/src
-/third_party/freetype
+/third_party/freetype-android/src
 /third_party/freetype2/src
 /third_party/gles2_conform
 /third_party/gnu_binutils/
@@ -336,6 +350,7 @@ v8.log
 /third_party/mesa/src
 /third_party/mingw-w64
 /third_party/mkl
+/third_party/mocha
 /third_party/mockito/src
 /third_party/mojo/src/mojo/public/tools/prebuilt/
 /third_party/nacl_sdk_binaries/
@@ -349,8 +364,6 @@ v8.log
 /third_party/perl
 /third_party/platformsdk_win7
 /third_party/platformsdk_win8
-/third_party/polymer
-/third_party/polymer_legacy
 /third_party/ppapi
 /third_party/psyco_win32
 /third_party/pthreads-win32
@@ -375,20 +388,17 @@ v8.log
 /third_party/swiftshader/include/
 /third_party/syzygy
 /third_party/syzygy/binaries
-/third_party/trace-viewer
 /third_party/tsan/
-/third_party/undoview
+/third_party/ub-uiautomator/lib
 /third_party/usb_ids
 /third_party/usrsctp/usrsctplib
 /third_party/v8-i18n
 /third_party/valgrind
 /third_party/v4l2capture
-/third_party/web-animations-js
 /third_party/webdriver/pylib
 /third_party/webdriver/python/selenium
 /third_party/webgl
 /third_party/webgl/src
-/third_party/WebKit
 /third_party/webpagereplay/
 /third_party/webrtc
 /third_party/webrtc/internal
@@ -430,6 +440,8 @@ v8.log
 /ui/surface/surface.xml
 /ui/surface/surface_gpu_tests.xml
 /v8
+# Results directory for run-webkit-tests. http://crbug.com/488288
+/webkit
 /webpagereplay_logs/
 /win8/delegate_execute/delegate_execute_version_resources.xml
 /win8/metro_driver/metro_driver_version_resources.xml

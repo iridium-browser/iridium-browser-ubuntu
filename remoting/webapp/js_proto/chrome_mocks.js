@@ -5,25 +5,15 @@
 // This file contains various mock objects for the chrome platform to make
 // unit testing easier.
 
-Entry = function() {};
-
 var chromeMocks = {};
-
-/** @constructor */
-chrome.Event = function() {};
-
-/** @param {Function} callback */
-chrome.Event.prototype.addListener = function(callback) {};
-
-/** @param {Function} callback */
-chrome.Event.prototype.removeListener = function(callback) {};
-
 
 (function(){
 
+'use strict'
+
 /**
  * @constructor
- * @extends {chrome.Event}
+ * @extends {ChromeEvent}
  */
 chromeMocks.Event = function() {
   this.listeners_ = [];
@@ -47,6 +37,7 @@ chromeMocks.Event.prototype.removeListener = function(callback) {
 /**
  * @param {...*} var_args
  * @return {void}
+ * @suppress {reportUnknownTypes}
  */
 chromeMocks.Event.prototype.mock$fire = function(var_args) {
   var params = Array.prototype.slice.call(arguments);
@@ -71,7 +62,7 @@ chromeMocks.runtime.Port = function() {
   /** @type {string} */
   this.name = '';
 
-  /** @type {chrome.runtime.MessageSender} */
+  /** @type {MessageSender} */
   this.sender = null;
 };
 
@@ -85,6 +76,10 @@ chromeMocks.runtime.Port.prototype.postMessage = function(message) {};
 /** @type {chromeMocks.Event} */
 chromeMocks.runtime.onMessage = new chromeMocks.Event();
 
+
+/** @type {chromeMocks.Event} */
+chromeMocks.runtime.onSuspend = new chromeMocks.Event();
+
 /**
  * @param {string?} extensionId
  * @param {*} message
@@ -92,11 +87,11 @@ chromeMocks.runtime.onMessage = new chromeMocks.Event();
  */
 chromeMocks.runtime.sendMessage = function(extensionId, message,
                                            responseCallback) {
-  base.debug.assert(
+  console.assert(
       extensionId === null,
       'The mock only supports sending messages to the same extension.');
   extensionId = chrome.runtime.id;
-  window.requestAnimationFrame(function() {
+  Promise.resolve().then(function() {
     var message_copy = base.deepCopy(message);
     chromeMocks.runtime.onMessage.mock$fire(
         message_copy, {id: extensionId}, responseCallback);
@@ -118,7 +113,7 @@ chromeMocks.runtime.connectNative = function(application) {
   return port;
 };
 
-/** @const {Object<string,!chromeMocks.runtime.Port>} */
+/** @const {Object<!chromeMocks.runtime.Port>} */
 var nativePorts = null;
 
 /** @type {string} */
@@ -130,35 +125,45 @@ chromeMocks.runtime.lastError = {
   message: undefined
 };
 
+chromeMocks.runtime.getManifest = function() {
+  return {
+    version: 10,
+    app: {
+      background: true
+    }
+  };
+};
 
 // Sample implementation of chrome.StorageArea according to
 // https://developer.chrome.com/apps/storage#type-StorageArea
-/** @constructor */
+/**
+ * @constructor
+ * @extends {StorageArea}
+ */
 chromeMocks.StorageArea = function() {
-  /** @type {Object} */
+  /** @type {!Object} */
   this.storage_ = {};
 };
 
 /**
- * @param {!Object} keys
+ * @param {Object|string} keys
  * @return {Array<string>}
  */
 function getKeys(keys) {
   if (typeof keys === 'string') {
     return [keys];
   } else if (typeof keys === 'object') {
-    return Object.keys(keys);
+    var objectKeys = /** @type {!Object} */ (keys);
+    return Object.keys(objectKeys);
   }
   return [];
 }
 
-/**
- * @param {!Object} keys
- * @param {Function} onDone
- */
 chromeMocks.StorageArea.prototype.get = function(keys, onDone) {
   if (!keys) {
-    onDone(base.deepCopy(this.storage_));
+    // No keys are specified, returns the entire storage.
+    var storageCopy = base.deepCopy(this.storage_);
+    onDone(/** @type {Object} */ (storageCopy));
     return;
   }
 
@@ -173,26 +178,33 @@ chromeMocks.StorageArea.prototype.get = function(keys, onDone) {
   onDone(result);
 };
 
-/** @param {Object} value */
-chromeMocks.StorageArea.prototype.set = function(value) {
+chromeMocks.StorageArea.prototype.set = function(value, opt_onDone) {
   for (var key in value) {
     this.storage_[key] = base.deepCopy(value[key]);
   }
+  if (opt_onDone) {
+    opt_onDone();
+  }
 };
 
-/**
- * @param {!Object} keys
- */
-chromeMocks.StorageArea.prototype.remove = function(keys) {
+chromeMocks.StorageArea.prototype.remove = function(keys, opt_onDone) {
   getKeys(keys).forEach(
       /** @param {string} key */
       function(key) {
         delete this.storage_[key];
       }, this);
+  if (opt_onDone) {
+    opt_onDone();
+  }
+};
+
+/** @return {!Object} */
+chromeMocks.StorageArea.prototype.mock$getStorage = function() {
+  return this.storage_;
 };
 
 chromeMocks.StorageArea.prototype.clear = function() {
-  this.storage_ = null;
+  this.storage_ = {};
 };
 
 /** @type {Object} */
@@ -219,7 +231,7 @@ chromeMocks.Identity.prototype.getAuthToken = function(options, callback) {
     token += JSON.stringify(options['scopes']);
   }
   // Don't use setTimeout because sinon mocks it.
-  window.requestAnimationFrame(callback.bind(null, token));
+  Promise.resolve().then(callback.bind(null, token));
 };
 
 /** @param {string} token */
@@ -232,28 +244,69 @@ chromeMocks.Identity.prototype.mock$clearToken = function() {
 };
 
 /** @type {chromeMocks.Identity} */
-chromeMocks.identity = new chromeMocks.Identity();
+chromeMocks.identity;
 
+/** @constructor */
+chromeMocks.MetricsPrivate = function() {};
+
+chromeMocks.MetricsPrivate.prototype.recordValue = function() {};
+
+/** @type {chromeMocks.MetricsPrivate} */
+chromeMocks.metricsPrivate;
+
+/** @constructor */
+chromeMocks.I18n = function() {};
+
+/**
+ * @param {string} messageName
+ * @param {(string|Array<string>)=} opt_args
+ * @return {string}
+ */
+chromeMocks.I18n.prototype.getMessage = function(messageName, opt_args) {};
+
+/**
+ * @return {string}
+ */
+chromeMocks.I18n.prototype.getUILanguage = function() {};
+
+/** @constructor */
+chromeMocks.WindowManager = function() {
+  this.current_ = new chromeMocks.AppWindow();
+};
+
+chromeMocks.WindowManager.prototype.current = function() {
+  return this.current_;
+};
+
+/** @constructor */
+chromeMocks.AppWindow = function() {};
 
 var originals_ = null;
 
 /**
  * Activates a list of Chrome components to mock
- * @param {Array<string>} components
  */
-chromeMocks.activate = function(components) {
+chromeMocks.activate = function() {
   if (originals_) {
     throw new Error('chromeMocks.activate() can only be called once.');
   }
   originals_ = {};
   nativePorts = {};
-  components.forEach(function(component) {
-    if (!chromeMocks[component]) {
-      throw new Error('No mocks defined for chrome.' + component);
-    }
-    originals_[component] = chrome[component];
-    chrome[component] = chromeMocks[component];
-  });
+
+  chromeMocks.i18n = new chromeMocks.I18n();
+  chromeMocks.identity = new chromeMocks.Identity();
+  chromeMocks.metricsPrivate = new chromeMocks.MetricsPrivate();
+
+  ['identity', 'i18n', 'runtime', 'storage', 'metricsPrivate'].forEach(
+    function(/** string */ component) {
+      if (!chromeMocks[component]) {
+        throw new Error('No mocks defined for chrome.' + component);
+      }
+      originals_[component] = chrome[component];
+      chrome[component] = chromeMocks[component];
+    });
+
+  chrome.app['window'] = new chromeMocks.WindowManager();
 };
 
 chromeMocks.restore = function() {

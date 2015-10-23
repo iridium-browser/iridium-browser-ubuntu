@@ -57,7 +57,6 @@ void {{container.cpp_class}}::set{{member.type_name}}({{member.rvalue_cpp_type}}
 {{container.cpp_class}}::~{{container.cpp_class}}() = default;
 {{container.cpp_class}}& {{container.cpp_class}}::operator=(const {{container.cpp_class}}&) = default;
 
-{% if container.needs_trace %}
 DEFINE_TRACE({{container.cpp_class}})
 {
     {% for member in container.members if member.is_traceable %}
@@ -65,7 +64,6 @@ DEFINE_TRACE({{container.cpp_class}})
     {% endfor %}
 }
 
-{% endif %}
 void V8{{container.cpp_class}}::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, {{container.cpp_class}}& impl, ExceptionState& exceptionState)
 {
     if (v8Value.IsEmpty())
@@ -103,13 +101,23 @@ void V8{{container.cpp_class}}::toImpl(v8::Isolate* isolate, v8::Local<v8::Value
 
     {% endif %}
     {% if container.array_or_sequence_type %}
-    {# 13. Arrays/Sequences #}
+    {# 13.1, 13.2. Arrays and Sequences #}
     {# FIXME: This should also check "object but not Date or RegExp". Add checks
        when we implement conversions for Date and RegExp. #}
     {# FIXME: Should check for sequences too, not just Array instances. #}
     if (v8Value->IsArray()) {
         {{v8_value_to_local_cpp_value(container.array_or_sequence_type) | indent(8)}}
         impl.set{{container.array_or_sequence_type.type_name}}(cppValue);
+        return;
+    }
+
+    {% endif %}
+    {# TODO(bashi): Support 13.3 Callback interface when we need it #}
+    {# 13.4. Objects #}
+    {% if container.object_type %}
+    if (isUndefinedOrNull(v8Value) || v8Value->IsObject()) {
+        {{v8_value_to_local_cpp_value(container.object_type) | indent(8)}}
+        impl.set{{container.object_type.type_name}}(cppValue);
         return;
     }
 

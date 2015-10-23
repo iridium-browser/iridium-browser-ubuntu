@@ -45,26 +45,22 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   // Called by the view code when the bubble is hidden.
   void OnBubbleHidden();
 
-  // Called by the view code when the "Never for this site." button in clicked
-  // by the user and user gets confirmation bubble.
-  void OnConfirmationForNeverForThisSite();
+  // Called by the view code when the "Cancel" button in clicked by the user.
+  void OnCancelClicked();
 
-  // Called by the view code when the "Nope" button in clicked by the user.
-  void OnNopeClicked();
+  // Called by the view code when the "Nope" button in clicked by the user in
+  // update bubble.
+  void OnNopeUpdateClicked();
 
   // Called by the view code when the "Never for this site." button in clicked
   // by the user.
   void OnNeverForThisSiteClicked();
 
-  // Called by the view code when the "Undo" button is clicked in
-  // "Never for this site." confirmation bubble by the user.
-  void OnUndoNeverForThisSite();
-
-  // Called by the view code when the site is unblacklisted.
-  void OnUnblacklistClicked();
-
-  // Called by the view code when the save button in clicked by the user.
+  // Called by the view code when the save button is clicked by the user.
   void OnSaveClicked();
+
+  // Called by the view code when the update link is clicked by the user.
+  void OnUpdateClicked(const autofill::PasswordForm& password_form);
 
   // Called by the view code when the "Done" button is clicked by the user.
   void OnDoneClicked();
@@ -114,7 +110,6 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
     return federated_credentials_;
   }
   const base::string16& manage_link() const { return manage_link_; }
-  bool never_save_passwords() const { return never_save_passwords_; }
   const base::string16& save_confirmation_text() const {
     return save_confirmation_text_;
   }
@@ -131,6 +126,10 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   // Returns true iff the new UI should be presented to user for managing and
   // saving the passwords.
   bool IsNewUIActive() const;
+
+  // Returns true iff the multiple account selection prompt for account update
+  // should be presented.
+  bool ShouldShowMultipleAccountUpdateUI() const;
 
 #if defined(UNIT_TEST)
   // Gets and sets the reason the bubble was displayed.
@@ -153,9 +152,16 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   static int PasswordFieldWidth();
 
  private:
+  enum UserBehaviorOnUpdateBubble {
+    UPDATE_CLICKED,
+    NOPE_CLICKED,
+    NO_INTERACTION
+  };
   // Updates |title_| and |title_brand_link_range_| for the
   // PENDING_PASSWORD_STATE.
   void UpdatePendingStateTitle();
+  password_manager::metrics_util::UpdatePasswordSubmissionEvent
+  GetUpdateDismissalReason(UserBehaviorOnUpdateBubble behavior) const;
   // URL of the page from where this bubble was triggered.
   GURL origin_;
   password_manager::ui::State state_;
@@ -164,16 +170,16 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   // should point to an article. For the default title the range is empty.
   gfx::Range title_brand_link_range_;
   autofill::PasswordForm pending_password_;
+  bool password_overridden_;
   ScopedVector<const autofill::PasswordForm> local_credentials_;
   ScopedVector<const autofill::PasswordForm> federated_credentials_;
   base::string16 manage_link_;
   base::string16 save_confirmation_text_;
   gfx::Range save_confirmation_link_range_;
-  // If true upon destruction, the user has confirmed that she never wants to
-  // save passwords for a particular site.
-  bool never_save_passwords_;
   password_manager::metrics_util::UIDisplayDisposition display_disposition_;
   password_manager::metrics_util::UIDismissalReason dismissal_reason_;
+  password_manager::metrics_util::UpdatePasswordSubmissionEvent
+      update_password_submission_event_;
 
   DISALLOW_COPY_AND_ASSIGN(ManagePasswordsBubbleModel);
 };

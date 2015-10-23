@@ -49,13 +49,57 @@
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/ThreadableLoaderClient.h"
 #include "platform/SharedBuffer.h"
+#include "platform/Task.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityOrigin.h"
+#include "public/platform/Platform.h"
 #include "public/platform/WebURLRequest.h"
 #include "wtf/Assertions.h"
 
 namespace blink {
+
+namespace {
+
+class EmptyDataHandle final : public WebDataConsumerHandle {
+private:
+    class EmptyDataReader final : public WebDataConsumerHandle::Reader {
+    public:
+        explicit EmptyDataReader(WebDataConsumerHandle::Client* client) : m_factory(this)
+        {
+            Platform::current()->currentThread()->postTask(FROM_HERE, new Task(bind(&EmptyDataReader::notify, m_factory.createWeakPtr(), client)));
+        }
+    private:
+        Result read(void*, size_t, WebDataConsumerHandle::Flags, size_t *readSize) override
+        {
+            *readSize = 0;
+            return Done;
+        }
+        Result beginRead(const void** buffer, WebDataConsumerHandle::Flags, size_t *available) override
+        {
+            *available = 0;
+            *buffer = nullptr;
+            return Done;
+        }
+        Result endRead(size_t) override
+        {
+            return WebDataConsumerHandle::UnexpectedError;
+        }
+        void notify(WebDataConsumerHandle::Client* client)
+        {
+            client->didGetReadable();
+        }
+        WeakPtrFactory<EmptyDataReader> m_factory;
+    };
+
+    Reader* obtainReaderInternal(Client* client) override
+    {
+        return new EmptyDataReader(client);
+    }
+    const char* debugName() const override { return "EmptyDataHandle"; }
+};
+
+} // namespace
 
 // Max number of CORS redirects handled in DocumentThreadableLoader.
 // Same number as net/url_request/url_request.cc, and
@@ -86,13 +130,15 @@ DocumentThreadableLoader::DocumentThreadableLoader(Document& document, Threadabl
     , m_resourceLoaderOptions(resourceLoaderOptions)
     , m_forceDoNotAllowStoredCredentials(false)
     , m_securityOrigin(m_resourceLoaderOptions.securityOrigin)
-    , m_sameOriginRequest(securityOrigin()->canRequest(request.url()))
+    , m_sameOriginRequest(securityOrigin()->canRequestNoSuborigin(request.url()))
     , m_crossOriginNonSimpleRequest(false)
+    , m_isUsingDataConsumerHandle(false)
     , m_async(blockingBehavior == LoadAsynchronously)
     , m_requestContext(request.requestContext())
     , m_timeoutTimer(this, &DocumentThreadableLoader::didTimeout)
     , m_requestStartedSeconds(0.0)
     , m_corsRedirectLimit(kMaxCORSRedirects)
+    , m_redirectMode(request.fetchRedirectMode())
 {
     ASSERT(client);
     // Setting an outgoing referer is only supported in the async code path.
@@ -268,7 +314,38 @@ void DocumentThreadableLoader::redirectReceived(Resource* resource, ResourceRequ
 
     RefPtr<DocumentThreadableLoader> protect(this);
 
-    if (!isAllowedByContentSecurityPolicy(request.url(), ContentSecurityPolicy::DidRedirect)) {
+    if (m_actualRequest) {
+        reportResponseReceived(resource->identifier(), redirectResponse);
+
+        clearResource();
+        request = ResourceRequest();
+
+        m_requestStartedSeconds = 0.0;
+
+        handlePreflightFailure(redirectResponse.url().string(), "Response for preflight is invalid (redirect)");
+
+        return;
+    }
+
+    if (m_redirectMode == WebURLRequest::FetchRedirectModeManual) {
+        // We use |m_redirectMode| to check the original redirect mode.
+        // |request| is a new request for redirect. So we don't set the redirect
+        // mode of it in WebURLLoaderImpl::Context::OnReceivedRedirect().
+        ASSERT(request.useStreamOnResponse());
+        // There is no need to read the body of redirect response because there
+        // is no way to read the body of opaque-redirect filtered response's
+        // internal response.
+        // TODO(horo): If we support any API which expose the internal body, we
+        // will have to read the body. And also HTTPCache changes will be needed
+        // because it doesn't store the body of redirect responses.
+        responseReceived(resource, redirectResponse, adoptPtr(new EmptyDataHandle()));
+        notifyFinished(resource);
+        clearResource();
+        request = ResourceRequest();
+        return;
+    }
+
+    if (m_redirectMode == WebURLRequest::FetchRedirectModeError || !isAllowedByContentSecurityPolicy(request.url(), ContentSecurityPolicy::DidRedirect)) {
         m_client->didFailRedirectCheck();
 
         clearResource();
@@ -368,10 +445,22 @@ void DocumentThreadableLoader::dataDownloaded(Resource* resource, int dataLength
     m_client->didDownloadData(dataLength);
 }
 
+void DocumentThreadableLoader::didReceiveResourceTiming(Resource* resource, const ResourceTimingInfo& info)
+{
+    ASSERT(m_client);
+    ASSERT_UNUSED(resource, resource == this->resource());
+    ASSERT(m_async);
+
+    m_client->didReceiveResourceTiming(info);
+}
+
 void DocumentThreadableLoader::responseReceived(Resource* resource, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
     ASSERT_UNUSED(resource, resource == this->resource());
     ASSERT(m_async);
+
+    if (handle)
+        m_isUsingDataConsumerHandle = true;
 
     handleResponse(resource->identifier(), response, handle);
 }
@@ -381,7 +470,7 @@ void DocumentThreadableLoader::handlePreflightResponse(const ResourceResponse& r
     String accessControlErrorDescription;
 
     if (!passesAccessControlCheck(response, effectiveAllowCredentials(), securityOrigin(), accessControlErrorDescription)) {
-        handlePreflightFailure(response.url().string(), accessControlErrorDescription);
+        handlePreflightFailure(response.url().string(), "Response to preflight request doesn't pass access control check: " + accessControlErrorDescription);
         return;
     }
 
@@ -404,7 +493,7 @@ void DocumentThreadableLoader::handlePreflightResponse(const ResourceResponse& r
 void DocumentThreadableLoader::reportResponseReceived(unsigned long identifier, const ResourceResponse& response)
 {
     DocumentLoader* loader = m_document.frame()->loader().documentLoader();
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceReceiveResponse", TRACE_EVENT_SCOPE_THREAD, "data", InspectorReceiveResponseEvent::data(identifier, m_document.frame(), response));
+    TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceReceiveResponse", TRACE_EVENT_SCOPE_THREAD, "data", InspectorReceiveResponseEvent::data(identifier, m_document.frame(), response));
     LocalFrame* frame = m_document.frame();
     InspectorInstrumentation::didReceiveResourceResponse(frame, identifier, loader, response, resource() ? resource()->loader() : 0);
     frame->console().reportResourceResponseReceived(loader, identifier, response);
@@ -431,6 +520,7 @@ void DocumentThreadableLoader::handleResponse(unsigned long identifier, const Re
             // therefore fallback-to-network is handled in the browser process
             // when the ServiceWorker does not call respondWith().)
             ASSERT(m_fallbackRequestForServiceWorker);
+            reportResponseReceived(identifier, response);
             loadFallbackRequestForServiceWorker();
             return;
         }
@@ -439,7 +529,17 @@ void DocumentThreadableLoader::handleResponse(unsigned long identifier, const Re
         return;
     }
 
-    ASSERT(!m_fallbackRequestForServiceWorker);
+    // Even if the request met the conditions to get handled by a Service Worker
+    // in the constructor of this class (and therefore
+    // |m_fallbackRequestForServiceWorker| is set), the Service Worker may skip
+    // processing the request. Only if the request is same origin, the skipped
+    // response may come here (wasFetchedViaServiceWorker() returns false) since
+    // such a request doesn't have to go through the CORS algorithm by calling
+    // loadFallbackRequestForServiceWorker().
+    // FIXME: We should use |m_sameOriginRequest| when we will support
+    // Suborigins (crbug.com/336894) for Service Worker.
+    ASSERT(!m_fallbackRequestForServiceWorker || securityOrigin()->canRequest(m_fallbackRequestForServiceWorker->url()));
+    m_fallbackRequestForServiceWorker = nullptr;
 
     if (!m_sameOriginRequest && m_options.crossOriginRequestPolicy == UseAccessControl) {
         String accessControlErrorDescription;
@@ -464,6 +564,9 @@ void DocumentThreadableLoader::dataReceived(Resource* resource, const char* data
 {
     ASSERT_UNUSED(resource, resource == this->resource());
     ASSERT(m_async);
+
+    if (m_isUsingDataConsumerHandle)
+        return;
 
     handleReceivedData(data, dataLength);
 }
@@ -578,9 +681,9 @@ void DocumentThreadableLoader::loadRequest(const ResourceRequest& request, Resou
             newRequest.setOriginRestriction(FetchRequest::NoOriginRestriction);
         ASSERT(!resource());
         if (request.requestContext() == WebURLRequest::RequestContextVideo || request.requestContext() == WebURLRequest::RequestContextAudio)
-            setResource(m_document.fetcher()->fetchMedia(newRequest));
+            setResource(RawResource::fetchMedia(newRequest, m_document.fetcher()));
         else
-            setResource(m_document.fetcher()->fetchRawResource(newRequest));
+            setResource(RawResource::fetch(newRequest, m_document.fetcher()));
         if (resource() && resource()->loader()) {
             unsigned long identifier = resource()->identifier();
             InspectorInstrumentation::documentThreadableLoaderStartedLoadingForClient(&m_document, identifier, m_client);
@@ -591,7 +694,7 @@ void DocumentThreadableLoader::loadRequest(const ResourceRequest& request, Resou
     FetchRequest fetchRequest(request, m_options.initiator, resourceLoaderOptions);
     if (m_options.crossOriginRequestPolicy == AllowCrossOriginRequests)
         fetchRequest.setOriginRestriction(FetchRequest::NoOriginRestriction);
-    ResourcePtr<Resource> resource = m_document.fetcher()->fetchSynchronously(fetchRequest);
+    ResourcePtr<Resource> resource = RawResource::fetchSynchronously(fetchRequest, m_document.fetcher());
     ResourceResponse response = resource ? resource->response() : ResourceResponse();
     unsigned long identifier = resource ? resource->identifier() : std::numeric_limits<unsigned long>::max();
     ResourceError error = resource ? resource->resourceError() : ResourceError();

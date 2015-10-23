@@ -14,16 +14,6 @@
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
-namespace {
-
-#ifdef NDEBUG
-const bool kDefaultClearCanvasSetting = false;
-#else
-const bool kDefaultClearCanvasSetting = true;
-#endif
-
-}  // namespace
-
 namespace cc {
 
 scoped_refptr<DisplayListRasterSource>
@@ -35,20 +25,21 @@ DisplayListRasterSource::CreateFromDisplayListRecordingSource(
 }
 
 DisplayListRasterSource::DisplayListRasterSource()
-    : background_color_(SK_ColorTRANSPARENT),
+    : painter_reported_memory_usage_(0),
+      background_color_(SK_ColorTRANSPARENT),
       requires_clear_(true),
       can_use_lcd_text_(true),
       is_solid_color_(false),
       solid_color_(SK_ColorTRANSPARENT),
-      clear_canvas_with_debug_color_(kDefaultClearCanvasSetting),
+      clear_canvas_with_debug_color_(false),
       slow_down_raster_scale_factor_for_debug_(0),
-      should_attempt_to_use_distance_field_text_(false) {
-}
+      should_attempt_to_use_distance_field_text_(false) {}
 
 DisplayListRasterSource::DisplayListRasterSource(
     const DisplayListRecordingSource* other,
     bool can_use_lcd_text)
     : display_list_(other->display_list_),
+      painter_reported_memory_usage_(other->painter_reported_memory_usage_),
       background_color_(other->background_color_),
       requires_clear_(other->requires_clear_),
       can_use_lcd_text_(can_use_lcd_text),
@@ -56,16 +47,16 @@ DisplayListRasterSource::DisplayListRasterSource(
       solid_color_(other->solid_color_),
       recorded_viewport_(other->recorded_viewport_),
       size_(other->size_),
-      clear_canvas_with_debug_color_(kDefaultClearCanvasSetting),
+      clear_canvas_with_debug_color_(other->clear_canvas_with_debug_color_),
       slow_down_raster_scale_factor_for_debug_(
           other->slow_down_raster_scale_factor_for_debug_),
-      should_attempt_to_use_distance_field_text_(false) {
-}
+      should_attempt_to_use_distance_field_text_(false) {}
 
 DisplayListRasterSource::DisplayListRasterSource(
     const DisplayListRasterSource* other,
     bool can_use_lcd_text)
     : display_list_(other->display_list_),
+      painter_reported_memory_usage_(other->painter_reported_memory_usage_),
       background_color_(other->background_color_),
       requires_clear_(other->requires_clear_),
       can_use_lcd_text_(can_use_lcd_text),
@@ -73,12 +64,11 @@ DisplayListRasterSource::DisplayListRasterSource(
       solid_color_(other->solid_color_),
       recorded_viewport_(other->recorded_viewport_),
       size_(other->size_),
-      clear_canvas_with_debug_color_(kDefaultClearCanvasSetting),
+      clear_canvas_with_debug_color_(other->clear_canvas_with_debug_color_),
       slow_down_raster_scale_factor_for_debug_(
           other->slow_down_raster_scale_factor_for_debug_),
       should_attempt_to_use_distance_field_text_(
-          other->should_attempt_to_use_distance_field_text_) {
-}
+          other->should_attempt_to_use_distance_field_text_) {}
 
 DisplayListRasterSource::~DisplayListRasterSource() {
 }
@@ -87,38 +77,50 @@ void DisplayListRasterSource::PlaybackToSharedCanvas(
     SkCanvas* canvas,
     const gfx::Rect& canvas_rect,
     float contents_scale) const {
-  RasterCommon(canvas, NULL, canvas_rect, contents_scale);
+  RasterCommon(canvas, NULL, canvas_rect, canvas_rect, contents_scale);
 }
 
 void DisplayListRasterSource::RasterForAnalysis(skia::AnalysisCanvas* canvas,
                                                 const gfx::Rect& canvas_rect,
                                                 float contents_scale) const {
-  RasterCommon(canvas, canvas, canvas_rect, contents_scale);
+  RasterCommon(canvas, canvas, canvas_rect, canvas_rect, contents_scale);
 }
 
-void DisplayListRasterSource::PlaybackToCanvas(SkCanvas* canvas,
-                                               const gfx::Rect& canvas_rect,
-                                               float contents_scale) const {
+void DisplayListRasterSource::PlaybackToCanvas(
+    SkCanvas* canvas,
+    const gfx::Rect& canvas_bitmap_rect,
+    const gfx::Rect& canvas_playback_rect,
+    float contents_scale) const {
   RasterSourceHelper::PrepareForPlaybackToCanvas(
-      canvas, canvas_rect, gfx::Rect(size_), contents_scale, background_color_,
-      clear_canvas_with_debug_color_, requires_clear_);
+      canvas, canvas_bitmap_rect, canvas_playback_rect, gfx::Rect(size_),
+      contents_scale, background_color_, clear_canvas_with_debug_color_,
+      requires_clear_);
 
-  RasterCommon(canvas, NULL, canvas_rect, contents_scale);
+  RasterCommon(canvas, NULL, canvas_bitmap_rect, canvas_playback_rect,
+               contents_scale);
 }
 
-void DisplayListRasterSource::RasterCommon(SkCanvas* canvas,
-                                           SkDrawPictureCallback* callback,
-                                           const gfx::Rect& canvas_rect,
-                                           float contents_scale) const {
-  canvas->translate(-canvas_rect.x(), -canvas_rect.y());
+void DisplayListRasterSource::RasterCommon(
+    SkCanvas* canvas,
+    SkPicture::AbortCallback* callback,
+    const gfx::Rect& canvas_bitmap_rect,
+    const gfx::Rect& canvas_playback_rect,
+    float contents_scale) const {
+  canvas->translate(-canvas_bitmap_rect.x(), -canvas_bitmap_rect.y());
   gfx::Rect content_rect =
       gfx::ToEnclosingRect(gfx::ScaleRect(gfx::Rect(size_), contents_scale));
-  content_rect.Intersect(canvas_rect);
+  content_rect.Intersect(canvas_playback_rect);
 
   canvas->clipRect(gfx::RectToSkRect(content_rect), SkRegion::kIntersect_Op);
 
   DCHECK(display_list_.get());
-  display_list_->Raster(canvas, callback, contents_scale);
+  gfx::Rect canvas_target_playback_rect =
+      canvas_playback_rect - canvas_bitmap_rect.OffsetFromOrigin();
+  int repeat_count = std::max(1, slow_down_raster_scale_factor_for_debug_);
+  for (int i = 0; i < repeat_count; ++i) {
+    display_list_->Raster(canvas, callback, canvas_target_playback_rect,
+                          contents_scale);
+  }
 }
 
 skia::RefPtr<SkPicture> DisplayListRasterSource::GetFlattenedPicture() {
@@ -129,7 +131,7 @@ skia::RefPtr<SkPicture> DisplayListRasterSource::GetFlattenedPicture() {
   SkCanvas* canvas = recorder.beginRecording(display_list_rect.width(),
                                              display_list_rect.height());
   if (!display_list_rect.IsEmpty())
-    PlaybackToCanvas(canvas, display_list_rect, 1.0);
+    PlaybackToCanvas(canvas, display_list_rect, display_list_rect, 1.0);
   skia::RefPtr<SkPicture> picture =
       skia::AdoptRef(recorder.endRecordingAsPicture());
 
@@ -139,7 +141,8 @@ skia::RefPtr<SkPicture> DisplayListRasterSource::GetFlattenedPicture() {
 size_t DisplayListRasterSource::GetPictureMemoryUsage() const {
   if (!display_list_)
     return 0;
-  return display_list_->PictureMemoryUsage();
+  return display_list_->ApproximateMemoryUsage() +
+         painter_reported_memory_usage_;
 }
 
 void DisplayListRasterSource::PerformSolidColorAnalysis(
@@ -161,7 +164,7 @@ void DisplayListRasterSource::PerformSolidColorAnalysis(
 void DisplayListRasterSource::GatherPixelRefs(
     const gfx::Rect& content_rect,
     float contents_scale,
-    std::vector<SkPixelRef*>* pixel_refs) const {
+    std::vector<skia::PositionPixelRef>* pixel_refs) const {
   DCHECK_EQ(0u, pixel_refs->size());
 
   gfx::Rect layer_rect =

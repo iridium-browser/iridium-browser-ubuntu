@@ -28,50 +28,11 @@
  */
 
 #include "config.h"
-
 #include "platform/geometry/FloatRoundedRect.h"
 
 #include <gtest/gtest.h>
 
-using namespace blink;
-
 namespace blink {
-
-void PrintTo(const FloatSize& size, std::ostream* os)
-{
-    *os << "FloatSize("
-        << size.width() << ", "
-        << size.height() << ")";
-}
-
-void PrintTo(const FloatRect& rect, std::ostream* os)
-{
-    *os << "FloatRect("
-        << rect.x() << ", "
-        << rect.y() << ", "
-        << rect.width() << ", "
-        << rect.height() << ")";
-}
-
-void PrintTo(const FloatRoundedRect::Radii& radii, std::ostream* os)
-{
-    *os << "FloatRoundedRect::Radii("
-        << ::testing::PrintToString(radii.topLeft()) << ", "
-        << ::testing::PrintToString(radii.topRight()) << ", "
-        << ::testing::PrintToString(radii.bottomRight()) << ", "
-        << ::testing::PrintToString(radii.bottomLeft()) << ")";
-}
-
-void PrintTo(const FloatRoundedRect& roundedRect, std::ostream* os)
-{
-    *os << "FloatRoundedRect("
-        << ::testing::PrintToString(roundedRect.rect()) << ", "
-        << ::testing::PrintToString(roundedRect.radii()) << ")";
-}
-
-} // namespace blink
-
-namespace {
 
 #define TEST_INTERCEPTS(roundedRect, yCoordinate, expectedMinXIntercept, expectedMaxXIntercept) \
 {                                                                                               \
@@ -213,5 +174,5 @@ TEST(FloatRoundedRectTest, radiusCenterRect)
     EXPECT_TRUE(r2.radiusCenterRect().isEmpty());
 }
 
-} // namespace
+} // namespace blink
 

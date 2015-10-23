@@ -28,8 +28,8 @@ class InputParamTraitsTest : public testing::Test {
       ASSERT_EQ(a_size, b->web_event->size);
       EXPECT_EQ(0, memcmp(a->web_event.get(), b->web_event.get(), a_size));
     }
-    EXPECT_EQ(a->latency_info.latency_components.size(),
-              b->latency_info.latency_components.size());
+    EXPECT_EQ(a->latency_info.latency_components().size(),
+              b->latency_info.latency_components().size());
     EXPECT_EQ(a->is_keyboard_shortcut, b->is_keyboard_shortcut);
   }
 
@@ -108,7 +108,7 @@ class InputParamTraitsTest : public testing::Test {
     IPC::ParamTraits<InputEvents>::Write(&msg, events_in);
 
     InputEvents events_out;
-    PickleIterator iter(msg);
+    base::PickleIterator iter(msg);
     EXPECT_TRUE(IPC::ParamTraits<InputEvents>::Read(&msg, &iter, &events_out));
 
     Compare(&events_in, &events_out);
@@ -127,7 +127,7 @@ class InputParamTraitsTest : public testing::Test {
     IPC::ParamTraits<SyntheticGesturePacket>::Write(&msg, packet_in);
 
     SyntheticGesturePacket packet_out;
-    PickleIterator iter(msg);
+    base::PickleIterator iter(msg);
     EXPECT_TRUE(IPC::ParamTraits<SyntheticGesturePacket>::Read(&msg, &iter,
                                                                &packet_out));
 
@@ -151,7 +151,7 @@ TEST_F(InputParamTraitsTest, UninitializedEvents) {
   IPC::WriteParam(&msg, event);
 
   InputEvent event_out;
-  PickleIterator iter(msg);
+  base::PickleIterator iter(msg);
   EXPECT_FALSE(IPC::ReadParam(&msg, &iter, &event_out));
 }
 
@@ -197,7 +197,7 @@ TEST_F(InputParamTraitsTest, InvalidSyntheticGestureParams) {
   WriteParam(&msg, -3);
 
   SyntheticGesturePacket packet_out;
-  PickleIterator iter(msg);
+  base::PickleIterator iter(msg);
   ASSERT_FALSE(
       IPC::ParamTraits<SyntheticGesturePacket>::Read(&msg, &iter, &packet_out));
 }

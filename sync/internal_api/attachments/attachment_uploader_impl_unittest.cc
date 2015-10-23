@@ -90,10 +90,10 @@ class MockOAuth2TokenService : public FakeOAuth2TokenService {
                         const std::string& client_secret,
                         const ScopeSet& scopes) override;
 
-  void InvalidateOAuth2Token(const std::string& account_id,
-                             const std::string& client_id,
-                             const ScopeSet& scopes,
-                             const std::string& access_token) override;
+  void InvalidateAccessTokenImpl(const std::string& account_id,
+                                 const std::string& client_id,
+                                 const ScopeSet& scopes,
+                                 const std::string& access_token) override;
 
  private:
   GoogleServiceAuthError response_error_;
@@ -137,7 +137,7 @@ void MockOAuth2TokenService::FetchOAuth2Token(
                  response_expiration_));
 }
 
-void MockOAuth2TokenService::InvalidateOAuth2Token(
+void MockOAuth2TokenService::InvalidateAccessTokenImpl(
     const std::string& account_id,
     const std::string& client_id,
     const ScopeSet& scopes,
@@ -277,10 +277,10 @@ void AttachmentUploaderImplTest::OnRequestReceived(const HttpRequest& request) {
 
 void AttachmentUploaderImplTest::SetUp() {
   DCHECK(CalledOnValidThread());
-  request_handler_.reset(new RequestHandler(message_loop_.message_loop_proxy(),
+  request_handler_.reset(new RequestHandler(message_loop_.task_runner(),
                                             weak_ptr_factory_.GetWeakPtr()));
   url_request_context_getter_ =
-      new net::TestURLRequestContextGetter(message_loop_.message_loop_proxy());
+      new net::TestURLRequestContextGetter(message_loop_.task_runner());
 
   ASSERT_TRUE(server_.InitializeAndWaitUntilReady());
   server_.RegisterRequestHandler(

@@ -16,7 +16,10 @@ var remoting = remoting || {};
  * @constructor
  * @implements {remoting.ContextMenuAdapter}
  */
-remoting.ContextMenuChrome = function() {
+remoting.ContextMenuChrome = function() {};
+
+remoting.ContextMenuChrome.prototype.dispose = function() {
+  chrome.contextMenus.removeAll();
 };
 
 /**
@@ -79,12 +82,13 @@ remoting.ContextMenuChrome.prototype.remove = function(id) {
  * @param {function(OnClickData):void} listener
  */
 remoting.ContextMenuChrome.prototype.addListener = function(listener) {
-  chrome.contextMenus.onClicked.addListener(listener);
+  chrome.contextMenus.onClicked.addListener(
+      /** @type {function(Object, Tab=)} */ (listener));
 };
 
 /**
  * @param {*} message
- * @param {Window} backgroundPage
+ * @param {Window=} backgroundPage
  */
 remoting.ContextMenuChrome.prototype.postMessage_ = function(
     message, backgroundPage) {

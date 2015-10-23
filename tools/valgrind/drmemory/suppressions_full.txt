@@ -29,14 +29,14 @@ GoogleDesktopNetwork3.DLL!DllUnregisterServer
 # They deliberately use uninit local var in sqlite random generator.
 # Random bytes may mess up the call stack between randomByte and
 # sqlite3_* frames (https://github.com/DynamoRIO/drmemory/issues/1514)
-# so we just look for randomByte.
+# so we also look for randomByte in form B.
 UNINITIALIZED READ
-name=sqlite3_randomness UNINIT
-sql.dll!sqlite3_randomness
+name=sqlite3_randomness A
+*.dll!sqlite3_randomness
 
 UNINITIALIZED READ
-name=blink_web_dll_sqlite3_randomness UNINIT
-blink_web.dll!sqlite3_randomness
+name=sqlite3_randomness B
+*.dll!randomByte
 
 # Intentional leak in WebKit Template Framework for ThreadData.
 LEAK
@@ -1033,46 +1033,6 @@ name=deliberate LazyInstance leak
 ...
 *!base::LazyInstance*::Pointer
 
-LEAK
-name=http://crbug.com/79933 (2)
-...
-*!TestURLRequestContext::TestURLRequestContext
-*!TestURLRequestContextGetter::GetURLRequestContext
-*!notifier::SingleLoginAttempt::SingleLoginAttempt
-*!notifier::Login::StartConnection
-*!syncer::InvalidationNotifier::UpdateCredentials
-*!syncer::NonBlockingInvalidationNotifier::Core::UpdateCredentials
-
-LEAK
-name=http://crbug.com/79933 (3)
-...
-*!TestURLRequestContext::TestURLRequestContext
-*!TestURLRequestContextGetter::GetURLRequestContext
-*!URLFetcher::Core::StartURLRequest
-
-LEAK
-name=http://crbug.com/79933 (4)
-*!generic_cpp_alloc
-*!operator new
-*!std::_Allocate<>
-*!std::allocator<>::allocate
-*!std::vector<>::_Insert_n
-*!std::vector<>::insert
-*!std::vector<>::push_back
-*!ObserverListBase<>::AddObserver
-...
-*!net::HttpNetworkSession::HttpNetworkSession
-*!notifier::ProxyResolvingClientSocket::ProxyResolvingClientSocket
-*!notifier::XmppClientSocketFactory::CreateTransportClientSocket
-*!notifier::ChromeAsyncSocket::Connect
-*!buzz::XmppClient::ProcessStartXmppLogin
-*!buzz::XmppClient::Process
-*!talk_base::Task::Step
-*!talk_base::TaskRunner::InternalRunTasks
-*!talk_base::TaskRunner::RunTasks
-*!notifier::TaskPump::CheckAndRunTasks
-*!base::internal::RunnableAdapter<>::Run
-
 # Test intentionally leaks an object.
 LEAK
 name=http://crbug.com/86301
@@ -1093,6 +1053,13 @@ UNINITIALIZED READ
 name=http://crbug.com/64887 (GMock printing uninit data)
 ...
 *!testing::*::PrintBytesInObjectTo*
+
+# This is an EXPECT_DEATH() that hits a RELEASE_ASSERT(),
+# which intentionally writes to NULL in order to crash.
+UNADDRESSABLE ACCESS
+name=https://crbug.com/497344
+blink_platform.dll!blink::SecurityOrigin::addSuborigin
+*!blink::SecurityOriginTest_Suborigins_Test::TestBody
 
 ###############################################################
 # Proactively borrowed from memcheck/suppressions.txt.
@@ -1507,40 +1474,6 @@ name=http://crbug.com/115328
 ...
 *!GenericInfoViewTest_GenericInfoView_Test::TestBody
 
-LEAK
-name=http://crbug.com/117427 a
-...
-*!net::HostCache::Set
-*!net::HostResolverImpl::CacheResult
-*!net::HostResolverImpl::Job::CompleteRequests
-*!net::HostResolverImpl::Job::OnProcTaskComplete
-*!base::internal::RunnableAdapter<>::Run
-
-# Probably related to 117427.  Someone is not tearing down DNS resolution during
-# testing.
-LEAK
-name=http://crbug.com/117427 b
-*!generic_cpp_alloc
-*!operator new
-*!base::internal::WeakReferenceOwner::GetRef
-*!base::SupportsWeakPtr<>::AsWeakPtr
-*!net::HostResolverImpl::Job::Job
-*!net::HostResolverImpl::Resolve
-*!net::SingleRequestHostResolver::Resolve
-*!net::TransportConnectJob::DoResolveHost
-*!net::TransportConnectJob::DoLoop
-*!net::TransportConnectJob::ConnectInternal
-*!net::ConnectJob::Connect
-*!net::internal::ClientSocketPoolBaseHelper::RequestSocketInternal
-*!net::internal::ClientSocketPoolBaseHelper::RequestSocket
-*!net::ClientSocketPoolBase<>::RequestSocket
-*!net::TransportClientSocketPool::RequestSocket
-*!net::ClientSocketHandle::Init<>
-*!net::`anonymous namespace'::InitSocketPoolHelper
-*!net::InitSocketHandleForRawConnect
-*!notifier::ProxyResolvingClientSocket::ProcessProxyResolveDone
-*!base::internal::RunnableAdapter<>::Run
-
 # IE frame possible leak of COM object.
 LEAK
 name=http://crbug.com/122399
@@ -1844,13 +1777,9 @@ KERNELBASE.dll!CreateWaitableTimerExW
 KERNEL32.dll!CreateWaitableTimerW
 content.dll!rtc::Timing::Timing
 content.dll!content::RenderProcessHostImpl::CreateMessageFilters
-...
-content.dll!content::RenderViewHostImpl::CreateRenderView
-content.dll!content::WebContentsImpl::CreateRenderViewForRenderManager
+content.dll!content::RenderProcessHostImpl::Init
 ...
 content.dll!content::NavigationControllerImpl::LoadEntry
-...
-*!extensions::ExtensionHost::LoadInitialURL
 
 UNINITIALIZED READ
 name=bug_414268
@@ -1880,7 +1809,7 @@ name=bug_436131
 
 UNADDRESSABLE ACCESS
 name=bug_436131_b
-views.dll!ObserverListBase<>::RemoveObserver
+views.dll!base::ObserverListBase<>::RemoveObserver
 *!ash::test::ShelfViewTestAPI::RunMessageLoopUntilAnimationsDone
 *!testing::internal::HandleExceptionsInMethodIfSupported<>
 
@@ -1904,27 +1833,8 @@ name=bug_455417
 UNINITIALIZED READ
 name=bug_468169
 ...
-*!vp9_foreach_transformed_block_in_plane
-...
-*!nonrd_select_partition
 *!encode_nonrd_sb_row
 *!vp9_encode_tile
-
-UNINITIALIZED READ
-name=bug_468169_b
-...
-*!vp9_pick_inter_mode
-...
-*!nonrd_select_partition
-*!encode_nonrd_sb_row
-*!vp9_encode_tile
-
-UNADDRESSABLE ACCESS
-name=bug_470055
-blink_web.dll!blink::*::focused*Frame
-blink_web.dll!blink::WebFrameWidgetImpl::selectionBounds
-content.dll!content::RenderWidget::UpdateSelectionBounds
-content.dll!content::RenderWidget::willBeginCompositorFrame
 
 UNINITIALIZED READ
 name=bug_470848
@@ -1954,29 +1864,142 @@ content.dll!content::RenderThreadImpl::AllocateSharedMemory
 content.dll!content::WebGraphicsContext3DCommandBufferImpl::CreateContext
 
 HANDLE LEAK
-name=https://crbug.com/487492
-system call NtCreateSection
-KERNELBASE.dll!CreateFileMappingW
-base.dll!base::SharedMemory::Create
-base.dll!base::SharedMemory::CreateAnonymous
-content.dll!content::ChildThreadImpl::AllocateSharedMemory
-...
-ppapi_proxy.dll!ppapi::proxy::PPB_ImageData_Proxy::CreateImageData
+name=https://crbug.com/489779
+system call NtUserCreateWindowEx
+USER32.dll!UnregisterClassW
+USER32.dll!UnregisterClassW
+USER32.dll!CreateWindowExW
+gfx.dll!gfx::WindowImpl::Init
+win_window.dll!ui::WinWindow::WinWindow
+aura.dll!aura::WindowTreeHostWin::WindowTreeHostWin
+aura.dll!aura::WindowTreeHost::Create
 
-HANDLE LEAK
-name=https://crbug.com/487492_b
-system call NtGdiCreateDIBSection
-GDI32.dll!CreateDIBSection
-skia.dll!`anonymous namespace'::CreateHBitmap
+UNINITIALIZED READ
+name=bug_492821
+*!blink::CSSPropertyParser::validUnit
 ...
-content.dll!content::PepperGraphics2DHost::Flush
+*!blink::CSSPropertyParser::parseValue
+*!blink::CSSPropertyParser::parseValue
+*!blink::CSSParserImpl::consumeDeclarationValue
+*!blink::CSSParserImpl::consumeDeclaration
+*!blink::CSSParserImpl::consumeDeclarationList
+*!blink::CSSParserImpl::consumeStyleRule
+*!blink::CSSParserImpl::consumeQualifiedRule
+*!blink::CSSParserImpl::consumeRuleList<>
+*!blink::CSSParserImpl::parseStyleSheet
+*!blink::CSSParser::parseSheet
+*!blink::StyleSheetContents::parseStringAtPosition
+*!blink::StyleEngine::parseSheet
+*!blink::StyleEngine::createSheet
+*!blink::StyleElement::createSheet
+*!blink::StyleElement::process
 
-HANDLE LEAK
-name=https://crbug.com/487492_c
-system call NtCreateSection
-KERNELBASE.dll!CreateFileMappingW
-base.dll!base::SharedMemory::Create
-base.dll!base::SharedMemory::CreateAnonymous
-content.dll!content::ChildThreadImpl::AllocateSharedMemory
-...
-content.dll!content::PepperPluginInstanceImpl::PrepareTextureMailbox
+UNINITIALIZED READ
+name=bug_493167
+system call NtWriteFile parameter #5
+KERNELBASE.dll!WriteFile
+KERNEL32.dll!WriteFile
+*!base::File::WriteAtCurrentPos
+*!sessions::SessionBackend::AppendCommandsToFile
+*!sessions::SessionBackend::AppendCommands
+*!base::internal::RunnableAdapter<>::Run
+
+UNADDRESSABLE ACCESS
+name=bug_505734
+webcore_shared.dll!blink::FocusController::focusedOrMainFrame
+content.dll!content::RenderWidget::GetSelectionBounds
+content.dll!content::RenderWidget::UpdateSelectionBounds
+content.dll!content::RenderWidget::WillBeginCompositorFrame
+cc.dll!base::internal::InvokeHelper<>::MakeItSo
+cc.dll!base::internal::Invoker<>::Run
+
+UNADDRESSABLE ACCESS
+name=bug_506557_a
+drmemorylib.dll!replace_memmove
+base.dll!base::trace_event::TraceLog::RemoveEnabledStateObserver
+base.dll!base::trace_event::TraceEventSystemStatsMonitor::~TraceEventSystemStatsMonitor
+content.dll!content::BrowserMainLoop::ShutdownThreadsAndCleanUp
+content.dll!content::BrowserMainRunnerImpl::Shutdown
+content.dll!content::BrowserMain
+content.dll!content::RunNamedProcessTypeMain
+content.dll!content::ContentMainRunnerImpl::Run
+content.dll!content::ContentMain
+*!content::BrowserTestBase::SetUp
+*!InProcessBrowserTest::SetUp
+*!testing::internal::HandleExceptionsInMethodIfSupported<>
+
+UNINITIALIZED READ
+name=bug_506557_b
+base.dll!base::trace_event::TraceLog::RemoveEnabledStateObserver
+content.dll!content::V8SamplingProfiler::~V8SamplingProfiler
+content.dll!content::RenderThreadImpl::~RenderThreadImpl
+content.dll!content::RenderThreadImpl::`vector deleting destructor'
+content.dll!content::ChildProcess::~ChildProcess
+content.dll!content::RenderProcessImpl::`scalar deleting destructor'
+content.dll!content::InProcessRendererThread::CleanUp
+base.dll!base::`anonymous namespace'::ThreadFunc
+KERNEL32.dll!BaseThreadInitThunk
+
+UNADDRESSABLE ACCESS
+name=bug_506557_c
+base.dll!base::trace_event::TraceLog::RemoveEnabledStateObserver
+content.dll!content::V8SamplingProfiler::~V8SamplingProfiler
+content.dll!content::RenderThreadImpl::~RenderThreadImpl
+content.dll!content::RenderThreadImpl::`vector deleting destructor'
+content.dll!content::ChildProcess::~ChildProcess
+content.dll!content::RenderProcessImpl::`scalar deleting destructor'
+content.dll!content::InProcessRendererThread::CleanUp
+base.dll!base::`anonymous namespace'::ThreadFunc
+KERNEL32.dll!BaseThreadInitThunk
+
+UNADDRESSABLE ACCESS
+name=bug_506557_d
+base.dll!std::vector<>::push_back
+base.dll!base::trace_event::TraceLog::AddEnabledStateObserver
+base.dll!base::trace_event::MemoryDumpManager::Initialize
+content.dll!content::ChildThreadImpl::Init
+content.dll!content::ChildThreadImpl::ChildThreadImpl
+content.dll!content::RenderThreadImpl::RenderThreadImpl
+content.dll!content::InProcessRendererThread::Init
+base.dll!base::`anonymous namespace'::ThreadFunc
+KERNEL32.dll!BaseThreadInitThunk
+
+UNADDRESSABLE ACCESS
+name=bug_506557_e
+base.dll!std::vector<>::push_back
+base.dll!base::trace_event::TraceLog::AddEnabledStateObserver
+content.dll!content::V8SamplingProfiler::V8SamplingProfiler
+content.dll!content::RenderThreadImpl::EnsureWebKitInitialized
+content.dll!content::RenderThreadImpl::OnCreateNewView
+content.dll!ViewMsg_New::Dispatch<>
+content.dll!content::RenderThreadImpl::OnControlMessageReceived
+content.dll!content::ChildThreadImpl::OnMessageReceived
+ipc.dll!IPC::ChannelProxy::Context::OnDispatchMessage
+ipc.dll!base::internal::Invoker<>::Run
+base.dll!base::debug::TaskAnnotator::RunTask
+scheduler.dll!scheduler::TaskQueueManager::ProcessTaskFromWorkQueue
+scheduler.dll!scheduler::TaskQueueManager::DoWork
+scheduler.dll!base::internal::Invoker<>::Run
+base.dll!base::debug::TaskAnnotator::RunTask
+base.dll!base::MessageLoop::RunTask
+base.dll!base::MessageLoop::DeferOrRunPendingTask
+base.dll!base::MessageLoop::DoWork
+base.dll!base::MessagePumpForUI::DoRunLoop
+base.dll!base::MessagePumpWin::Run
+base.dll!base::MessageLoop::RunHandler
+base.dll!base::MessageLoop::Run
+base.dll!base::Thread::Run
+base.dll!base::Thread::ThreadMain
+base.dll!base::`anonymous namespace'::ThreadFunc
+KERNEL32.dll!BaseThreadInitThunk
+
+UNINITIALIZED READ
+name=bug_508794
+MSVCR120.dll!mbtowc_l
+MSVCR120.dll!fputwc_nolock
+MSVCR120.dll!vsnwprintf_s_l
+MSVCR120.dll!vsnwprintf_s
+*!base::`anonymous namespace'::StringAppendVT<>
+*!base::StringPrintf
+*!content::AccessibilityTreeFormatter::ToString
+*!content::AccessibilityTreeFormatter::RecursiveFormatAccessibilityTree

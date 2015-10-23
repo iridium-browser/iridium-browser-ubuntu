@@ -211,7 +211,7 @@ Status ParseProxy(const base::Value& option, Capabilities* capabilities) {
   std::string proxy_type;
   if (!proxy_dict->GetString("proxyType", &proxy_type))
     return Status(kUnknownError, "'proxyType' must be a string");
-  proxy_type = base::StringToLowerASCII(proxy_type);
+  proxy_type = base::ToLowerASCII(proxy_type);
   if (proxy_type == "direct") {
     capabilities->switches.SetSwitch("no-proxy-server");
   } else if (proxy_type == "system") {
@@ -294,8 +294,8 @@ Status ParseUseRemoteBrowser(const base::Value& option,
   if (!option.GetAsString(&server_addr))
     return Status(kUnknownError, "must be 'host:port'");
 
-  std::vector<std::string> values;
-  base::SplitString(server_addr, ':', &values);
+  std::vector<std::string> values = base::SplitString(
+      server_addr, ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (values.size() != 2)
     return Status(kUnknownError, "must be 'host:port'");
 

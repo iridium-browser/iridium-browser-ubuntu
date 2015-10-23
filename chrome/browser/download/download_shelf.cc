@@ -10,14 +10,18 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_started_animation.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/grit/locale_settings.h"
@@ -26,11 +30,13 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
+#include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkPath.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/theme_provider.h"
 #include "ui/gfx/animation/animation.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/image/image_skia.h"
 
 using content::DownloadItem;
 
@@ -62,199 +68,76 @@ DownloadShelf::DownloadShelf()
 
 DownloadShelf::~DownloadShelf() {}
 
-// static
-int DownloadShelf::GetBigProgressIconSize() {
-  static int big_progress_icon_size = 0;
-  if (big_progress_icon_size == 0) {
-    base::string16 locale_size_str =
-        l10n_util::GetStringUTF16(IDS_DOWNLOAD_BIG_PROGRESS_SIZE);
-    bool rc = base::StringToInt(locale_size_str, &big_progress_icon_size);
-    if (!rc || big_progress_icon_size < kBigProgressIconSize) {
-      NOTREACHED();
-      big_progress_icon_size = kBigProgressIconSize;
-    }
-  }
-
-  return big_progress_icon_size;
-}
-
-// static
-int DownloadShelf::GetBigProgressIconOffset() {
-  return (GetBigProgressIconSize() - kBigIconSize) / 2;
-}
-
 // Download progress painting --------------------------------------------------
-
-// Common images used for download progress animations. We load them once the
-// first time we do a progress paint, then reuse them as they are always the
-// same.
-gfx::ImageSkia* g_foreground_16 = NULL;
-gfx::ImageSkia* g_background_16 = NULL;
-gfx::ImageSkia* g_foreground_32 = NULL;
-gfx::ImageSkia* g_background_32 = NULL;
-
-// static
-void DownloadShelf::PaintCustomDownloadProgress(
-    gfx::Canvas* canvas,
-    const gfx::ImageSkia& background_image,
-    const gfx::ImageSkia& foreground_image,
-    int image_size,
-    const gfx::Rect& bounds,
-    int start_angle,
-    int percent_done) {
-  // Draw the background progress image.
-  canvas->DrawImageInt(background_image,
-                       bounds.x(),
-                       bounds.y());
-
-  // Layer the foreground progress image in an arc proportional to the download
-  // progress. The arc grows clockwise, starting in the midnight position, as
-  // the download progresses. However, if the download does not have known total
-  // size (the server didn't give us one), then we just spin an arc around until
-  // we're done.
-  float sweep_angle = 0.0;
-  float start_pos = static_cast<float>(kStartAngleDegrees);
-  if (percent_done < 0) {
-    sweep_angle = kUnknownAngleDegrees;
-    start_pos = static_cast<float>(start_angle);
-  } else if (percent_done > 0) {
-    sweep_angle = static_cast<float>(kMaxDegrees / 100.0 * percent_done);
-  }
-
-  // Set up an arc clipping region for the foreground image. Don't bother using
-  // a clipping region if it would round to 360 (really 0) degrees, since that
-  // would eliminate the foreground completely and be quite confusing (it would
-  // look like 0% complete when it should be almost 100%).
-  canvas->Save();
-  if (sweep_angle < static_cast<float>(kMaxDegrees - 1)) {
-    SkRect oval;
-    oval.set(SkIntToScalar(bounds.x()),
-             SkIntToScalar(bounds.y()),
-             SkIntToScalar(bounds.x() + image_size),
-             SkIntToScalar(bounds.y() + image_size));
-    SkPath path;
-    path.arcTo(oval,
-               SkFloatToScalar(start_pos),
-               SkFloatToScalar(sweep_angle), false);
-    path.lineTo(SkIntToScalar(bounds.x() + image_size / 2),
-                SkIntToScalar(bounds.y() + image_size / 2));
-
-    // gfx::Canvas::ClipPath does not provide for anti-aliasing.
-    canvas->sk_canvas()->clipPath(path, SkRegion::kIntersect_Op, true);
-  }
-
-  canvas->DrawImageInt(foreground_image,
-                       bounds.x(),
-                       bounds.y());
-  canvas->Restore();
-}
 
 // static
 void DownloadShelf::PaintDownloadProgress(
     gfx::Canvas* canvas,
-    const BoundsAdjusterCallback& rtl_mirror,
-    int origin_x,
-    int origin_y,
-    int start_angle,
-    int percent_done,
-    PaintDownloadProgressSize size) {
-  // Load up our common images.
-  if (!g_background_16) {
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    g_foreground_16 = rb.GetImageSkiaNamed(IDR_DOWNLOAD_PROGRESS_FOREGROUND_16);
-    g_background_16 = rb.GetImageSkiaNamed(IDR_DOWNLOAD_PROGRESS_BACKGROUND_16);
-    g_foreground_32 = rb.GetImageSkiaNamed(IDR_DOWNLOAD_PROGRESS_FOREGROUND_32);
-    g_background_32 = rb.GetImageSkiaNamed(IDR_DOWNLOAD_PROGRESS_BACKGROUND_32);
-    DCHECK_EQ(g_foreground_16->width(), g_background_16->width());
-    DCHECK_EQ(g_foreground_16->height(), g_background_16->height());
-    DCHECK_EQ(g_foreground_32->width(), g_background_32->width());
-    DCHECK_EQ(g_foreground_32->height(), g_background_32->height());
+    const ui::ThemeProvider& theme_provider,
+    const base::TimeTicks& progress_start_time,
+    int percent_done) {
+  // Draw background (light blue circle).
+  SkPaint bg_paint;
+  bg_paint.setStyle(SkPaint::kFill_Style);
+  SkColor indicator_color =
+      theme_provider.GetColor(ThemeProperties::COLOR_THROBBER_SPINNING);
+  bg_paint.setColor(SkColorSetA(indicator_color, 0x33));
+  bg_paint.setAntiAlias(true);
+  const SkScalar kCenterPoint = kProgressIndicatorSize / 2.f;
+  const SkScalar kRadius = 12.5f;
+  SkPath bg;
+  bg.addCircle(kCenterPoint, kCenterPoint, kRadius);
+  canvas->DrawPath(bg, bg_paint);
+
+  // Calculate progress.
+  SkScalar sweep_angle = 0.f;
+  // Start at 12 o'clock.
+  SkScalar start_pos = SkIntToScalar(270);
+  if (percent_done < 0) {
+    // For unknown size downloads, draw a 50 degree sweep that moves at
+    // 0.08 degrees per millisecond.
+    sweep_angle = 50.f;
+    start_pos += static_cast<SkScalar>(
+        (base::TimeTicks::Now() - progress_start_time).InMilliseconds() * 0.08);
+  } else if (percent_done > 0) {
+    sweep_angle = static_cast<SkScalar>(360 * percent_done / 100.0);
   }
 
-  gfx::ImageSkia* background =
-      (size == BIG) ? g_background_32 : g_background_16;
-  gfx::ImageSkia* foreground =
-      (size == BIG) ? g_foreground_32 : g_foreground_16;
-
-  const int kProgressIconSize =
-      (size == BIG) ? kBigProgressIconSize : kSmallProgressIconSize;
-
-  // We start by storing the bounds of the images so that it is easy to mirror
-  // the bounds if the UI layout is RTL.
-  gfx::Rect bounds(origin_x, origin_y,
-                   background->width(), background->height());
-
-  // Mirror the positions if necessary.
-  rtl_mirror.Run(&bounds);
-
-  // Draw the background progress image.
-  canvas->DrawImageInt(*background,
-                       bounds.x(),
-                       bounds.y());
-
-  PaintCustomDownloadProgress(canvas,
-                              *background,
-                              *foreground,
-                              kProgressIconSize,
-                              bounds,
-                              start_angle,
-                              percent_done);
+  // Draw progress.
+  SkPath progress;
+  progress.addArc(SkRect::MakeLTRB(kCenterPoint - kRadius,
+                                   kCenterPoint - kRadius,
+                                   kCenterPoint + kRadius,
+                                   kCenterPoint + kRadius),
+                  start_pos, sweep_angle);
+  SkPaint progress_paint;
+  progress_paint.setColor(indicator_color);
+  progress_paint.setStyle(SkPaint::kStroke_Style);
+  progress_paint.setStrokeWidth(1.7f);
+  progress_paint.setAntiAlias(true);
+  canvas->DrawPath(progress, progress_paint);
 }
 
 // static
 void DownloadShelf::PaintDownloadComplete(
     gfx::Canvas* canvas,
-    const BoundsAdjusterCallback& rtl_mirror,
-    int origin_x,
-    int origin_y,
-    double animation_progress,
-    PaintDownloadProgressSize size) {
-  // Load up our common images.
-  if (!g_foreground_16) {
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    g_foreground_16 = rb.GetImageSkiaNamed(IDR_DOWNLOAD_PROGRESS_FOREGROUND_16);
-    g_foreground_32 = rb.GetImageSkiaNamed(IDR_DOWNLOAD_PROGRESS_FOREGROUND_32);
-  }
-
-  gfx::ImageSkia* complete = (size == BIG) ? g_foreground_32 : g_foreground_16;
-
-  gfx::Rect complete_bounds(origin_x, origin_y,
-                            complete->width(), complete->height());
-  // Mirror the positions if necessary.
-  rtl_mirror.Run(&complete_bounds);
-
+    const ui::ThemeProvider& theme_provider,
+    double animation_progress) {
   // Start at full opacity, then loop back and forth five times before ending
   // at zero opacity.
-  canvas->DrawImageInt(*complete, complete_bounds.x(), complete_bounds.y(),
-                       GetOpacity(animation_progress));
+  canvas->sk_canvas()->saveLayerAlpha(nullptr, GetOpacity(animation_progress));
+  PaintDownloadProgress(canvas, theme_provider, base::TimeTicks(), 100);
+  canvas->sk_canvas()->restore();
 }
 
 // static
 void DownloadShelf::PaintDownloadInterrupted(
     gfx::Canvas* canvas,
-    const BoundsAdjusterCallback& rtl_mirror,
-    int origin_x,
-    int origin_y,
-    double animation_progress,
-    PaintDownloadProgressSize size) {
-  // Load up our common images.
-  if (!g_foreground_16) {
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    g_foreground_16 = rb.GetImageSkiaNamed(IDR_DOWNLOAD_PROGRESS_FOREGROUND_16);
-    g_foreground_32 = rb.GetImageSkiaNamed(IDR_DOWNLOAD_PROGRESS_FOREGROUND_32);
-  }
-
-  gfx::ImageSkia* complete = (size == BIG) ? g_foreground_32 : g_foreground_16;
-
-  gfx::Rect complete_bounds(origin_x, origin_y,
-                            complete->width(), complete->height());
-  // Mirror the positions if necessary.
-  rtl_mirror.Run(&complete_bounds);
-
+    const ui::ThemeProvider& theme_provider,
+    double animation_progress) {
   // Start at zero opacity, then loop back and forth five times before ending
   // at full opacity.
-  canvas->DrawImageInt(*complete, complete_bounds.x(), complete_bounds.y(),
-                       GetOpacity(1.0 - animation_progress));
+  PaintDownloadComplete(canvas, theme_provider, 1.0 - animation_progress);
 }
 
 void DownloadShelf::AddDownload(DownloadItem* download) {
@@ -263,11 +146,10 @@ void DownloadShelf::AddDownload(DownloadItem* download) {
     // If we are going to remove the download from the shelf upon completion,
     // wait a few seconds to see if it completes quickly. If it's a small
     // download, then the user won't have time to interact with it.
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&DownloadShelf::ShowDownloadById,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   download->GetId()),
+                   weak_ptr_factory_.GetWeakPtr(), download->GetId()),
         GetTransientDownloadShowDelay());
   } else {
     ShowDownload(download);

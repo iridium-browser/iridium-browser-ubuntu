@@ -56,11 +56,17 @@ namespace blink {
 
 namespace {
 
+void processExceptionOnWorkerGlobalScope(int exceptionId, bool isHandled, ExecutionContext* scriptContext)
+{
+    WorkerGlobalScope* globalScope = toWorkerGlobalScope(scriptContext);
+    globalScope->exceptionHandled(exceptionId, isHandled);
+}
+
 void processMessageOnWorkerGlobalScope(PassRefPtr<SerializedScriptValue> message, PassOwnPtr<MessagePortChannelArray> channels, WorkerObjectProxy* workerObjectProxy, ExecutionContext* scriptContext)
 {
     WorkerGlobalScope* globalScope = toWorkerGlobalScope(scriptContext);
-    OwnPtrWillBeRawPtr<MessagePortArray> ports = MessagePort::entanglePorts(*scriptContext, channels);
-    globalScope->dispatchEvent(MessageEvent::create(ports.release(), message));
+    MessagePortArray* ports = MessagePort::entanglePorts(*scriptContext, channels);
+    globalScope->dispatchEvent(MessageEvent::create(ports, message));
     workerObjectProxy->confirmMessageFromWorkerObject(scriptContext->hasPendingActivity());
 }
 
@@ -103,10 +109,10 @@ void WorkerMessagingProxy::startWorkerGlobalScope(const KURL& scriptURL, const S
     Document* document = toDocument(m_executionContext.get());
     SecurityOrigin* starterOrigin = document->securityOrigin();
 
-    RefPtr<ContentSecurityPolicy> csp = m_workerObject->contentSecurityPolicy() ? m_workerObject->contentSecurityPolicy() : document->contentSecurityPolicy();
+    ContentSecurityPolicy* csp = m_workerObject->contentSecurityPolicy() ? m_workerObject->contentSecurityPolicy() : document->contentSecurityPolicy();
     ASSERT(csp);
 
-    OwnPtr<WorkerThreadStartupData> startupData = WorkerThreadStartupData::create(scriptURL, userAgent, sourceCode, nullptr, startMode, csp->deprecatedHeader(), csp->deprecatedHeaderType(), starterOrigin, m_workerClients.release());
+    OwnPtr<WorkerThreadStartupData> startupData = WorkerThreadStartupData::create(scriptURL, userAgent, sourceCode, nullptr, startMode, csp->headers(), starterOrigin, m_workerClients.release());
     double originTime = document->loader() ? document->loader()->timing().referenceMonotonicTime() : monotonicallyIncreasingTime();
 
     m_loaderProxy = WorkerLoaderProxy::create(this);
@@ -121,8 +127,8 @@ void WorkerMessagingProxy::postMessageToWorkerObject(PassRefPtr<SerializedScript
     if (!m_workerObject || m_askedToTerminate)
         return;
 
-    OwnPtrWillBeRawPtr<MessagePortArray> ports = MessagePort::entanglePorts(*m_executionContext.get(), channels);
-    m_workerObject->dispatchEvent(MessageEvent::create(ports.release(), message));
+    MessagePortArray* ports = MessagePort::entanglePorts(*m_executionContext.get(), channels);
+    m_workerObject->dispatchEvent(MessageEvent::create(ports, message));
 }
 
 void WorkerMessagingProxy::postMessageToWorkerGlobalScope(PassRefPtr<SerializedScriptValue> message, PassOwnPtr<MessagePortChannelArray> channels)
@@ -166,8 +172,7 @@ void WorkerMessagingProxy::reportException(const String& errorMessage, int lineN
 
     RefPtrWillBeRawPtr<ErrorEvent> event = ErrorEvent::create(errorMessage, sourceURL, lineNumber, columnNumber, nullptr);
     bool errorHandled = !m_workerObject->dispatchEvent(event);
-
-    postTaskToWorkerGlobalScope(createCrossThreadTask(&WorkerGlobalScope::exceptionHandled, m_workerThread->workerGlobalScope(), exceptionId, errorHandled));
+    postTaskToWorkerGlobalScope(createCrossThreadTask(&processExceptionOnWorkerGlobalScope, exceptionId, errorHandled));
 }
 
 void WorkerMessagingProxy::reportConsoleMessage(MessageSource source, MessageLevel level, const String& message, int lineNumber, const String& sourceURL)
@@ -202,7 +207,11 @@ void WorkerMessagingProxy::workerThreadCreated(PassRefPtr<WorkerThread> workerTh
 
 void WorkerMessagingProxy::workerObjectDestroyed()
 {
-    m_workerObject = nullptr;
+    // workerObjectDestroyed() is called in InProcessWorkerBase's destructor.
+    // Thus it should be guaranteed that a weak pointer m_workerObject has been cleared
+    // before this method gets called.
+    ASSERT(!m_workerObject);
+
     m_executionContext->postTask(FROM_HERE, createCrossThreadTask(&WorkerMessagingProxy::workerObjectDestroyedInternal, this));
 }
 
@@ -233,7 +242,7 @@ void WorkerMessagingProxy::terminateWorkerGlobalScope()
     m_askedToTerminate = true;
 
     if (m_workerThread)
-        m_workerThread->stop();
+        m_workerThread->terminate();
 
     terminateInternally();
 }

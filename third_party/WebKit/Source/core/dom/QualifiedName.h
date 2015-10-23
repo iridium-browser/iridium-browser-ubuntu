@@ -22,6 +22,7 @@
 #define QualifiedName_h
 
 #include "core/CoreExport.h"
+#include "wtf/Allocator.h"
 #include "wtf/HashTableDeletedValueType.h"
 #include "wtf/HashTraits.h"
 #include "wtf/RefCounted.h"
@@ -30,6 +31,7 @@
 namespace blink {
 
 struct QualifiedNameComponents {
+    DISALLOW_ALLOCATION();
     StringImpl* m_prefix;
     StringImpl* m_localName;
     StringImpl* m_namespace;
@@ -38,6 +40,7 @@ struct QualifiedNameComponents {
 // This struct is used to pass data between QualifiedName and the QNameTranslator.
 // For hashing and equality only the QualifiedNameComponents fields are used.
 struct QualifiedNameData {
+    DISALLOW_ALLOCATION();
     QualifiedNameComponents m_components;
     bool m_isStatic;
 };
@@ -153,6 +156,7 @@ inline unsigned hashComponents(const QualifiedNameComponents& buf)
 }
 
 struct QualifiedNameHash {
+    STATIC_ONLY(QualifiedNameHash);
     static unsigned hash(const QualifiedName& name) { return hash(name.impl()); }
 
     static unsigned hash(const QualifiedName::QualifiedNameImpl* name)
@@ -172,14 +176,14 @@ struct QualifiedNameHash {
 
 namespace WTF {
 
-    template<> struct DefaultHash<blink::QualifiedName> {
-        typedef blink::QualifiedNameHash Hash;
-    };
+template<> struct DefaultHash<blink::QualifiedName> {
+    typedef blink::QualifiedNameHash Hash;
+};
 
-    template<> struct HashTraits<blink::QualifiedName> : SimpleClassHashTraits<blink::QualifiedName> {
-        static const bool emptyValueIsZero = false;
-        static blink::QualifiedName emptyValue() { return blink::QualifiedName::null(); }
-    };
+template<> struct HashTraits<blink::QualifiedName> : SimpleClassHashTraits<blink::QualifiedName> {
+    static const bool emptyValueIsZero = false;
+    static blink::QualifiedName emptyValue() { return blink::QualifiedName::null(); }
+};
 }
 
 #endif

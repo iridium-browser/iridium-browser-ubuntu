@@ -8,9 +8,12 @@
 #include <list>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
+#include "base/values.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_util.h"
 #include "net/base/upload_data_stream.h"
@@ -362,7 +365,14 @@ void SpdyHttpStream::OnDataSent() {
   ReadAndSendRequestBodyData();
 }
 
+// TODO(xunjieli): Maybe do something with the trailers. crbug.com/422958.
+void SpdyHttpStream::OnTrailers(const SpdyHeaderBlock& trailers) {}
+
 void SpdyHttpStream::OnClose(int status) {
+  // Cancel any pending reads from the upload data stream.
+  if (request_info_->upload_data_stream)
+    request_info_->upload_data_stream->Reset();
+
   if (stream_.get()) {
     stream_closed_ = true;
     closed_stream_status_ = status;
@@ -372,6 +382,7 @@ void SpdyHttpStream::OnClose(int status) {
     closed_stream_received_bytes_ = stream_->raw_received_bytes();
   }
   stream_.reset();
+
   bool invoked_callback = false;
   if (status == OK) {
     // We need to complete any pending buffered read now.
@@ -446,7 +457,7 @@ void SpdyHttpStream::ScheduleBufferedReadCallback() {
   more_read_data_pending_ = false;
   buffered_read_callback_pending_ = true;
   const base::TimeDelta kBufferTime = base::TimeDelta::FromMilliseconds(1);
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(base::IgnoreResult(&SpdyHttpStream::DoBufferedReadCallback),
                  weak_factory_.GetWeakPtr()),

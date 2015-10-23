@@ -32,18 +32,20 @@
 
 #include "public/web/WebLeakDetector.h"
 
+#include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8GCController.h"
+#include "core/dom/ActiveDOMObject.h"
 #include "core/dom/Document.h"
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceFetcher.h"
-#include "core/inspector/InspectorCounters.h"
+#include "core/inspector/InstanceCounters.h"
 #include "core/layout/LayoutObject.h"
+#include "core/workers/WorkerThread.h"
 #include "modules/webaudio/AudioNode.h"
 #include "platform/Timer.h"
 #include "public/web/WebDocument.h"
 #include "public/web/WebLocalFrame.h"
-#include "web/WebEmbeddedWorkerImpl.h"
 
 namespace blink {
 
@@ -65,9 +67,9 @@ public:
         ASSERT(m_client);
     }
 
-    virtual ~WebLeakDetectorImpl() { }
+    ~WebLeakDetectorImpl() override {}
 
-    virtual void collectGarbageAndGetDOMCounts(WebLocalFrame*) override;
+    void collectGarbageAndGetDOMCounts(WebLocalFrame*) override;
 
 private:
     void delayedGCAndReport(Timer<WebLeakDetectorImpl>*);
@@ -81,7 +83,17 @@ private:
 
 void WebLeakDetectorImpl::collectGarbageAndGetDOMCounts(WebLocalFrame* frame)
 {
-    WebEmbeddedWorkerImpl::terminateAll();
+    v8::Isolate* isolate = v8::Isolate::GetCurrent();
+    v8::HandleScope handleScope(isolate);
+
+    // For example, calling isValidEmailAddress in EmailInputType.cpp with a
+    // non-empty string creates a static ScriptRegexp value which holds a
+    // V8PerContextData indirectly. This affects the number of V8PerContextData.
+    // To ensure that context data is created, call ensureScriptRegexpContext
+    // here.
+    V8PerIsolateData::from(isolate)->ensureScriptRegexpContext();
+
+    WorkerThread::terminateAndWaitForAllWorkers();
     memoryCache()->evictResources();
 
     {
@@ -93,7 +105,7 @@ void WebLeakDetectorImpl::collectGarbageAndGetDOMCounts(WebLocalFrame* frame)
     // FIXME: HTML5 Notification should be closed because notification affects the result of number of DOM objects.
 
     for (int i = 0; i < kNumberOfGCsToClaimChains; ++i)
-        V8GCController::collectGarbage(v8::Isolate::GetCurrent());
+        V8GCController::collectGarbage(isolate);
     // Note: Oilpan precise GC is scheduled at the end of the event loop.
 
     // Task queue may contain delayed object destruction tasks.
@@ -126,12 +138,15 @@ void WebLeakDetectorImpl::delayedReport(Timer<WebLeakDetectorImpl>*)
     ASSERT(m_client);
 
     WebLeakDetectorClient::Result result;
-    result.numberOfLiveAudioNodes = AudioHandler::instanceCount();
-    result.numberOfLiveDocuments = InspectorCounters::counterValue(InspectorCounters::DocumentCounter);
-    result.numberOfLiveNodes = InspectorCounters::counterValue(InspectorCounters::NodeCounter);
-    result.numberOfLiveLayoutObjects = LayoutObject::instanceCount();
-    result.numberOfLiveRenderObjects = result.numberOfLiveLayoutObjects;
-    result.numberOfLiveResources = Resource::instanceCount();
+    result.numberOfLiveAudioNodes = InstanceCounters::counterValue(InstanceCounters::AudioHandlerCounter);
+    result.numberOfLiveDocuments = InstanceCounters::counterValue(InstanceCounters::DocumentCounter);
+    result.numberOfLiveNodes = InstanceCounters::counterValue(InstanceCounters::NodeCounter);
+    result.numberOfLiveLayoutObjects = InstanceCounters::counterValue(InstanceCounters::LayoutObjectCounter);
+    result.numberOfLiveResources = InstanceCounters::counterValue(InstanceCounters::ResourceCounter);
+    result.numberOfLiveActiveDOMObjects = InstanceCounters::counterValue(InstanceCounters::ActiveDOMObjectCounter);
+    result.numberOfLiveScriptPromises = InstanceCounters::counterValue(InstanceCounters::ScriptPromiseCounter);
+    result.numberOfLiveFrames = InstanceCounters::counterValue(InstanceCounters::FrameCounter);
+    result.numberOfLiveV8PerContextData = InstanceCounters::counterValue(InstanceCounters::V8PerContextDataCounter);
 
     m_client->onLeakDetectionComplete(result);
 

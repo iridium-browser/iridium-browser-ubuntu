@@ -12,14 +12,10 @@
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/top_sites_factory.h"
-#include "chrome/browser/precache/most_visited_urls_provider.h"
+#include "chrome/browser/precache/precache_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
-#include "components/history/core/browser/top_sites.h"
 #include "components/precache/content/precache_manager.h"
-#include "components/precache/content/precache_manager_factory.h"
 #include "jni/PrecacheLauncher_jni.h"
 
 using base::android::AttachCurrentThread;
@@ -44,14 +40,6 @@ PrecacheManager* GetPrecacheManager(Profile* profile) {
   return precache_manager;
 }
 
-bool IsDataReductionProxyEnabled(Profile* profile) {
-  // TODO(bengr): Use DataReductionProxySettings instead once it is safe to
-  // instantiate from here.
-  PrefService* prefs = profile->GetPrefs();
-  return prefs && prefs->GetBoolean(
-      data_reduction_proxy::prefs::kDataReductionProxyEnabled);
-}
-
 }  // namespace
 
 PrecacheLauncher::PrecacheLauncher(JNIEnv* env, jobject obj)
@@ -66,20 +54,16 @@ void PrecacheLauncher::Destroy(JNIEnv* env, jobject obj) {
 void PrecacheLauncher::Start(JNIEnv* env, jobject obj) {
   // TODO(bengr): Add integration tests for the whole feature.
   Profile* profile = GetProfile();
-  PrecacheManager* precache_manager = GetPrecacheManager(profile);
-  scoped_refptr<history::TopSites> ts = TopSitesFactory::GetForProfile(profile);
-  precache::MostVisitedURLsProvider url_list_provider(ts.get());
 
-  if (!IsDataReductionProxyEnabled(profile)) {
-    Java_PrecacheLauncher_onPrecacheCompletedCallback(
-        env, weak_java_precache_launcher_.get(env).obj());
+  PrecacheManager* precache_manager = GetPrecacheManager(profile);
+
+  if (precache_manager == nullptr) {
+    OnPrecacheCompleted(false);
     return;
   }
 
-  precache_manager->StartPrecaching(
-      base::Bind(&PrecacheLauncher::OnPrecacheCompleted,
-                 weak_factory_.GetWeakPtr()),
-      &url_list_provider);
+  precache_manager->StartPrecaching(base::Bind(
+      &PrecacheLauncher::OnPrecacheCompleted, weak_factory_.GetWeakPtr()));
 }
 
 void PrecacheLauncher::Cancel(JNIEnv* env, jobject obj) {
@@ -89,18 +73,22 @@ void PrecacheLauncher::Cancel(JNIEnv* env, jobject obj) {
   precache_manager->CancelPrecaching();
 }
 
-void PrecacheLauncher::OnPrecacheCompleted() {
+void PrecacheLauncher::OnPrecacheCompleted(bool try_again_soon) {
   JNIEnv* env = AttachCurrentThread();
   Java_PrecacheLauncher_onPrecacheCompletedCallback(
-      env, weak_java_precache_launcher_.get(env).obj());
+      env, weak_java_precache_launcher_.get(env).obj(),
+      try_again_soon ? JNI_TRUE : JNI_FALSE);
 }
 
 static jlong Init(JNIEnv* env, jobject obj) {
   return reinterpret_cast<intptr_t>(new PrecacheLauncher(env, obj));
 }
 
-static jboolean IsPrecachingEnabled(JNIEnv* env, jclass clazz) {
-  return PrecacheManager::IsPrecachingEnabled();
+// Must be run on the UI thread.
+static jboolean ShouldRun(JNIEnv* env, jobject obj) {
+  Profile* profile = GetProfile();
+  PrecacheManager* precache_manager = GetPrecacheManager(profile);
+  return precache_manager && precache_manager->ShouldRun();
 }
 
 bool RegisterPrecacheLauncher(JNIEnv* env) {

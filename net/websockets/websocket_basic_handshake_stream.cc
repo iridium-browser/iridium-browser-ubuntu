@@ -16,7 +16,7 @@
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -99,7 +99,7 @@ void AddVectorHeaderIfNonEmpty(const char* name,
                                HttpRequestHeaders* headers) {
   if (value.empty())
     return;
-  headers->SetHeader(name, JoinString(value, ", "));
+  headers->SetHeader(name, base::JoinString(value, ", "));
 }
 
 GetHeaderResult GetSingleHeaderValue(const HttpResponseHeaders* headers,
@@ -142,7 +142,7 @@ bool ValidateUpgrade(const HttpResponseHeaders* headers,
     return false;
   }
 
-  if (!LowerCaseEqualsASCII(value, websockets::kWebSocketLowercase)) {
+  if (!base::LowerCaseEqualsASCII(value, websockets::kWebSocketLowercase)) {
     *failure_message =
         "'Upgrade' header value is not 'WebSocket': " + value;
     return false;
@@ -346,7 +346,7 @@ bool ValidateExtensions(const HttpResponseHeaders* headers,
       }
     }
   }
-  *accepted_extensions_descriptor = JoinString(header_values, ", ");
+  *accepted_extensions_descriptor = base::JoinString(header_values, ", ");
   return true;
 }
 

@@ -56,8 +56,8 @@ class TestUrlRequestListener implements UrlRequestListener {
     // Signaled on each step when mAutoAdvance is false.
     private final ConditionVariable mStepBlock = new ConditionVariable();
 
-    // Executor for Cronet callbacks.
-    private final ExecutorService mExecutor = Executors.newSingleThreadExecutor(
+    // Executor Service for Cronet callbacks.
+    private final ExecutorService mExecutorService = Executors.newSingleThreadExecutor(
             new ExecutorThreadFactory());
     private Thread mExecutorThread;
 
@@ -105,7 +105,11 @@ class TestUrlRequestListener implements UrlRequestListener {
     }
 
     public Executor getExecutor() {
-        return mExecutor;
+        return mExecutorService;
+    }
+
+    public void shutdownExecutor() {
+        mExecutorService.shutdown();
     }
 
     @Override
@@ -219,7 +223,8 @@ class TestUrlRequestListener implements UrlRequestListener {
     }
 
     /**
-     * Returns false if the listener should continue to advance the request.
+     * Returns {@code false} if the listener should continue to advance the
+     * request.
      */
     private boolean maybeThrowCancelOrPause(final UrlRequest request) {
         if (mResponseStep != mFailureStep || mFailureType == FailureType.NONE) {
@@ -241,7 +246,7 @@ class TestUrlRequestListener implements UrlRequestListener {
         };
         if (mFailureType == FailureType.CANCEL_ASYNC
                 || mFailureType == FailureType.CANCEL_ASYNC_WITHOUT_PAUSE) {
-            mExecutor.execute(task);
+            getExecutor().execute(task);
         } else {
             task.run();
         }

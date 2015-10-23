@@ -275,6 +275,7 @@ const char kUnregisterDarkSuspendDelayMethod[] = "UnregisterDarkSuspendDelay";
 const char kHandleDarkSuspendReadinessMethod[] = "HandleDarkSuspendReadiness";
 const char kHandlePowerButtonAcknowledgmentMethod[] =
     "HandlePowerButtonAcknowledgment";
+const char kRecordDarkResumeWakeReasonMethod[] = "RecordDarkResumeWakeReason";
 // Signals emitted by powerd.
 const char kBrightnessChangedSignal[] = "BrightnessChanged";
 const char kKeyboardBrightnessChangedSignal[] = "KeyboardBrightnessChanged";
@@ -721,6 +722,8 @@ const char kGatewayProperty[] = "Gateway";
 const char kDomainNameProperty[] = "DomainName";
 const char kAcceptedHostnameProperty[] = "AcceptedHostname";
 const char kNameServersProperty[] = "NameServers";
+const char kDelegatedPrefixProperty[] = "DelegatedPrefix";
+const char kDelegatedPrefixLengthProperty[] = "DelegatedPrefixLength";
 
 // IPConfig type options.
 const char kTypeIPv4[] = "ipv4";
@@ -1831,6 +1834,7 @@ const char kMtpdServiceError[] = "org.chromium.Mtpd.Error";
 // Methods.
 const char kEnumerateStorages[] = "EnumerateStorages";
 const char kGetStorageInfo[] = "GetStorageInfo";
+const char kGetStorageInfoFromDevice[] = "GetStorageInfoFromDevice";
 const char kOpenStorage[] = "OpenStorage";
 const char kCloseStorage[] = "CloseStorage";
 const char kReadDirectoryEntryIds[] = "ReadDirectoryEntryIds";
@@ -1903,6 +1907,7 @@ const char kGetDebugLogs[] = "GetDebugLogs";
 const char kGetInterfaces[] = "GetInterfaces";
 const char kGetModemStatus[] = "GetModemStatus";
 const char kGetNetworkStatus[] = "GetNetworkStatus";
+const char kGetRandomPerfOutput[] = "GetRandomPerfOutput";
 const char kGetRichPerfData[] = "GetRichPerfData";
 const char kGetRoutes[] = "GetRoutes";
 const char kGetWiMaxStatus[] = "GetWiMaxStatus";
@@ -1946,6 +1951,7 @@ const char kPermissionBrokerServiceName[] = "org.chromium.PermissionBroker";
 // Methods
 const char kCheckPathAccess[] = "CheckPathAccess";
 const char kRequestPathAccess[] = "RequestPathAccess";
+const char kOpenPath[] = "OpenPath";
 const char kRequestTcpPortAccess[] = "RequestTcpPortAccess";
 const char kRequestUdpPortAccess[] = "RequestUdpPortAccess";
 const char kReleaseTcpPort[] = "ReleaseTcpPort";

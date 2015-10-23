@@ -40,7 +40,7 @@
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/Vector.h"
-#include "wtf/unicode/CharacterNames.h"
+#include "wtf/text/CharacterNames.h"
 
 #include <unicode/uscript.h>
 
@@ -49,102 +49,95 @@ namespace blink {
 class Font;
 class GlyphBuffer;
 class SimpleFontData;
+class HarfBuzzShaper;
+
+class PLATFORM_EXPORT ShapeResult : public RefCounted<ShapeResult> {
+public:
+    static PassRefPtr<ShapeResult> create(const Font* font,
+        unsigned numCharacters, TextDirection direction)
+    {
+        return adoptRef(new ShapeResult(font, numCharacters, direction));
+    }
+    static PassRefPtr<ShapeResult> createForTabulationCharacters(const Font*,
+        const TextRun&, float positionOffset, unsigned count);
+    ~ShapeResult();
+
+    float width() { return m_width; }
+    FloatRect bounds() { return m_glyphBoundingBox; }
+    unsigned numCharacters() const { return m_numCharacters; }
+    void fallbackFonts(HashSet<const SimpleFontData*>*) const;
+
+    static int offsetForPosition(Vector<RefPtr<ShapeResult>>&,
+        const TextRun&, float targetX);
+    static float fillGlyphBuffer(Vector<RefPtr<ShapeResult>>&,
+        GlyphBuffer*, const TextRun&, unsigned from, unsigned to);
+    static float fillGlyphBufferForTextEmphasis(Vector<RefPtr<ShapeResult>>&,
+        GlyphBuffer*, const TextRun&, const GlyphData* emphasisData,
+        unsigned from, unsigned to);
+    static FloatRect selectionRect(Vector<RefPtr<ShapeResult>>&,
+        TextDirection, float totalWidth, const FloatPoint&, int height,
+        unsigned from, unsigned to);
+
+    unsigned numberOfRunsForTesting() const;
+    bool runInfoForTesting(unsigned runIndex, unsigned& startIndex,
+        unsigned& numGlyphs, hb_script_t&);
+    uint16_t glyphForTesting(unsigned runIndex, size_t glyphIndex);
+    float advanceForTesting(unsigned runIndex, size_t glyphIndex);
+
+private:
+    struct RunInfo;
+
+    ShapeResult(const Font*, unsigned numCharacters, TextDirection);
+
+    int offsetForPosition(float targetX);
+    template<TextDirection>
+    float fillGlyphBufferForRun(GlyphBuffer*, const RunInfo*,
+        float initialAdvance, unsigned from, unsigned to, unsigned runOffset);
+
+    float fillGlyphBufferForTextEmphasisRun(GlyphBuffer*, const RunInfo*,
+        const TextRun&, const GlyphData*, float initialAdvance,
+        unsigned from, unsigned to, unsigned runOffset);
+
+    float m_width;
+    FloatRect m_glyphBoundingBox;
+    Vector<OwnPtr<RunInfo>> m_runs;
+    RefPtr<SimpleFontData> m_primaryFont;
+
+    unsigned m_numCharacters;
+    unsigned m_numGlyphs : 31;
+
+    // Overall direction for the TextRun, dictates which order each individual
+    // sub run (represented by RunInfo structs in the m_runs vector) can have a
+    // different text direction.
+    unsigned m_direction : 1;
+
+    friend class HarfBuzzShaper;
+};
 
 class PLATFORM_EXPORT HarfBuzzShaper final : public Shaper {
 public:
-    HarfBuzzShaper(const Font*, const TextRun&, const GlyphData* emphasisData = nullptr,
-        HashSet<const SimpleFontData*>* fallbackFonts = nullptr, FloatRect* = nullptr);
-
-    void setDrawRange(int from, int to);
-    bool shape(GlyphBuffer* = 0);
-    float totalWidth() { return m_totalWidth; }
-    int offsetForPosition(float targetX);
-    FloatRect selectionRect(const FloatPoint&, int height, int from, int to);
-
-    unsigned numberOfRunsForTesting() const
-    {
-        return m_harfBuzzRuns.size();
-    }
-
-    bool runInfoForTesting(unsigned runIndex, unsigned& startIndex,
-        unsigned& numGlyphs, hb_script_t& script)
-    {
-        if (runIndex < m_harfBuzzRuns.size()) {
-            startIndex = m_harfBuzzRuns[runIndex]->startIndex();
-            numGlyphs = m_harfBuzzRuns[runIndex]->numGlyphs();
-            script = m_harfBuzzRuns[runIndex]->script();
-            return true;
-        }
-        return false;
-    }
+    HarfBuzzShaper(const Font*, const TextRun&);
+    PassRefPtr<ShapeResult> shapeResult();
+    ~HarfBuzzShaper() { }
 
 private:
-    class PLATFORM_EXPORT HarfBuzzRun {
-    public:
-        HarfBuzzRun(const HarfBuzzRun&);
-        ~HarfBuzzRun();
-
-        static PassOwnPtr<HarfBuzzRun> create(const SimpleFontData* fontData, unsigned startIndex, unsigned numCharacters, hb_direction_t direction, hb_script_t script)
-        {
-            return adoptPtr(new HarfBuzzRun(fontData, startIndex, numCharacters, direction, script));
-        }
-
-        void applyShapeResult(hb_buffer_t*);
-        void setGlyphAndPositions(unsigned index, uint16_t glyphId, float advance, float offsetX, float offsetY);
-        void setWidth(float width) { m_width = width; }
-        void addAdvance(unsigned index, float advance);
-
-        int characterIndexForXPosition(float targetX);
-        float xPositionForOffset(unsigned offset);
-
-        const SimpleFontData* fontData() { return m_fontData; }
-        unsigned startIndex() const { return m_startIndex; }
-        unsigned numCharacters() const { return m_numCharacters; }
-        unsigned numGlyphs() const { return m_numGlyphs; }
-        uint16_t* glyphs() { ASSERT(m_numGlyphs); return &m_glyphs[0]; }
-        float* advances() { ASSERT(m_numGlyphs); return &m_advances[0]; }
-        FloatSize* offsets() { ASSERT(m_numGlyphs); return &m_offsets[0]; }
-        uint16_t* glyphToCharacterIndexes()
-        {
-            ASSERT(m_numGlyphs);
-            return &m_glyphToCharacterIndexes[0];
-        }
-        float width() { return m_width; }
-        hb_direction_t direction() { return m_direction; }
-        bool rtl() { return m_direction == HB_DIRECTION_RTL; }
-        hb_script_t script() { return m_script; }
-
-    private:
-        HarfBuzzRun(const SimpleFontData*, unsigned startIndex, unsigned numCharacters, hb_direction_t, hb_script_t);
-
+    struct HarfBuzzRun {
         const SimpleFontData* m_fontData;
         unsigned m_startIndex;
         size_t m_numCharacters;
-        unsigned m_numGlyphs;
         hb_direction_t m_direction;
         hb_script_t m_script;
-        Vector<uint16_t, 256> m_glyphs;
-        Vector<float, 256> m_advances;
-        Vector<uint16_t, 256> m_glyphToCharacterIndexes;
-        Vector<FloatSize, 256> m_offsets;
-        float m_width;
     };
 
     float nextExpansionPerOpportunity();
-    // setPadding sets a number of pixels to be distributed across the TextRun.
-    // WebKit uses this to justify text.
     void setExpansion(float);
-
     void setFontFeatures();
 
     bool createHarfBuzzRuns();
     bool createHarfBuzzRunsForSingleCharacter();
-    bool shapeHarfBuzzRuns();
-    bool fillGlyphBuffer(GlyphBuffer*);
-    float fillGlyphBufferFromHarfBuzzRun(GlyphBuffer*, HarfBuzzRun*, float initialAdvance);
-    float fillGlyphBufferForTextEmphasis(GlyphBuffer*, HarfBuzzRun*, float initialAdvance);
-    void setGlyphPositionsForHarfBuzzRun(HarfBuzzRun*, hb_buffer_t*, HarfBuzzRun* previousRun);
-    float adjustSpacing(HarfBuzzRun*, size_t glyphIndex, unsigned currentCharacterIndex, HarfBuzzRun* previousRun, float& offsetX, float& totalAdvance);
+    PassRefPtr<ShapeResult> shapeHarfBuzzRuns();
+    void shapeResult(ShapeResult*, unsigned, const HarfBuzzRun*, hb_buffer_t*);
+    float adjustSpacing(ShapeResult::RunInfo*, size_t glyphIndex, unsigned currentCharacterIndex, float& offsetX, float& totalAdvance);
     void addHarfBuzzRun(unsigned startCharacter, unsigned endCharacter, const SimpleFontData*, UScriptCode);
 
     OwnPtr<UChar[]> m_normalizedBuffer;
@@ -155,14 +148,7 @@ private:
     unsigned m_expansionOpportunityCount;
 
     Vector<hb_feature_t, 4> m_features;
-    Vector<OwnPtr<HarfBuzzRun>, 16> m_harfBuzzRuns;
-
-    int m_fromIndex;
-    int m_toIndex;
-
-    float m_totalWidth;
-
-    friend struct CachedShapingResults;
+    Vector<HarfBuzzRun, 16> m_harfBuzzRuns;
 };
 
 } // namespace blink

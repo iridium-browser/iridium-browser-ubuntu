@@ -15,11 +15,12 @@
 #include "base/files/scoped_file.h"
 #include "base/process/process.h"
 #include "ipc/ipc_channel_handle.h"
+#include "ipc/ipc_endpoint.h"
 #include "ipc/ipc_message.h"
-#include "ipc/ipc_sender.h"
 
 namespace IPC {
 
+class AttachmentBroker;
 class Listener;
 
 //------------------------------------------------------------------------------
@@ -39,7 +40,7 @@ class Listener;
 // the channel with the mode set to one of the NAMED modes. NAMED modes are
 // currently used by automation and service processes.
 
-class IPC_EXPORT Channel : public Sender {
+class IPC_EXPORT Channel : public Endpoint {
   // Security tests need access to the pipe handle.
   friend class ChannelTest;
 
@@ -118,11 +119,21 @@ class IPC_EXPORT Channel : public Sender {
   //
   // TODO(morrita): Replace CreateByModeForProxy() with one of above Create*().
   //
-  static scoped_ptr<Channel> Create(
-      const IPC::ChannelHandle &channel_handle, Mode mode, Listener* listener);
+  // TODO(erikchen): Remove default parameter for |broker|. It exists only to
+  // make the upcoming refactor decomposable into smaller CLs.
+  // http://crbug.com/493414.
+  static scoped_ptr<Channel> Create(const IPC::ChannelHandle& channel_handle,
+                                    Mode mode,
+                                    Listener* listener,
+                                    AttachmentBroker* broker = nullptr);
 
+  // TODO(erikchen): Remove default parameter for |broker|. It exists only to
+  // make the upcoming refactor decomposable into smaller CLs.
+  // http://crbug.com/493414.
   static scoped_ptr<Channel> CreateClient(
-      const IPC::ChannelHandle &channel_handle, Listener* listener);
+      const IPC::ChannelHandle& channel_handle,
+      Listener* listener,
+      AttachmentBroker* broker = nullptr);
 
   // Channels on Windows are named by default and accessible from other
   // processes. On POSIX channels are anonymous by default and not accessible
@@ -130,18 +141,29 @@ class IPC_EXPORT Channel : public Sender {
   // On Windows MODE_NAMED_SERVER is equivalent to MODE_SERVER and
   // MODE_NAMED_CLIENT is equivalent to MODE_CLIENT.
   static scoped_ptr<Channel> CreateNamedServer(
-      const IPC::ChannelHandle &channel_handle, Listener* listener);
+      const IPC::ChannelHandle& channel_handle,
+      Listener* listener,
+      AttachmentBroker* broker);
   static scoped_ptr<Channel> CreateNamedClient(
-      const IPC::ChannelHandle &channel_handle, Listener* listener);
+      const IPC::ChannelHandle& channel_handle,
+      Listener* listener,
+      AttachmentBroker* broker);
 #if defined(OS_POSIX)
   // An "open" named server accepts connections from ANY client.
   // The caller must then implement their own access-control based on the
   // client process' user Id.
   static scoped_ptr<Channel> CreateOpenNamedServer(
-      const IPC::ChannelHandle &channel_handle, Listener* listener);
+      const IPC::ChannelHandle& channel_handle,
+      Listener* listener,
+      AttachmentBroker* broker);
 #endif
+  // TODO(erikchen): Remove default parameter for |broker|. It exists only to
+  // make the upcoming refactor decomposable into smaller CLs.
+  // http://crbug.com/493414.
   static scoped_ptr<Channel> CreateServer(
-      const IPC::ChannelHandle &channel_handle, Listener* listener);
+      const IPC::ChannelHandle& channel_handle,
+      Listener* listener,
+      AttachmentBroker* broker = nullptr);
 
   ~Channel() override;
 
@@ -158,17 +180,6 @@ class IPC_EXPORT Channel : public Sender {
   // new connections. If you just want to close the currently accepted
   // connection and listen for new ones, use ResetToAcceptingConnectionState.
   virtual void Close() = 0;
-
-  // Get the process ID for the connected peer.
-  //
-  // Returns base::kNullProcessId if the peer is not connected yet. Watch out
-  // for race conditions. You can easily get a channel to another process, but
-  // if your process has not yet processed the "hello" message from the remote
-  // side, this will fail. You should either make sure calling this is either
-  // in response to a message from the remote side (which guarantees that it's
-  // been connected), or you wait for the "connected" notification on the
-  // listener.
-  virtual base::ProcessId GetPeerPID() const = 0;
 
   // Get its own process id. This value is told to the peer.
   virtual base::ProcessId GetSelfPID() const = 0;
@@ -229,7 +240,6 @@ class IPC_EXPORT Channel : public Sender {
   // process such that it acts similar to if it was exec'd, for tests.
   static void NotifyProcessForkedForTesting();
 #endif
-
 };
 
 #if defined(OS_POSIX)

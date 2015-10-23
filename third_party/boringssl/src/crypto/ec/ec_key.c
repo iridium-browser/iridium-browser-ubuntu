@@ -87,7 +87,7 @@ EC_KEY *EC_KEY_new(void) { return EC_KEY_new_method(NULL); }
 EC_KEY *EC_KEY_new_method(const ENGINE *engine) {
   EC_KEY *ret = (EC_KEY *)OPENSSL_malloc(sizeof(EC_KEY));
   if (ret == NULL) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_new_method, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
     return NULL;
   }
 
@@ -127,7 +127,7 @@ err1:
 EC_KEY *EC_KEY_new_by_curve_name(int nid) {
   EC_KEY *ret = EC_KEY_new();
   if (ret == NULL) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_new_by_curve_name, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
     return NULL;
   }
   ret->group = EC_GROUP_new_by_curve_name(nid);
@@ -143,7 +143,7 @@ void EC_KEY_free(EC_KEY *r) {
     return;
   }
 
-  if (CRYPTO_add(&r->references, -1, CRYPTO_LOCK_EC)) {
+  if (!CRYPTO_refcount_dec_and_test_zero(&r->references)) {
     return;
   }
 
@@ -166,7 +166,7 @@ void EC_KEY_free(EC_KEY *r) {
 
 EC_KEY *EC_KEY_copy(EC_KEY *dest, const EC_KEY *src) {
   if (dest == NULL || src == NULL) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_copy, ERR_R_PASSED_NULL_PARAMETER);
+    OPENSSL_PUT_ERROR(EC, ERR_R_PASSED_NULL_PARAMETER);
     return NULL;
   }
   /* Copy the parameters. */
@@ -234,7 +234,8 @@ EC_KEY *EC_KEY_dup(const EC_KEY *ec_key) {
 }
 
 int EC_KEY_up_ref(EC_KEY *r) {
-  return CRYPTO_add(&r->references, 1, CRYPTO_LOCK_EC) > 1;
+  CRYPTO_refcount_inc(&r->references);
+  return 1;
 }
 
 int EC_KEY_is_opaque(const EC_KEY *key) {
@@ -299,12 +300,12 @@ int EC_KEY_check_key(const EC_KEY *eckey) {
   EC_POINT *point = NULL;
 
   if (!eckey || !eckey->group || !eckey->pub_key) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_check_key, ERR_R_PASSED_NULL_PARAMETER);
+    OPENSSL_PUT_ERROR(EC, ERR_R_PASSED_NULL_PARAMETER);
     return 0;
   }
 
   if (EC_POINT_is_at_infinity(eckey->group, eckey->pub_key)) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_check_key, EC_R_POINT_AT_INFINITY);
+    OPENSSL_PUT_ERROR(EC, EC_R_POINT_AT_INFINITY);
     goto err;
   }
 
@@ -318,7 +319,7 @@ int EC_KEY_check_key(const EC_KEY *eckey) {
 
   /* testing whether the pub_key is on the elliptic curve */
   if (!EC_POINT_is_on_curve(eckey->group, eckey->pub_key, ctx)) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_check_key, EC_R_POINT_IS_NOT_ON_CURVE);
+    OPENSSL_PUT_ERROR(EC, EC_R_POINT_IS_NOT_ON_CURVE);
     goto err;
   }
   /* testing whether pub_key * order is the point at infinity */
@@ -326,15 +327,15 @@ int EC_KEY_check_key(const EC_KEY *eckey) {
    * to check the private key, below? */
   order = &eckey->group->order;
   if (BN_is_zero(order)) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_check_key, EC_R_INVALID_GROUP_ORDER);
+    OPENSSL_PUT_ERROR(EC, EC_R_INVALID_GROUP_ORDER);
     goto err;
   }
   if (!EC_POINT_mul(eckey->group, point, NULL, eckey->pub_key, order, ctx)) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_check_key, ERR_R_EC_LIB);
+    OPENSSL_PUT_ERROR(EC, ERR_R_EC_LIB);
     goto err;
   }
   if (!EC_POINT_is_at_infinity(eckey->group, point)) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_check_key, EC_R_WRONG_ORDER);
+    OPENSSL_PUT_ERROR(EC, EC_R_WRONG_ORDER);
     goto err;
   }
   /* in case the priv_key is present :
@@ -342,15 +343,15 @@ int EC_KEY_check_key(const EC_KEY *eckey) {
    */
   if (eckey->priv_key) {
     if (BN_cmp(eckey->priv_key, order) >= 0) {
-      OPENSSL_PUT_ERROR(EC, EC_KEY_check_key, EC_R_WRONG_ORDER);
+      OPENSSL_PUT_ERROR(EC, EC_R_WRONG_ORDER);
       goto err;
     }
     if (!EC_POINT_mul(eckey->group, point, eckey->priv_key, NULL, NULL, ctx)) {
-      OPENSSL_PUT_ERROR(EC, EC_KEY_check_key, ERR_R_EC_LIB);
+      OPENSSL_PUT_ERROR(EC, ERR_R_EC_LIB);
       goto err;
     }
     if (EC_POINT_cmp(eckey->group, point, eckey->pub_key, ctx) != 0) {
-      OPENSSL_PUT_ERROR(EC, EC_KEY_check_key, EC_R_INVALID_PRIVATE_KEY);
+      OPENSSL_PUT_ERROR(EC, EC_R_INVALID_PRIVATE_KEY);
       goto err;
     }
   }
@@ -370,8 +371,7 @@ int EC_KEY_set_public_key_affine_coordinates(EC_KEY *key, BIGNUM *x,
   int ok = 0;
 
   if (!key || !key->group || !x || !y) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_set_public_key_affine_coordinates,
-                      ERR_R_PASSED_NULL_PARAMETER);
+    OPENSSL_PUT_ERROR(EC, ERR_R_PASSED_NULL_PARAMETER);
     return 0;
   }
   ctx = BN_CTX_new();
@@ -393,8 +393,7 @@ int EC_KEY_set_public_key_affine_coordinates(EC_KEY *key, BIGNUM *x,
   /* Check if retrieved coordinates match originals: if not values
    * are out of range. */
   if (BN_cmp(x, tx) || BN_cmp(y, ty)) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_set_public_key_affine_coordinates,
-                      EC_R_COORDINATES_OUT_OF_RANGE);
+    OPENSSL_PUT_ERROR(EC, EC_R_COORDINATES_OUT_OF_RANGE);
     goto err;
   }
 
@@ -421,7 +420,7 @@ int EC_KEY_generate_key(EC_KEY *eckey) {
   EC_POINT *pub_key = NULL;
 
   if (!eckey || !eckey->group) {
-    OPENSSL_PUT_ERROR(EC, EC_KEY_generate_key, ERR_R_PASSED_NULL_PARAMETER);
+    OPENSSL_PUT_ERROR(EC, ERR_R_PASSED_NULL_PARAMETER);
     return 0;
   }
 

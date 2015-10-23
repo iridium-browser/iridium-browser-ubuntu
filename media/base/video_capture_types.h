@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "build/build_config.h"
 #include "media/base/media_export.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -16,22 +17,35 @@ namespace media {
 // shared with device manager.
 typedef int VideoCaptureSessionId;
 
+// TODO(dshwang): replace it with media::VideoPixelFormat. crbug.com/489744
 // Color formats from camera. This list is sorted in order of preference.
-enum VideoPixelFormat {
-  PIXEL_FORMAT_I420,
-  PIXEL_FORMAT_YV12,
-  PIXEL_FORMAT_NV12,
-  PIXEL_FORMAT_NV21,
-  PIXEL_FORMAT_UYVY,
-  PIXEL_FORMAT_YUY2,
-  PIXEL_FORMAT_RGB24,
-  PIXEL_FORMAT_RGB32,
-  PIXEL_FORMAT_ARGB,
-  PIXEL_FORMAT_MJPEG,
-  PIXEL_FORMAT_TEXTURE,  // Capture format as a GL texture.
-  PIXEL_FORMAT_GPUMEMORYBUFFER,
-  PIXEL_FORMAT_UNKNOWN,  // Color format not set.
-  PIXEL_FORMAT_MAX,
+// TODO(emircan): http://crbug.com/521068 Consider if this list can be merged
+// with media::Format.
+// TODO(mcasas): http://crbug.com/504160 Consider making this an enum class.
+enum VideoCapturePixelFormat {
+  VIDEO_CAPTURE_PIXEL_FORMAT_I420,
+  VIDEO_CAPTURE_PIXEL_FORMAT_YV12,
+  VIDEO_CAPTURE_PIXEL_FORMAT_NV12,
+  VIDEO_CAPTURE_PIXEL_FORMAT_NV21,
+  VIDEO_CAPTURE_PIXEL_FORMAT_UYVY,
+  VIDEO_CAPTURE_PIXEL_FORMAT_YUY2,
+  VIDEO_CAPTURE_PIXEL_FORMAT_RGB24,
+  VIDEO_CAPTURE_PIXEL_FORMAT_RGB32,
+  VIDEO_CAPTURE_PIXEL_FORMAT_ARGB,
+  VIDEO_CAPTURE_PIXEL_FORMAT_MJPEG,
+  VIDEO_CAPTURE_PIXEL_FORMAT_UNKNOWN,  // Color format not set.
+  VIDEO_CAPTURE_PIXEL_FORMAT_MAX = VIDEO_CAPTURE_PIXEL_FORMAT_UNKNOWN,
+};
+
+// Storage type for the pixels. In principle, all combinations of Storage and
+// Format are possible, though some are very typical, such as texture + ARGB,
+// and others are only available if the platform allows it e.g. GpuMemoryBuffer.
+// TODO(mcasas): http://crbug.com/504160 Consider making this an enum class.
+enum VideoPixelStorage {
+  PIXEL_STORAGE_CPU,
+  PIXEL_STORAGE_TEXTURE,
+  PIXEL_STORAGE_GPUMEMORYBUFFER,
+  PIXEL_STORAGE_MAX = PIXEL_STORAGE_GPUMEMORYBUFFER,
 };
 
 // Policies for capture devices that have source content that varies in size.
@@ -53,7 +67,8 @@ enum ResolutionChangePolicy {
   // exceeding the maximum dimensions specified.
   RESOLUTION_POLICY_ANY_WITHIN_LIMIT,
 
-  RESOLUTION_POLICY_LAST,
+  // Must always be equal to largest entry in the enum.
+  RESOLUTION_POLICY_LAST = RESOLUTION_POLICY_ANY_WITHIN_LIMIT,
 };
 
 // Some drivers use rational time per frame instead of float frame rate, this
@@ -64,15 +79,19 @@ const int kFrameRatePrecision = 10000;
 // This class is used by the video capture device to specify the format of every
 // frame captured and returned to a client. It is also used to specify a
 // supported capture format by a device.
-class MEDIA_EXPORT VideoCaptureFormat {
- public:
+struct MEDIA_EXPORT VideoCaptureFormat {
   VideoCaptureFormat();
   VideoCaptureFormat(const gfx::Size& frame_size,
                      float frame_rate,
-                     VideoPixelFormat pixel_format);
+                     VideoCapturePixelFormat pixel_format);
+  VideoCaptureFormat(const gfx::Size& frame_size,
+                     float frame_rate,
+                     VideoCapturePixelFormat pixel_format,
+                     VideoPixelStorage pixel_storage);
 
-  std::string ToString() const;
-  static std::string PixelFormatToString(VideoPixelFormat format);
+  static std::string ToString(const VideoCaptureFormat& format);
+  static std::string PixelFormatToString(VideoCapturePixelFormat format);
+  static std::string PixelStorageToString(VideoPixelStorage storage);
 
   // Returns the required buffer size to hold an image of a given
   // VideoCaptureFormat with no padding and tightly packed.
@@ -90,7 +109,8 @@ class MEDIA_EXPORT VideoCaptureFormat {
 
   gfx::Size frame_size;
   float frame_rate;
-  VideoPixelFormat pixel_format;
+  VideoCapturePixelFormat pixel_format;
+  VideoPixelStorage pixel_storage;
 };
 
 typedef std::vector<VideoCaptureFormat> VideoCaptureFormats;
@@ -99,13 +119,12 @@ typedef std::vector<VideoCaptureFormat> VideoCaptureFormats;
 // This class is used by the client of a video capture device to specify the
 // format of frames in which the client would like to have captured frames
 // returned.
-class MEDIA_EXPORT VideoCaptureParams {
- public:
+struct MEDIA_EXPORT VideoCaptureParams {
   VideoCaptureParams();
 
   bool operator==(const VideoCaptureParams& other) const {
     return requested_format == other.requested_format &&
-        resolution_change_policy == other.resolution_change_policy;
+           resolution_change_policy == other.resolution_change_policy;
   }
 
   // Requests a resolution and format at which the capture will occur.

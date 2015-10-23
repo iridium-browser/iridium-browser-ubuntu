@@ -5,10 +5,11 @@
 #include "components/plugins/renderer/webview_plugin.h"
 
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "content/public/common/web_preferences.h"
 #include "content/public/renderer/render_view.h"
+#include "gin/converter.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
@@ -42,9 +43,11 @@ using blink::WebVector;
 using blink::WebView;
 using content::WebPreferences;
 
-WebViewPlugin::WebViewPlugin(WebViewPlugin::Delegate* delegate,
+WebViewPlugin::WebViewPlugin(content::RenderView* render_view,
+                             WebViewPlugin::Delegate* delegate,
                              const WebPreferences& preferences)
-    : delegate_(delegate),
+    : content::RenderViewObserver(render_view),
+      delegate_(delegate),
       container_(NULL),
       web_view_(WebView::create(this)),
       finished_loading_(false),
@@ -52,16 +55,18 @@ WebViewPlugin::WebViewPlugin(WebViewPlugin::Delegate* delegate,
   // ApplyWebPreferences before making a WebLocalFrame so that the frame sees a
   // consistent view of our preferences.
   content::RenderView::ApplyWebPreferences(preferences, web_view_);
-  web_frame_ = WebLocalFrame::create(this);
+  web_frame_ = WebLocalFrame::create(blink::WebTreeScopeType::Document, this);
   web_view_->setMainFrame(web_frame_);
 }
 
 // static
-WebViewPlugin* WebViewPlugin::Create(WebViewPlugin::Delegate* delegate,
+WebViewPlugin* WebViewPlugin::Create(content::RenderView* render_view,
+                                     WebViewPlugin::Delegate* delegate,
                                      const WebPreferences& preferences,
                                      const std::string& html_data,
                                      const GURL& url) {
-  WebViewPlugin* plugin = new WebViewPlugin(delegate, preferences);
+  DCHECK(url.is_valid()) << "Blink requires the WebView to have a valid URL.";
+  WebViewPlugin* plugin = new WebViewPlugin(render_view, delegate, preferences);
   plugin->web_view()->mainFrame()->loadHTMLString(html_data, url);
   return plugin;
 }
@@ -121,9 +126,10 @@ bool WebViewPlugin::initialize(WebPluginContainer* container) {
 
     old_title_ = container_->element().getAttribute("title");
 
-    // Propagate device scale to inner webview to load the correct resource
-    // when images have a "srcset" attribute.
+    // Propagate device scale and zoom level to inner webview.
     web_view_->setDeviceScaleFactor(container_->deviceScaleFactor());
+    web_view_->setZoomLevel(
+        blink::WebView::zoomFactorToZoomLevel(container_->pageZoomFactor()));
   }
   return true;
 }
@@ -180,6 +186,9 @@ void WebViewPlugin::updateGeometry(const WebRect& window_rect,
     WebSize newSize(window_rect.width, window_rect.height);
     web_view_->resize(newSize);
   }
+
+  if (delegate_)
+    delegate_->OnUnobscuredRectUpdate(gfx::Rect(unobscured_rect));
 }
 
 void WebViewPlugin::updateFocus(bool focused, blink::WebFocusType focus_type) {
@@ -275,12 +284,35 @@ void WebViewPlugin::scheduleAnimation() {
 }
 
 void WebViewPlugin::didClearWindowObject(WebLocalFrame* frame) {
-  if (delegate_)
-    delegate_->BindWebFrame(frame);
+  if (!delegate_)
+    return;
+
+  v8::Isolate* isolate = blink::mainThreadIsolate();
+  v8::HandleScope handle_scope(isolate);
+  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
+  DCHECK(!context.IsEmpty());
+
+  v8::Context::Scope context_scope(context);
+  v8::Local<v8::Object> global = context->Global();
+
+  global->Set(gin::StringToV8(isolate, "plugin"),
+              delegate_->GetV8Handle(isolate));
 }
 
 void WebViewPlugin::didReceiveResponse(WebLocalFrame* frame,
                                        unsigned identifier,
                                        const WebURLResponse& response) {
   WebFrameClient::didReceiveResponse(frame, identifier, response);
+}
+
+void WebViewPlugin::OnDestruct() {
+  // By default RenderViewObservers are destroyed along with the RenderView.
+  // WebViewPlugin has a custom destruction mechanism, so we disable this.
+}
+
+void WebViewPlugin::OnZoomLevelChanged() {
+  if (container_) {
+    web_view_->setZoomLevel(
+      blink::WebView::zoomFactorToZoomLevel(container_->pageZoomFactor()));
+  }
 }

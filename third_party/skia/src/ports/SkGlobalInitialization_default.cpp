@@ -5,12 +5,8 @@
  * found in the LICENSE file.
  */
 
-#include "SkTypes.h"
-
 #include "SkBitmapProcShader.h"
-#include "SkMallocPixelRef.h"
 #include "SkPathEffect.h"
-#include "SkPixelRef.h"
 #include "SkXfermode.h"
 
 #include "Sk1DPathEffect.h"
@@ -41,6 +37,7 @@
 #include "SkLayerRasterizer.h"
 #include "SkLerpXfermode.h"
 #include "SkLightingImageFilter.h"
+#include "SkLightingShader.h"
 #include "SkLocalMatrixShader.h"
 #include "SkLumaColorFilter.h"
 #include "SkMagnifierImageFilter.h"
@@ -115,6 +112,7 @@ public:
         SkColorFilter::InitializeFlattenables();
         SkGradientShader::InitializeFlattenables();
         SkLightingImageFilter::InitializeFlattenables();
+        SkLightingShader::InitializeFlattenables();
         SkTableColorFilter::InitializeFlattenables();
         SkXfermode::InitializeFlattenables();
     }

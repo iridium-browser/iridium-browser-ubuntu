@@ -7,10 +7,12 @@
 #include <cmath>
 
 #include "base/bind.h"
+#include "base/format_macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event_impl.h"
 
 namespace content {
@@ -21,10 +23,6 @@ typedef DevToolsProtocolClient::Response Response;
 
 namespace {
 
-const char kRecordUntilFull[]   = "record-until-full";
-const char kRecordContinuously[] = "record-continuously";
-const char kRecordAsMuchAsPossible[] = "record-as-much-as-possible";
-const char kEnableSampling[] = "enable-sampling";
 const double kMinimumReportingInterval = 250.0;
 
 class DevToolsTraceSinkProxy : public TracingController::TraceDataSink {
@@ -51,7 +49,7 @@ class DevToolsTraceSinkProxy : public TracingController::TraceDataSink {
 
 TracingHandler::TracingHandler(TracingHandler::Target target)
     : target_(target),
-      is_recording_(false),
+      did_initiate_recording_(false),
       weak_factory_(this) {
 }
 
@@ -63,7 +61,7 @@ void TracingHandler::SetClient(scoped_ptr<Client> client) {
 }
 
 void TracingHandler::Detached() {
-  if (is_recording_)
+  if (IsRecording())
     DisableRecording(true);
 }
 
@@ -85,15 +83,16 @@ void TracingHandler::OnTraceComplete() {
 
 Response TracingHandler::Start(DevToolsCommandId command_id,
                                const std::string* categories,
-                               const std::string* options_str,
+                               const std::string* options,
                                const double* buffer_usage_reporting_interval) {
-  if (is_recording_)
+  if (IsRecording())
     return Response::InternalError("Tracing is already started");
 
-  is_recording_ = true;
-  base::trace_event::TraceOptions options = TraceOptionsFromString(options_str);
-  base::trace_event::CategoryFilter filter(categories ? *categories
-                                                      : std::string());
+  did_initiate_recording_ = true;
+
+  base::trace_event::TraceConfig trace_config(
+      categories ? *categories : std::string(),
+      options ? *options : std::string());
   if (buffer_usage_reporting_interval)
     SetupTimer(*buffer_usage_reporting_interval);
 
@@ -101,15 +100,13 @@ Response TracingHandler::Start(DevToolsCommandId command_id,
   // tracing agent in the renderer.
   if (target_ == Renderer) {
     TracingController::GetInstance()->EnableRecording(
-        filter,
-        options,
+        trace_config,
         TracingController::EnableRecordingDoneCallback());
     return Response::FallThrough();
   }
 
   TracingController::GetInstance()->EnableRecording(
-      filter,
-      options,
+      trace_config,
       base::Bind(&TracingHandler::OnRecordingEnabled,
                  weak_factory_.GetWeakPtr(),
                  command_id));
@@ -117,7 +114,7 @@ Response TracingHandler::Start(DevToolsCommandId command_id,
 }
 
 Response TracingHandler::End(DevToolsCommandId command_id) {
-  if (!is_recording_)
+  if (!IsRecording())
     return Response::InternalError("Tracing is not started");
 
   DisableRecording(false);
@@ -158,28 +155,27 @@ void TracingHandler::OnCategoriesReceived(
       GetCategoriesResponse::Create()->set_categories(categories));
 }
 
-base::trace_event::TraceOptions TracingHandler::TraceOptionsFromString(
-    const std::string* options) {
-  base::trace_event::TraceOptions ret;
-  if (!options)
-    return ret;
+Response TracingHandler::RequestMemoryDump(DevToolsCommandId command_id) {
+  if (!did_initiate_recording_)
+    return Response::InternalError("Tracing is not started");
 
-  std::vector<std::string> split;
-  std::vector<std::string>::iterator iter;
+  base::trace_event::MemoryDumpArgs dump_args = {
+      base::trace_event::MemoryDumpArgs::LevelOfDetail::HIGH};
+  base::trace_event::MemoryDumpManager::GetInstance()->RequestGlobalDump(
+      base::trace_event::MemoryDumpType::EXPLICITLY_TRIGGERED, dump_args,
+      base::Bind(&TracingHandler::OnMemoryDumpFinished,
+                 weak_factory_.GetWeakPtr(), command_id));
+  return Response::OK();
+}
 
-  base::SplitString(*options, ',', &split);
-  for (iter = split.begin(); iter != split.end(); ++iter) {
-    if (*iter == kRecordUntilFull) {
-      ret.record_mode = base::trace_event::RECORD_UNTIL_FULL;
-    } else if (*iter == kRecordContinuously) {
-      ret.record_mode = base::trace_event::RECORD_CONTINUOUSLY;
-    } else if (*iter == kRecordAsMuchAsPossible) {
-      ret.record_mode = base::trace_event::RECORD_AS_MUCH_AS_POSSIBLE;
-    } else if (*iter == kEnableSampling) {
-      ret.enable_sampling = true;
-    }
-  }
-  return ret;
+void TracingHandler::OnMemoryDumpFinished(DevToolsCommandId command_id,
+                                          uint64 dump_guid,
+                                          bool success) {
+  client_->SendRequestMemoryDumpResponse(
+      command_id,
+      RequestMemoryDumpResponse::Create()
+          ->set_dump_guid(base::StringPrintf("0x%" PRIx64, dump_guid))
+          ->set_success(success));
 }
 
 void TracingHandler::SetupTimer(double usage_reporting_interval) {
@@ -201,10 +197,14 @@ void TracingHandler::SetupTimer(double usage_reporting_interval) {
 }
 
 void TracingHandler::DisableRecording(bool abort) {
-  is_recording_ = false;
   buffer_usage_poll_timer_.reset();
   TracingController::GetInstance()->DisableRecording(
       abort ? nullptr : new DevToolsTraceSinkProxy(weak_factory_.GetWeakPtr()));
+  did_initiate_recording_ = false;
+}
+
+bool TracingHandler::IsRecording() const {
+  return TracingController::GetInstance()->IsRecording();
 }
 
 }  // namespace tracing

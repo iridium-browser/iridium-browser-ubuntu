@@ -83,7 +83,6 @@ void SetGestureBoolProperty(GesturePropertyProvider* provider,
 scoped_ptr<EventConverterEvdev> CreateConverter(
     const OpenInputDeviceParams& params,
     int fd,
-    InputDeviceType type,
     const EventDeviceInfo& devinfo) {
 #if defined(USE_EVDEV_GESTURES)
   // Touchpad or mouse: use gestures library.
@@ -94,14 +93,14 @@ scoped_ptr<EventConverterEvdev> CreateConverter(
             params.id, params.cursor, params.gesture_property_provider,
             params.dispatcher));
     return make_scoped_ptr(new EventReaderLibevdevCros(
-        fd, params.path, params.id, type, devinfo, gesture_interp.Pass()));
+        fd, params.path, params.id, devinfo, gesture_interp.Pass()));
   }
 #endif
 
   // Touchscreen: use TouchEventConverterEvdev.
   if (devinfo.HasTouchscreen()) {
     scoped_ptr<TouchEventConverterEvdev> converter(new TouchEventConverterEvdev(
-        fd, params.path, params.id, type, devinfo, params.dispatcher));
+        fd, params.path, params.id, devinfo, params.dispatcher));
     converter->Initialize(devinfo);
     return converter.Pass();
   }
@@ -109,13 +108,11 @@ scoped_ptr<EventConverterEvdev> CreateConverter(
   // Graphics tablet
   if (devinfo.HasTablet())
     return make_scoped_ptr<EventConverterEvdev>(new TabletEventConverterEvdev(
-        fd, params.path, params.id, type, params.cursor, devinfo,
-        params.dispatcher));
+        fd, params.path, params.id, params.cursor, devinfo, params.dispatcher));
 
   // Everything else: use EventConverterEvdevImpl.
-  return make_scoped_ptr<EventConverterEvdevImpl>(
-      new EventConverterEvdevImpl(fd, params.path, params.id, type, devinfo,
-                                  params.cursor, params.dispatcher));
+  return make_scoped_ptr<EventConverterEvdevImpl>(new EventConverterEvdevImpl(
+      fd, params.path, params.id, devinfo, params.cursor, params.dispatcher));
 }
 
 // Open an input device. Opening may put the calling thread to sleep, and
@@ -148,17 +145,15 @@ void OpenInputDevice(scoped_ptr<OpenInputDeviceParams> params,
     PLOG(ERROR) << "failed to set CLOCK_MONOTONIC";
 
   EventDeviceInfo devinfo;
-  if (!devinfo.Initialize(fd)) {
-    LOG(ERROR) << "failed to get device information for " << path.value();
+  if (!devinfo.Initialize(fd, path)) {
+    LOG(ERROR) << "Failed to get device information for " << path.value();
     close(fd);
     reply_runner->PostTask(
         FROM_HERE, base::Bind(reply_callback, base::Passed(&converter)));
     return;
   }
 
-  InputDeviceType type = GetInputDeviceTypeFromPath(path);
-
-  converter = CreateConverter(*params, fd, type, devinfo);
+  converter = CreateConverter(*params, fd, devinfo);
 
   // Reply with the constructed converter.
   reply_runner->PostTask(FROM_HERE,
@@ -185,12 +180,6 @@ InputDeviceFactoryEvdev::InputDeviceFactoryEvdev(
       gesture_property_provider_(new GesturePropertyProvider),
 #endif
       dispatcher_(dispatcher.Pass()),
-      pending_device_changes_(0),
-      touchscreen_list_dirty_(false),
-      keyboard_list_dirty_(false),
-      mouse_list_dirty_(false),
-      touchpad_list_dirty_(false),
-      caps_lock_led_enabled_(false),
       weak_ptr_factory_(this) {
 }
 
@@ -227,6 +216,11 @@ void InputDeviceFactoryEvdev::RemoveInputDevice(const base::FilePath& path) {
   DetachInputDevice(path);
 }
 
+void InputDeviceFactoryEvdev::OnStartupScanComplete() {
+  startup_devices_enumerated_ = true;
+  NotifyDevicesUpdated();
+}
+
 void InputDeviceFactoryEvdev::AttachInputDevice(
     scoped_ptr<EventConverterEvdev> converter) {
   if (converter.get()) {
@@ -250,8 +244,8 @@ void InputDeviceFactoryEvdev::AttachInputDevice(
     ApplyCapsLockLed();
   }
 
-  if (--pending_device_changes_ == 0)
-    NotifyDevicesUpdated();
+  --pending_device_changes_;
+  NotifyDevicesUpdated();
 }
 
 void InputDeviceFactoryEvdev::DetachInputDevice(const base::FilePath& path) {
@@ -263,6 +257,9 @@ void InputDeviceFactoryEvdev::DetachInputDevice(const base::FilePath& path) {
   converters_.erase(path);
 
   if (converter) {
+    // Disable the device (to release keys/buttons/etc).
+    converter->SetEnabled(false);
+
     // Cancel libevent notifications from this converter. This part must be
     // on UI since the polling happens on UI.
     converter->Stop();
@@ -274,49 +271,6 @@ void InputDeviceFactoryEvdev::DetachInputDevice(const base::FilePath& path) {
     base::WorkerPool::PostTask(
         FROM_HERE,
         base::Bind(&CloseInputDevice, path, base::Passed(&converter)), true);
-  }
-}
-
-void InputDeviceFactoryEvdev::DisableInternalTouchpad() {
-  for (const auto& it : converters_) {
-    EventConverterEvdev* converter = it.second;
-    if (converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
-        converter->HasTouchpad()) {
-      DCHECK(!converter->HasKeyboard());
-      converter->set_ignore_events(true);
-    }
-  }
-}
-
-void InputDeviceFactoryEvdev::EnableInternalTouchpad() {
-  for (const auto& it : converters_) {
-    EventConverterEvdev* converter = it.second;
-    if (converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
-        converter->HasTouchpad()) {
-      DCHECK(!converter->HasKeyboard());
-      converter->set_ignore_events(false);
-    }
-  }
-}
-
-void InputDeviceFactoryEvdev::DisableInternalKeyboardExceptKeys(
-    scoped_ptr<std::set<DomCode>> excepted_keys) {
-  for (const auto& it : converters_) {
-    EventConverterEvdev* converter = it.second;
-    if (converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
-        converter->HasKeyboard()) {
-      converter->SetAllowedKeys(excepted_keys.Pass());
-    }
-  }
-}
-
-void InputDeviceFactoryEvdev::EnableInternalKeyboard() {
-  for (const auto& it : converters_) {
-    EventConverterEvdev* converter = it.second;
-    if (converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
-        converter->HasKeyboard()) {
-      converter->AllowAllKeys();
-    }
   }
 }
 
@@ -346,8 +300,8 @@ void InputDeviceFactoryEvdev::GetTouchEventLog(
   scoped_ptr<std::vector<base::FilePath>> log_paths(
       new std::vector<base::FilePath>);
 #if defined(USE_EVDEV_GESTURES)
-  DumpTouchEventLog(gesture_property_provider_.get(), out_dir, log_paths.Pass(),
-                    reply);
+  DumpTouchEventLog(converters_, gesture_property_provider_.get(), out_dir,
+                    log_paths.Pass(), reply);
 #else
   reply.Run(log_paths.Pass());
 #endif
@@ -358,6 +312,8 @@ base::WeakPtr<InputDeviceFactoryEvdev> InputDeviceFactoryEvdev::GetWeakPtr() {
 }
 
 void InputDeviceFactoryEvdev::ApplyInputDeviceSettings() {
+  TRACE_EVENT0("evdev", "ApplyInputDeviceSettings");
+
   SetIntPropertyForOneType(DT_TOUCHPAD, "Pointer Sensitivity",
                            input_device_settings_.touchpad_sensitivity);
   SetIntPropertyForOneType(DT_TOUCHPAD, "Scroll Sensitivity",
@@ -380,6 +336,21 @@ void InputDeviceFactoryEvdev::ApplyInputDeviceSettings() {
 
   SetBoolPropertyForOneType(DT_TOUCHPAD, "Tap Paused",
                             input_device_settings_.tap_to_click_paused);
+
+  for (const auto& it : converters_) {
+    EventConverterEvdev* converter = it.second;
+    converter->SetEnabled(IsDeviceEnabled(converter));
+
+    if (converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
+        converter->HasKeyboard()) {
+      converter->SetKeyFilter(
+          input_device_settings_.enable_internal_keyboard_filter,
+          input_device_settings_.internal_keyboard_allowed_keys);
+    }
+
+    converter->SetTouchEventLoggingEnabled(
+        input_device_settings_.touch_event_logging_enabled);
+  }
 }
 
 void InputDeviceFactoryEvdev::ApplyCapsLockLed() {
@@ -387,6 +358,16 @@ void InputDeviceFactoryEvdev::ApplyCapsLockLed() {
     EventConverterEvdev* converter = it.second;
     converter->SetCapsLockLed(caps_lock_led_enabled_);
   }
+}
+
+bool InputDeviceFactoryEvdev::IsDeviceEnabled(
+    const EventConverterEvdev* converter) {
+  if (!input_device_settings_.enable_internal_touchpad &&
+      converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
+      converter->HasTouchpad())
+    return false;
+
+  return input_device_settings_.enable_devices;
 }
 
 void InputDeviceFactoryEvdev::UpdateDirtyFlags(
@@ -405,6 +386,8 @@ void InputDeviceFactoryEvdev::UpdateDirtyFlags(
 }
 
 void InputDeviceFactoryEvdev::NotifyDevicesUpdated() {
+  if (!startup_devices_enumerated_ || pending_device_changes_)
+    return;  // No update until full scan done and no pending operations.
   if (touchscreen_list_dirty_)
     NotifyTouchscreensUpdated();
   if (keyboard_list_dirty_)
@@ -413,6 +396,10 @@ void InputDeviceFactoryEvdev::NotifyDevicesUpdated() {
     NotifyMouseDevicesUpdated();
   if (touchpad_list_dirty_)
     NotifyTouchpadDevicesUpdated();
+  if (!startup_devices_opened_) {
+    dispatcher_->DispatchDeviceListsComplete();
+    startup_devices_opened_ = true;
+  }
   touchscreen_list_dirty_ = false;
   keyboard_list_dirty_ = false;
   mouse_list_dirty_ = false;

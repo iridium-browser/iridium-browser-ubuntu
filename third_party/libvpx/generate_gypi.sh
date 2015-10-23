@@ -106,9 +106,9 @@ function write_target_definition {
   echo "      'includes': [ 'ads2gas.gypi' ]," >> "$2"
   echo "      'cflags!': [ '-mfpu=vfpv3-d16' ]," >> "$2"
   echo "      'conditions': [" >> $2
-  echo "        # Disable LTO in neon targets due to compiler bug" >> "$2"
+  echo "        # Disable GCC LTO in neon targets due to compiler bug" >> "$2"
   echo "        # crbug.com/408997" >> "$2"
-  echo "        ['use_lto==1', {" >> "$2"
+  echo "        ['clang==0 and use_lto==1', {" >> "$2"
   echo "          'cflags!': [" >> "$2"
   echo "            '-flto'," >> "$2"
   echo "            '-ffat-lto-objects'," >> "$2"
@@ -124,9 +124,6 @@ function write_target_definition {
   echo "          'EnableEnhancedInstructionSet': '5', # /arch:AVX2" >> "$2"
   echo "        }," >> "$2"
   echo "      }," >> "$2"
-  echo "      # TODO(pcc): Remove this once we properly support subtarget specific" >> "$2"
-  echo "      # code generation in LLVM (http://llvm.org/PR19416)." >> "$2"
-  echo "      'cflags!': [ '-flto', '-fsanitize=cfi-vptr', ]," >> "$2"
   elif [[ $4 == ssse3 || $4 == sse4.1 ]]; then
   echo "      'conditions': [" >> "$2"
   echo "        ['OS==\"win\" and clang==1', {" >> "$2"

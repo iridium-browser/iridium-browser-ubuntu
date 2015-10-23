@@ -110,11 +110,6 @@ class SSLClientSocketNSS : public SSLClientSocket {
   ChannelIDService* GetChannelIDService() const override;
   SSLFailureState GetSSLFailureState() const override;
 
- protected:
-  // SSLClientSocket implementation.
-  scoped_refptr<X509Certificate> GetUnverifiedServerCertificateChain()
-      const override;
-
  private:
   // Helper class to handle marshalling any NSS interaction to and from the
   // NSS and network task runners. Not every call needs to happen on the Core
@@ -191,6 +186,9 @@ class SSLClientSocketNSS : public SSLClientSocket {
   bool completed_handshake_;
 
   State next_handshake_state_;
+
+  // True if the socket has been disconnected.
+  bool disconnected_;
 
   // The NSS SSL state machine. This is owned by |core_|.
   // TODO(rsleevi): http://crbug.com/130616 - Remove this member once

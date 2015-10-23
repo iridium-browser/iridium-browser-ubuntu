@@ -2,7 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry.page import shared_page_state
+from telemetry import story
 
 
 class ToughPinchZoomCasesPage(page_module.Page):
@@ -10,8 +11,8 @@ class ToughPinchZoomCasesPage(page_module.Page):
   def __init__(self, url, page_set, name=''):
     super(ToughPinchZoomCasesPage, self).__init__(
         url=url, page_set=page_set, name=name,
+        shared_page_state_class=shared_page_state.SharedDesktopPageState,
         credentials_path = 'data/credentials.json')
-    self.user_agent_type = 'desktop'
     self.archive_data_file = 'data/tough_pinch_zoom_cases.json'
 
   def RunPageInteractions(self, action_runner):
@@ -233,50 +234,49 @@ class YahooAnswersPage(ToughPinchZoomCasesPage):
       action_runner.PinchElement(selector='#ya-content-apps')
 
 
-class ToughPinchZoomCasesPageSet(page_set_module.PageSet):
+class ToughPinchZoomCasesPageSet(story.StorySet):
 
   """ Set of pages that are tricky to pinch-zoom """
 
   def __init__(self):
     super(ToughPinchZoomCasesPageSet, self).__init__(
-      user_agent_type='desktop',
       archive_data_file='data/tough_pinch_zoom_cases.json',
-      bucket=page_set_module.PARTNER_BUCKET)
+      cloud_storage_bucket=story.PARTNER_BUCKET)
 
-    self.AddUserStory(GoogleSearchPage(self))
-    self.AddUserStory(GmailPage(self))
-    self.AddUserStory(GoogleCalendarPage(self))
-    self.AddUserStory(GoogleImageSearchPage(self))
-    self.AddUserStory(GooglePlusPage(self))
-    self.AddUserStory(YoutubePage(self))
-    self.AddUserStory(BlogSpotPage(self))
-    self.AddUserStory(FacebookPage(self))
-    self.AddUserStory(LinkedinPage(self))
-    self.AddUserStory(WikipediaPage(self))
-    self.AddUserStory(TwitterPage(self))
-    self.AddUserStory(ESPNPage(self))
+    self.AddStory(GoogleSearchPage(self))
+    self.AddStory(GmailPage(self))
+    self.AddStory(GoogleCalendarPage(self))
+    self.AddStory(GoogleImageSearchPage(self))
+    self.AddStory(GooglePlusPage(self))
+    self.AddStory(YoutubePage(self))
+    self.AddStory(BlogSpotPage(self))
+    self.AddStory(FacebookPage(self))
+    self.AddStory(LinkedinPage(self))
+    self.AddStory(WikipediaPage(self))
+    self.AddStory(TwitterPage(self))
+    self.AddStory(ESPNPage(self))
 
     # Why: #1 news worldwide (Alexa global)
-    self.AddUserStory(ToughPinchZoomCasesPage('http://news.yahoo.com', self))
+    self.AddStory(ToughPinchZoomCasesPage('http://news.yahoo.com', self))
 
     # Why: #2 news worldwide
-    self.AddUserStory(ToughPinchZoomCasesPage('http://www.cnn.com', self))
+    self.AddStory(ToughPinchZoomCasesPage('http://www.cnn.com', self))
 
-    self.AddUserStory(WeatherDotComPage(self))
+    self.AddStory(WeatherDotComPage(self))
 
     # Why: #1 world commerce website by visits; #3 commerce in the US by time
     # spent
-    self.AddUserStory(ToughPinchZoomCasesPage('http://www.amazon.com', self))
+    self.AddStory(ToughPinchZoomCasesPage('http://www.amazon.com', self))
 
     # Why: #1 commerce website by time spent by users in US
-    self.AddUserStory(ToughPinchZoomCasesPage('http://www.ebay.com', self))
+    self.AddStory(ToughPinchZoomCasesPage('http://www.ebay.com', self))
 
-    self.AddUserStory(YahooGamePage(self))
+    self.AddStory(YahooGamePage(self))
 
     # Why: #1 Alexa recreation
-    self.AddUserStory(ToughPinchZoomCasesPage('http://booking.com', self))
+    self.AddStory(ToughPinchZoomCasesPage('http://booking.com', self))
 
-    self.AddUserStory(YahooAnswersPage(self))
+    self.AddStory(YahooAnswersPage(self))
 
     # Why: #1 Alexa sports
-    self.AddUserStory(ToughPinchZoomCasesPage('http://sports.yahoo.com/', self))
+    self.AddStory(ToughPinchZoomCasesPage('http://sports.yahoo.com/', self))

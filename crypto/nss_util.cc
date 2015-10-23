@@ -37,7 +37,6 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
@@ -671,11 +670,13 @@ class NSSInitSingleton {
   }
 #endif  // defined(USE_NSS_CERTS)
 
+#if !defined(USE_OPENSSL)
   // This method is used to force NSS to be initialized without a DB.
   // Call this method before NSSInitSingleton() is constructed.
   static void ForceNoDBInit() {
     force_nodb_init_ = true;
   }
+#endif
 
  private:
   friend struct base::DefaultLazyInstanceTraits<NSSInitSingleton>;
@@ -685,8 +686,6 @@ class NSSInitSingleton {
         initializing_tpm_token_(false),
         chaps_module_(NULL),
         root_(NULL) {
-    base::TimeTicks start_time = base::TimeTicks::Now();
-
     // It's safe to construct on any thread, since LazyInstance will prevent any
     // other threads from accessing until the constructor is done.
     thread_checker_.DetachFromThread();
@@ -711,7 +710,13 @@ class NSSInitSingleton {
     }
 
     SECStatus status = SECFailure;
-    bool nodb_init = force_nodb_init_;
+    bool nodb_init = false;
+
+#if !defined(USE_OPENSSL)
+    // ForceNoDBInit was called.
+    if (force_nodb_init_)
+      nodb_init = true;
+#endif
 
 #if !defined(USE_NSS_CERTS)
     // Use the system certificate store, so initialize NSS without database.
@@ -783,14 +788,6 @@ class NSSInitSingleton {
     NSS_SetAlgorithmPolicy(SEC_OID_MD5, 0, NSS_USE_ALG_IN_CERT_SIGNATURE);
     NSS_SetAlgorithmPolicy(SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION,
                            0, NSS_USE_ALG_IN_CERT_SIGNATURE);
-
-    // The UMA bit is conditionally set for this histogram in
-    // components/startup_metric_utils.cc .
-    LOCAL_HISTOGRAM_CUSTOM_TIMES("Startup.SlowStartupNSSInit",
-                                 base::TimeTicks::Now() - start_time,
-                                 base::TimeDelta::FromMilliseconds(10),
-                                 base::TimeDelta::FromHours(1),
-                                 50);
   }
 
   // NOTE(willchan): We don't actually execute this code since we leak NSS to
@@ -878,8 +875,10 @@ class NSSInitSingleton {
     }
   }
 
+#if !defined(USE_OPENSSL)
   // If this is set to true NSS is forced to be initialized without a DB.
   static bool force_nodb_init_;
+#endif
 
   bool tpm_token_enabled_for_nss_;
   bool initializing_tpm_token_;
@@ -902,8 +901,10 @@ class NSSInitSingleton {
   base::ThreadChecker thread_checker_;
 };
 
+#if !defined(USE_OPENSSL)
 // static
 bool NSSInitSingleton::force_nodb_init_ = false;
+#endif
 
 base::LazyInstance<NSSInitSingleton>::Leaky
     g_nss_singleton = LAZY_INSTANCE_INITIALIZER;
@@ -938,6 +939,7 @@ void EnsureNSPRInit() {
   g_nspr_singleton.Get();
 }
 
+#if !defined(USE_OPENSSL)
 void InitNSSSafely() {
   // We might fork, but we haven't loaded any security modules.
   DisableNSSForkCheck();
@@ -948,6 +950,7 @@ void InitNSSSafely() {
   // Initialize NSS.
   EnsureNSSInit();
 }
+#endif  // !defined(USE_OPENSSL)
 
 void EnsureNSSInit() {
   // Initializing SSL causes us to do blocking IO.
@@ -956,6 +959,8 @@ void EnsureNSSInit() {
   base::ThreadRestrictions::ScopedAllowIO allow_io;
   g_nss_singleton.Get();
 }
+
+#if !defined(USE_OPENSSL)
 
 void ForceNSSNoDBInit() {
   NSSInitSingleton::ForceNoDBInit();
@@ -1019,6 +1024,8 @@ void LoadNSSLibraries() {
   }
 #endif  // defined(USE_NSS_CERTS)
 }
+
+#endif  // !defined(USE_OPENSSL)
 
 bool CheckNSSVersion(const char* version) {
   return !!NSS_VersionCheck(version);

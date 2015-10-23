@@ -30,7 +30,7 @@ remoting.XmppConnection = function() {
   this.sendPending_ = false;
   /** @private */
   this.startTlsPending_ = false;
-  /** @private {Array<ArrayBuffer>} */
+  /** @private {Array<!ArrayBuffer>} */
   this.sendQueue_ = [];
   /** @private {remoting.XmppLoginHandler} */
   this.loginHandler_ = null;
@@ -71,8 +71,10 @@ remoting.XmppConnection.prototype.setIncomingStanzaCallback =
  */
 remoting.XmppConnection.prototype.connect =
     function(server, username, authToken) {
-  base.debug.assert(this.state_ == remoting.SignalStrategy.State.NOT_CONNECTED);
-  base.debug.assert(this.onStateChangedCallback_ != null);
+  console.assert(this.state_ == remoting.SignalStrategy.State.NOT_CONNECTED,
+                'connect() called in state ' + this.state_ + '.');
+  console.assert(this.onStateChangedCallback_ != null,
+                 'No state-change callback registered.');
 
   this.error_ = remoting.Error.none();
   var hostnameAndPort = server.split(':', 2);
@@ -93,13 +95,18 @@ remoting.XmppConnection.prototype.connect =
   if (xmppServer == 'talk.google.com')
     xmppServer = 'google.com';
 
-  // <starttls> handshake before starting TLS is not needed when connecting on
-  // the HTTPS port.
-  var needHandshakeBeforeTls = this.port_ != 443;
+  var tlsMode = remoting.TlsMode.WITH_HANDSHAKE;
+  if (this.port_ === 443) {
+    // <starttls> handshake before starting TLS is not needed when connecting on
+    // the HTTPS port.
+    tlsMode = remoting.TlsMode.WITHOUT_HANDSHAKE;
+  } else if (remoting.settings.XMPP_SERVER_USE_TLS === false) {
+    tlsMode = remoting.TlsMode.NO_TLS;
+  }
 
   /** @type {remoting.XmppLoginHandler} */
   this.loginHandler_ = new remoting.XmppLoginHandler(
-      xmppServer, username, authToken, needHandshakeBeforeTls,
+      xmppServer, username, authToken, tlsMode,
       this.sendString_.bind(this), this.startTls_.bind(this),
       this.onHandshakeDone_.bind(this), this.onError_.bind(this));
   this.setState_(remoting.SignalStrategy.State.CONNECTING);
@@ -118,16 +125,9 @@ remoting.XmppConnection.prototype.connect =
 
 /** @param {string} message */
 remoting.XmppConnection.prototype.sendMessage = function(message) {
-  base.debug.assert(this.state_ == remoting.SignalStrategy.State.CONNECTED);
+  console.assert(this.state_ == remoting.SignalStrategy.State.CONNECTED,
+                'sendMessage() called in state ' + this.state_ + '.');
   this.sendString_(message);
-};
-
-/**
- * @param {remoting.LogToServer} logToServer The LogToServer instance for the
- *     connection.
- */
-remoting.XmppConnection.prototype.sendConnectionSetupResults =
-    function(logToServer) {
 };
 
 /** @return {remoting.SignalStrategy.State} Current state */
@@ -177,8 +177,9 @@ remoting.XmppConnection.prototype.onSocketConnected_ = function() {
  * @private
  */
 remoting.XmppConnection.prototype.onReceive_ = function(data) {
-  base.debug.assert(this.state_ == remoting.SignalStrategy.State.HANDSHAKE ||
-                    this.state_ == remoting.SignalStrategy.State.CONNECTED);
+  console.assert(this.state_ == remoting.SignalStrategy.State.HANDSHAKE ||
+                 this.state_ == remoting.SignalStrategy.State.CONNECTED,
+                'onReceive_() called in state ' + this.state_ + '.');
 
   if (this.state_ == remoting.SignalStrategy.State.HANDSHAKE) {
     this.loginHandler_.onDataReceived(data);
@@ -247,10 +248,12 @@ remoting.XmppConnection.prototype.onSent_ = function(bytesSent) {
     return;
   }
 
-  base.debug.assert(this.sendQueue_.length > 0);
+  console.assert(this.sendQueue_.length > 0,
+                 'Bad queue length: ' + this.sendQueue_.length + '.');
 
   var data = this.sendQueue_[0];
-  base.debug.assert(bytesSent <= data.byteLength);
+  console.assert(bytesSent <= data.byteLength,
+                 'Bad |bytesSent|: ' + bytesSent + '.');
   if (bytesSent == data.byteLength) {
     this.sendQueue_.shift();
   } else {
@@ -264,7 +267,7 @@ remoting.XmppConnection.prototype.onSent_ = function(bytesSent) {
  * @private
  */
 remoting.XmppConnection.prototype.startTls_ = function() {
-  base.debug.assert(!this.startTlsPending_);
+  console.assert(!this.startTlsPending_, 'startTls already pending.');
 
   var that = this;
 

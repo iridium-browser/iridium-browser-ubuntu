@@ -11,6 +11,7 @@
 #include "ash/shell_window_ids.h"
 #include "ash/system/audio/tray_audio.h"
 #include "ash/system/bluetooth/tray_bluetooth.h"
+#include "ash/system/cast/tray_cast.h"
 #include "ash/system/date/tray_date.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray_delegate.h"
@@ -181,6 +182,8 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
   AddTrayItem(new TrayVPN(this));
   AddTrayItem(new TraySms(this));
   AddTrayItem(new TrayBluetooth(this));
+  tray_cast_ = new TrayCast(this);
+  AddTrayItem(tray_cast_);
   AddTrayItem(new TrayDisplay(this));
   screen_capture_tray_item_ = new ScreenCaptureTrayItem(this);
   AddTrayItem(screen_capture_tray_item_);
@@ -690,6 +693,8 @@ views::View* SystemTray::GetTrayItemViewForTest(SystemTrayItem* item) {
       tray_item_map_.find(item);
   return it == tray_item_map_.end() ? NULL : it->second;
 }
+
+TrayCast* SystemTray::GetTrayCastForTesting() const { return tray_cast_; }
 
 TrayDate* SystemTray::GetTrayDateForTesting() const { return tray_date_; }
 

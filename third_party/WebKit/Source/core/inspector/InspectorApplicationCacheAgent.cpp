@@ -27,7 +27,7 @@
 #include "core/inspector/InspectorApplicationCacheAgent.h"
 
 #include "core/frame/LocalFrame.h"
-#include "core/inspector/InspectorIdentifiers.h"
+#include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/inspector/InspectorState.h"
 #include "core/inspector/InstrumentingAgents.h"
@@ -80,7 +80,7 @@ void InspectorApplicationCacheAgent::updateApplicationCacheStatus(LocalFrame* fr
     ApplicationCacheHost::CacheInfo info = host->applicationCacheInfo();
 
     String manifestURL = info.m_manifest.string();
-    String frameId = InspectorIdentifiers<LocalFrame>::identifier(frame);
+    String frameId = IdentifiersFactory::frameId(frame);
     frontend()->applicationCacheStatusUpdated(frameId, manifestURL, static_cast<int>(status));
 }
 
@@ -107,7 +107,7 @@ void InspectorApplicationCacheAgent::getFramesWithManifests(ErrorString*, RefPtr
         String manifestURL = info.m_manifest.string();
         if (!manifestURL.isEmpty()) {
             RefPtr<TypeBuilder::ApplicationCache::FrameWithManifest> value = TypeBuilder::ApplicationCache::FrameWithManifest::create()
-                .setFrameId(InspectorIdentifiers<LocalFrame>::identifier(toLocalFrame(frame)))
+                .setFrameId(IdentifiersFactory::frameId(toLocalFrame(frame)))
                 .setManifestURL(manifestURL)
                 .setStatus(static_cast<int>(host->status()));
             result->addItem(value);
@@ -117,11 +117,16 @@ void InspectorApplicationCacheAgent::getFramesWithManifests(ErrorString*, RefPtr
 
 DocumentLoader* InspectorApplicationCacheAgent::assertFrameWithDocumentLoader(ErrorString* errorString, String frameId)
 {
-    LocalFrame* frame = m_pageAgent->assertFrame(errorString, frameId);
-    if (!frame)
+    LocalFrame* frame = IdentifiersFactory::frameById(m_pageAgent->inspectedFrame(), frameId);
+    if (!frame) {
+        *errorString = "No frame for given id found";
         return nullptr;
+    }
 
-    return InspectorPageAgent::assertDocumentLoader(errorString, frame);
+    DocumentLoader* documentLoader = frame->loader().documentLoader();
+    if (!documentLoader)
+        *errorString = "No documentLoader for given frame found";
+    return documentLoader;
 }
 
 void InspectorApplicationCacheAgent::getManifestForFrame(ErrorString* errorString, const String& frameId, String* manifestURL)

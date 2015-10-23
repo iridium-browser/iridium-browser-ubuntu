@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import os
+import platform
 import subprocess
 import sys
 

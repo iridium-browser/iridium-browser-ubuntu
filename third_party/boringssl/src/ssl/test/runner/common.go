@@ -82,6 +82,7 @@ const (
 	extensionSignedCertificateTimestamp uint16 = 18
 	extensionExtendedMasterSecret       uint16 = 23
 	extensionSessionTicket              uint16 = 35
+	extensionCustom                     uint16 = 1234  // not IANA assigned
 	extensionNextProtoNeg               uint16 = 13172 // not IANA assigned
 	extensionRenegotiationInfo          uint16 = 0xff01
 	extensionChannelID                  uint16 = 30032 // not IANA assigned
@@ -188,6 +189,7 @@ type ConnectionState struct {
 	VerifiedChains             [][]*x509.Certificate // verified chains built from PeerCertificates
 	ChannelID                  *ecdsa.PublicKey      // the channel ID for this connection
 	SRTPProtectionProfile      uint16                // the negotiated DTLS-SRTP protection profile
+	TLSUnique                  []byte
 }
 
 // ClientAuthType declares the policy the server will follow for
@@ -398,6 +400,10 @@ type ProtocolBugs struct {
 	// ServerKeyExchange message should be invalid.
 	InvalidSKXSignature bool
 
+	// InvalidCertVerifySignature specifies that the signature in a
+	// CertificateVerify message should be invalid.
+	InvalidCertVerifySignature bool
+
 	// InvalidSKXCurve causes the curve ID in the ServerKeyExchange message
 	// to be wrong.
 	InvalidSKXCurve bool
@@ -475,10 +481,16 @@ type ProtocolBugs struct {
 	// TLS_FALLBACK_SCSV in the ClientHello.
 	SendFallbackSCSV bool
 
+	// SendRenegotiationSCSV causes the client to include the renegotiation
+	// SCSV in the ClientHello.
+	SendRenegotiationSCSV bool
+
 	// MaxHandshakeRecordLength, if non-zero, is the maximum size of a
 	// handshake record. Handshake messages will be split into multiple
 	// records at the specified size, except that the client_version will
-	// never be fragmented.
+	// never be fragmented. For DTLS, it is the maximum handshake fragment
+	// size, not record size; DTLS allows multiple handshake fragments in a
+	// single handshake record. See |PackHandshakeFragments|.
 	MaxHandshakeRecordLength int
 
 	// FragmentClientVersion will allow MaxHandshakeRecordLength to apply to
@@ -537,6 +549,10 @@ type ProtocolBugs struct {
 	// of ALPN works regardless of their relative order.
 	SwapNPNAndALPN bool
 
+	// ALPNProtocol, if not nil, sets the ALPN protocol that a server will
+	// return.
+	ALPNProtocol *string
+
 	// AllowSessionVersionMismatch causes the server to resume sessions
 	// regardless of the version associated with the session.
 	AllowSessionVersionMismatch bool
@@ -569,11 +585,15 @@ type ProtocolBugs struct {
 	// didn't support the renegotiation info extension.
 	NoRenegotiationInfo bool
 
-	// SequenceNumberIncrement, if non-zero, causes outgoing sequence
-	// numbers in DTLS to increment by that value rather by 1. This is to
-	// stress the replay bitmap window by simulating extreme packet loss and
-	// retransmit at the record layer.
-	SequenceNumberIncrement uint64
+	// RequireRenegotiationInfo, if true, causes the client to return an
+	// error if the server doesn't reply with the renegotiation extension.
+	RequireRenegotiationInfo bool
+
+	// SequenceNumberMapping, if non-nil, is the mapping function to apply
+	// to the sequence number of outgoing packets. For both TLS and DTLS,
+	// the two most-significant bytes in the resulting sequence number are
+	// ignored so that the DTLS epoch cannot be changed.
+	SequenceNumberMapping func(uint64) uint64
 
 	// RSAEphemeralKey, if true, causes the server to send a
 	// ServerKeyExchange message containing an ephemeral key (as in
@@ -605,10 +625,6 @@ type ProtocolBugs struct {
 	// to require that all ClientHellos match in offered version
 	// across a renego.
 	RequireSameRenegoClientVersion bool
-
-	// RequireFastradioPadding, if true, requires that ClientHello messages
-	// be at least 1000 bytes long.
-	RequireFastradioPadding bool
 
 	// ExpectInitialRecordVersion, if non-zero, is the expected
 	// version of the records before the version is determined.
@@ -665,29 +681,23 @@ type ProtocolBugs struct {
 	// handshake fragments in DTLS to have the wrong message length.
 	FragmentMessageLengthMismatch bool
 
-	// SplitFragmentHeader, if true, causes the handshake fragments in DTLS
-	// to be split across two records.
-	SplitFragmentHeader bool
-
-	// SplitFragmentBody, if true, causes the handshake bodies in DTLS to be
-	// split across two records.
-	//
-	// TODO(davidben): There's one final split to test: when the header and
-	// body are split across two records. But those are (incorrectly)
-	// accepted right now.
-	SplitFragmentBody bool
+	// SplitFragments, if non-zero, causes the handshake fragments in DTLS
+	// to be split across two records. The value of |SplitFragments| is the
+	// number of bytes in the first fragment.
+	SplitFragments int
 
 	// SendEmptyFragments, if true, causes handshakes to include empty
 	// fragments in DTLS.
 	SendEmptyFragments bool
 
+	// SendSplitAlert, if true, causes an alert to be sent with the header
+	// and record body split across multiple packets. The peer should
+	// discard these packets rather than process it.
+	SendSplitAlert bool
+
 	// FailIfResumeOnRenego, if true, causes renegotiations to fail if the
 	// client offers a resumption or the server accepts one.
 	FailIfResumeOnRenego bool
-
-	// NoSignatureAlgorithmsOnRenego, if true, causes renegotiations to omit
-	// the signature_algorithms extension.
-	NoSignatureAlgorithmsOnRenego bool
 
 	// IgnorePeerCipherPreferences, if true, causes the peer's cipher
 	// preferences to be ignored.
@@ -701,12 +711,44 @@ type ProtocolBugs struct {
 	// preferences to be ignored.
 	IgnorePeerCurvePreferences bool
 
-	// SendWarningAlerts, if non-zero, causes every record to be prefaced by
-	// a warning alert.
-	SendWarningAlerts alert
-
 	// BadFinished, if true, causes the Finished hash to be broken.
 	BadFinished bool
+
+	// DHGroupPrime, if not nil, is used to define the (finite field)
+	// Diffie-Hellman group. The generator used is always two.
+	DHGroupPrime *big.Int
+
+	// PackHandshakeFragments, if true, causes handshake fragments to be
+	// packed into individual handshake records, up to the specified record
+	// size.
+	PackHandshakeFragments int
+
+	// PackHandshakeRecords, if true, causes handshake records to be packed
+	// into individual packets, up to the specified packet size.
+	PackHandshakeRecords int
+
+	// EnableAllCiphersInDTLS, if true, causes RC4 to be enabled in DTLS.
+	EnableAllCiphersInDTLS bool
+
+	// EmptyCertificateList, if true, causes the server to send an empty
+	// certificate list in the Certificate message.
+	EmptyCertificateList bool
+
+	// ExpectNewTicket, if true, causes the client to abort if it does not
+	// receive a new ticket.
+	ExpectNewTicket bool
+
+	// RequireClientHelloSize, if not zero, is the required length in bytes
+	// of the ClientHello /record/. This is checked by the server.
+	RequireClientHelloSize int
+
+	// CustomExtension, if not empty, contains the contents of an extension
+	// that will be added to client/server hellos.
+	CustomExtension string
+
+	// ExpectedCustomExtension, if not nil, contains the expected contents
+	// of a custom extension.
+	ExpectedCustomExtension *string
 }
 
 func (c *Config) serverInit() {

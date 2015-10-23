@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "extensions/browser/api/vpn_provider/vpn_service.h"
@@ -20,7 +21,7 @@ namespace extensions {
 
 namespace {
 
-namespace api_vpn = extensions::core_api::vpn_provider;
+namespace api_vpn = extensions::api::vpn_provider;
 
 const char kCIDRSeperator[] = "/";
 
@@ -32,7 +33,7 @@ bool CheckIPCIDRSanity(const std::string& value, bool cidr, bool ipv6) {
   int counter = 0;
 
   for (const auto& elem : value) {
-    if (IsAsciiDigit(elem)) {
+    if (base::IsAsciiDigit(elem)) {
       counter++;
       continue;
     }
@@ -53,7 +54,7 @@ bool CheckIPCIDRSanity(const std::string& value, bool cidr, bool ipv6) {
       if (!colon)
         return false;
       colon--;
-    } else if (!hex_allowed || !IsHexDigit(elem)) {
+    } else if (!hex_allowed || !base::IsHexDigit(elem)) {
       return false;
     } else {
       counter++;
@@ -100,8 +101,10 @@ void ConvertParameters(const api_vpn::Parameters& parameters,
     return;
   }
 
-  std::vector<std::string> cidr_parts;
-  CHECK(Tokenize(parameters.address, kCIDRSeperator, &cidr_parts) == 2);
+  std::vector<std::string> cidr_parts = base::SplitString(
+      parameters.address, kCIDRSeperator, base::KEEP_WHITESPACE,
+      base::SPLIT_WANT_NONEMPTY);
+  CHECK_EQ(2u, cidr_parts.size());
 
   parameter_value->SetStringWithoutPathExpansion(
       shill::kAddressParameterThirdPartyVpn, cidr_parts[0]);
@@ -109,13 +112,14 @@ void ConvertParameters(const api_vpn::Parameters& parameters,
   parameter_value->SetStringWithoutPathExpansion(
       shill::kSubnetPrefixParameterThirdPartyVpn, cidr_parts[1]);
 
+  std::string ip_delimiter(1, shill::kIPDelimiter);
   parameter_value->SetStringWithoutPathExpansion(
       shill::kExclusionListParameterThirdPartyVpn,
-      JoinString(parameters.exclusion_list, shill::kIPDelimiter));
+      base::JoinString(parameters.exclusion_list, ip_delimiter));
 
   parameter_value->SetStringWithoutPathExpansion(
       shill::kInclusionListParameterThirdPartyVpn,
-      JoinString(parameters.inclusion_list, shill::kIPDelimiter));
+      base::JoinString(parameters.inclusion_list, ip_delimiter));
 
   if (parameters.mtu) {
     parameter_value->SetStringWithoutPathExpansion(
@@ -128,15 +132,16 @@ void ConvertParameters(const api_vpn::Parameters& parameters,
         *parameters.broadcast_address);
   }
 
+  std::string non_ip_delimiter(1, shill::kNonIPDelimiter);
   if (parameters.domain_search) {
     parameter_value->SetStringWithoutPathExpansion(
         shill::kDomainSearchParameterThirdPartyVpn,
-        JoinString(*parameters.domain_search, shill::kNonIPDelimiter));
+        base::JoinString(*parameters.domain_search, non_ip_delimiter));
   }
 
   parameter_value->SetStringWithoutPathExpansion(
       shill::kDnsServersParameterThirdPartyVpn,
-      JoinString(parameters.dns_servers, shill::kIPDelimiter));
+      base::JoinString(parameters.dns_servers, ip_delimiter));
 
   return;
 }

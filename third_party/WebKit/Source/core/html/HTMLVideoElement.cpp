@@ -32,13 +32,13 @@
 #include "core/dom/Attribute.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/dom/Fullscreen.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/frame/Settings.h"
-#include "core/html/HTMLImageLoader.h"
-#include "core/html/canvas/CanvasRenderingContext.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/layout/LayoutImage.h"
 #include "core/layout/LayoutVideo.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/ImageBuffer.h"
@@ -138,17 +138,6 @@ void HTMLVideoElement::parseAttribute(const QualifiedName& name, const AtomicStr
     }
 }
 
-bool HTMLVideoElement::supportsFullscreen() const
-{
-    if (!document().page())
-        return false;
-
-    if (!webMediaPlayer())
-        return false;
-
-    return true;
-}
-
 unsigned HTMLVideoElement::videoWidth() const
 {
     if (!webMediaPlayer())
@@ -204,25 +193,26 @@ void HTMLVideoElement::updateDisplayState()
         setDisplayMode(Poster);
 }
 
-void HTMLVideoElement::paintCurrentFrameInContext(GraphicsContext* context, const IntRect& destRect) const
+void HTMLVideoElement::paintCurrentFrame(SkCanvas* canvas, const IntRect& destRect, const SkPaint* paint) const
 {
     if (!webMediaPlayer())
         return;
 
-    WebCanvas* canvas = context->canvas();
-    SkXfermode::Mode mode = context->compositeOperation();
-    webMediaPlayer()->paint(canvas, destRect, context->getNormalizedAlpha(), mode);
+    SkXfermode::Mode mode;
+    if (!paint || !SkXfermode::AsMode(paint->getXfermode(), &mode))
+        mode = SkXfermode::kSrcOver_Mode;
+
+    // TODO(junov, philipj): crbug.com/456529 Pass the whole SkPaint instead of only alpha and xfermode
+    webMediaPlayer()->paint(canvas, destRect, paint ? paint->getAlpha() : 0xFF, mode);
 }
 
-bool HTMLVideoElement::copyVideoTextureToPlatformTexture(WebGraphicsContext3D* context, Platform3DObject texture, GLint level, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY)
+bool HTMLVideoElement::copyVideoTextureToPlatformTexture(WebGraphicsContext3D* context, Platform3DObject texture, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY)
 {
     if (!webMediaPlayer())
         return false;
 
-    if (!Extensions3DUtil::canUseCopyTextureCHROMIUM(internalFormat, type, level))
-        return false;
-
-    return webMediaPlayer()->copyVideoTextureToPlatformTexture(context, texture, level, internalFormat, type, premultiplyAlpha, flipY);
+    ASSERT(Extensions3DUtil::canUseCopyTextureCHROMIUM(GL_TEXTURE_2D, internalFormat, type, 0));
+    return webMediaPlayer()->copyVideoTextureToPlatformTexture(context, texture, internalFormat, type, premultiplyAlpha, flipY);
 }
 
 bool HTMLVideoElement::hasAvailableVideoFrame() const
@@ -233,17 +223,10 @@ bool HTMLVideoElement::hasAvailableVideoFrame() const
     return webMediaPlayer()->hasVideo() && webMediaPlayer()->readyState() >= WebMediaPlayer::ReadyStateHaveCurrentData;
 }
 
-void HTMLVideoElement::webkitEnterFullscreen(ExceptionState& exceptionState)
+void HTMLVideoElement::webkitEnterFullscreen()
 {
-    if (isFullscreen())
-        return;
-
-    if (!supportsFullscreen()) {
-        exceptionState.throwDOMException(InvalidStateError, "This element does not support fullscreen mode.");
-        return;
-    }
-
-    enterFullscreen();
+    if (!isFullscreen())
+        enterFullscreen();
 }
 
 void HTMLVideoElement::webkitExitFullscreen()
@@ -254,12 +237,26 @@ void HTMLVideoElement::webkitExitFullscreen()
 
 bool HTMLVideoElement::webkitSupportsFullscreen()
 {
-    return supportsFullscreen();
+    return Fullscreen::fullscreenEnabled(document());
 }
 
 bool HTMLVideoElement::webkitDisplayingFullscreen()
 {
     return isFullscreen();
+}
+
+bool HTMLVideoElement::usesOverlayFullscreenVideo() const
+{
+    if (RuntimeEnabledFeatures::forceOverlayFullscreenVideoEnabled())
+        return true;
+
+    // TODO(watk): Remove this and the REF check below when the chromium side change to not
+    // set OverlayFullscreenVideo on Android lands. http://crbug.com/511376
+    if (HTMLMediaElement::isMediaStreamURL(sourceURL().string()))
+        return false;
+
+    return RuntimeEnabledFeatures::overlayFullscreenVideoEnabled()
+        || (webMediaPlayer() && webMediaPlayer()->supportsOverlayFullscreenVideo());
 }
 
 void HTMLVideoElement::didMoveToNewDocument(Document& oldDocument)
@@ -293,12 +290,7 @@ KURL HTMLVideoElement::posterImageURL() const
     return document().completeURL(url);
 }
 
-KURL HTMLVideoElement::mediaPlayerPosterURL()
-{
-    return posterImageURL();
-}
-
-PassRefPtr<Image> HTMLVideoElement::getSourceImageForCanvas(SourceImageMode mode, SourceImageStatus* status) const
+PassRefPtr<Image> HTMLVideoElement::getSourceImageForCanvas(SourceImageStatus* status) const
 {
     if (!hasAvailableVideoFrame()) {
         *status = InvalidSourceImageStatus;
@@ -312,10 +304,15 @@ PassRefPtr<Image> HTMLVideoElement::getSourceImageForCanvas(SourceImageMode mode
         return nullptr;
     }
 
-    paintCurrentFrameInContext(imageBuffer->context(), IntRect(IntPoint(0, 0), intrinsicSize));
+    paintCurrentFrame(imageBuffer->canvas(), IntRect(IntPoint(0, 0), intrinsicSize), nullptr);
+    RefPtr<Image> snapshot = imageBuffer->newImageSnapshot();
+    if (!snapshot) {
+        *status = InvalidSourceImageStatus;
+        return nullptr;
+    }
 
-    *status = (mode == CopySourceImageIfVolatile) ? NormalSourceImageStatus : ExternalSourceImageStatus;
-    return imageBuffer->copyImage(mode == CopySourceImageIfVolatile ? CopyBackingStore : DontCopyBackingStore, Unscaled);
+    *status = NormalSourceImageStatus;
+    return snapshot.release();
 }
 
 bool HTMLVideoElement::wouldTaintOrigin(SecurityOrigin* destinationSecurityOrigin) const

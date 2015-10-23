@@ -12,6 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
@@ -28,16 +29,21 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/disks/disk_mount_manager.h"
+#include "components/drive/file_system_core_util.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 
 namespace file_manager {
 namespace {
 
+const uint32 kAccessCapabilityReadWrite = 0;
+const uint32 kFilesystemTypeGenericHierarchical = 2;
 const char kFileManagerMTPMountNamePrefix[] = "fileman-mtp-";
 const char kMtpVolumeIdPrefix [] = "mtp:";
+const char kRootPath[] = "/";
 
 // Registers |path| as the "Downloads" folder to the FileSystem API backend.
 // If another folder is already mounted. It revokes and overrides the old one.
@@ -138,7 +144,8 @@ Volume::Volume()
       is_parent_(false),
       is_read_only_(false),
       has_media_(false),
-      configurable_(false) {
+      configurable_(false),
+      watchable_(false) {
 }
 
 Volume::~Volume() {
@@ -156,6 +163,7 @@ Volume* Volume::CreateForDrive(Profile* profile) {
   volume->mount_path_ = drive_path;
   volume->mount_condition_ = chromeos::disks::MOUNT_CONDITION_NONE;
   volume->volume_id_ = GenerateVolumeId(*volume);
+  volume->watchable_ = true;
   return volume;
 }
 
@@ -169,6 +177,7 @@ Volume* Volume::CreateForDownloads(const base::FilePath& downloads_path) {
   volume->mount_path_ = downloads_path;
   volume->mount_condition_ = chromeos::disks::MOUNT_CONDITION_NONE;
   volume->volume_id_ = GenerateVolumeId(*volume);
+  volume->watchable_ = true;
   return volume;
 }
 
@@ -197,6 +206,7 @@ Volume* Volume::CreateForRemovable(
         (mount_point.mount_type == chromeos::MOUNT_TYPE_ARCHIVE);
   }
   volume->volume_id_ = GenerateVolumeId(*volume);
+  volume->watchable_ = true;
   return volume;
 }
 
@@ -227,6 +237,7 @@ Volume* Volume::CreateForProvidedFileSystem(
   volume->is_parent_ = true;
   volume->is_read_only_ = !file_system_info.writable();
   volume->configurable_ = file_system_info.configurable();
+  volume->watchable_ = file_system_info.watchable();
   volume->volume_id_ = GenerateVolumeId(*volume);
   return volume;
 }
@@ -280,11 +291,13 @@ VolumeManager::VolumeManager(
     drive::DriveIntegrationService* drive_integration_service,
     chromeos::PowerManagerClient* power_manager_client,
     chromeos::disks::DiskMountManager* disk_mount_manager,
-    chromeos::file_system_provider::Service* file_system_provider_service)
+    chromeos::file_system_provider::Service* file_system_provider_service,
+    GetMtpStorageInfoCallback get_mtp_storage_info_callback)
     : profile_(profile),
       drive_integration_service_(drive_integration_service),
       disk_mount_manager_(disk_mount_manager),
       file_system_provider_service_(file_system_provider_service),
+      get_mtp_storage_info_callback_(get_mtp_storage_info_callback),
       snapshot_manager_(new SnapshotManager(profile_)),
       weak_ptr_factory_(this) {
   DCHECK(disk_mount_manager);
@@ -324,7 +337,8 @@ void VolumeManager::Initialize() {
   disk_mount_manager_->AddObserver(this);
   disk_mount_manager_->EnsureMountInfoRefreshed(
       base::Bind(&VolumeManager::OnDiskMountManagerRefreshed,
-                 weak_ptr_factory_.GetWeakPtr()));
+                 weak_ptr_factory_.GetWeakPtr()),
+      false /* force */);
 
   // Subscribe to FileSystemProviderService and register currently mounted
   // volumes for the profile.
@@ -701,17 +715,36 @@ void VolumeManager::OnRemovableStorageAttached(
           path);
   DCHECK(result);
 
-  bool disable_mtp_write = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      chromeos::switches::kDisableMtpWriteSupport);
+  // Resolve mtp storage name and get MtpStorageInfo.
+  std::string storage_name;
+  base::RemoveChars(info.location(), kRootPath, &storage_name);
+  DCHECK(!storage_name.empty());
+
+  const MtpStorageInfo* mtp_storage_info;
+  if (get_mtp_storage_info_callback_.is_null()) {
+    mtp_storage_info = storage_monitor::StorageMonitor::GetInstance()
+                           ->media_transfer_protocol_manager()
+                           ->GetStorageInfo(storage_name);
+  } else {
+    mtp_storage_info = get_mtp_storage_info_callback_.Run(storage_name);
+  }
+  DCHECK(mtp_storage_info);
+
+  // Mtp write is enabled only when the device is writable and supports generic
+  // hierarchical file system.
+  const bool read_only =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kDisableMtpWriteSupport) ||
+      mtp_storage_info->access_capability() != kAccessCapabilityReadWrite ||
+      mtp_storage_info->filesystem_type() != kFilesystemTypeGenericHierarchical;
 
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
       base::Bind(&MTPDeviceMapService::RegisterMTPFileSystem,
                  base::Unretained(MTPDeviceMapService::GetInstance()),
-                 info.location(), fsid, disable_mtp_write /* read_only */));
+                 info.location(), fsid, read_only));
 
-  linked_ptr<Volume> volume(
-      Volume::CreateForMTP(path, label, disable_mtp_write));
+  linked_ptr<Volume> volume(Volume::CreateForMTP(path, label, read_only));
   DoMountEvent(chromeos::MOUNT_ERROR_NONE, volume);
 }
 

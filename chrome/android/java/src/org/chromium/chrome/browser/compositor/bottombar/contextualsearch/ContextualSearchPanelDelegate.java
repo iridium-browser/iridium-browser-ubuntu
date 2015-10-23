@@ -12,6 +12,11 @@ import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.Context
  */
 public interface ContextualSearchPanelDelegate {
     /**
+     * @return Whether the Panel is in fullscreen size.
+     */
+    boolean isFullscreenSizePanel();
+
+    /**
      * @return Whether the Panel is showing.
      */
     boolean isShowing();
@@ -20,6 +25,26 @@ public interface ContextualSearchPanelDelegate {
      * @return Whether the Search Bar is peeking.
      */
     boolean isPeeking();
+
+    /**
+     * @return The width of the Contextual Search Panel in pixels.
+     */
+    int getMaximumWidthPx();
+
+    /**
+     * @return The height of the Contextual Search Panel in pixels.
+     */
+    int getMaximumHeightPx();
+
+    /**
+     * @return The width of the Search Content View in pixels.
+     */
+    int getSearchContentViewWidthPx();
+
+    /**
+     * @return The height of the Search Content View in pixels.
+     */
+    int getSearchContentViewHeightPx();
 
     /**
      * Maximizes the Contextual Search Panel, then promotes it to a regular Tab.
@@ -52,23 +77,6 @@ public interface ContextualSearchPanelDelegate {
      * @param y The y coordinate.
      */
     void updateBasePageSelectionYPx(float y);
-
-    /**
-     * Sets the content height of the First Run Flow Panel.
-     * @param height The content height of the First Run Flow Panel.
-     */
-    void setPromoContentHeight(float height);
-
-    /**
-     * @param shouldHidePromoHeader Sets whether the First Run Flow's header
-     *            should be hidden.
-     */
-    void setShouldHidePromoHeader(boolean shouldHidePromoHeader);
-
-    /**
-     * Animates the Contextual Search panel after first-run success.
-     */
-    void animateAfterFirstRunSuccess();
 
     /**
      * Handles the onLoadStarted event in the WebContents.
@@ -123,4 +131,10 @@ public interface ContextualSearchPanelDelegate {
      * @return ContextualSearchControl The Android View that renders the BottomBar text.
      */
     ContextualSearchControl getContextualSearchControl();
+
+    /**
+     * @return {@code true} Whether the close animation should run when the the panel is closed
+     *                      due the panel being promoted to a tab.
+     */
+    boolean shouldAnimatePanelCloseOnPromoteToTab();
 }

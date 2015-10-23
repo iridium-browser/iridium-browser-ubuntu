@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -83,6 +83,9 @@ URLFetcherCore::URLFetcherCore(URLFetcher* fetcher,
       buffer_(new IOBuffer(kBufferSize)),
       url_request_data_key_(NULL),
       was_fetched_via_proxy_(false),
+      was_cached_(false),
+      received_response_content_length_(0),
+      total_received_bytes_(0),
       upload_content_set_(false),
       upload_range_offset_(0),
       upload_range_length_(0),
@@ -316,6 +319,18 @@ bool URLFetcherCore::WasFetchedViaProxy() const {
   return was_fetched_via_proxy_;
 }
 
+bool URLFetcherCore::WasCached() const {
+  return was_cached_;
+}
+
+int64_t URLFetcherCore::GetReceivedResponseContentLength() const {
+  return received_response_content_length_;
+}
+
+int64_t URLFetcherCore::GetTotalReceivedBytes() const {
+  return total_received_bytes_;
+}
+
 const GURL& URLFetcherCore::GetOriginalURL() const {
   return original_url_;
 }
@@ -393,6 +408,8 @@ void URLFetcherCore::OnReceivedRedirect(URLRequest* request,
     url_ = redirect_info.new_url;
     response_code_ = request_->GetResponseCode();
     was_fetched_via_proxy_ = request_->was_fetched_via_proxy();
+    was_cached_ = request_->was_cached();
+    total_received_bytes_ += request_->GetTotalReceivedBytes();
     request->Cancel();
     OnReadCompleted(request, 0);
   }
@@ -406,6 +423,7 @@ void URLFetcherCore::OnResponseStarted(URLRequest* request) {
     response_headers_ = request_->response_headers();
     socket_address_ = request_->GetSocketAddress();
     was_fetched_via_proxy_ = request_->was_fetched_via_proxy();
+    was_cached_ = request_->was_cached();
     total_response_bytes_ = request_->GetExpectedContentSize();
   }
 
@@ -459,6 +477,9 @@ void URLFetcherCore::OnReadCompleted(URLRequest* request,
   // See comments re: HEAD requests in ReadResponse().
   if (!status.is_io_pending() || request_type_ == URLFetcher::HEAD) {
     status_ = status;
+    received_response_content_length_ =
+        request_->received_response_content_length();
+    total_received_bytes_ += request_->GetTotalReceivedBytes();
     ReleaseRequest();
 
     // No more data to write.
@@ -668,8 +689,7 @@ void URLFetcherCore::CancelURLRequest(int error) {
   // URLRequestJob::NotifyDone(). But, because the request was released
   // immediately after being canceled, the request could not call
   // OnReadCompleted() which overwrites |status_| with the error status.
-  status_.set_status(URLRequestStatus::CANCELED);
-  status_.set_error(error);
+  status_ = URLRequestStatus(URLRequestStatus::CANCELED, error);
 
   // Release the reference to the request context. There could be multiple
   // references to URLFetcher::Core at this point so it may take a while to

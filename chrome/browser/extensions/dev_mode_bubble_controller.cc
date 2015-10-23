@@ -35,7 +35,7 @@ class DevModeBubbleDelegate
   ~DevModeBubbleDelegate() override;
 
   // ExtensionMessageBubbleController::Delegate methods.
-  bool ShouldIncludeExtension(const std::string& extension_id) override;
+  bool ShouldIncludeExtension(const Extension* extension) override;
   void AcknowledgeExtension(
       const std::string& extension_id,
       ExtensionMessageBubbleController::BubbleAction user_action) override;
@@ -50,30 +50,24 @@ class DevModeBubbleDelegate
   base::string16 GetDismissButtonLabel() const override;
   bool ShouldShowExtensionList() const override;
   bool ShouldHighlightExtensions() const override;
+  bool ShouldLimitToEnabledExtensions() const override;
   void LogExtensionCount(size_t count) override;
   void LogAction(
       ExtensionMessageBubbleController::BubbleAction action) override;
+  std::set<Profile*>* GetProfileSet() override;
 
  private:
-  // Our extension service. Weak, not owned by us.
-  ExtensionService* service_;
-
   DISALLOW_COPY_AND_ASSIGN(DevModeBubbleDelegate);
 };
 
 DevModeBubbleDelegate::DevModeBubbleDelegate(Profile* profile)
-    : ExtensionMessageBubbleController::Delegate(profile),
-      service_(ExtensionSystem::Get(profile)->extension_service()) {
+    : ExtensionMessageBubbleController::Delegate(profile) {
 }
 
 DevModeBubbleDelegate::~DevModeBubbleDelegate() {
 }
 
-bool DevModeBubbleDelegate::ShouldIncludeExtension(
-    const std::string& extension_id) {
-  const Extension* extension = service_->GetExtensionById(extension_id, false);
-  if (!extension)
-    return false;
+bool DevModeBubbleDelegate::ShouldIncludeExtension(const Extension* extension) {
   return (extension->location() == Manifest::UNPACKED ||
           extension->location() == Manifest::COMMAND_LINE);
 }
@@ -85,7 +79,7 @@ void DevModeBubbleDelegate::AcknowledgeExtension(
 
 void DevModeBubbleDelegate::PerformAction(const ExtensionIdList& list) {
   for (size_t i = 0; i < list.size(); ++i)
-    service_->DisableExtension(list[i], Extension::DISABLE_USER_ACTION);
+    service()->DisableExtension(list[i], Extension::DISABLE_USER_ACTION);
 }
 
 base::string16 DevModeBubbleDelegate::GetTitle() const {
@@ -125,6 +119,10 @@ bool DevModeBubbleDelegate::ShouldHighlightExtensions() const {
   return true;
 }
 
+bool DevModeBubbleDelegate::ShouldLimitToEnabledExtensions() const {
+  return true;
+}
+
 void DevModeBubbleDelegate::LogExtensionCount(size_t count) {
   UMA_HISTOGRAM_COUNTS_100(
       "ExtensionBubble.ExtensionsInDevModeCount", count);
@@ -137,6 +135,10 @@ void DevModeBubbleDelegate::LogAction(
       action, ExtensionMessageBubbleController::ACTION_BOUNDARY);
 }
 
+std::set<Profile*>* DevModeBubbleDelegate::GetProfileSet() {
+  return g_shown_for_profiles.Pointer();
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -147,21 +149,15 @@ void DevModeBubbleController::ClearProfileListForTesting() {
   g_shown_for_profiles.Get().clear();
 }
 
-DevModeBubbleController::DevModeBubbleController(Profile* profile)
-    : ExtensionMessageBubbleController(new DevModeBubbleDelegate(profile),
-                                       profile),
-      profile_(profile) {}
+DevModeBubbleController::DevModeBubbleController(Browser* browser)
+    : ExtensionMessageBubbleController(
+          new DevModeBubbleDelegate(browser->profile()), browser) {}
 
 DevModeBubbleController::~DevModeBubbleController() {
 }
 
-bool DevModeBubbleController::ShouldShow() {
-  return !g_shown_for_profiles.Get().count(profile_->GetOriginalProfile()) &&
-      !GetExtensionList().empty();
-}
-
 void DevModeBubbleController::Show(ExtensionMessageBubble* bubble) {
-  g_shown_for_profiles.Get().insert(profile_->GetOriginalProfile());
+  g_shown_for_profiles.Get().insert(profile()->GetOriginalProfile());
   ExtensionMessageBubbleController::Show(bubble);
 }
 

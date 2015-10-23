@@ -33,6 +33,9 @@ ProfilerEventsProcessor::ProfilerEventsProcessor(ProfileGenerator* generator,
       last_processed_code_event_id_(0) {}
 
 
+ProfilerEventsProcessor::~ProfilerEventsProcessor() {}
+
+
 void ProfilerEventsProcessor::Enqueue(const CodeEventsContainer& event) {
   event.generic.order = ++last_code_event_id_;
   events_buffer_.Enqueue(event);
@@ -544,4 +547,5 @@ void CpuProfiler::LogBuiltins() {
 }
 
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8

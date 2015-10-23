@@ -69,8 +69,20 @@ class TimelineModel(event_container.TimelineEventContainer):
     self.import_errors = []
     self.metadata = []
     self.flow_events = []
+    self._global_memory_dumps = None
     if trace_data is not None:
       self.ImportTraces(trace_data, shift_world_to_zero=shift_world_to_zero)
+
+  def SetGlobalMemoryDumps(self, global_memory_dumps):
+    """Populates the model with a sequence of GlobalMemoryDump objects."""
+    assert not self._frozen and self._global_memory_dumps is None
+    # Keep dumps sorted in chronological order.
+    self._global_memory_dumps = tuple(sorted(global_memory_dumps,
+                                             key=lambda dump: dump.start))
+
+  def IterGlobalMemoryDumps(self):
+    """Iterate over the memory dump events of this model."""
+    return iter(self._global_memory_dumps or [])
 
   def IterChildContainers(self):
     for process in self._processes.itervalues():

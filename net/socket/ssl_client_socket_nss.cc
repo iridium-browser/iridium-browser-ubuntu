@@ -69,7 +69,7 @@
 #include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -699,7 +699,7 @@ class SSLClientSocketNSS::Core : public base::RefCountedThreadSafe<Core> {
 
   // The service for retrieving Channel ID keys.  May be NULL.
   ChannelIDService* channel_id_service_;
-  ChannelIDService::RequestHandle domain_bound_cert_request_handle_;
+  ChannelIDService::Request channel_id_request_;
 
   // The information about NSS task runner.
   int unhandled_buffer_size_;
@@ -785,8 +785,7 @@ class SSLClientSocketNSS::Core : public base::RefCountedThreadSafe<Core> {
   // prior to invoking OnHandshakeIOComplete.
   // Read on the NSS task runner when once OnHandshakeIOComplete is invoked
   // on the NSS task runner.
-  std::string domain_bound_private_key_;
-  std::string domain_bound_cert_;
+  scoped_ptr<crypto::ECPrivateKey> channel_id_key_;
 
   DISALLOW_COPY_AND_ASSIGN(Core);
 };
@@ -955,7 +954,7 @@ void SSLClientSocketNSS::Core::Detach() {
 
   network_handshake_state_.Reset();
 
-  domain_bound_cert_request_handle_.Cancel();
+  channel_id_request_.Cancel();
 }
 
 int SSLClientSocketNSS::Core::Read(IOBuffer* buf, int buf_len,
@@ -1964,34 +1963,11 @@ SECStatus SSLClientSocketNSS::Core::ClientChannelIDHandler(
 
 int SSLClientSocketNSS::Core::ImportChannelIDKeys(SECKEYPublicKey** public_key,
                                                   SECKEYPrivateKey** key) {
-  // Set the certificate.
-  SECItem cert_item;
-  cert_item.data = (unsigned char*) domain_bound_cert_.data();
-  cert_item.len = domain_bound_cert_.size();
-  ScopedCERTCertificate cert(CERT_NewTempCertificate(CERT_GetDefaultCertDB(),
-                                                     &cert_item,
-                                                     NULL,
-                                                     PR_FALSE,
-                                                     PR_TRUE));
-  if (cert == NULL)
-    return MapNSSError(PORT_GetError());
+  if (!channel_id_key_)
+    return SECFailure;
 
-  crypto::ScopedPK11Slot slot(PK11_GetInternalSlot());
-  // Set the private key.
-  if (!crypto::ECPrivateKey::ImportFromEncryptedPrivateKeyInfo(
-          slot.get(),
-          ChannelIDService::kEPKIPassword,
-          reinterpret_cast<const unsigned char*>(
-              domain_bound_private_key_.data()),
-          domain_bound_private_key_.size(),
-          &cert->subjectPublicKeyInfo,
-          false,
-          false,
-          key,
-          public_key)) {
-    int error = MapNSSError(PORT_GetError());
-    return error;
-  }
+  *public_key = SECKEY_CopyPublicKey(channel_id_key_->public_key());
+  *key = SECKEY_CopyPrivateKey(channel_id_key_->key());
 
   return OK;
 }
@@ -2235,11 +2211,9 @@ int SSLClientSocketNSS::Core::DoGetChannelID(const std::string& host) {
   weak_net_log_->BeginEvent(NetLog::TYPE_SSL_GET_DOMAIN_BOUND_CERT);
 
   int rv = channel_id_service_->GetOrCreateChannelID(
-      host,
-      &domain_bound_private_key_,
-      &domain_bound_cert_,
+      host, &channel_id_key_,
       base::Bind(&Core::OnGetChannelIDComplete, base::Unretained(this)),
-      &domain_bound_cert_request_handle_);
+      &channel_id_request_);
 
   if (rv != ERR_IO_PENDING && !OnNSSTaskRunner()) {
     nss_task_runner_->PostTask(
@@ -2407,6 +2381,7 @@ SSLClientSocketNSS::SSLClientSocketNSS(
       ssl_session_cache_shard_(context.ssl_session_cache_shard),
       completed_handshake_(false),
       next_handshake_state_(STATE_NONE),
+      disconnected_(false),
       nss_fd_(NULL),
       net_log_(transport_->socket()->NetLog()),
       transport_security_state_(context.transport_security_state),
@@ -2459,6 +2434,7 @@ bool SSLClientSocketNSS::GetSSLInfo(SSLInfo* ssl_info) {
 
   ssl_info->cert_status = server_cert_verify_result_.cert_status;
   ssl_info->cert = server_cert_verify_result_.verified_cert;
+  ssl_info->unverified_cert = core_->state().server_cert;
 
   AddSCTInfoToSSLInfo(ssl_info);
 
@@ -2557,6 +2533,14 @@ int SSLClientSocketNSS::Connect(const CompletionCallback& callback) {
   DCHECK(user_connect_callback_.is_null());
   DCHECK(!callback.is_null());
 
+  // Although StreamSocket does allow calling Connect() after Disconnect(),
+  // this has never worked for layered sockets. CHECK to detect any consumers
+  // reconnecting an SSL socket.
+  //
+  // TODO(davidben,mmenke): Remove this API feature. See
+  // https://crbug.com/499289.
+  CHECK(!disconnected_);
+
   EnsureThreadIdAssigned();
 
   net_log_.BeginEvent(NetLog::TYPE_SSL_CONNECT);
@@ -2601,6 +2585,8 @@ void SSLClientSocketNSS::Disconnect() {
   core_->Detach();
   cert_verifier_request_.reset();
   transport_->socket()->Disconnect();
+
+  disconnected_ = true;
 
   // Reset object state.
   user_connect_callback_.Reset();
@@ -2784,6 +2770,22 @@ int SSLClientSocketNSS::InitializeSSLOptions() {
   if (rv != SECSuccess) {
     LogFailedNSSFunction(net_log_, "SSL_VersionRangeSet", "");
     return ERR_NO_SSL_VERSIONS_ENABLED;
+  }
+
+  if (ssl_config_.require_ecdhe) {
+    const PRUint16* const ssl_ciphers = SSL_GetImplementedCiphers();
+    const PRUint16 num_ciphers = SSL_GetNumImplementedCiphers();
+
+    // Iterate over the cipher suites and disable those that don't use ECDHE.
+    for (unsigned i = 0; i < num_ciphers; i++) {
+      SSLCipherSuiteInfo info;
+      if (SSL_GetCipherSuiteInfo(ssl_ciphers[i], &info, sizeof(info)) ==
+          SECSuccess) {
+        if (strcmp(info.keaTypeName, "ECDHE") != 0) {
+          SSL_CipherPrefSet(nss_fd_, ssl_ciphers[i], PR_FALSE);
+        }
+      }
+    }
   }
 
   if (ssl_config_.version_fallback) {
@@ -2995,6 +2997,7 @@ int SSLClientSocketNSS::DoHandshakeLoop(int last_io_result) {
 
 int SSLClientSocketNSS::DoHandshake() {
   EnterFunction("");
+
   int rv = core_->Connect(
       base::Bind(&SSLClientSocketNSS::OnHandshakeIOComplete,
                  base::Unretained(this)));
@@ -3035,6 +3038,12 @@ int SSLClientSocketNSS::DoVerifyCert(int result) {
 
   GotoState(STATE_VERIFY_CERT_COMPLETE);
 
+  // NSS decoded the certificate, but the platform certificate implementation
+  // could not. This is treated as a fatal SSL-level protocol error rather than
+  // a certificate error. See https://crbug.com/91341.
+  if (!core_->state().server_cert.get())
+    return ERR_SSL_SERVER_CERT_BAD_FORMAT;
+
   // If the certificate is expected to be bad we can use the expectation as
   // the cert status.
   base::StringPiece der_cert(
@@ -3051,28 +3060,11 @@ int SSLClientSocketNSS::DoVerifyCert(int result) {
     return OK;
   }
 
-  // We may have failed to create X509Certificate object if we are
-  // running inside sandbox.
-  if (!core_->state().server_cert.get()) {
-    server_cert_verify_result_.Reset();
-    server_cert_verify_result_.cert_status = CERT_STATUS_INVALID;
-    return ERR_CERT_INVALID;
-  }
-
   start_cert_verification_time_ = base::TimeTicks::Now();
 
-  int flags = 0;
-  if (ssl_config_.rev_checking_enabled)
-    flags |= CertVerifier::VERIFY_REV_CHECKING_ENABLED;
-  if (ssl_config_.verify_ev_cert)
-    flags |= CertVerifier::VERIFY_EV_CERT;
-  if (ssl_config_.cert_io_enabled)
-    flags |= CertVerifier::VERIFY_CERT_IO_ENABLED;
-  if (ssl_config_.rev_checking_required_local_anchors)
-    flags |= CertVerifier::VERIFY_REV_CHECKING_REQUIRED_LOCAL_ANCHORS;
   return cert_verifier_->Verify(
       core_->state().server_cert.get(), host_and_port_.host(),
-      core_->state().stapled_ocsp_response, flags,
+      core_->state().stapled_ocsp_response, ssl_config_.GetCertVerifyFlags(),
       SSLConfigService::GetCRLSet().get(), &server_cert_verify_result_,
       base::Bind(&SSLClientSocketNSS::OnHandshakeIOComplete,
                  base::Unretained(this)),
@@ -3108,10 +3100,11 @@ int SSLClientSocketNSS::DoVerifyCertComplete(int result) {
       (result == OK ||
        (IsCertificateError(result) && IsCertStatusMinorError(cert_status))) &&
       !transport_security_state_->CheckPublicKeyPins(
-          host_and_port_.host(),
-          server_cert_verify_result_.is_issued_by_known_root,
+          host_and_port_, server_cert_verify_result_.is_issued_by_known_root,
           server_cert_verify_result_.public_key_hashes,
-          &pinning_failure_log_)) {
+          core_->state().server_cert.get(),
+          server_cert_verify_result_.verified_cert.get(),
+          TransportSecurityState::ENABLE_PIN_REPORTS, &pinning_failure_log_)) {
     result = ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN;
   }
 
@@ -3145,22 +3138,21 @@ void SSLClientSocketNSS::VerifyCT() {
   // TODO(ekasper): wipe stapled_ocsp_response and sct_list_from_tls_extension
   // from the state after verification is complete, to conserve memory.
 
-  if (!policy_enforcer_) {
-    server_cert_verify_result_.cert_status &= ~CERT_STATUS_IS_EV;
-  } else {
-    if (server_cert_verify_result_.cert_status & CERT_STATUS_IS_EV) {
-      scoped_refptr<ct::EVCertsWhitelist> ev_whitelist =
-          SSLConfigService::GetEVCertsWhitelist();
-      if (!policy_enforcer_->DoesConformToCTEVPolicy(
-              server_cert_verify_result_.verified_cert.get(),
-              ev_whitelist.get(), ct_verify_result_, net_log_)) {
-        // TODO(eranm): Log via the BoundNetLog, see crbug.com/437766
-        VLOG(1) << "EV certificate for "
-                << server_cert_verify_result_.verified_cert->subject()
-                       .GetDisplayName()
-                << " does not conform to CT policy, removing EV status.";
-        server_cert_verify_result_.cert_status &= ~CERT_STATUS_IS_EV;
-      }
+  if (policy_enforcer_ &&
+      (server_cert_verify_result_.cert_status & CERT_STATUS_IS_EV)) {
+    scoped_refptr<ct::EVCertsWhitelist> ev_whitelist =
+        SSLConfigService::GetEVCertsWhitelist();
+    if (!policy_enforcer_->DoesConformToCTEVPolicy(
+            server_cert_verify_result_.verified_cert.get(), ev_whitelist.get(),
+            ct_verify_result_, net_log_)) {
+      // TODO(eranm): Log via the BoundNetLog, see crbug.com/437766
+      VLOG(1) << "EV certificate for "
+              << server_cert_verify_result_.verified_cert->subject()
+                     .GetDisplayName()
+              << " does not conform to CT policy, removing EV status.";
+      server_cert_verify_result_.cert_status |=
+          CERT_STATUS_CT_COMPLIANCE_FAILED;
+      server_cert_verify_result_.cert_status &= ~CERT_STATUS_IS_EV;
     }
   }
 }
@@ -3198,11 +3190,6 @@ void SSLClientSocketNSS::AddSCTInfoToSSLInfo(SSLInfo* ssl_info) const {
         SignedCertificateTimestampAndStatus(*iter,
                                             ct::SCT_STATUS_LOG_UNKNOWN));
   }
-}
-
-scoped_refptr<X509Certificate>
-SSLClientSocketNSS::GetUnverifiedServerCertificateChain() const {
-  return core_->state().server_cert.get();
 }
 
 ChannelIDService* SSLClientSocketNSS::GetChannelIDService() const {

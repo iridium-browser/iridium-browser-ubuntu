@@ -13,7 +13,7 @@
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
 #include "GrInvariantOutput.h"
-#include "gl/GrGLProcessor.h"
+#include "gl/GrGLFragmentProcessor.h"
 #include "gl/builders/GrGLProgramBuilder.h"
 #endif
 
@@ -65,39 +65,25 @@ public:
 
     const char* name() const override { return "Luminance-to-Alpha"; }
 
-    virtual void getGLProcessorKey(const GrGLSLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const override {
-        GLProcessor::GenKey(*this, caps, b);
-    }
-
-    GrGLFragmentProcessor* createGLInstance() const override {
-        return SkNEW_ARGS(GLProcessor, (*this));
-    }
-
     class GLProcessor : public GrGLFragmentProcessor {
     public:
         GLProcessor(const GrProcessor&) {}
 
         static void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder* b) {}
 
-        virtual void emitCode(GrGLFPBuilder* builder,
-                              const GrFragmentProcessor&,
-                              const char* outputColor,
-                              const char* inputColor,
-                              const TransformedCoordsArray&,
-                              const TextureSamplerArray&) override {
-            if (NULL == inputColor) {
-                inputColor = "vec4(1)";
+        virtual void emitCode(EmitArgs& args) override {
+            if (NULL == args.fInputColor) {
+                args.fInputColor = "vec4(1)";
             }
 
-            GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+            GrGLFragmentBuilder* fsBuilder = args.fBuilder->getFragmentShaderBuilder();
             fsBuilder->codeAppendf("\tfloat luma = dot(vec3(%f, %f, %f), %s.rgb);\n",
                                    SK_ITU_BT709_LUM_COEFF_R,
                                    SK_ITU_BT709_LUM_COEFF_G,
                                    SK_ITU_BT709_LUM_COEFF_B,
-                                   inputColor);
+                                   args.fInputColor);
             fsBuilder->codeAppendf("\t%s = vec4(0, 0, 0, luma);\n",
-                                   outputColor);
+                                   args.fOutputColor);
 
         }
 
@@ -110,6 +96,15 @@ private:
         this->initClassID<LumaColorFilterEffect>();
     }
 
+    GrGLFragmentProcessor* onCreateGLInstance() const override {
+        return SkNEW_ARGS(GLProcessor, (*this));
+    }
+
+    virtual void onGetGLProcessorKey(const GrGLSLCaps& caps,
+                                     GrProcessorKeyBuilder* b) const override {
+        GLProcessor::GenKey(*this, caps, b);
+    }
+
     bool onIsEqual(const GrFragmentProcessor&) const override { return true; }
 
     void onComputeInvariantOutput(GrInvariantOutput* inout) const override {
@@ -119,13 +114,16 @@ private:
     }
 };
 
-bool SkLumaColorFilter::asFragmentProcessors(GrContext*,
+bool SkLumaColorFilter::asFragmentProcessors(GrContext*, GrProcessorDataManager*,
                                              SkTDArray<GrFragmentProcessor*>* array) const {
 
     GrFragmentProcessor* frag = LumaColorFilterEffect::Create();
     if (frag) {
         if (array) {
             *array->append() = frag;
+        } else {
+            frag->unref();
+            SkDEBUGCODE(frag = NULL;)
         }
         return true;
     }

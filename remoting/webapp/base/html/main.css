@@ -4,7 +4,7 @@
  */
 
 html, body, div, span, applet, object, iframe, h1, h2, h3, h4, h5, h6, p,
-blockquote, pre, a, abbr, acronym, address, big, cite, code, del, dfn, em,
+blockquote, a, abbr, acronym, address, big, cite, code, del, dfn, em,
 font, img, ins, kbd, q, s, samp, small, strike, strong, sub, sup, tt, var, dl,
 dt, dd, ol, ul, li, fieldset, form, label, legend, table, caption, tbody,
 tfoot, thead, tr, th, td, button {
@@ -374,6 +374,7 @@ section {
 .editbox-label {
   line-height: 29px;
   font-weight: bold;
+  margin-right: 6px;
 }
 
 .error-state {
@@ -415,10 +416,6 @@ section {
   text-align: center;
   font-size: 12px;
   margin-top: 30px;
-}
-
-#paired-clients-list table {
-  width: 100%;
 }
 
 .message {
@@ -652,10 +649,6 @@ html.apps-v2.scrollable {
   border-bottom: 6px solid transparent;
 }
 
-#top-secondary {
-  margin-top: 10px
-}
-
 #webapp-description {
   margin-bottom: 10px;
 }
@@ -742,4 +735,9 @@ body:not(.connected) #session-mode {
 .mouse-cursor-overlay {
   position: absolute;
   pointer-events: none;
+}
+
+#connection-dropped-dialog .restart-timer {
+  color: rgb(0, 0, 0);
+  font-weight: bold;
 }

@@ -53,7 +53,7 @@ namespace aria_strings {
 
 // static
 BrowserAccessibilityManager* BrowserAccessibilityManager::Create(
-    const ui::AXTreeUpdate& initial_tree,
+    const SimpleAXTreeUpdate& initial_tree,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory) {
   return new BrowserAccessibilityManagerAndroid(
@@ -67,7 +67,7 @@ BrowserAccessibilityManager::ToBrowserAccessibilityManagerAndroid() {
 
 BrowserAccessibilityManagerAndroid::BrowserAccessibilityManagerAndroid(
     ScopedJavaLocalRef<jobject> content_view_core,
-    const ui::AXTreeUpdate& initial_tree,
+    const SimpleAXTreeUpdate& initial_tree,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory)
     : BrowserAccessibilityManager(delegate, factory),
@@ -86,13 +86,14 @@ BrowserAccessibilityManagerAndroid::~BrowserAccessibilityManagerAndroid() {
 }
 
 // static
-ui::AXTreeUpdate BrowserAccessibilityManagerAndroid::GetEmptyDocument() {
+SimpleAXTreeUpdate
+    BrowserAccessibilityManagerAndroid::GetEmptyDocument() {
   ui::AXNodeData empty_document;
   empty_document.id = 0;
   empty_document.role = ui::AX_ROLE_ROOT_WEB_AREA;
   empty_document.state = 1 << ui::AX_STATE_READ_ONLY;
 
-  ui::AXTreeUpdate update;
+  SimpleAXTreeUpdate update;
   update.nodes.push_back(empty_document);
   return update;
 }
@@ -192,7 +193,10 @@ void BrowserAccessibilityManagerAndroid::NotifyAccessibilityEvent(
 }
 
 jint BrowserAccessibilityManagerAndroid::GetRootId(JNIEnv* env, jobject obj) {
-  return static_cast<jint>(GetRoot()->GetId());
+  if (GetRoot())
+    return static_cast<jint>(GetRoot()->GetId());
+  else
+    return -1;
 }
 
 jboolean BrowserAccessibilityManagerAndroid::IsNodeValid(
@@ -269,6 +273,10 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityNodeInfo(
       id,
       node->CanScrollForward(),
       node->CanScrollBackward(),
+      node->CanScrollUp(),
+      node->CanScrollDown(),
+      node->CanScrollLeft(),
+      node->CanScrollRight(),
       node->IsClickable(),
       node->IsEditableText(),
       node->IsEnabled(),
@@ -283,6 +291,12 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityNodeInfo(
         env, obj, info,
         base::android::ConvertUTF16ToJavaString(env, node->GetText()).obj(),
         node->IsLink());
+  }
+  base::string16 element_id;
+  if (node->GetHtmlAttribute("id", &element_id)) {
+    Java_BrowserAccessibilityManager_setAccessibilityNodeInfoViewIdResourceName(
+        env, obj, info,
+        base::android::ConvertUTF16ToJavaString(env, element_id).obj());
   }
 
   gfx::Rect absolute_rect = node->GetLocalBoundsRect();
@@ -729,7 +743,28 @@ void BrowserAccessibilityManagerAndroid::SetAccessibilityFocus(
     delegate_->AccessibilitySetAccessibilityFocus(id);
 }
 
+bool BrowserAccessibilityManagerAndroid::IsSlider(
+    JNIEnv* env, jobject obj, jint id) {
+  BrowserAccessibilityAndroid* node = static_cast<BrowserAccessibilityAndroid*>(
+      GetFromID(id));
+  if (!node)
+    return false;
+
+  return node->GetRole() == ui::AX_ROLE_SLIDER;
+}
+
+bool BrowserAccessibilityManagerAndroid::Scroll(
+    JNIEnv* env, jobject obj, jint id, int direction) {
+  BrowserAccessibilityAndroid* node = static_cast<BrowserAccessibilityAndroid*>(
+      GetFromID(id));
+  if (!node)
+    return false;
+
+  return node->Scroll(direction);
+}
+
 void BrowserAccessibilityManagerAndroid::OnAtomicUpdateFinished(
+    ui::AXTree* tree,
     bool root_changed,
     const std::vector<ui::AXTreeDelegate::Change>& changes) {
   if (root_changed) {

@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 
 #include "ash/ash_switches.h"
-#include "ash/display/display_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_button.h"
 #include "ash/shelf/shelf_constants.h"
@@ -36,6 +35,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -44,6 +44,7 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/settings_window_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -138,6 +139,29 @@ void ClickAllAppsButtonFromStartPage(ui::test::EventGenerator* generator,
   base::MessageLoop::current()->RunUntilIdle();
   // Run Layout() to effectively complete the animation to the apps page.
   controller_test.LayoutContentsView();
+}
+
+// Find the browser that associated with |app_name|.
+Browser* FindBrowserForApp(const std::string& app_name) {
+  Browser* browser = nullptr;
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    std::string browser_app_name =
+        web_app::GetExtensionIdFromApplicationName((*it)->app_name());
+    if (browser_app_name == app_name) {
+      browser = *it;
+      break;
+    }
+  }
+  return browser;
+}
+
+// Close |app_browser| and wait until it's closed.
+void CloseAppBrowserWindow(Browser* app_browser) {
+  content::WindowedNotificationObserver close_observer(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::Source<Browser>(app_browser));
+  app_browser->window()->Close();
+  close_observer.Wait();
 }
 
 }  // namespace
@@ -664,47 +688,6 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, WindowActivation) {
   CloseAppWindow(window1);
   --item_count;
   EXPECT_EQ(item_count, shelf_model()->item_count());
-}
-
-// Verify that ChromeLauncherController::CanInstall() returns true for ephemeral
-// apps and false when the app is promoted to a regular installed app.
-IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, InstallEphemeralApp) {
-  int item_count = shelf_model()->item_count();
-
-  // Sanity check to verify that ChromeLauncherController::CanInstall() returns
-  // false for apps that are fully installed.
-  const Extension* app = LoadAndLaunchPlatformApp("launch", "Launched");
-  ASSERT_TRUE(app);
-  CreateAppWindow(app);
-  ++item_count;
-  ASSERT_EQ(item_count, shelf_model()->item_count());
-  const ash::ShelfItem& app_item = GetLastLauncherItem();
-  ash::ShelfID app_id = app_item.id;
-  EXPECT_FALSE(controller_->CanInstall(app_id));
-
-  // Add an ephemeral app.
-  const Extension* ephemeral_app = InstallEphemeralAppWithSourceAndFlags(
-      test_data_dir_.AppendASCII("platform_apps").AppendASCII("launch_2"),
-      1,
-      extensions::Manifest::INTERNAL,
-      Extension::NO_FLAGS);
-  ASSERT_TRUE(ephemeral_app);
-  CreateAppWindow(ephemeral_app);
-  ++item_count;
-  ASSERT_EQ(item_count, shelf_model()->item_count());
-  const ash::ShelfItem& ephemeral_item = GetLastLauncherItem();
-  ash::ShelfID ephemeral_id = ephemeral_item.id;
-
-  // Verify that the shelf item for the ephemeral app can be installed.
-  EXPECT_TRUE(controller_->CanInstall(ephemeral_id));
-
-  // Promote the ephemeral app to a regular installed app.
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile())->extension_service();
-  service->PromoteEphemeralApp(ephemeral_app, false);
-
-  // Verify that the shelf item for the app can no longer be installed.
-  EXPECT_FALSE(controller_->CanInstall(ephemeral_id));
 }
 
 // Confirm that Click behavior for app windows is correnct.
@@ -1297,6 +1280,42 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, AsyncActivationStateCheck) {
   tab_strip->CloseWebContentsAt(1, TabStripModel::CLOSE_NONE);
   // The status should now be set to closed.
   EXPECT_EQ(ash::STATUS_CLOSED, model_->ItemByID(shortcut_id)->status);
+}
+
+// Test that the App window could restore to its previous window state from
+// before it was closed.
+IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, AppWindowRestoreBehaviorTest) {
+  // Open an App, maximized its window, and close it.
+  const Extension* extension = LoadAndLaunchExtension(
+      "app1", extensions::LAUNCH_CONTAINER_WINDOW, NEW_WINDOW);
+  Browser* app_browser = FindBrowserForApp(extension->id());
+  ASSERT_TRUE(app_browser);
+  aura::Window* window = app_browser->window()->GetNativeWindow();
+  EXPECT_FALSE(ash::wm::GetWindowState(window)->IsMaximized());
+  ash::wm::GetWindowState(window)->Maximize();
+  EXPECT_TRUE(ash::wm::GetWindowState(window)->IsMaximized());
+  CloseAppBrowserWindow(app_browser);
+
+  // Reopen the App. It should start maximized. Un-maximize it and close it.
+  extension = LoadAndLaunchExtension(
+      "app1", extensions::LAUNCH_CONTAINER_WINDOW, NEW_WINDOW);
+  app_browser = FindBrowserForApp(extension->id());
+  ASSERT_TRUE(app_browser);
+  window = app_browser->window()->GetNativeWindow();
+  EXPECT_TRUE(ash::wm::GetWindowState(window)->IsMaximized());
+
+  ash::wm::GetWindowState(window)->Restore();
+  EXPECT_FALSE(ash::wm::GetWindowState(window)->IsMaximized());
+  app_browser->window()->Close();
+  CloseAppBrowserWindow(app_browser);
+
+  // Reopen the App. It should start un-maximized.
+  extension = LoadAndLaunchExtension(
+      "app1", extensions::LAUNCH_CONTAINER_WINDOW, NEW_WINDOW);
+  app_browser = FindBrowserForApp(extension->id());
+  ASSERT_TRUE(app_browser);
+  window = app_browser->window()->GetNativeWindow();
+  EXPECT_FALSE(ash::wm::GetWindowState(window)->IsMaximized());
 }
 
 // Checks that a windowed application does not add an item to the browser list.

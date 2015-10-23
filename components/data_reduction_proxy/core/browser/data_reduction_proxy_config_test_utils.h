@@ -11,6 +11,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace net {
+class NetworkQualityEstimator;
 class NetLog;
 }
 
@@ -64,8 +65,21 @@ class TestDataReductionProxyConfig : public DataReductionProxyConfig {
 
   // Allows tests to set the internal state.
   void SetStateForTest(bool enabled_by_user,
-                       bool alternative_enabled_by_user,
                        bool secure_proxy_enabled);
+
+  // Resets the Lo-Fi status to default state.
+  void ResetLoFiStatusForTest();
+
+  bool IsIncludedInLoFiEnabledFieldTrial() const override;
+
+  // Allows tests to set the session as part of Lo-Fi enabled field trial.
+  void SetIncludedInLoFiEnabledFieldTrial(bool included_in_lofi_enabled);
+
+  // Allows tests to mark the network as prohibitively slow.
+  void SetNetworkProhibitivelySlow(bool network_quality_prohibitively_slow);
+
+  bool IsNetworkQualityProhibitivelySlow(
+      const net::NetworkQualityEstimator* network_quality_estimator) override;
 
   net::NetworkInterfaceList* interfaces() {
     return network_interfaces_.get();
@@ -73,6 +87,12 @@ class TestDataReductionProxyConfig : public DataReductionProxyConfig {
 
  private:
   scoped_ptr<net::NetworkInterfaceList> network_interfaces_;
+
+  // True if this session is part of Auto Lo-Fi enabled field trial.
+  bool auto_lofi_enabled_group_;
+
+  // True if network quality is slow enough to turn Auto Lo-Fi ON.
+  bool network_quality_prohibitively_slow_;
 };
 
 // A |TestDataReductionProxyConfig| which permits mocking of methods for
@@ -89,10 +109,7 @@ class MockDataReductionProxyConfig : public TestDataReductionProxyConfig {
 
   MOCK_METHOD1(RecordSecureProxyCheckFetchResult,
                void(SecureProxyCheckFetchResult result));
-  MOCK_METHOD3(LogProxyState,
-               void(bool enabled, bool restricted, bool at_startup));
-  MOCK_METHOD3(SetProxyPrefs,
-               void(bool enabled, bool alternative_enabled, bool at_startup));
+  MOCK_METHOD2(SetProxyPrefs, void(bool enabled, bool at_startup));
   MOCK_CONST_METHOD2(IsDataReductionProxy,
                      bool(const net::HostPortPair& host_port_pair,
                           DataReductionProxyTypeInfo* proxy_info));
@@ -111,15 +128,16 @@ class MockDataReductionProxyConfig : public TestDataReductionProxyConfig {
   MOCK_METHOD2(SecureProxyCheck,
                void(const GURL& secure_proxy_check_url,
                     FetcherResponseCallback fetcher_callback));
-  MOCK_CONST_METHOD0(IsNetworkBad, bool());
+  MOCK_METHOD1(
+      IsNetworkQualityProhibitivelySlow,
+      bool(const net::NetworkQualityEstimator* network_quality_estimator));
   MOCK_CONST_METHOD0(IsIncludedInLoFiEnabledFieldTrial, bool());
   MOCK_CONST_METHOD0(IsIncludedInLoFiControlFieldTrial, bool());
 
-  // UpdateConfigurator should always call LogProxyState exactly once.
-  void UpdateConfigurator(bool enabled,
-                          bool alternative_enabled,
-                          bool restricted,
-                          bool at_startup) override;
+  void UpdateConfigurator(bool enabled, bool restricted) override;
+
+  // Resets the Lo-Fi status to default state.
+  void ResetLoFiStatusForTest();
 };
 
 }  // namespace data_reduction_proxy

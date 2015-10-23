@@ -18,7 +18,7 @@
 #include "components/search_engines/template_url_id.h"
 #include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
-#include "url/url_parse.h"
+#include "url/third_party/mozilla/url_parse.h"
 
 class SearchTermsData;
 class TemplateURL;
@@ -201,8 +201,8 @@ class TemplateURLRef {
     ContextualSearchParams contextual_search_params;
   };
 
-  TemplateURLRef(TemplateURL* owner, Type type);
-  TemplateURLRef(TemplateURL* owner, size_t index_in_owner);
+  TemplateURLRef(const TemplateURL* owner, Type type);
+  TemplateURLRef(const TemplateURL* owner, size_t index_in_owner);
   ~TemplateURLRef();
 
   // Returns the raw URL. None of the parameters will have been replaced.
@@ -433,7 +433,7 @@ class TemplateURLRef {
       PostContent* post_content) const;
 
   // The TemplateURL that contains us.  This should outlive us.
-  TemplateURL* const owner_;
+  const TemplateURL* const owner_;
 
   // What kind of URL we are.
   const Type type_;
@@ -523,7 +523,10 @@ class TemplateURL {
   // Generates a suitable keyword for the specified url, which must be valid.
   // This is guaranteed not to return an empty string, since TemplateURLs should
   // never have an empty keyword.
-  static base::string16 GenerateKeyword(const GURL& url);
+  // |accept_languages| is a list of languages, which will be used in
+  // IDN-decoding of |url|'s hostname.
+  static base::string16 GenerateKeyword(const GURL& url,
+                                        const std::string& accept_languages);
 
   // Generates a favicon URL from the specified url.
   static GURL GenerateFaviconURL(const GURL& url);
@@ -663,12 +666,13 @@ class TemplateURL {
   // search term will be "b".
   bool ExtractSearchTermsFromURL(const GURL& url,
                                  const SearchTermsData& search_terms_data,
-                                 base::string16* search_terms);
+                                 base::string16* search_terms) const;
 
   // Returns true if non-empty search terms could be extracted from |url| using
   // ExtractSearchTermsFromURL(). In other words, this returns whether |url|
   // could be the result of performing a search with |this|.
-  bool IsSearchURL(const GURL& url, const SearchTermsData& search_terms_data);
+  bool IsSearchURL(const GURL& url,
+                   const SearchTermsData& search_terms_data) const;
 
   // Returns true if the specified |url| contains the search terms replacement
   // key in either the query or the ref. This method does not verify anything
@@ -729,7 +733,7 @@ class TemplateURL {
                             const SearchTermsData& search_terms_data,
                             base::string16* search_terms,
                             url::Parsed::ComponentType* search_terms_component,
-                            url::Component* search_terms_position);
+                            url::Component* search_terms_position) const;
 
   TemplateURLData data_;
   TemplateURLRef url_ref_;

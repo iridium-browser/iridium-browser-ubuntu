@@ -4,22 +4,25 @@
 import os
 import unittest
 
+from telemetry import story
 from telemetry import page as page_module
-from telemetry.page import page_set
 from telemetry import value
 
 
 class TestBase(unittest.TestCase):
   def setUp(self):
-    ps = page_set.PageSet(file_path=os.path.dirname(__file__))
-    ps.AddUserStory(page_module.Page("http://www.bar.com/", ps, ps.base_dir))
-    ps.AddUserStory(page_module.Page("http://www.baz.com/", ps, ps.base_dir))
-    ps.AddUserStory(page_module.Page("http://www.foo.com/", ps, ps.base_dir))
-    self.page_set = ps
+    story_set = story.StorySet(base_dir=os.path.dirname(__file__))
+    story_set.AddStory(
+        page_module.Page("http://www.bar.com/", story_set, story_set.base_dir))
+    story_set.AddStory(
+        page_module.Page("http://www.baz.com/", story_set, story_set.base_dir))
+    story_set.AddStory(
+        page_module.Page("http://www.foo.com/", story_set, story_set.base_dir))
+    self.story_set = story_set
 
   @property
   def pages(self):
-    return self.page_set.pages
+    return self.story_set.stories
 
 class ValueForTest(value.Value):
   @classmethod
@@ -27,8 +30,7 @@ class ValueForTest(value.Value):
     pass
 
   @classmethod
-  def MergeLikeValuesFromDifferentPages(cls, values,
-                                        group_by_name_suffix=False):
+  def MergeLikeValuesFromDifferentPages(cls, values):
     pass
 
   def GetBuildbotDataType(self, output_context):

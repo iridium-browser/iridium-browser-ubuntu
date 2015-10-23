@@ -19,7 +19,7 @@
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/in_memory_database.h"
 #include "components/history/core/browser/url_database.h"
-#include "components/omnibox/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_match.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -321,7 +321,9 @@ TEST_F(AutocompleteActionPredictorTest, DeleteOldIdsFromCaches) {
     std::string row_id = AddRow(test_url_db[i]);
     all_ids.push_back(row_id);
 
-    bool exclude_url = StartsWithASCII(test_url_db[i].url.path(), "/d", true) ||
+    bool exclude_url =
+        base::StartsWith(test_url_db[i].url.path(), "/d",
+                         base::CompareCase::SENSITIVE) ||
         (test_url_db[i].days_from_now > maximum_days_to_keep_entry());
 
     if (exclude_url)

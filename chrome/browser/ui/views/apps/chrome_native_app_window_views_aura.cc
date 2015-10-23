@@ -79,6 +79,12 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
     return true;
   }
 
+  // Overridden from ash::wm::WindowStateDelegate.
+  bool RestoreAlwaysOnTop(ash::wm::WindowState* window_state) override {
+    app_window_->RestoreAlwaysOnTop();
+    return true;
+  }
+
   // Overridden from ash::wm::WindowStateObserver:
   void OnPostWindowStateTypeChange(ash::wm::WindowState* window_state,
                                    ash::wm::WindowStateType old_type) override {
@@ -241,8 +247,10 @@ ui::WindowShowState ChromeNativeAppWindowViewsAura::GetRestoredState() const {
       }
       return ui::SHOW_STATE_FULLSCREEN;
     }
-    if (widget()->GetNativeWindow()->GetProperty(aura::client::kShowStateKey) ==
-        ui::SHOW_STATE_DOCKED) {
+    if (widget()->GetNativeWindow()->GetProperty(
+            aura::client::kShowStateKey) == ui::SHOW_STATE_DOCKED ||
+        widget()->GetNativeWindow()->GetProperty(
+            aura::client::kRestoreShowStateKey) == ui::SHOW_STATE_DOCKED) {
       return ui::SHOW_STATE_DOCKED;
     }
   }

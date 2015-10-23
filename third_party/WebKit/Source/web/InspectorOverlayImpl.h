@@ -38,7 +38,6 @@
 #include "platform/graphics/Color.h"
 #include "platform/heap/Handle.h"
 #include "public/web/WebInputEvent.h"
-#include "public/web/WebPageOverlay.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefPtr.h"
@@ -50,12 +49,15 @@ class Color;
 class EmptyChromeClient;
 class LocalFrame;
 class GraphicsContext;
+class GraphicsLayer;
 class JSONValue;
+class LayoutEditor;
 class Node;
 class Page;
+class PageOverlay;
 class WebViewImpl;
 
-class InspectorOverlayImpl final : public NoBaseWillBeGarbageCollectedFinalized<InspectorOverlayImpl>, public InspectorOverlay, public WebPageOverlay, public InspectorOverlayHost::Listener {
+class InspectorOverlayImpl final : public NoBaseWillBeGarbageCollectedFinalized<InspectorOverlayImpl>, public InspectorOverlay, public InspectorOverlayHost::DebuggerListener {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(InspectorOverlayImpl);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(InspectorOverlayImpl);
 public:
@@ -82,18 +84,18 @@ public:
     void suspendUpdates() override;
     void resumeUpdates() override;
     void clear() override;
+    void setLayoutEditor(PassOwnPtrWillBeRawPtr<LayoutEditor>) override;
 
     bool handleInputEvent(const WebInputEvent&);
-    void invalidate();
+    void layout();
+    PageOverlay* pageOverlay() { return m_pageOverlay.get(); };
 private:
     explicit InspectorOverlayImpl(WebViewImpl*);
-
-    // InspectorOverlayHost::Listener implementation.
+    class InspectorOverlayChromeClient;
+    class InspectorPageOverlayDelegate;
+    // InspectorOverlayHost::DebuggerListener implementation.
     void overlayResumed() override;
     void overlaySteppedOver() override;
-
-    // WebPageOverlay implementation.
-    void paintPageOverlay(WebGraphicsContext*, const WebSize& webViewSize) override;
 
     bool isEmpty();
     void drawNodeHighlight();
@@ -107,6 +109,8 @@ private:
     void evaluateInOverlay(const String& method, const String& argument);
     void evaluateInOverlay(const String& method, PassRefPtr<JSONValue> argument);
     void onTimer(Timer<InspectorOverlayImpl>*);
+    void rebuildOverlayPage();
+    void invalidate();
 
     WebViewImpl* m_webViewImpl;
     String m_pausedInDebuggerMessage;
@@ -116,7 +120,7 @@ private:
     InspectorHighlightConfig m_nodeHighlightConfig;
     OwnPtr<FloatQuad> m_highlightQuad;
     OwnPtrWillBeMember<Page> m_overlayPage;
-    OwnPtr<EmptyChromeClient> m_overlayChromeClient;
+    OwnPtrWillBeMember<InspectorOverlayChromeClient> m_overlayChromeClient;
     RefPtrWillBeMember<InspectorOverlayHost> m_overlayHost;
     InspectorHighlightConfig m_quadHighlightConfig;
     bool m_drawViewSize;
@@ -124,8 +128,11 @@ private:
     bool m_omitTooltip;
     Timer<InspectorOverlayImpl> m_timer;
     int m_suspendCount;
-    bool m_updating;
+    bool m_inLayout;
+    bool m_needsUpdate;
     RawPtrWillBeMember<InspectorOverlay::Listener> m_listener;
+    OwnPtrWillBeMember<LayoutEditor> m_layoutEditor;
+    OwnPtr<PageOverlay> m_pageOverlay;
 };
 
 } // namespace blink

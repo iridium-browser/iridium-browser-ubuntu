@@ -1,0 +1,225 @@
+/* Copyright 2015 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+:host {
+  @apply(--downloads-shared-style);
+  display: flex;
+  margin: 24px 0;
+}
+
+:host([hide-date]) {
+  margin-top: -12px;
+}
+
+:host(:first-of-type),
+:host(:not(:first-of-type):not([hide-date])) {
+  margin-top: 30px;
+}
+
+#date-container,
+#end-cap {
+  flex: 1 0 var(--downloads-side-column-basis);
+}
+
+#date-container > * {
+  color: #7c7c7c;
+  font-weight: 500;
+}
+
+:host([hide-date]) #date-container {
+  visibility: hidden;
+}
+
+#content {
+  background: white;
+  border-radius: 2px;  /* TODO(dbeam): change to paper-card instead. */
+  display: flex;
+  flex: none;
+  min-height: 103px;
+  width: var(--downloads-item-width);
+}
+
+#content[elevation='1'] {
+  box-shadow: 0 2px 2px 0 rgba(0, 0, 0, .05), 0 1px 4px 0 rgba(0, 0, 0, .08),
+              0 3px 1px -2px rgba(0, 0, 0, .2);
+}
+
+#details {
+  -webkit-border-start: 1px #d8d8d8 solid;
+  -webkit-padding-end: 16px;
+  -webkit-padding-start: 24px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding-bottom: 12px;
+  padding-top: 16px;
+}
+
+#content:not(.is-active) #details {
+  color: #bababa;
+}
+
+#content:not(.is-active) #name {
+  text-decoration: line-through;
+}
+
+.icon-wrapper {
+  align-self: center;
+  flex: none;
+  justify-content: center;
+  margin: 0 24px;
+}
+
+.icon {
+  height: 32px;
+  width: 32px;
+}
+
+#content:-webkit-any(.show-progress, .dangerous) #file-icon-wrapper {
+  /* TODO(dbeam): animate from top-aligned to centered when items finish? */
+  align-self: flex-start;
+  padding-top: 16px;
+}
+
+#content:not(.is-active) .icon {
+  -webkit-filter: grayscale(100%);
+  opacity: .5;
+}
+
+#warning {
+  -webkit-mask-image: url(../../../../ui/webui/resources/images/warning.svg);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: 100%;
+  background: rgb(255, 193, 7);
+}
+
+#name,
+#file-link,
+#url {
+  max-width: 100%;
+}
+
+#name,
+#file-link {
+  font-weight: 500;
+  word-break: break-all;
+}
+
+#name {
+  -webkit-margin-end: 12px;  /* Only really affects #tag. */
+}
+
+.is-active :-webkit-any(#name, #file-link, #pause, #resume, #show) {
+  color: rgb(51, 103, 214);
+}
+
+#tag {
+  color: #5a5a5a;
+  font-weight: 500;
+}
+
+#url {
+  color: inherit;
+  margin-top: 6px;
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.is-active #url {
+  color: #969696;
+}
+
+#progress,
+#description:not(:empty),
+.controls {
+  margin-top: 16px;
+}
+
+.is-active #description {
+  color: #616161;
+}
+
+.dangerous #description {
+  color: rgb(239, 108, 0);
+}
+
+#progress {
+  --paper-progress-active-color: rgb(54, 126, 237);
+  --paper-progress-container-color: rgb(223, 222, 223);
+  width: auto;
+}
+
+#content:not(.show-progress) #progress {
+  display: none;
+}
+
+.controls {
+  -webkit-margin-start: -8px;
+}
+
+#cancel,
+#retry,
+.keep,
+.discard {
+  color: #5a5a5a;
+}
+
+#remove-wrapper {
+  align-self: flex-start;
+  margin: 0;
+}
+
+#remove {
+  --iron-icon-height: 16px;
+  --iron-icon-width: 16px;
+  --paper-icon-button: {
+    height: 16px;
+    padding: 8px;
+    width: 16px;
+  };
+}
+
+#incognito {
+  bottom: 20px;
+  content: -webkit-image-set(url(1x/incognito_marker.png) 1x,
+                             url(2x/incognito_marker.png) 2x);
+  position: absolute;
+  right: 10px;
+}
+
+@media not all and (max-width: 1024px) {
+  /* Only show rule separators in wide mode. */
+  :host(:not(:first-of-type):not([hide-date])) {
+    border-top: 1px solid rgba(0, 0, 0, .14);
+    padding-top: 30px;
+  }
+
+  #date-container > * {
+    -webkit-margin-start: 24px;
+  }
+}
+
+@media all and (max-width: 1024px) {
+  /* In narrow windows, put the dates on top instead of on the side. */
+  :host {
+    flex-direction: column;
+  }
+
+  :host([hide-date]) #date-container,
+  #end-cap {
+    display: none;
+  }
+
+  #content {
+    margin: 0 auto;
+  }
+
+  #date-container {
+    flex: none !important;
+    margin: 0 auto 16px;
+    width: var(--downloads-item-width);
+  }
+}

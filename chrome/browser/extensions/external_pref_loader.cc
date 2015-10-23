@@ -118,7 +118,7 @@ const base::FilePath ExternalPrefLoader::GetBaseCrxFilePath() {
 void ExternalPrefLoader::StartLoading() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if ((options_ & DELAY_LOAD_UNTIL_PRIORITY_SYNC) &&
-      (profile_ && profile_->IsSyncAccessible())) {
+      (profile_ && profile_->IsSyncAllowed())) {
     if (!PostLoadIfPrioritySyncReady()) {
       DCHECK(profile_);
       PrefServiceSyncable* prefs = PrefServiceSyncable::FromProfile(profile_);
@@ -127,7 +127,7 @@ void ExternalPrefLoader::StartLoading() {
       ProfileSyncService* service =
           ProfileSyncServiceFactory::GetForProfile(profile_);
       DCHECK(service);
-      if (service->IsSyncEnabledAndLoggedIn() &&
+      if (service->CanSyncStart() &&
           (service->HasSyncSetupCompleted() ||
            browser_defaults::kSyncAutoStarts)) {
         service->AddObserver(this);
@@ -150,7 +150,7 @@ void ExternalPrefLoader::OnStateChanged() {
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
   DCHECK(service);
-  if (!service->IsSyncEnabledAndLoggedIn()) {
+  if (!service->CanSyncStart()) {
     PostLoadAndRemoveObservers();
   }
 }

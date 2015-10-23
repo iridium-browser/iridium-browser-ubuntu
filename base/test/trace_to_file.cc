@@ -9,7 +9,8 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/run_loop.h"
-#include "base/trace_event/trace_event_impl.h"
+#include "base/trace_event/trace_buffer.h"
+#include "base/trace_event/trace_log.h"
 
 namespace base {
 namespace test {
@@ -52,9 +53,8 @@ void TraceToFile::BeginTracing(const FilePath& path,
   WriteFileHeader();
 
   trace_event::TraceLog::GetInstance()->SetEnabled(
-      trace_event::CategoryFilter(categories),
-      trace_event::TraceLog::RECORDING_MODE,
-      trace_event::TraceOptions(trace_event::RECORD_UNTIL_FULL));
+      trace_event::TraceConfig(categories, trace_event::RECORD_UNTIL_FULL),
+      trace_event::TraceLog::RECORDING_MODE);
 }
 
 void TraceToFile::WriteFileHeader() {

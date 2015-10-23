@@ -2,18 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/location.h"
 #include "base/run_loop.h"
-#include "chrome/browser/signin/account_tracker_service_factory.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
+#include "chrome/browser/signin/account_fetcher_service_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
-#include "chrome/browser/signin/fake_account_tracker_service.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
+#include "chrome/browser/signin/fake_account_fetcher_service_builder.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/test_signin_client_builder.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/gcm_driver/fake_gcm_driver.h"
 #include "components/gcm_driver/gcm_driver.h"
-#include "components/invalidation/gcm_invalidation_bridge.h"
+#include "components/invalidation/impl/gcm_invalidation_bridge.h"
+#include "components/signin/core/browser/fake_account_fetcher_service.h"
+#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/gaia/fake_identity_provider.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -34,13 +38,11 @@ class CustomFakeGCMDriver : public gcm::FakeGCMDriver {
   // FakeGCMDriver override:
   void RegisterImpl(const std::string& app_id,
                     const std::vector<std::string>& sender_ids) override {
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&CustomFakeGCMDriver::RegisterFinished,
-                   base::Unretained(this),
-                   app_id,
-                   std::string("registration.id"),
-                   gcm::GCMClient::SUCCESS));
+                   base::Unretained(this), app_id,
+                   std::string("registration.id"), gcm::GCMClient::SUCCESS));
   }
 
  private:
@@ -58,8 +60,8 @@ class GCMInvalidationBridgeTest : public ::testing::Test {
     TestingProfile::Builder builder;
     builder.AddTestingFactory(ProfileOAuth2TokenServiceFactory::GetInstance(),
                               &BuildAutoIssuingFakeProfileOAuth2TokenService);
-    builder.AddTestingFactory(AccountTrackerServiceFactory::GetInstance(),
-                              FakeAccountTrackerService::Build);
+    builder.AddTestingFactory(AccountFetcherServiceFactory::GetInstance(),
+                              FakeAccountFetcherServiceBuilder::BuildForTests);
     builder.AddTestingFactory(ChromeSigninClientFactory::GetInstance(),
                               signin::BuildTestSigninClient);
     profile_ = builder.Build();
@@ -67,7 +69,7 @@ class GCMInvalidationBridgeTest : public ::testing::Test {
     FakeProfileOAuth2TokenService* token_service =
         (FakeProfileOAuth2TokenService*)
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile_.get());
-    token_service->IssueRefreshTokenForUser("", "fake_refresh_token");
+    token_service->UpdateCredentials("", "fake_refresh_token");
     gcm_driver_.reset(new CustomFakeGCMDriver());
 
     identity_provider_.reset(new FakeIdentityProvider(token_service));

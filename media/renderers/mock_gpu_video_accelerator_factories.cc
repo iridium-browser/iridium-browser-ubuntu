@@ -12,8 +12,12 @@ namespace {
 
 class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
  public:
-  GpuMemoryBufferImpl(const gfx::Size& size) : size_(size) {
-    bytes_.resize(size_.GetArea());
+  GpuMemoryBufferImpl(const gfx::Size& size, gfx::BufferFormat format)
+      : format_(format), size_(size) {
+    DCHECK(gfx::BufferFormat::R_8 == format_ ||
+           gfx::BufferFormat::UYVY_422 == format_);
+    bytes_.resize(size_.GetArea() *
+                  (format_ == gfx::BufferFormat::UYVY_422 ? 2 : 1));
   }
 
   // Overridden from gfx::GpuMemoryBuffer:
@@ -26,8 +30,18 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
     NOTREACHED();
     return false;
   }
-  Format GetFormat() const override { return gfx::GpuMemoryBuffer::R_8; }
-  void GetStride(int* stride) const override { stride[0] = size_.width(); }
+  gfx::BufferFormat GetFormat() const override {
+    NOTREACHED();
+    return gfx::BufferFormat::R_8;
+  }
+  void GetStride(int* stride) const override {
+    stride[0] =
+        size_.width() * (format_ == gfx::BufferFormat::UYVY_422 ? 2 : 1);
+  }
+  gfx::GpuMemoryBufferId GetId() const override {
+    NOTREACHED();
+    return gfx::GpuMemoryBufferId(0);
+  }
   gfx::GpuMemoryBufferHandle GetHandle() const override {
     NOTREACHED();
     return gfx::GpuMemoryBufferHandle();
@@ -37,6 +51,7 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   }
 
  private:
+  gfx::BufferFormat format_;
   std::vector<unsigned char> bytes_;
   const gfx::Size size_;
 };
@@ -47,13 +62,17 @@ MockGpuVideoAcceleratorFactories::MockGpuVideoAcceleratorFactories() {}
 
 MockGpuVideoAcceleratorFactories::~MockGpuVideoAcceleratorFactories() {}
 
+bool MockGpuVideoAcceleratorFactories::IsGpuVideoAcceleratorEnabled() {
+  return true;
+}
+
 scoped_ptr<gfx::GpuMemoryBuffer>
 MockGpuVideoAcceleratorFactories::AllocateGpuMemoryBuffer(
     const gfx::Size& size,
-    gfx::GpuMemoryBuffer::Format format,
-    gfx::GpuMemoryBuffer::Usage usage) {
-  DCHECK_EQ(gfx::GpuMemoryBuffer::R_8, format);
-  return make_scoped_ptr<gfx::GpuMemoryBuffer>(new GpuMemoryBufferImpl(size));
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage) {
+  return make_scoped_ptr<gfx::GpuMemoryBuffer>(
+      new GpuMemoryBufferImpl(size, format));
 }
 
 scoped_ptr<base::SharedMemory>
@@ -69,6 +88,15 @@ MockGpuVideoAcceleratorFactories::CreateVideoDecodeAccelerator() {
 scoped_ptr<VideoEncodeAccelerator>
 MockGpuVideoAcceleratorFactories::CreateVideoEncodeAccelerator() {
   return scoped_ptr<VideoEncodeAccelerator>(DoCreateVideoEncodeAccelerator());
+}
+
+bool MockGpuVideoAcceleratorFactories::ShouldUseGpuMemoryBuffersForVideoFrames()
+    const {
+  return false;
+}
+
+unsigned MockGpuVideoAcceleratorFactories::ImageTextureTarget() {
+  return GL_TEXTURE_2D;
 }
 
 }  // namespace media

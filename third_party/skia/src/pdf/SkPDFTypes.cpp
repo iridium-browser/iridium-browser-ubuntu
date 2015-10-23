@@ -6,15 +6,10 @@
  * found in the LICENSE file.
  */
 
+#include "SkDeflate.h"
 #include "SkPDFTypes.h"
 #include "SkPDFUtils.h"
-#include "SkStream.h"
-
-#ifdef SK_BUILD_FOR_WIN
-    #define SNPRINTF    _snprintf
-#else
-    #define SNPRINTF    snprintf
-#endif
+#include "SkStreamPriv.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -260,7 +255,7 @@ SkPDFUnion SkPDFUnion::Object(SkPDFObject* ptr) {
 #if 0  // Enable if needed.
 void SkPDFAtom::emitObject(SkWStream* stream,
                            const SkPDFObjNumMap& objNumMap,
-                           const SkPDFSubstituteMap& substitutes) {
+                           const SkPDFSubstituteMap& substitutes) const {
     fValue.emitObject(stream, objNumMap, substitutes);
 }
 void SkPDFAtom::addResources(SkPDFObjNumMap* map,
@@ -284,8 +279,8 @@ int SkPDFArray::size() const { return fValues.count(); }
 void SkPDFArray::reserve(int length) { fValues.setReserve(length); }
 
 void SkPDFArray::emitObject(SkWStream* stream,
-                             const SkPDFObjNumMap& objNumMap,
-                             const SkPDFSubstituteMap& substitutes) {
+                            const SkPDFObjNumMap& objNumMap,
+                            const SkPDFSubstituteMap& substitutes) const {
     stream->writeText("[");
     for (int i = 0; i < fValues.count(); i++) {
         fValues[i].emitObject(stream, objNumMap, substitutes);
@@ -353,8 +348,15 @@ SkPDFDict::SkPDFDict(const char type[]) { this->insertName("Type", type); }
 
 void SkPDFDict::emitObject(SkWStream* stream,
                            const SkPDFObjNumMap& objNumMap,
-                           const SkPDFSubstituteMap& substitutes) {
+                           const SkPDFSubstituteMap& substitutes) const {
     stream->writeText("<<");
+    this->emitAll(stream, objNumMap, substitutes);
+    stream->writeText(">>");
+}
+
+void SkPDFDict::emitAll(SkWStream* stream,
+                        const SkPDFObjNumMap& objNumMap,
+                        const SkPDFSubstituteMap& substitutes) const {
     for (int i = 0; i < fRecords.count(); i++) {
         fRecords[i].fKey.emitObject(stream, objNumMap, substitutes);
         stream->writeText(" ");
@@ -363,7 +365,6 @@ void SkPDFDict::emitObject(SkWStream* stream,
             stream->writeText("\n");
         }
     }
-    stream->writeText(">>");
 }
 
 void SkPDFDict::addResources(SkPDFObjNumMap* catalog,
@@ -435,6 +436,41 @@ void SkPDFDict::clear() {
         rec.fValue.~SkPDFUnion();
     }
     fRecords.reset();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void SkPDFSharedStream::emitObject(
+        SkWStream* stream,
+        const SkPDFObjNumMap& objNumMap,
+        const SkPDFSubstituteMap& substitutes) const {
+    SkDynamicMemoryWStream buffer;
+    SkDeflateWStream deflateWStream(&buffer);
+    // Since emitObject is const, this function doesn't change the dictionary.
+    SkAutoTDelete<SkStreamAsset> dup(fAsset->duplicate());  // Cheap copy
+    SkASSERT(dup);
+    SkStreamCopy(&deflateWStream, dup.get());
+    deflateWStream.finalize();
+    size_t length = buffer.bytesWritten();
+    stream->writeText("<<");
+    fDict->emitAll(stream, objNumMap, substitutes);
+    stream->writeText("\n");
+    SkPDFUnion::Name("Length").emitObject(stream, objNumMap, substitutes);
+    stream->writeText(" ");
+    SkPDFUnion::Int(length).emitObject(stream, objNumMap, substitutes);
+    stream->writeText("\n");
+    SkPDFUnion::Name("Filter").emitObject(stream, objNumMap, substitutes);
+    stream->writeText(" ");
+    SkPDFUnion::Name("FlateDecode").emitObject(stream, objNumMap, substitutes);
+    stream->writeText(">>");
+    stream->writeText(" stream\n");
+    buffer.writeToStream(stream);
+    stream->writeText("\nendstream");
+}
+
+void SkPDFSharedStream::addResources(
+        SkPDFObjNumMap* catalog, const SkPDFSubstituteMap& substitutes) const {
+    fDict->addResources(catalog, substitutes);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

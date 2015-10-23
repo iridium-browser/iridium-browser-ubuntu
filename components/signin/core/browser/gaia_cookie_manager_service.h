@@ -11,6 +11,7 @@
 #include "base/timer/timer.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/ubertoken_fetcher.h"
 #include "net/base/backoff_entry.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -34,8 +35,7 @@ class URLFetcher;
 // lifetime of this object, when the first call is made to AddAccountToCookie.
 class GaiaCookieManagerService : public KeyedService,
                                  public GaiaAuthConsumer,
-                                 public UbertokenConsumer,
-                                 public net::URLFetcherDelegate {
+                                 public UbertokenConsumer {
  public:
   enum GaiaCookieRequestType {
     ADD_ACCOUNT,
@@ -82,7 +82,7 @@ class GaiaCookieManagerService : public KeyedService,
     // If the ListAccounts call fails and the GCMS cannot recover, the reason
     // is passed in |error|.
     virtual void OnGaiaAccountsInCookieUpdated(
-        const std::vector<std::pair<std::string, bool> >& accounts,
+        const std::vector<gaia::ListedAccount>& accounts,
         const GoogleServiceAuthError& error) {}
 
    protected:
@@ -167,7 +167,7 @@ class GaiaCookieManagerService : public KeyedService,
   // parameter if return is false). The parameter will be assigned the current
   // cached accounts. If the accounts are not up to date, a ListAccounts fetch
   // is sent GAIA and Observer::OnGaiaAccountsInCookieUpdated will be called.
-  bool ListAccounts(std::vector<std::pair<std::string,bool> >* accounts);
+  bool ListAccounts(std::vector<gaia::ListedAccount>* accounts);
 
   // Add or remove observers of this helper.
   void AddObserver(Observer* observer);
@@ -193,8 +193,8 @@ class GaiaCookieManagerService : public KeyedService,
     return &external_cc_result_fetcher_;
   }
 
-  void set_list_accounts_fetched_once_for_testing(bool fetched) {
-    list_accounts_fetched_once_ = fetched;
+  void set_list_accounts_stale_for_testing(bool stale) {
+    list_accounts_stale_ = stale;
   }
 
  private:
@@ -215,6 +215,8 @@ class GaiaCookieManagerService : public KeyedService,
   void OnMergeSessionFailure(const GoogleServiceAuthError& error) override;
   void OnListAccountsSuccess(const std::string& data) override;
   void OnListAccountsFailure(const GoogleServiceAuthError& error) override;
+  void OnLogOutSuccess() override;
+  void OnLogOutFailure(const GoogleServiceAuthError& error) override;
 
   // Helper method for AddAccountToCookie* methods.
   void AddAccountToCookieInternal(const std::string& account_id);
@@ -226,17 +228,14 @@ class GaiaCookieManagerService : public KeyedService,
   // Virtual for testing purposes.
   virtual void StartFetchingMergeSession();
 
-  // Virtual for testing purpose.
-  virtual void StartLogOutUrlFetch();
-
   // Virtual for testing purposes.
   virtual void StartFetchingListAccounts();
 
+  // Virtual for testing purpose.
+  virtual void StartFetchingLogOut();
+
   // Start the next request, if needed.
   void HandleNextRequest();
-
-  // Overridden from URLFetcherDelgate.
-  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   OAuth2TokenService* token_service_;
   SigninClient* signin_client_;
@@ -269,7 +268,7 @@ class GaiaCookieManagerService : public KeyedService,
 
   // List of observers to notify when merge session completes.
   // Makes sure list is empty on destruction.
-  ObserverList<Observer, true> observer_list_;
+  base::ObserverList<Observer, true> observer_list_;
 
   // Source to use with GAIA endpoints for accounting.
   std::string source_;
@@ -277,10 +276,9 @@ class GaiaCookieManagerService : public KeyedService,
   // True once the ExternalCCResultFetcher has completed once.
   bool external_cc_result_fetched_;
 
-  std::vector<std::pair<std::string, bool> > listed_accounts_;
+  std::vector<gaia::ListedAccount> listed_accounts_;
 
-  bool list_accounts_fetched_once_;
-  scoped_ptr<net::URLFetcher> logout_url_request_;
+  bool list_accounts_stale_;
 
   DISALLOW_COPY_AND_ASSIGN(GaiaCookieManagerService);
 };

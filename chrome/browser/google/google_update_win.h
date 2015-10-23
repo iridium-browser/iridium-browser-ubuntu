@@ -45,8 +45,7 @@ enum GoogleUpdateErrorCode {
   GOOGLE_UPDATE_DISABLED_BY_POLICY = 8,
   // Updates can not be downloaded because the administrator has disabled
   // manual (on-demand) updates.  Automatic background updates are allowed.
-  // DEPRECATED.
-  // GOOGLE_UPDATE_DISABLED_BY_POLICY_AUTO_ONLY = 9,
+  GOOGLE_UPDATE_DISABLED_BY_POLICY_AUTO_ONLY = 9,
   NUM_ERROR_CODES
 };
 
@@ -76,11 +75,13 @@ class UpdateCheckDelegate {
   virtual void OnUpgradeComplete(const base::string16& new_version) = 0;
 
   // Invoked following an unrecoverable error, indicated by |error_code|.
-  // |error_message|, if not empty, contains a localized string that may be
-  // presented to the user explaining the nature of the error. |new_version|, if
-  // not empty, indicates the version to which an upgrade attempt was made.
+  // |html_error_message|, if not empty, must be a localized string containing
+  // all information required by users to act on the error as well as for
+  // support staff to diagnose it (i.e. |error_code| and any other related
+  // state information).  |new_version|, if not empty, indicates the version
+  // to which an upgrade attempt was made.
   virtual void OnError(GoogleUpdateErrorCode error_code,
-                       const base::string16& error_message,
+                       const base::string16& html_error_message,
                        const base::string16& new_version) = 0;
 
  protected:

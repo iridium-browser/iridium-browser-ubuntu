@@ -11,10 +11,8 @@
 #include "base/values.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/renderer/render_frame.h"
-#include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
-#include "third_party/WebKit/public/web/WebKit.h"
 #include "ui/base/webui/jstemplate_builder.h"
 
 using blink::WebFrame;
@@ -51,15 +49,16 @@ bool IsValidYouTubeVideo(const std::string& path) {
   if (path.length() <= len)
     return false;
 
-  std::string str = base::StringToLowerASCII(path);
   // Youtube flash url can start with /v/ or /e/.
-  if (strncmp(str.data(), kSlashVSlash, len) != 0 &&
-      strncmp(str.data(), kSlashESlash, len) != 0)
+  if (!base::StartsWith(path, kSlashVSlash,
+                        base::CompareCase::INSENSITIVE_ASCII) ||
+      !base::StartsWith(path, kSlashESlash,
+                        base::CompareCase::INSENSITIVE_ASCII))
     return false;
 
   // Start after /v/
   for (unsigned i = len; i < path.length(); i++) {
-    char c = str[i];
+    char c = path[i];
     if (isalpha(c) || isdigit(c) || c == '_' || c == '-')
       continue;
     // The url can have more parameters such as &hl=en after the video id.
@@ -73,16 +72,17 @@ bool IsValidYouTubeVideo(const std::string& path) {
 
 namespace plugins {
 
+gin::WrapperInfo MobileYouTubePlugin::kWrapperInfo = {gin::kEmbedderNativeGin};
+
 MobileYouTubePlugin::MobileYouTubePlugin(content::RenderFrame* render_frame,
                                          blink::WebLocalFrame* frame,
                                          const blink::WebPluginParams& params,
-                                         base::StringPiece& template_html,
-                                         GURL placeholderDataUrl)
-    : PluginPlaceholder(render_frame,
-                        frame,
-                        params,
-                        HtmlData(params, template_html),
-                        placeholderDataUrl) {}
+                                         base::StringPiece& template_html)
+    : PluginPlaceholderBase(render_frame,
+                            frame,
+                            params,
+                            HtmlData(params, template_html)) {
+}
 
 MobileYouTubePlugin::~MobileYouTubePlugin() {}
 
@@ -90,11 +90,14 @@ MobileYouTubePlugin::~MobileYouTubePlugin() {}
 bool MobileYouTubePlugin::IsYouTubeURL(const GURL& url,
                                        const std::string& mime_type) {
   std::string host = url.host();
-  bool is_youtube = EndsWith(host, "youtube.com", true) ||
-                    EndsWith(host, "youtube-nocookie.com", true);
+  bool is_youtube =
+      base::EndsWith(host, "youtube.com", base::CompareCase::SENSITIVE) ||
+      base::EndsWith(host, "youtube-nocookie.com",
+                     base::CompareCase::SENSITIVE);
 
   return is_youtube && IsValidYouTubeVideo(url.path()) &&
-         LowerCaseEqualsASCII(mime_type, content::kFlashPluginSwfMimeType);
+         base::LowerCaseEqualsASCII(mime_type,
+                                    content::kFlashPluginSwfMimeType);
 }
 
 void MobileYouTubePlugin::OpenYoutubeUrlCallback() {
@@ -107,22 +110,15 @@ void MobileYouTubePlugin::OpenYoutubeUrlCallback() {
       GetFrame(), request, blink::WebNavigationPolicyNewForegroundTab);
 }
 
-void MobileYouTubePlugin::BindWebFrame(WebFrame* frame) {
-  v8::Isolate* isolate = blink::mainThreadIsolate();
-  v8::HandleScope handle_scope(isolate);
-  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
-  DCHECK(!context.IsEmpty());
-
-  v8::Context::Scope context_scope(context);
-  v8::Local<v8::Object> global = context->Global();
-  global->Set(gin::StringToV8(isolate, "plugin"),
-              gin::CreateHandle(isolate, this).ToV8());
+v8::Local<v8::Value> MobileYouTubePlugin::GetV8Handle(v8::Isolate* isolate) {
+  return gin::CreateHandle(isolate, this).ToV8();
 }
 
 gin::ObjectTemplateBuilder MobileYouTubePlugin::GetObjectTemplateBuilder(
     v8::Isolate* isolate) {
-  return PluginPlaceholder::GetObjectTemplateBuilder(isolate)
-    .SetMethod("openYoutubeURL", &MobileYouTubePlugin::OpenYoutubeUrlCallback);
+  return gin::Wrappable<MobileYouTubePlugin>::GetObjectTemplateBuilder(isolate)
+      .SetMethod("openYoutubeURL",
+                 &MobileYouTubePlugin::OpenYoutubeUrlCallback);
 }
 
 }  // namespace plugins

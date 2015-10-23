@@ -35,12 +35,18 @@ std::string DirectionToString(mojo::OrderDirection direction) {
 std::string ChangeToDescription1(const Change& change) {
   switch (change.type) {
     case CHANGE_TYPE_EMBED:
-      return base::StringPrintf("OnEmbed creator=%s",
-                                change.creator_url.data());
+      return "OnEmbed";
 
     case CHANGE_TYPE_EMBEDDED_APP_DISCONNECTED:
       return base::StringPrintf("OnEmbeddedAppDisconnected view=%s",
                                 ViewIdToString(change.view_id).c_str());
+
+    case CHANGE_TYPE_EMBED_FOR_DESCENDANT:
+      return base::StringPrintf("OnEmbedForDescendant view=%s",
+                                ViewIdToString(change.view_id).c_str());
+
+    case CHANGE_TYPE_UNEMBED:
+      return "OnUnembed";
 
     case CHANGE_TYPE_NODE_BOUNDS_CHANGED:
       return base::StringPrintf(
@@ -113,14 +119,18 @@ std::vector<std::string> ChangesToDescription1(
 }
 
 std::string SingleChangeToDescription(const std::vector<Change>& changes) {
-  if (changes.size() != 1u)
-    return std::string();
-  return ChangeToDescription1(changes[0]);
+  std::string result;
+  for (auto& change : changes) {
+    if (!result.empty())
+      result += "\n";
+    result += ChangeToDescription1(change);
+  }
+  return result;
 }
 
 std::string SingleViewDescription(const std::vector<TestView>& views) {
   if (views.size() != 1u)
-    return std::string();
+    return "more than one changes and expected only one";
   return views[0].ToString();
 }
 
@@ -130,7 +140,7 @@ std::string ChangeViewDescription(const std::vector<Change>& changes) {
   std::vector<std::string> view_strings(changes[0].views.size());
   for (size_t i = 0; i < changes[0].views.size(); ++i)
     view_strings[i] = "[" + changes[0].views[i].ToString() + "]";
-  return JoinString(view_strings, ',');
+  return base::JoinString(view_strings, ",");
 }
 
 TestView ViewDataToTestView(const ViewDataPtr& data) {
@@ -172,13 +182,18 @@ TestChangeTracker::~TestChangeTracker() {
 }
 
 void TestChangeTracker::OnEmbed(mojo::ConnectionSpecificId connection_id,
-                                const String& creator_url,
                                 ViewDataPtr root) {
   Change change;
   change.type = CHANGE_TYPE_EMBED;
   change.connection_id = connection_id;
-  change.creator_url = creator_url;
   change.views.push_back(ViewDataToTestView(root));
+  AddChange(change);
+}
+
+void TestChangeTracker::OnEmbedForDescendant(mojo::Id view_id) {
+  Change change;
+  change.type = CHANGE_TYPE_EMBED_FOR_DESCENDANT;
+  change.view_id = view_id;
   AddChange(change);
 }
 
@@ -203,6 +218,12 @@ void TestChangeTracker::OnViewBoundsChanged(Id view_id,
   change.bounds2.y = new_bounds->y;
   change.bounds2.width = new_bounds->width;
   change.bounds2.height = new_bounds->height;
+  AddChange(change);
+}
+
+void TestChangeTracker::OnUnembed() {
+  Change change;
+  change.type = CHANGE_TYPE_UNEMBED;
   AddChange(change);
 }
 

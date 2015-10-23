@@ -24,6 +24,7 @@ var remoting = remoting || {};
 /**
  * @param {remoting.ClientPlugin} plugin
  * @param {remoting.SignalStrategy} signalStrategy Signal strategy.
+ * @param {remoting.Logger} logger
  * @param {remoting.ClientSession.EventHandler} listener
  *
  * @constructor
@@ -31,7 +32,8 @@ var remoting = remoting || {};
  * @implements {base.Disposable}
  * @implements {remoting.ClientPlugin.ConnectionEventHandler}
  */
-remoting.ClientSession = function(plugin, signalStrategy, listener) {
+remoting.ClientSession = function(
+    plugin, signalStrategy, logger, listener) {
   base.inherits(this, base.EventSourceImpl);
 
   /** @private */
@@ -55,26 +57,24 @@ remoting.ClientSession = function(plugin, signalStrategy, listener) {
   /** @private */
   this.hasReceivedFrame_ = false;
 
-  /** @private */
-  this.logToServer_ = new remoting.LogToServer(signalStrategy);
+  /** @private {remoting.Logger} */
+  this.logger_ = logger;
 
   /** @private */
   this.signalStrategy_ = signalStrategy;
-  base.debug.assert(this.signalStrategy_.getState() ==
-                    remoting.SignalStrategy.State.CONNECTED);
+
+  var state = this.signalStrategy_.getState();
+  console.assert(state == remoting.SignalStrategy.State.CONNECTED,
+                 'ClientSession ctor called in state ' + state + '.');
   this.signalStrategy_.setIncomingStanzaCallback(
       this.onIncomingMessage_.bind(this));
 
   /** @private {remoting.FormatIq} */
   this.iqFormatter_ = null;
 
-  /**
-   * Allow host-offline error reporting to be suppressed in situations where it
-   * would not be useful, for example, when using a cached host JID.
-   *
-   * @type {boolean} @private
-   */
-  this.logHostOfflineErrors_ = true;
+  /** @private {remoting.XmppErrorCache} */
+  this.xmppErrorCache_ = new remoting.XmppErrorCache();
+
 
   /** @private {remoting.ClientPlugin} */
   this.plugin_ = plugin;
@@ -132,22 +132,30 @@ remoting.ClientSession.EventHandler.prototype.onDisconnected =
 // the names given here.
 // The negative values represent state transitions that occur within the
 // web-app that have no corresponding plugin state transition.
+//
+// TODO(kelvinp): Merge this enum with remoting.ChromotingEvent.SessionState
+// once we have migrated away from XMPP-based logging (crbug.com/523423).
+// NOTE: The enums here correspond to the Chromoting.Connections enumerated
+// histogram defined in src/tools/metrics/histograms/histograms.xml. UMA
+// histograms don't work well with negative values, so only non-negative values
+// have been used for Chromoting.Connections.
+// The maximum values for the UMA enumerated histogram is included here for use
+// when uploading values to UMA.
+// The 2 lists should be kept in sync, and any new enums should be append-only.
 /** @enum {number} */
 remoting.ClientSession.State = {
+  MIN_STATE_ENUM: -3,
   CONNECTION_CANCELED: -3,  // Connection closed (gracefully) before connecting.
   CONNECTION_DROPPED: -2,  // Succeeded, but subsequently closed with an error.
   CREATED: -1,
   UNKNOWN: 0,
   INITIALIZING: 1,
   CONNECTING: 2,
-  // We don't currently receive AUTHENTICATED from the host - it comes through
-  // as 'CONNECTING' instead.
-  // TODO(garykac) Update chromoting_instance.cc to send this once we've
-  // shipped a webapp release with support for AUTHENTICATED.
   AUTHENTICATED: 3,
   CONNECTED: 4,
   CLOSED: 5,
-  FAILED: 6
+  FAILED: 6,
+  MAX_STATE_ENUM: 6,
 };
 
 /**
@@ -230,6 +238,11 @@ remoting.ClientSession.Capability = {
   // <1000 users on M-29 or below. Remove this and the capability on the host.
   RATE_LIMIT_RESIZE_REQUESTS: 'rateLimitResizeRequests',
 
+  // Indicates native touch input support. If the host does not support
+  // touch then the client will let Chrome synthesize mouse events from touch
+  // input, for compatibility with non-touch-aware systems.
+  TOUCH_EVENTS: 'touchEvents',
+
   // Indicates that host/client supports Google Drive integration, and that the
   // client should send to the host the OAuth tokens to be used by Google Drive
   // on the host.
@@ -241,6 +254,9 @@ remoting.ClientSession.Capability = {
   // Indicates that the client supports 'cast'ing the video stream to a
   // cast-enabled device.
   CAST: 'casting',
+
+  // Indicates desktop shape support.
+  DESKTOP_SHAPE: 'desktopShape',
 };
 
 /**
@@ -315,10 +331,10 @@ remoting.ClientSession.prototype.getState = function() {
 };
 
 /**
- * @return {remoting.LogToServer}.
+ * @return {remoting.Logger}.
  */
 remoting.ClientSession.prototype.getLogger = function() {
-  return this.logToServer_;
+  return this.logger_;
 };
 
 /**
@@ -326,6 +342,29 @@ remoting.ClientSession.prototype.getLogger = function() {
  */
 remoting.ClientSession.prototype.getError = function() {
   return this.error_;
+};
+
+/**
+ * Drop the session when the computer is suspended for more than
+ * |suspendDurationInMS|.
+ *
+ * @param {number} suspendDurationInMS maximum duration of suspension allowed
+ *     before the session will be dropped.
+ */
+remoting.ClientSession.prototype.dropSessionOnSuspend = function(
+    suspendDurationInMS) {
+  if (this.state_ !== remoting.ClientSession.State.CONNECTED) {
+    console.error('The session is not connected.');
+    return;
+  }
+
+  var suspendDetector = new remoting.SuspendDetector(suspendDurationInMS);
+  this.connectedDisposables_.add(
+      suspendDetector,
+      new base.EventHook(
+          suspendDetector, remoting.SuspendDetector.Events.resume,
+          this.disconnect.bind(
+              this, new remoting.Error(remoting.Error.Tag.CLIENT_SUSPENDED))));
 };
 
 /**
@@ -398,6 +437,7 @@ remoting.ClientSession.prototype.onIncomingMessage_ = function(message) {
   var formatted = new XMLSerializer().serializeToString(message);
   console.log(base.timestamp() +
               this.iqFormatter_.prettifyReceiveIq(formatted));
+  this.xmppErrorCache_.processStanza(message);
   this.plugin_.onIncomingIq(formatted);
 };
 
@@ -448,11 +488,9 @@ remoting.ClientSession.prototype.onConnectionStatusUpdate =
  * @param {string} connectionType The new connection type.
  * @private
  */
-remoting.ClientSession.prototype.onRouteChanged =
-    function(channel, connectionType) {
-  console.log('plugin: Channel ' + channel + ' using ' +
-              connectionType + ' connection.');
-  this.logToServer_.setConnectionType(connectionType);
+remoting.ClientSession.prototype.onRouteChanged = function(channel,
+                                                           connectionType) {
+  this.logger_.setConnectionType(connectionType);
 };
 
 /**
@@ -492,20 +530,57 @@ remoting.ClientSession.prototype.isFinished = function() {
  * @private
  */
 remoting.ClientSession.prototype.setState_ = function(newState) {
+  // If we are at a finished state, ignore further state changes.
+  if (this.isFinished()) {
+    return;
+  }
+
   var oldState = this.state_;
   this.state_ = this.translateState_(oldState, newState);
 
   if (newState == remoting.ClientSession.State.CONNECTED) {
     this.connectedDisposables_.add(
         new base.RepeatingTimer(this.reportStatistics.bind(this), 1000));
+    if (this.plugin_.hasCapability(
+          remoting.ClientSession.Capability.TOUCH_EVENTS)) {
+      this.plugin_.enableTouchEvents(true);
+    }
   } else if (this.isFinished()) {
     base.dispose(this.connectedDisposables_);
     this.connectedDisposables_ = null;
   }
 
   this.notifyStateChanges_(oldState, this.state_);
-  this.logToServer_.logClientSessionStateChange(this.state_, this.error_);
+  // Record state count in an UMA enumerated histogram.
+  recordState(this.state_);
+  this.logger_.logClientSessionStateChange(
+      this.state_, this.error_, this.xmppErrorCache_.getFirstError());
 };
+
+/**
+ * Records a Chromoting Connection State, stored in an UMA enumerated histogram.
+ * @param {remoting.ClientSession.State} state State identifier.
+ */
+function recordState(state) {
+  // According to src/base/metrics/histogram.h, for a UMA enumerated histogram,
+  // the upper limit should be 1 above the max-enum.
+  var histogram_max = remoting.ClientSession.State.MAX_STATE_ENUM -
+      remoting.ClientSession.State.MIN_STATE_ENUM + 1;
+
+  var metricDescription = {
+    metricName: 'Chromoting.Connections',
+    type: 'histogram-linear',
+    // According to histogram.h, minimum should be 1. Values less than minimum
+    // end up in the 0th bucket.
+    min: 1,
+    max: histogram_max,
+    // The # of buckets should include 1 for underflow.
+    buckets: histogram_max + 1
+  };
+
+  chrome.metricsPrivate.recordValue(metricDescription, state -
+      remoting.ClientSession.State.MIN_STATE_ENUM);
+}
 
 /**
  * @param {remoting.ClientSession.State} oldState The new state for the session.
@@ -574,13 +649,6 @@ remoting.ClientSession.prototype.translateState_ = function(previous, current) {
   if (previous == State.CONNECTING || previous == State.AUTHENTICATED) {
     if (current == State.CLOSED) {
       return remoting.ClientSession.State.CONNECTION_CANCELED;
-    } else if (current == State.FAILED &&
-        this.error_.hasTag(remoting.Error.Tag.HOST_IS_OFFLINE) &&
-        !this.logHostOfflineErrors_) {
-      // The application requested host-offline errors to be suppressed, for
-      // example, because this connection attempt is using a cached host JID.
-      console.log('Suppressing host-offline error.');
-      return State.CONNECTION_CANCELED;
     }
   } else if (previous == State.CONNECTED && current == State.FAILED) {
     return State.CONNECTION_DROPPED;
@@ -590,17 +658,5 @@ remoting.ClientSession.prototype.translateState_ = function(previous, current) {
 
 /** @private */
 remoting.ClientSession.prototype.reportStatistics = function() {
-  this.logToServer_.logStatistics(this.plugin_.getPerfStats());
-};
-
-/**
- * Enable or disable logging of connection errors due to a host being offline.
- * For example, if attempting a connection using a cached JID, host-offline
- * errors should not be logged because the JID will be refreshed and the
- * connection retried.
- *
- * @param {boolean} enable True to log host-offline errors; false to suppress.
- */
-remoting.ClientSession.prototype.logHostOfflineErrors = function(enable) {
-  this.logHostOfflineErrors_ = enable;
+  this.logger_.logStatistics(this.plugin_.getPerfStats());
 };

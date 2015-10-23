@@ -11,7 +11,7 @@ var GalleryUtil = {};
  *
  * The function also filters non-image items and hidden items.
  *
- * @param {!Array.<!FileEntry>} originalEntries Entries passed from onLaunched
+ * @param {!Array<!FileEntry>} originalEntries Entries passed from onLaunched
  *     events.
  * @return {!Promise} Promise to be fulfilled with entry array.
  */
@@ -45,9 +45,11 @@ GalleryUtil.createEntrySet = function(originalEntries) {
 
   return entriesPromise.then(function(entries) {
     return entries.filter(function(entry) {
+      // Currently the gallery doesn't support mime types, so checking by
+      // file extensions is enough.
       return FileType.isImage(entry) || FileType.isRaw(entry);
     }).sort(function(a, b) {
-      return a.name.localeCompare(b.name);
+      return util.compareName(a, b);
     });
   });
 };
@@ -62,4 +64,16 @@ GalleryUtil.isOnMTPVolume = function(entry, volumeManager) {
   var volumeInfo = volumeManager.getVolumeInfo(entry);
   return volumeInfo &&
       volumeInfo.volumeType === VolumeManagerCommon.VolumeType.MTP;
-}
+};
+
+/**
+ * Decorates an element to handle mouse focus specific logic. The element
+ * becomes to have using-mouse class when it is focused by mouse.
+ * @param {!HTMLElement} element
+ */
+GalleryUtil.decorateMouseFocusHandling = function(element) {
+  element.addEventListener('mousedown',
+      element.classList.toggle.bind(element.classList, 'using-mouse', true));
+  element.addEventListener('blur',
+      element.classList.toggle.bind(element.classList, 'using-mouse', false));
+};

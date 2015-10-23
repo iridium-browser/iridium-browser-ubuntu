@@ -55,8 +55,11 @@ class FormStructure {
   void DetermineHeuristicTypes();
 
   // Encodes the XML upload request from this FormStructure.
+  // In some cases, a |login_form_signature| is included as part of the upload.
+  // This field is empty when sending upload requests for non-login forms.
   bool EncodeUploadRequest(const ServerFieldTypeSet& available_field_types,
                            bool form_was_autofilled,
+                           const std::string& login_form_signature,
                            std::string* encoded_xml) const;
 
   // Encodes a XML block contains autofill field type from this FormStructure.
@@ -191,7 +194,6 @@ class FormStructure {
   UploadRequired upload_required() const { return upload_required_; }
 
   // Returns a FormData containing the data this form structure knows about.
-  // |user_submitted| is currently always false.
   FormData ToFormData() const;
 
   bool operator==(const FormData& form) const;

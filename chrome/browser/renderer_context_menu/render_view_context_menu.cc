@@ -20,7 +20,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -33,6 +32,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
+#include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -56,20 +56,23 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_restriction.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/spellcheck_messages.h"
+#include "chrome/common/spellcheck_common.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
-#include "components/omnibox/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_classifier.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/password_manager/core/common/experiments.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/browser/translate_prefs.h"
+#include "components/url_formatter/url_formatter.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/download_manager.h"
@@ -97,6 +100,7 @@
 #include "third_party/WebKit/public/web/WebMediaPlayerAction.h"
 #include "third_party/WebKit/public/web/WebPluginAction.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/geometry/point.h"
@@ -220,8 +224,11 @@ const struct UmaEnumCommandIdPair {
     {63, IDC_WRITING_DIRECTION_DEFAULT},
     {64, IDC_WRITING_DIRECTION_LTR},
     {65, IDC_WRITING_DIRECTION_RTL},
+    {66, IDC_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE},
+    {67, IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD},
     // Add new items here and use |enum_id| from the next line.
-    {66, 0},  // Must be the last. Increment |enum_id| when new IDC was added.
+    // Also, add new items to RenderViewContextMenuItem enum in histograms.xml.
+    {68, 0},  // Must be the last. Increment |enum_id| when new IDC was added.
 };
 
 // Collapses large ranges of ids before looking for UMA enum.
@@ -275,12 +282,6 @@ WindowOpenDisposition ForceNewTabDispositionFromEventFlags(
   return disposition == CURRENT_TAB ? NEW_FOREGROUND_TAB : disposition;
 }
 
-// Helper function to escape "&" as "&&".
-void EscapeAmpersands(base::string16* text) {
-  base::ReplaceChars(*text, base::ASCIIToUTF16("&"), base::ASCIIToUTF16("&&"),
-                     text);
-}
-
 // Returns the preference of the profile represented by the |context|.
 PrefService* GetPrefs(content::BrowserContext* context) {
   return user_prefs::UserPrefs::Get(context);
@@ -318,6 +319,23 @@ content::WebContents* GetWebContentsToUse(content::WebContents* web_contents) {
   }
 #endif
   return web_contents;
+}
+
+void WriteURLToClipboard(const GURL& url, const std::string& languages) {
+  if (url.is_empty() || !url.is_valid())
+    return;
+
+  // Unescaping path and query is not a good idea because other applications
+  // may not encode non-ASCII characters in UTF-8.  See crbug.com/2820.
+  base::string16 text =
+      url.SchemeIs(url::kMailToScheme)
+          ? base::ASCIIToUTF16(url.path())
+          : url_formatter::FormatUrl(
+                url, languages, url_formatter::kFormatUrlOmitNothing,
+                net::UnescapeRule::NONE, nullptr, nullptr, nullptr);
+
+  ui::ScopedClipboardWriter scw(ui::CLIPBOARD_TYPE_COPY_PASTE);
+  scw.WriteURL(text);
 }
 
 bool g_custom_id_ranges_initialized = false;
@@ -511,17 +529,25 @@ void RenderViewContextMenu::AppendCurrentExtensionItems() {
   // For Panel, this happens when the panel is navigated to a url outside of the
   // extension's package.
   const Extension* extension = GetExtension();
-  if (extension) {
-    // Only add extension items from this extension.
-    int index = 0;
-    MenuItem::ExtensionKey key(
+  if (!extension)
+    return;
+
+  extensions::WebViewGuest* web_view_guest =
+      extensions::WebViewGuest::FromWebContents(source_web_contents_);
+  MenuItem::ExtensionKey key;
+  if (web_view_guest) {
+    key = MenuItem::ExtensionKey(
         extension->id(),
-        extensions::WebViewGuest::GetViewInstanceId(source_web_contents_));
-    extension_items_.AppendExtensionItems(key,
-                                          PrintableSelectionText(),
-                                          &index,
-                                          false);  // is_action_menu
+        web_view_guest->owner_web_contents()->GetRenderProcessHost()->GetID(),
+        web_view_guest->view_instance_id());
+  } else {
+    key = MenuItem::ExtensionKey(extension->id());
   }
+
+  // Only add extension items from this extension.
+  int index = 0;
+  extension_items_.AppendExtensionItems(key, PrintableSelectionText(), &index,
+                                        false /* is_action_menu */);
 }
 #endif  // defined(ENABLE_EXTENSIONS)
 
@@ -625,6 +651,11 @@ void RenderViewContextMenu::InitMenu() {
   if (content_type_->SupportsGroup(
           ContextMenuContentType::ITEM_GROUP_PRINT_PREVIEW)) {
     AppendPrintPreviewItems();
+  }
+
+  if (content_type_->SupportsGroup(
+          ContextMenuContentType::ITEM_GROUP_PASSWORD)) {
+    AppendPasswordItems();
   }
 }
 
@@ -741,6 +772,14 @@ void RenderViewContextMenu::AppendImageItems() {
                                   IDS_CONTENT_CONTEXT_COPYIMAGELOCATION);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYIMAGE,
                                   IDS_CONTENT_CONTEXT_COPYIMAGE);
+  std::map<std::string, std::string>::const_iterator it =
+      params_.properties.find(data_reduction_proxy::chrome_proxy_header());
+  if (it != params_.properties.end() && it->second ==
+      data_reduction_proxy::chrome_proxy_lo_fi_directive()) {
+    menu_model_.AddItemWithStringId(
+        IDC_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE,
+        IDS_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE);
+  }
   DataReductionProxyChromeSettings* settings =
       DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
           browser_context_);
@@ -979,8 +1018,18 @@ void RenderViewContextMenu::AppendEditableItems() {
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   }
 
+#if defined(OS_MACOSX)
   if (use_spellcheck_and_search)
     AppendSpellcheckOptionsSubMenu();
+#else
+  if (chrome::spellcheck_common::IsMultilingualSpellcheckEnabled()) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS,
+                                    IDS_CONTENT_CONTEXT_LANGUAGE_SETTINGS);
+  } else if (use_spellcheck_and_search) {
+    AppendSpellcheckOptionsSubMenu();
+  }
+#endif  // defined(OS_MACOSX)
+
   AppendPlatformEditableItems();
 
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
@@ -1025,6 +1074,15 @@ void RenderViewContextMenu::AppendProtocolHandlerSubMenu() {
       IDC_CONTENT_CONTEXT_OPENLINKWITH,
       l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_OPENLINKWITH),
       &protocol_handler_submenu_model_);
+}
+
+void RenderViewContextMenu::AppendPasswordItems() {
+  if (!password_manager::ForceSavingExperimentEnabled())
+    return;
+
+  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD,
+                                  IDS_CONTENT_CONTEXT_FORCESAVEPASSWORD);
 }
 
 // Menu delegate functions -----------------------------------------------------
@@ -1127,7 +1185,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
              translate::TranslateDownloadManager::IsSupportedLanguage(
                  target_lang) &&
              // Disable on the Instant Extended NTP.
-             !chrome::IsInstantNTP(embedder_web_contents_);
+             !search::IsInstantNTP(embedder_web_contents_);
     }
 
     case IDC_CONTENT_CONTEXT_OPENLINKNEWTAB:
@@ -1161,6 +1219,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     // The images shown in the most visited thumbnails can't be opened or
     // searched for conventionally.
     case IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB:
+    case IDC_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE:
     case IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB:
     case IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE:
       return params_.src_url.is_valid() &&
@@ -1328,6 +1387,9 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS:
       return true;
 
+    case IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD:
+      return true;
+
     default:
       NOTREACHED();
       return false;
@@ -1474,6 +1536,10 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
           params_.src_url, GetDocumentURL(params_), NEW_BACKGROUND_TAB,
           ui::PAGE_TRANSITION_LINK,
           data_reduction_proxy::kDataReductionPassThroughHeader);
+      break;
+
+    case IDC_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE:
+      LoadOriginalImage();
       break;
 
     case IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB:
@@ -1750,7 +1816,9 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
           SearchEngineTabHelper::FromWebContents(source_web_contents_);
       if (search_engine_tab_helper &&
           search_engine_tab_helper->delegate()) {
-        base::string16 keyword(TemplateURL::GenerateKeyword(params_.page_url));
+        base::string16 keyword(TemplateURL::GenerateKeyword(
+            params_.page_url,
+            GetProfile()->GetPrefs()->GetString(prefs::kAcceptLanguages)));
         TemplateURLData data;
         data.SetShortName(keyword);
         data.SetKeyword(keyword);
@@ -1763,6 +1831,11 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       }
       break;
     }
+
+    case IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD:
+      ChromePasswordManagerClient::FromWebContents(source_web_contents_)->
+          ForceSavePassword();
+      break;
 
     default:
       NOTREACHED();
@@ -1824,10 +1897,23 @@ base::string16 RenderViewContextMenu::PrintableSelectionText() {
                              gfx::WORD_BREAK);
 }
 
+void RenderViewContextMenu::EscapeAmpersands(base::string16* text) {
+  base::ReplaceChars(*text, base::ASCIIToUTF16("&"), base::ASCIIToUTF16("&&"),
+                     text);
+}
+
 // Controller functions --------------------------------------------------------
 
 void RenderViewContextMenu::CopyImageAt(int x, int y) {
   source_web_contents_->GetRenderViewHost()->CopyImageAt(x, y);
+}
+
+void RenderViewContextMenu::LoadOriginalImage() {
+  RenderFrameHost* render_frame_host = GetRenderFrameHost();
+  if (!render_frame_host)
+    return;
+  render_frame_host->Send(new ChromeViewMsg_RequestReloadImageForContextNode(
+      render_frame_host->GetRoutingID()));
 }
 
 void RenderViewContextMenu::GetImageThumbnailForSearch() {
@@ -1851,7 +1937,7 @@ void RenderViewContextMenu::Inspect(int x, int y) {
 }
 
 void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {
-  chrome_common_net::WriteURLToClipboard(
+  ::WriteURLToClipboard(
       url, GetPrefs(browser_context_)->GetString(prefs::kAcceptLanguages));
 }
 

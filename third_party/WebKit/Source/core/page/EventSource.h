@@ -50,14 +50,13 @@ class ResourceResponse;
 class TextResourceDecoder;
 class ThreadableLoader;
 
-class EventSource final : public EventTargetWithInlineData, public RefCountedWillBeNoBase<EventSource>, private ThreadableLoaderClient, public ActiveDOMObject {
+class EventSource final : public RefCountedGarbageCollectedEventTargetWithInlineData<EventSource>, private ThreadableLoaderClient, public ActiveDOMObject {
     DEFINE_WRAPPERTYPEINFO();
-    REFCOUNTED_EVENT_TARGET(EventSource);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(EventSource);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(EventSource);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(EventSource);
 public:
-    static PassRefPtrWillBeRawPtr<EventSource> create(ExecutionContext*, const String& url, const EventSourceInit&, ExceptionState&);
-    virtual ~EventSource();
+    static EventSource* create(ExecutionContext*, const String& url, const EventSourceInit&, ExceptionState&);
+    ~EventSource() override;
 
     static const unsigned long long defaultReconnectDelay;
 
@@ -77,8 +76,8 @@ public:
 
     void close();
 
-    virtual const AtomicString& interfaceName() const override;
-    virtual ExecutionContext* executionContext() const override;
+    const AtomicString& interfaceName() const override;
+    ExecutionContext* executionContext() const override;
 
     // ActiveDOMObject
     //
@@ -86,21 +85,21 @@ public:
     // Page::setDefersLoading() and it defers delivery of events from the
     // loader, and therefore the methods of this class for receiving
     // asynchronous events from the loader won't be invoked.
-    virtual void stop() override;
+    void stop() override;
 
-    virtual bool hasPendingActivity() const override;
+    bool hasPendingActivity() const override;
 
     DECLARE_VIRTUAL_TRACE();
 
 private:
     EventSource(ExecutionContext*, const KURL&, const EventSourceInit&);
 
-    virtual void didReceiveResponse(unsigned long, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
-    virtual void didReceiveData(const char*, unsigned) override;
-    virtual void didFinishLoading(unsigned long, double) override;
-    virtual void didFail(const ResourceError&) override;
-    virtual void didFailAccessControlCheck(const ResourceError&) override;
-    virtual void didFailRedirectCheck() override;
+    void didReceiveResponse(unsigned long, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
+    void didReceiveData(const char*, unsigned) override;
+    void didFinishLoading(unsigned long, double) override;
+    void didFail(const ResourceError&) override;
+    void didFailAccessControlCheck(const ResourceError&) override;
+    void didFailRedirectCheck() override;
 
     void scheduleInitialConnect();
     void connect();

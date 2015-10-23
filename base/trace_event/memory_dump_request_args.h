@@ -10,6 +10,7 @@
 
 #include "base/base_export.h"
 #include "base/callback.h"
+#include "base/trace_event/memory_dump_provider.h"
 
 namespace base {
 namespace trace_event {
@@ -24,6 +25,9 @@ enum class MemoryDumpType {
   LAST = EXPLICITLY_TRIGGERED // For IPC macros.
 };
 
+// Returns the name in string for the dump type given.
+BASE_EXPORT const char* MemoryDumpTypeToString(const MemoryDumpType& dump_type);
+
 using MemoryDumpCallback = Callback<void(uint64 dump_guid, bool success)>;
 
 struct BASE_EXPORT MemoryDumpRequestArgs {
@@ -33,6 +37,8 @@ struct BASE_EXPORT MemoryDumpRequestArgs {
   uint64 dump_guid;
 
   MemoryDumpType dump_type;
+
+  MemoryDumpArgs dump_args;
 };
 
 }  // namespace trace_event

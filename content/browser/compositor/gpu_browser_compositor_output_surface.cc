@@ -17,10 +17,12 @@ namespace content {
 
 GpuBrowserCompositorOutputSurface::GpuBrowserCompositorOutputSurface(
     const scoped_refptr<ContextProviderCommandBuffer>& context,
+    const scoped_refptr<ContextProviderCommandBuffer>& worker_context,
     const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
     scoped_ptr<BrowserCompositorOverlayCandidateValidator>
         overlay_candidate_validator)
     : BrowserCompositorOutputSurface(context,
+                                     worker_context,
                                      vsync_manager,
                                      overlay_candidate_validator.Pass()),
 #if defined(OS_MACOSX)
@@ -105,7 +107,8 @@ void GpuBrowserCompositorOutputSurface::SwapBuffers(
 }
 
 void GpuBrowserCompositorOutputSurface::OnSwapBuffersCompleted(
-    const std::vector<ui::LatencyInfo>& latency_info) {
+    const std::vector<ui::LatencyInfo>& latency_info,
+    gfx::SwapResult result) {
 #if defined(OS_MACOSX)
   // On Mac, delay acknowledging the swap to the output surface client until
   // it has been drawn, see OnSurfaceDisplayed();
@@ -151,5 +154,13 @@ bool GpuBrowserCompositorOutputSurface::
   return should_show_frames_state_ != SHOULD_SHOW_FRAMES;
 }
 #endif
+
+bool GpuBrowserCompositorOutputSurface::SurfaceIsSuspendForRecycle() const {
+#if defined(OS_MACOSX)
+  return should_show_frames_state_ == SHOULD_NOT_SHOW_FRAMES_SUSPENDED;
+#else
+  return false;
+#endif
+}
 
 }  // namespace content

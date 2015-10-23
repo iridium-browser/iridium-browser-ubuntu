@@ -15,6 +15,8 @@
 #include "components/history/core/browser/top_sites_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/search_engines/template_url_service_observer.h"
+#include "components/suggestions/proto/suggestions.pb.h"
+#include "components/suggestions/suggestions_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "url/gurl.h"
@@ -122,10 +124,14 @@ class InstantService : public KeyedService,
 
   // TopSitesObserver:
   void TopSitesLoaded(history::TopSites* top_sites) override;
-  void TopSitesChanged(history::TopSites* top_sites) override;
+  void TopSitesChanged(history::TopSites* top_sites,
+                       ChangeReason change_reason) override;
 
   // Called when a renderer process is terminated.
   void OnRendererProcessTerminated(int process_id);
+
+  // Called when SuggestionsService has a new suggestions profile available.
+  void OnSuggestionsAvailable(const suggestions::SuggestionsProfile& profile);
 
   // Called when we get new most visited items from TopSites, registered as an
   // async callback. Parses them and sends them to the renderer via
@@ -151,8 +157,11 @@ class InstantService : public KeyedService,
   // The process ids associated with Instant processes.
   std::set<int> process_ids_;
 
-  // InstantMostVisitedItems sent to the Instant Pages.
+  // InstantMostVisitedItems from TopSites.
   std::vector<InstantMostVisitedItem> most_visited_items_;
+
+  // InstantMostVisitedItems from SuggestionService.
+  std::vector<InstantMostVisitedItem> suggestions_items_;
 
   // Theme-related data for NTP overlay to adopt themes.
   scoped_ptr<ThemeBackgroundInfo> theme_info_;
@@ -161,7 +170,7 @@ class InstantService : public KeyedService,
   // text or assets properly with the omnibox.
   int omnibox_start_margin_;
 
-  ObserverList<InstantServiceObserver> observers_;
+  base::ObserverList<InstantServiceObserver> observers_;
 
   content::NotificationRegistrar registrar_;
 
@@ -174,6 +183,9 @@ class InstantService : public KeyedService,
   // change that affects the default search provider.
   scoped_ptr<TemplateURLData> previous_default_search_provider_;
   GURL previous_google_base_url_;
+
+  // Suggestions Service to fetch server suggestions.
+  suggestions::SuggestionsService* suggestions_service_;
 
   // Used for Top Sites async retrieval.
   base::WeakPtrFactory<InstantService> weak_ptr_factory_;

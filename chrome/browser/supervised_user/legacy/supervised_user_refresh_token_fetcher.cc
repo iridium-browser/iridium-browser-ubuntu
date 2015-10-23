@@ -42,7 +42,11 @@ static const char kIssueTokenBodyFormat[] =
 
 // kIssueTokenBodyFormatDeviceIdAddendum is appended to kIssueTokenBodyFormat
 // if device_id is provided.
-static const char kIssueTokenBodyFormatDeviceIdAddendum[] = "&device_id=%s";
+// TODO(pavely): lib_ver is passed to differentiate IssueToken requests from
+// different code locations. Remove once device_id mismatch is understood.
+// (crbug.com/481596)
+static const char kIssueTokenBodyFormatDeviceIdAddendum[] =
+    "&device_id=%s&lib_ver=supervised_user";
 
 static const char kAuthorizationHeaderFormat[] =
     "Authorization: Bearer %s";
@@ -201,9 +205,8 @@ void SupervisedUserRefreshTokenFetcherImpl::OnURLFetchComplete(
   int response_code = source->GetResponseCode();
   if (response_code == net::HTTP_UNAUTHORIZED && !access_token_expired_) {
     access_token_expired_ = true;
-    oauth2_token_service_->InvalidateToken(account_id_,
-                                           OAuth2TokenService::ScopeSet(),
-                                           access_token_);
+    oauth2_token_service_->InvalidateAccessToken(
+        account_id_, OAuth2TokenService::ScopeSet(), access_token_);
     StartFetching();
     return;
   }
@@ -219,7 +222,7 @@ void SupervisedUserRefreshTokenFetcherImpl::OnURLFetchComplete(
 
   std::string response_body;
   source->GetResponseAsString(&response_body);
-  scoped_ptr<base::Value> value(base::JSONReader::Read(response_body));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(response_body);
   base::DictionaryValue* dict = NULL;
   if (!value.get() || !value->GetAsDictionary(&dict)) {
     DispatchNetworkError(net::ERR_INVALID_RESPONSE);

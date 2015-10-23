@@ -28,6 +28,7 @@
 
 #include "image_expectations.h"
 
+struct GrContextOptions;
 class SkBitmap;
 class SkCanvas;
 class SkGLContext;
@@ -70,11 +71,12 @@ public:
         kMaskFilter_DrawFilterFlag = 0x80000, // toggles on/off mask filters (e.g., blurs)
     };
 
-    SK_COMPILE_ASSERT(!(kMaskFilter_DrawFilterFlag & SkPaint::kAllFlags), maskfilter_flag_must_be_greater);
-    SK_COMPILE_ASSERT(!(kHinting_DrawFilterFlag & SkPaint::kAllFlags),
-            hinting_flag_must_be_greater);
-    SK_COMPILE_ASSERT(!(kSlightHinting_DrawFilterFlag & SkPaint::kAllFlags),
-            slight_hinting_flag_must_be_greater);
+    static_assert(!(kMaskFilter_DrawFilterFlag & SkPaint::kAllFlags),
+                  "maskfilter_flag_must_be_greater");
+    static_assert(!(kHinting_DrawFilterFlag & SkPaint::kAllFlags),
+                  "hinting_flag_must_be_greater");
+    static_assert(!(kSlightHinting_DrawFilterFlag & SkPaint::kAllFlags),
+                  "slight_hinting_flag_must_be_greater");
 
     /**
      * Called with each new SkPicture to render.
@@ -226,8 +228,13 @@ public:
 #endif
 
     void setDrawFilters(DrawFilterFlags const * const filters, const SkString& configName) {
-        memcpy(fDrawFilters, filters, sizeof(fDrawFilters));
+        fHasDrawFilters = false;
         fDrawFiltersConfig = configName;
+
+        for (size_t i = 0; i < SK_ARRAY_COUNT(fDrawFilters); ++i) {
+            fDrawFilters[i] = filters[i];
+            fHasDrawFilters |= SkToBool(filters[i]);
+        }
     }
 
     void setBBoxHierarchyType(BBoxHierarchyType bbhType) {
@@ -392,7 +399,7 @@ public:
         return fGrContext;
     }
 
-    const GrContext::Options& getGrContextOptions() {
+    const GrContextOptions& getGrContextOptions() {
         return fGrContextFactory.getGlobalOptions();
     }
 #endif
@@ -406,7 +413,7 @@ public:
     }
 
 #if SK_SUPPORT_GPU
-    explicit PictureRenderer(const GrContext::Options &opts)
+    explicit PictureRenderer(const GrContextOptions &opts)
 #else
     PictureRenderer()
 #endif
@@ -414,6 +421,7 @@ public:
         , fDeviceType(kBitmap_DeviceType)
         , fEnableWrites(false)
         , fBBoxHierarchyType(kNone_BBoxHierarchyType)
+        , fHasDrawFilters(false)
         , fScaleFactor(SK_Scalar1)
 #if SK_SUPPORT_GPU
         , fGrContextFactory(opts)
@@ -441,6 +449,7 @@ protected:
     SkDeviceTypes          fDeviceType;
     bool                   fEnableWrites;
     BBoxHierarchyType      fBBoxHierarchyType;
+    bool                   fHasDrawFilters;
     DrawFilterFlags        fDrawFilters[SkDrawFilter::kTypeCount];
     SkString               fDrawFiltersConfig;
     SkString               fWritePath;
@@ -498,7 +507,7 @@ private:
 class RecordPictureRenderer : public PictureRenderer {
 public:
 #if SK_SUPPORT_GPU
-    RecordPictureRenderer(const GrContext::Options &opts) : INHERITED(opts) { }
+    RecordPictureRenderer(const GrContextOptions &opts) : INHERITED(opts) { }
 #endif
 
     bool render(SkBitmap** out = NULL) override;
@@ -519,7 +528,7 @@ private:
 class PipePictureRenderer : public PictureRenderer {
 public:
 #if SK_SUPPORT_GPU
-    PipePictureRenderer(const GrContext::Options &opts) : INHERITED(opts) { }
+    PipePictureRenderer(const GrContextOptions &opts) : INHERITED(opts) { }
 #endif
 
     bool render(SkBitmap** out = NULL) override;
@@ -533,7 +542,7 @@ private:
 class SimplePictureRenderer : public PictureRenderer {
 public:
 #if SK_SUPPORT_GPU
-    SimplePictureRenderer(const GrContext::Options &opts) : INHERITED(opts) { }
+    SimplePictureRenderer(const GrContextOptions &opts) : INHERITED(opts) { }
 #endif
 
     virtual void init(const SkPicture* pict,
@@ -554,7 +563,7 @@ private:
 class TiledPictureRenderer : public PictureRenderer {
 public:
 #if SK_SUPPORT_GPU
-    TiledPictureRenderer(const GrContext::Options &opts);
+    TiledPictureRenderer(const GrContextOptions &opts);
 #else
     TiledPictureRenderer();
 #endif
@@ -689,7 +698,7 @@ private:
 class PlaybackCreationRenderer : public PictureRenderer {
 public:
 #if SK_SUPPORT_GPU
-    PlaybackCreationRenderer(const GrContext::Options &opts) : INHERITED(opts) { }
+    PlaybackCreationRenderer(const GrContextOptions &opts) : INHERITED(opts) { }
 #endif
 
     void setup() override;
@@ -709,7 +718,7 @@ private:
 };
 
 #if SK_SUPPORT_GPU
-extern PictureRenderer* CreateGatherPixelRefsRenderer(const GrContext::Options& opts);
+extern PictureRenderer* CreateGatherPixelRefsRenderer(const GrContextOptions& opts);
 #else
 extern PictureRenderer* CreateGatherPixelRefsRenderer();
 #endif

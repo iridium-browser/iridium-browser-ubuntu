@@ -41,7 +41,31 @@ const char kPepperVideoSourceName[] = "PepperVideoSourceName";
 // Default config for output mode.
 const int kDefaultOutputFrameRate = 30;
 
-media::VideoPixelFormat ToPixelFormat(PP_VideoFrame_Format format) {
+media::VideoCapturePixelFormat ToPixelFormat(PP_VideoFrame_Format format) {
+  switch (format) {
+    case PP_VIDEOFRAME_FORMAT_YV12:
+      return media::VIDEO_CAPTURE_PIXEL_FORMAT_YV12;
+    case PP_VIDEOFRAME_FORMAT_I420:
+      return media::VIDEO_CAPTURE_PIXEL_FORMAT_I420;
+    default:
+      DVLOG(1) << "Unsupported pixel format " << format;
+      return media::VIDEO_CAPTURE_PIXEL_FORMAT_UNKNOWN;
+  }
+}
+
+PP_VideoFrame_Format ToPpapiFormat(media::VideoPixelFormat format) {
+  switch (format) {
+    case media::PIXEL_FORMAT_YV12:
+      return PP_VIDEOFRAME_FORMAT_YV12;
+    case media::PIXEL_FORMAT_I420:
+      return PP_VIDEOFRAME_FORMAT_I420;
+    default:
+      DVLOG(1) << "Unsupported pixel format " << format;
+      return PP_VIDEOFRAME_FORMAT_UNKNOWN;
+  }
+}
+
+media::VideoPixelFormat FromPpapiFormat(PP_VideoFrame_Format format) {
   switch (format) {
     case PP_VIDEOFRAME_FORMAT_YV12:
       return media::PIXEL_FORMAT_YV12;
@@ -50,30 +74,6 @@ media::VideoPixelFormat ToPixelFormat(PP_VideoFrame_Format format) {
     default:
       DVLOG(1) << "Unsupported pixel format " << format;
       return media::PIXEL_FORMAT_UNKNOWN;
-  }
-}
-
-PP_VideoFrame_Format ToPpapiFormat(VideoFrame::Format format) {
-  switch (format) {
-    case VideoFrame::YV12:
-      return PP_VIDEOFRAME_FORMAT_YV12;
-    case VideoFrame::I420:
-      return PP_VIDEOFRAME_FORMAT_I420;
-    default:
-      DVLOG(1) << "Unsupported pixel format " << format;
-      return PP_VIDEOFRAME_FORMAT_UNKNOWN;
-  }
-}
-
-VideoFrame::Format FromPpapiFormat(PP_VideoFrame_Format format) {
-  switch (format) {
-    case PP_VIDEOFRAME_FORMAT_YV12:
-      return VideoFrame::YV12;
-    case PP_VIDEOFRAME_FORMAT_I420:
-      return VideoFrame::I420;
-    default:
-      DVLOG(1) << "Unsupported pixel format " << format;
-      return VideoFrame::UNKNOWN;
   }
 }
 
@@ -95,7 +95,8 @@ void ConvertFromMediaVideoFrame(const scoped_refptr<media::VideoFrame>& src,
                                 PP_VideoFrame_Format dst_format,
                                 const gfx::Size& dst_size,
                                 uint8_t* dst) {
-  CHECK(src->format() == VideoFrame::YV12 || src->format() == VideoFrame::I420);
+  CHECK(src->format() == media::PIXEL_FORMAT_YV12 ||
+        src->format() == media::PIXEL_FORMAT_I420);
   if (dst_format == PP_VIDEOFRAME_FORMAT_BGRA) {
     if (src->visible_rect().size() == dst_size) {
       libyuv::I420ToARGB(src->visible_data(VideoFrame::kYPlane),
@@ -182,9 +183,8 @@ namespace content {
 class PepperMediaStreamVideoTrackHost::FrameDeliverer
     : public base::RefCountedThreadSafe<FrameDeliverer> {
  public:
-  FrameDeliverer(
-      const scoped_refptr<base::MessageLoopProxy>& io_message_loop_proxy,
-      const VideoCaptureDeliverFrameCB& new_frame_callback);
+  FrameDeliverer(scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+                 const VideoCaptureDeliverFrameCB& new_frame_callback);
 
   void DeliverVideoFrame(const scoped_refptr<media::VideoFrame>& frame);
 
@@ -194,17 +194,16 @@ class PepperMediaStreamVideoTrackHost::FrameDeliverer
 
   void DeliverFrameOnIO(const scoped_refptr<media::VideoFrame>& frame);
 
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   VideoCaptureDeliverFrameCB new_frame_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameDeliverer);
 };
 
 PepperMediaStreamVideoTrackHost::FrameDeliverer::FrameDeliverer(
-    const scoped_refptr<base::MessageLoopProxy>& io_message_loop_proxy,
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     const VideoCaptureDeliverFrameCB& new_frame_callback)
-    : io_message_loop_(io_message_loop_proxy),
-      new_frame_callback_(new_frame_callback) {
+    : io_task_runner_(io_task_runner), new_frame_callback_(new_frame_callback) {
 }
 
 PepperMediaStreamVideoTrackHost::FrameDeliverer::~FrameDeliverer() {
@@ -212,14 +211,13 @@ PepperMediaStreamVideoTrackHost::FrameDeliverer::~FrameDeliverer() {
 
 void PepperMediaStreamVideoTrackHost::FrameDeliverer::DeliverVideoFrame(
     const scoped_refptr<media::VideoFrame>& frame) {
-  io_message_loop_->PostTask(
-      FROM_HERE,
-      base::Bind(&FrameDeliverer::DeliverFrameOnIO, this, frame));
+  io_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&FrameDeliverer::DeliverFrameOnIO, this, frame));
 }
 
 void PepperMediaStreamVideoTrackHost::FrameDeliverer::DeliverFrameOnIO(
      const scoped_refptr<media::VideoFrame>& frame) {
-  DCHECK(io_message_loop_->BelongsToCurrentThread());
+  DCHECK(io_task_runner_->BelongsToCurrentThread());
   // The time when this frame is generated is unknown so give a null value to
   // |estimated_capture_time|.
   new_frame_callback_.Run(frame, base::TimeTicks());
@@ -361,8 +359,7 @@ int32_t PepperMediaStreamVideoTrackHost::SendFrameToTrack(int32_t index) {
         y_data,
         u_data,
         v_data,
-        base::TimeDelta::FromMilliseconds(ts_ms),
-        base::Closure());
+        base::TimeDelta::FromMilliseconds(ts_ms));
 
     frame_deliverer_->DeliverVideoFrame(frame);
   }
@@ -436,7 +433,7 @@ void PepperMediaStreamVideoTrackHost::StartSourceImpl(
     const blink::WebMediaConstraints& constraints,
     const VideoCaptureDeliverFrameCB& frame_callback) {
   output_started_ = true;
-  frame_deliverer_ = new FrameDeliverer(io_message_loop(), frame_callback);
+  frame_deliverer_ = new FrameDeliverer(io_task_runner(), frame_callback);
 }
 
 void PepperMediaStreamVideoTrackHost::StopSourceImpl() {

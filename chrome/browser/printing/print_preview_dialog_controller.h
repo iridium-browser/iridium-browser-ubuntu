@@ -79,14 +79,19 @@ class PrintPreviewDialogController
     return is_creating_print_preview_dialog_;
   }
 
+  void AddProxyDialogForWebContents(content::WebContents* source,
+                                    content::WebContents* target);
+
+  void RemoveProxyDialogForWebContents(content::WebContents* source);
+
  private:
   friend class base::RefCounted<PrintPreviewDialogController>;
 
   // 1:1 relationship between a print preview dialog and its initiator tab.
   // Key: Print preview dialog.
   // Value: Initiator.
-  typedef std::map<content::WebContents*, content::WebContents*>
-      PrintPreviewDialogMap;
+  using PrintPreviewDialogMap =
+      std::map<content::WebContents*, content::WebContents*>;
 
   ~PrintPreviewDialogController() override;
 
@@ -121,6 +126,8 @@ class PrintPreviewDialogController
 
   // Mapping between print preview dialog and the corresponding initiator.
   PrintPreviewDialogMap preview_dialog_map_;
+
+  PrintPreviewDialogMap proxied_dialog_map_;
 
   // A registrar for listening to notifications.
   content::NotificationRegistrar registrar_;

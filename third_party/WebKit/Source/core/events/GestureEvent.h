@@ -35,16 +35,18 @@ namespace blink {
 
 class CORE_EXPORT GestureEvent final : public MouseRelatedEvent {
 public:
-    virtual ~GestureEvent() { }
+    ~GestureEvent() override { }
 
     static PassRefPtrWillBeRawPtr<GestureEvent> create(PassRefPtrWillBeRawPtr<AbstractView>, const PlatformGestureEvent&);
 
-    virtual bool isGestureEvent() const override;
+    bool isGestureEvent() const override;
 
-    virtual const AtomicString& interfaceName() const override;
+    const AtomicString& interfaceName() const override;
 
     float deltaX() const { return m_deltaX; }
     float deltaY() const { return m_deltaY; }
+
+    PassRefPtrWillBeRawPtr<EventDispatchMediator> createMediator() override;
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -68,7 +70,7 @@ private:
 
     GestureEvent& event() const;
 
-    virtual bool dispatchEvent(EventDispatcher&) const override;
+    bool dispatchEvent(EventDispatcher&) const override;
 };
 
 DEFINE_EVENT_TYPE_CASTS(GestureEvent);

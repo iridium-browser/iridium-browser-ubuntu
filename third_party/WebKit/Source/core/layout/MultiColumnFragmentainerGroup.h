@@ -33,10 +33,15 @@ public:
 
     // Position within the LayoutMultiColumnSet.
     LayoutUnit logicalTop() const { return m_logicalTop; }
+    void setLogicalTop(LayoutUnit logicalTop) { m_logicalTop = logicalTop; }
 
     LayoutUnit logicalHeight() const { return m_columnHeight; }
 
     LayoutSize offsetFromColumnSet() const;
+
+    // Return the block offset from the enclosing flow thread, if nested. In the coordinate space
+    // of the enclosing flow thread.
+    LayoutUnit blockOffsetInEnclosingFlowThread() const;
 
     // The top of our flow thread portion
     LayoutUnit logicalTopInFlowThread() const { return m_logicalTopInFlowThread; }
@@ -44,7 +49,7 @@ public:
 
     // The bottom of our flow thread portion
     LayoutUnit logicalBottomInFlowThread() const { return m_logicalBottomInFlowThread; }
-    void setLogicalBottomInFlowThread(LayoutUnit logicalBottomInFlowThread) { m_logicalBottomInFlowThread = logicalBottomInFlowThread; }
+    void setLogicalBottomInFlowThread(LayoutUnit logicalBottomInFlowThread) { ASSERT(logicalBottomInFlowThread >= m_logicalTopInFlowThread); m_logicalBottomInFlowThread = logicalBottomInFlowThread; }
 
     // The height of our flow thread portion
     LayoutUnit logicalHeightInFlowThread() const { return m_logicalBottomInFlowThread - m_logicalTopInFlowThread; }
@@ -56,11 +61,11 @@ public:
     void recordSpaceShortage(LayoutUnit);
     bool recalculateColumnHeight(BalancedColumnHeightCalculation calculationMode);
 
-    void expandToEncompassFlowThreadOverflow();
-
     LayoutSize flowThreadTranslationAtOffset(LayoutUnit offsetInFlowThread) const;
     LayoutUnit columnLogicalTopForOffset(LayoutUnit offsetInFlowThread) const;
     LayoutPoint visualPointToFlowThreadPoint(const LayoutPoint& visualPoint) const;
+    LayoutRect fragmentsBoundingBox(const LayoutRect& boundingBoxInFlowThread) const;
+
     void collectLayerFragments(DeprecatedPaintLayerFragments&, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRect) const;
     LayoutRect calculateOverflow() const;
 
@@ -83,11 +88,10 @@ private:
 
     LayoutUnit calculateColumnHeight(BalancedColumnHeightCalculation) const;
 
-    LayoutSize translationAtColumn(unsigned columnIndex) const;
     LayoutRect columnRectAt(unsigned columnIndex) const;
     LayoutUnit logicalTopInFlowThreadAt(unsigned columnIndex) const { return m_logicalTopInFlowThread + columnIndex * m_columnHeight; }
     LayoutRect flowThreadPortionRectAt(unsigned columnIndex) const;
-    LayoutRect flowThreadPortionOverflowRect(const LayoutRect& flowThreadPortion, unsigned columnIndex, unsigned columnCount, LayoutUnit columnGap) const;
+    LayoutRect flowThreadPortionOverflowRectAt(unsigned columnIndex) const;
 
     enum ColumnIndexCalculationMode {
         ClampToExistingColumns, // Stay within the range of already existing columns.
@@ -99,6 +103,13 @@ private:
     // column progression axis is relevant. Every point belongs to a column, even if said point is
     // not inside any of the columns.
     unsigned columnIndexAtVisualPoint(const LayoutPoint& visualPoint) const;
+
+    // Get the first and the last column intersecting the specified block range.
+    // Note that |logicalBottomInFlowThread| is an exclusive endpoint.
+    void columnIntervalForBlockRangeInFlowThread(LayoutUnit logicalTopInFlowThread, LayoutUnit logicalBottomInFlowThread, unsigned& firstColumn, unsigned& lastColumn) const;
+
+    // Get the first and the last column intersecting the specified visual rectangle.
+    void columnIntervalForVisualRect(const LayoutRect&, unsigned& firstColumn, unsigned& lastColumn) const;
 
     LayoutMultiColumnSet& m_columnSet;
 
@@ -147,6 +158,7 @@ private:
 class CORE_EXPORT MultiColumnFragmentainerGroupList {
 public:
     MultiColumnFragmentainerGroupList(LayoutMultiColumnSet&);
+    ~MultiColumnFragmentainerGroupList();
 
     // Add an additional fragmentainer group to the end of the list, and return it.
     MultiColumnFragmentainerGroup& addExtraGroup();
@@ -167,8 +179,11 @@ public:
     iterator end() { return m_groups.end(); }
     const_iterator end() const { return m_groups.end(); }
 
-    void append(const MultiColumnFragmentainerGroup& group) { m_groups.append(group); }
+    size_t size() const { return m_groups.size(); }
+    MultiColumnFragmentainerGroup& operator[](size_t i) { return m_groups.at(i); }
+    const MultiColumnFragmentainerGroup& operator[](size_t i) const { return m_groups.at(i); }
 
+    void append(const MultiColumnFragmentainerGroup& group) { m_groups.append(group); }
     void shrink(size_t size) { m_groups.shrink(size); }
 
 private:

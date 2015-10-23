@@ -26,7 +26,6 @@
 #if ENABLE(WEB_AUDIO)
 #include "modules/webaudio/AudioBasicProcessorHandler.h"
 
-#include "modules/webaudio/AudioContext.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/AudioNodeOutput.h"
 #include "platform/audio/AudioBus.h"
@@ -49,7 +48,7 @@ PassRefPtr<AudioBasicProcessorHandler> AudioBasicProcessorHandler::create(NodeTy
 
 AudioBasicProcessorHandler::~AudioBasicProcessorHandler()
 {
-    // Safe to call the virtual uninitialize() because it's final.
+    // Safe to call the uninitialize() because it's final.
     uninitialize();
 }
 

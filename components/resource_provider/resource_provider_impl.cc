@@ -10,11 +10,14 @@
 #include "base/logging.h"
 #include "components/resource_provider/file_utils.h"
 #include "mojo/platform_handle/platform_handle_functions.h"
+#include "url/gurl.h"
 
 using mojo::ScopedHandle;
 
 namespace resource_provider {
 namespace {
+
+const char kResourceIcudtl[] = "icudtl.dat";
 
 ScopedHandle GetHandleForPath(const base::FilePath& path) {
   if (path.empty())
@@ -42,8 +45,10 @@ ScopedHandle GetHandleForPath(const base::FilePath& path) {
 }  // namespace
 
 ResourceProviderImpl::ResourceProviderImpl(
-    const base::FilePath& application_path)
-    : application_path_(application_path) {
+    const base::FilePath& application_path,
+    const std::string& resource_provider_app_url)
+    : application_path_(application_path),
+      resource_provider_app_url_(resource_provider_app_url) {
   CHECK(!application_path_.empty());
 }
 
@@ -61,6 +66,14 @@ void ResourceProviderImpl::GetResources(mojo::Array<mojo::String> paths,
     }
   }
   callback.Run(handles.Pass());
+}
+
+void ResourceProviderImpl::GetICUHandle(const GetICUHandleCallback& callback) {
+  const base::FilePath resource_app_path(
+      GetPathForApplicationUrl(GURL(resource_provider_app_url_)));
+  mojo::ScopedHandle handle = GetHandleForPath(
+      GetPathForResourceNamed(resource_app_path, kResourceIcudtl));
+  callback.Run(handle.Pass());
 }
 
 }  // namespace resource_provider

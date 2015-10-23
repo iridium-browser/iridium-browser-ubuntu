@@ -47,6 +47,14 @@ public:
 #endif
 
     virtual CSSRule* parentRule() const = 0;
+    String cssFloat()
+    {
+        return getPropertyValueInternal(CSSPropertyFloat);
+    }
+    void setCSSFloat(const String& value, ExceptionState& exceptionState)
+    {
+        setPropertyInternal(CSSPropertyFloat, value, false, exceptionState);
+    }
     virtual String cssText() const = 0;
     virtual void setCSSText(const String&, ExceptionState&) = 0;
     virtual unsigned length() const = 0;
@@ -64,8 +72,6 @@ public:
     virtual PassRefPtrWillBeRawPtr<CSSValue> getPropertyCSSValueInternal(CSSPropertyID) = 0;
     virtual String getPropertyValueInternal(CSSPropertyID) = 0;
     virtual void setPropertyInternal(CSSPropertyID, const String& value, bool important, ExceptionState&) = 0;
-
-    virtual PassRefPtrWillBeRawPtr<MutableStylePropertySet> copyProperties() const = 0;
 
     virtual bool cssPropertyMatches(CSSPropertyID, const CSSValue*) const = 0;
     virtual CSSStyleSheet* parentStyleSheet() const { return 0; }

@@ -33,13 +33,14 @@
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/cocoa/key_equivalent_constants.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #import "chrome/common/mac/app_mode_common.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/crx_file/id_util.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
@@ -183,9 +184,9 @@ bool HasExistingExtensionShim(const base::FilePath& destination_directory,
   for (base::FilePath shim_path = enumerator.Next();
        !shim_path.empty(); shim_path = enumerator.Next()) {
     if (shim_path.BaseName() != own_basename &&
-        EndsWith(shim_path.RemoveExtension().value(),
-                 extension_id,
-                 true /* case_sensitive */)) {
+        base::EndsWith(shim_path.RemoveExtension().value(),
+                       extension_id,
+                       base::CompareCase::SENSITIVE)) {
       return true;
     }
   }
@@ -212,11 +213,10 @@ bool HasSameUserDataDir(const base::FilePath& bundle_path) {
   base::FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   DCHECK(!user_data_dir.empty());
-  return StartsWithASCII(
+  return base::StartsWith(
       base::SysNSStringToUTF8(
           [plist valueForKey:app_mode::kCrAppModeUserDataDirKey]),
-      user_data_dir.value(),
-      true /* case_sensitive */);
+      user_data_dir.value(), base::CompareCase::SENSITIVE);
 }
 
 void LaunchShimOnFileThread(scoped_ptr<web_app::ShortcutInfo> shortcut_info,
@@ -319,11 +319,11 @@ base::FilePath GetLocalizableAppShortcutsSubdirName() {
   static const char kChromeAppDirName[] = "Chrome Apps.localized";
   static const char kChromeCanaryAppDirName[] = "Chrome Canary Apps.localized";
 
-  switch (chrome::VersionInfo::GetChannel()) {
-    case chrome::VersionInfo::CHANNEL_UNKNOWN:
+  switch (chrome::GetChannel()) {
+    case version_info::Channel::UNKNOWN:
       return base::FilePath(kChromiumAppDirName);
 
-    case chrome::VersionInfo::CHANNEL_CANARY:
+    case version_info::Channel::CANARY:
       return base::FilePath(kChromeCanaryAppDirName);
 
     default:
@@ -454,7 +454,8 @@ void DeletePathAndParentIfEmpty(const base::FilePath& app_path) {
 
 bool IsShimForProfile(const base::FilePath& base_name,
                       const std::string& profile_base_name) {
-  if (!StartsWithASCII(base_name.value(), profile_base_name, true))
+  if (!base::StartsWith(base_name.value(), profile_base_name,
+                        base::CompareCase::SENSITIVE))
     return false;
 
   if (base_name.Extension() != ".app")
@@ -809,8 +810,17 @@ bool WebAppShortcutCreator::UpdateShortcuts() {
   if (app_path.empty() || !base::PathExists(app_path))
     app_path = GetAppBundleById(GetBundleIdentifier());
 
-  if (!app_path.empty())
+  if (app_path.empty()) {
+    if (info_->from_bookmark) {
+      // The bookmark app shortcut has been deleted by the user. Restore it, as
+      // the Mac UI for bookmark apps creates the expectation that the app will
+      // be added to Applications.
+      app_path = GetApplicationsDirname();
+      paths.push_back(app_path);
+    }
+  } else {
     paths.push_back(app_path.DirName());
+  }
 
   size_t success_count = CreateShortcutsIn(paths);
   if (success_count == 0)
@@ -862,7 +872,7 @@ bool WebAppShortcutCreator::UpdatePlist(const base::FilePath& app_path) const {
   }
 
   // 2. Fill in other values.
-  [plist setObject:base::SysUTF8ToNSString(chrome::VersionInfo().Version())
+  [plist setObject:base::SysUTF8ToNSString(version_info::GetVersionNumber())
             forKey:app_mode::kCrBundleVersionKey];
   [plist setObject:base::SysUTF8ToNSString(info_->version_for_display)
             forKey:app_mode::kCFBundleShortVersionStringKey];

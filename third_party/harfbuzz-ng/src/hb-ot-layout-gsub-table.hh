@@ -1222,7 +1222,6 @@ struct SubstLookup : Lookup
   {
     TRACE_SANITIZE (this);
     if (unlikely (!Lookup::sanitize (c))) return TRACE_RETURN (false);
-    const OffsetArrayOf<SubstLookupSubTable> &list = get_subtables<SubstLookupSubTable> ();
     if (unlikely (!dispatch (c))) return TRACE_RETURN (false);
 
     if (unlikely (get_type () == SubstLookupSubTable::Extension))
@@ -1312,8 +1311,11 @@ template <typename context_t>
   const GSUB &gsub = *(hb_ot_layout_from_face (c->face)->gsub);
   const SubstLookup &l = gsub.get_lookup (lookup_index);
   unsigned int saved_lookup_props = c->lookup_props;
-  c->set_lookup (l);
+  unsigned int saved_lookup_index = c->lookup_index;
+  c->set_lookup_index (lookup_index);
+  c->set_lookup_props (l.get_props ());
   bool ret = l.dispatch (c);
+  c->set_lookup_index (saved_lookup_index);
   c->set_lookup_props (saved_lookup_props);
   return ret;
 }

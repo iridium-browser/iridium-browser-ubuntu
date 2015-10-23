@@ -8,9 +8,9 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/location.h"
 #include "base/metrics/histogram.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -107,7 +107,8 @@ void NotifyPluginsOfActivation() {
 }
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_OPENBSD) && !defined(OS_ANDROID)
+#if defined(OS_POSIX)
+#if !defined(OS_OPENBSD) && !defined(OS_ANDROID)
 void NotifyPluginDirChanged(const base::FilePath& path, bool error) {
   if (error) {
     // TODO(pastarmovj): Add some sensible error handling. Maybe silently
@@ -123,13 +124,14 @@ void NotifyPluginDirChanged(const base::FilePath& path, bool error) {
       base::Bind(&PluginService::PurgePluginListCache,
                  static_cast<BrowserContext*>(NULL), false));
 }
-#endif
+#endif  // !defined(OS_OPENBSD) && !defined(OS_ANDROID)
 
-void ForwardCallback(base::MessageLoopProxy* target_loop,
+void ForwardCallback(base::SingleThreadTaskRunner* target_task_runner,
                      const PluginService::GetPluginsCallback& callback,
                      const std::vector<WebPluginInfo>& plugins) {
-  target_loop->PostTask(FROM_HERE, base::Bind(callback, plugins));
+  target_task_runner->PostTask(FROM_HERE, base::Bind(callback, plugins));
 }
+#endif  // defined(OS_POSIX)
 
 }  // namespace
 
@@ -581,7 +583,8 @@ base::string16 PluginServiceImpl::GetPluginDisplayNameByPath(
     // Many plugins on the Mac have .plugin in the actual name, which looks
     // terrible, so look for that and strip it off if present.
     const std::string kPluginExtension = ".plugin";
-    if (EndsWith(plugin_name, base::ASCIIToUTF16(kPluginExtension), true))
+    if (base::EndsWith(plugin_name, base::ASCIIToUTF16(kPluginExtension),
+                       base::CompareCase::SENSITIVE))
       plugin_name.erase(plugin_name.length() - kPluginExtension.length());
 #endif  // OS_MACOSX
   }
@@ -589,45 +592,43 @@ base::string16 PluginServiceImpl::GetPluginDisplayNameByPath(
 }
 
 void PluginServiceImpl::GetPlugins(const GetPluginsCallback& callback) {
-  scoped_refptr<base::MessageLoopProxy> target_loop(
-      base::MessageLoop::current()->message_loop_proxy());
+  scoped_refptr<base::SingleThreadTaskRunner> target_task_runner(
+      base::ThreadTaskRunnerHandle::Get());
 
   if (LoadPluginListInProcess()) {
-    BrowserThread::GetBlockingPool()->
-        PostSequencedWorkerTaskWithShutdownBehavior(
-            plugin_list_token_,
-            FROM_HERE,
+    BrowserThread::GetBlockingPool()
+        ->PostSequencedWorkerTaskWithShutdownBehavior(
+            plugin_list_token_, FROM_HERE,
             base::Bind(&PluginServiceImpl::GetPluginsInternal,
-                       base::Unretained(this),
-                       target_loop, callback),
-        base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+                       base::Unretained(this), target_task_runner, callback),
+            base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
     return;
   }
 #if defined(OS_POSIX)
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       base::Bind(&PluginServiceImpl::GetPluginsOnIOThread,
-                 base::Unretained(this), target_loop, callback));
+                 base::Unretained(this), target_task_runner, callback));
 #else
   NOTREACHED();
 #endif
 }
 
 void PluginServiceImpl::GetPluginsInternal(
-     base::MessageLoopProxy* target_loop,
-     const PluginService::GetPluginsCallback& callback) {
+    base::SingleThreadTaskRunner* target_task_runner,
+    const PluginService::GetPluginsCallback& callback) {
   DCHECK(BrowserThread::GetBlockingPool()->IsRunningSequenceOnCurrentThread(
       plugin_list_token_));
 
   std::vector<WebPluginInfo> plugins;
   PluginList::Singleton()->GetPlugins(&plugins, NPAPIPluginsSupported());
 
-  target_loop->PostTask(FROM_HERE,
-      base::Bind(callback, plugins));
+  target_task_runner->PostTask(FROM_HERE, base::Bind(callback, plugins));
 }
 
 #if defined(OS_POSIX)
 void PluginServiceImpl::GetPluginsOnIOThread(
-    base::MessageLoopProxy* target_loop,
+    base::SingleThreadTaskRunner* target_task_runner,
     const GetPluginsCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -637,8 +638,8 @@ void PluginServiceImpl::GetPluginsOnIOThread(
   if (!plugin_loader_.get())
     plugin_loader_ = new PluginLoaderPosix;
 
-  plugin_loader_->GetPlugins(
-      base::Bind(&ForwardCallback, make_scoped_refptr(target_loop), callback));
+  plugin_loader_->GetPlugins(base::Bind(
+      &ForwardCallback, make_scoped_refptr(target_task_runner), callback));
 }
 #endif
 
@@ -795,47 +796,26 @@ void PluginServiceImpl::GetInternalPlugins(
 }
 
 bool PluginServiceImpl::NPAPIPluginsSupported() {
-  if (npapi_plugins_enabled_)
-    return true;
-
-  static bool command_line_checked = false;
-
-  if (!command_line_checked) {
 #if defined(OS_WIN) || defined(OS_MACOSX)
-    const base::CommandLine* command_line =
-        base::CommandLine::ForCurrentProcess();
-    npapi_plugins_enabled_ = command_line->HasSwitch(switches::kEnableNpapi);
+  npapi_plugins_enabled_ = GetContentClient()->browser()->IsNPAPIEnabled();
 #if defined(OS_WIN)
-    // NPAPI plugins don't play well with Win32k renderer lockdown.
-    if (npapi_plugins_enabled_)
-      DisableWin32kRendererLockdown();
+  // NPAPI plugins don't play well with Win32k renderer lockdown.
+  if (npapi_plugins_enabled_)
+    DisableWin32kRendererLockdown();
 #endif
-    NPAPIPluginStatus status =
-        npapi_plugins_enabled_ ? NPAPI_STATUS_ENABLED : NPAPI_STATUS_DISABLED;
+  NPAPIPluginStatus status =
+      npapi_plugins_enabled_ ? NPAPI_STATUS_ENABLED : NPAPI_STATUS_DISABLED;
 #else
-    NPAPIPluginStatus status = NPAPI_STATUS_UNSUPPORTED;
+  NPAPIPluginStatus status = NPAPI_STATUS_UNSUPPORTED;
 #endif
-    UMA_HISTOGRAM_ENUMERATION("Plugin.NPAPIStatus", status,
-        NPAPI_STATUS_ENUM_COUNT);
-  }
+  UMA_HISTOGRAM_ENUMERATION("Plugin.NPAPIStatus", status,
+                            NPAPI_STATUS_ENUM_COUNT);
 
   return npapi_plugins_enabled_;
 }
 
 void PluginServiceImpl::DisablePluginsDiscoveryForTesting() {
   PluginList::Singleton()->DisablePluginsDiscovery();
-}
-
-void PluginServiceImpl::EnableNpapiPlugins() {
-#if defined(OS_WIN)
-  DisableWin32kRendererLockdown();
-#endif
-  npapi_plugins_enabled_ = true;
-  RefreshPlugins();
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&PluginService::PurgePluginListCache,
-                 static_cast<BrowserContext*>(NULL), false));
 }
 
 #if defined(OS_MACOSX)
@@ -888,8 +868,8 @@ bool PluginServiceImpl::IsPluginWindow(HWND window) {
 bool PluginServiceImpl::PpapiDevChannelSupported(
     BrowserContext* browser_context,
     const GURL& document_url) {
-  return content::GetContentClient()->browser()->
-      IsPluginAllowedToUseDevChannelAPIs(browser_context, document_url);
+  return GetContentClient()->browser()->IsPluginAllowedToUseDevChannelAPIs(
+      browser_context, document_url);
 }
 
 }  // namespace content

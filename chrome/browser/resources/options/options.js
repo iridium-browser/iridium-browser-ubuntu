@@ -45,8 +45,6 @@ var SupervisedUserCreateConfirmOverlay =
 var SupervisedUserImportOverlay = options.SupervisedUserImportOverlay;
 var SupervisedUserLearnMoreOverlay = options.SupervisedUserLearnMoreOverlay;
 var SyncSetupOverlay = options.SyncSetupOverlay;
-var WebsiteSettingsEditor = options.WebsiteSettings.WebsiteSettingsEditor;
-var WebsiteSettingsManager = options.ContentSettings.WebsiteSettingsManager;
 var ThirdPartyImeConfirmOverlay = options.ThirdPartyImeConfirmOverlay;
 
 /**
@@ -97,29 +95,21 @@ function load() {
           $('do-not-track-enabled')['pref'],
           $('do-not-track-enabled')['metric']),
       BrowserOptions.getInstance());
-  // 'spelling-enabled-control' element is only present on Chrome branded
-  // builds.
-  if ($('spelling-enabled-control')) {
-    PageManager.registerOverlay(
-        new ConfirmDialog(
-            'spellingConfirm',
-            loadTimeData.getString('spellingConfirmOverlayTabTitle'),
-            'spelling-confirm-overlay',
-            /** @type {HTMLButtonElement} */($('spelling-confirm-ok')),
-            /** @type {HTMLButtonElement} */($('spelling-confirm-cancel')),
-            $('spelling-enabled-control')['pref'],
-            $('spelling-enabled-control')['metric']),
-        BrowserOptions.getInstance());
-  }
+  PageManager.registerOverlay(
+      new ConfirmDialog(
+          'spellingConfirm',
+          loadTimeData.getString('spellingConfirmOverlayTabTitle'),
+          'spelling-confirm-overlay',
+          /** @type {HTMLButtonElement} */($('spelling-confirm-ok')),
+          /** @type {HTMLButtonElement} */($('spelling-confirm-cancel')),
+          $('spelling-enabled-control')['pref'],
+          $('spelling-enabled-control')['metric']),
+      BrowserOptions.getInstance());
   PageManager.registerOverlay(new HotwordConfirmDialog(),
                               BrowserOptions.getInstance());
   PageManager.registerOverlay(ContentSettings.getInstance(),
                               BrowserOptions.getInstance(),
                               [$('privacyContentSettingsButton')]);
-  PageManager.registerOverlay(WebsiteSettingsManager.getInstance(),
-                              ContentSettings.getInstance());
-  PageManager.registerOverlay(WebsiteSettingsEditor.getInstance(),
-                              WebsiteSettingsManager.getInstance());
   PageManager.registerOverlay(ContentSettingsExceptionsArea.getInstance(),
                               ContentSettings.getInstance());
   PageManager.registerOverlay(CookiesView.getInstance(),
@@ -134,7 +124,7 @@ function load() {
   if (!cr.isMac) {
     PageManager.registerOverlay(EditDictionaryOverlay.getInstance(),
                                 LanguageOptions.getInstance(),
-                                [$('edit-dictionary-button')]);
+                                [$('edit-custom-dictionary-button')]);
   }
   PageManager.registerOverlay(FontSettings.getInstance(),
                               BrowserOptions.getInstance(),
@@ -220,7 +210,7 @@ function load() {
                                 BrowserOptions.getInstance());
     PageManager.registerOverlay(PowerOverlay.getInstance(),
                                 BrowserOptions.getInstance(),
-                                [$('power-settings-button')]);
+                                [$('power-settings-link')]);
     PageManager.registerOverlay(ThirdPartyImeConfirmOverlay.getInstance(),
                                 LanguageOptions.getInstance());
   }

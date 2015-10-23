@@ -38,7 +38,7 @@ struct CookieStoreIOSTestTraits {
   static const bool is_cookie_monster = false;
   static const bool supports_http_only = false;
   static const bool supports_non_dotted_domains = false;
-  static const bool supports_trailing_dots = false;
+  static const bool preserves_trailing_dots = false;
   static const bool filters_schemes = false;
   static const bool has_path_prefix_bug = true;
   static const int creation_time_granularity_in_ms = 1000;
@@ -54,7 +54,7 @@ struct InactiveCookieStoreIOSTestTraits {
   static const bool is_cookie_monster = false;
   static const bool supports_http_only = false;
   static const bool supports_non_dotted_domains = true;
-  static const bool supports_trailing_dots = true;
+  static const bool preserves_trailing_dots = true;
   static const bool filters_schemes = false;
   static const bool has_path_prefix_bug = false;
   static const int creation_time_granularity_in_ms = 0;
@@ -164,7 +164,7 @@ struct RoundTripTestCookieStoreTraits {
   static const bool is_cookie_monster = false;
   static const bool supports_http_only = false;
   static const bool supports_non_dotted_domains = false;
-  static const bool supports_trailing_dots = false;
+  static const bool preserves_trailing_dots = false;
   static const bool filters_schemes = false;
   static const bool has_path_prefix_bug = true;
   static const int creation_time_granularity_in_ms = 1000;
@@ -579,6 +579,27 @@ TEST_F(CookieStoreIOSWithBackend, SyncThenUnsync) {
   dummy_store->UnSynchronize();
 }
 
+// Tests that Synchronization can be "aborted" while there are pending tasks
+// (i.e. the cookie store is unsynchronized while synchronization is in progress
+// and there are pending tasks).
+TEST_F(CookieStoreIOSWithBackend, SyncThenUnsyncWithPendingTasks) {
+  ClearCookies();
+  scoped_refptr<CookieStoreIOS> dummy_store = new CookieStoreIOS(nullptr);
+  // Start synchornization.
+  CookieStoreIOS::SwitchSynchronizedStore(nullptr, store_.get());
+  // Create a pending task while synchronization is in progress.
+  GetCookieCallback callback;
+  GetCookies(base::Bind(&GetCookieCallback::Run, base::Unretained(&callback)));
+  // Cancel the synchronization.
+  CookieStoreIOS::SwitchSynchronizedStore(store_.get(), dummy_store.get());
+  // Synchronization completes after being cancelled.
+  backend_->RunLoadedCallback();
+  // The task is not lost.
+  EXPECT_TRUE(callback.did_run());
+  EXPECT_EQ("a=b", callback.cookie_line());
+  dummy_store->UnSynchronize();
+}
+
 TEST_F(CookieStoreIOSWithBackend, ChangePolicyOnceDuringSynchronization) {
   // Start synchronization.
   CookieStoreIOS::SwitchSynchronizedStore(nullptr, store_.get());
@@ -590,6 +611,23 @@ TEST_F(CookieStoreIOSWithBackend, ChangePolicyOnceDuringSynchronization) {
   CookieStoreIOS::SetCookiePolicy(CookieStoreIOS::ALLOW);
   GetCookieCallback callback;
   GetCookies(base::Bind(&GetCookieCallback::Run, base::Unretained(&callback)));
+  EXPECT_TRUE(callback.did_run());
+  EXPECT_EQ("a=b", callback.cookie_line());
+  store_->UnSynchronize();
+}
+
+TEST_F(CookieStoreIOSWithBackend,
+       ChangePolicyDuringSynchronizationWithPendingTask) {
+  // Start synchronization.
+  CookieStoreIOS::SwitchSynchronizedStore(nullptr, store_.get());
+  // Create a pending task while synchronization is in progress.
+  GetCookieCallback callback;
+  GetCookies(base::Bind(&GetCookieCallback::Run, base::Unretained(&callback)));
+  // Toggle cookie policy to trigger another synchronization while the first one
+  // is still in progress.
+  CookieStoreIOS::SetCookiePolicy(CookieStoreIOS::BLOCK);
+  // Backend loading completes (end of synchronization).
+  backend_->RunLoadedCallback();
   EXPECT_TRUE(callback.did_run());
   EXPECT_EQ("a=b", callback.cookie_line());
   store_->UnSynchronize();

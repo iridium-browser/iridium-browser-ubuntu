@@ -9,10 +9,9 @@
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/logging.h"
-#include "base/strings/string_piece.h"
-#include "base/synchronization/lock.h"
+#include "base/macros.h"
 #include "tools/gn/action_values.h"
 #include "tools/gn/config_values.h"
 #include "tools/gn/inherited_libraries.h"
@@ -120,9 +119,11 @@ class Target : public Item {
   const FileList& inputs() const { return inputs_; }
   FileList& inputs() { return inputs_; }
 
-  // Runtime dependencies.
-  const FileList& data() const { return data_; }
-  FileList& data() { return data_; }
+  // Runtime dependencies. These are "file-like things" that can either be
+  // directories or files. They do not need to exist, these are just passed as
+  // runtime dependencies to external test systems as necessary.
+  const std::vector<std::string>& data() const { return data_; }
+  std::vector<std::string>& data() { return data_; }
 
   // Returns true if targets depending on this one should have an order
   // dependency.
@@ -219,6 +220,16 @@ class Target : public Item {
   // frequently by unit tests which become needlessly verbose.
   bool SetToolchain(const Toolchain* toolchain, Err* err = nullptr);
 
+  // Once this target has been resolved, all outputs from the target will be
+  // listed here. This will include things listed in the "outputs" for an
+  // action or a copy step, and the output library or executable file(s) from
+  // binary targets.
+  //
+  // It will NOT include stamp files and object files.
+  const std::vector<OutputFile>& computed_outputs() const {
+    return computed_outputs_;
+  }
+
   // Returns outputs from this target. The link output file is the one that
   // other targets link to when they depend on this target. This will only be
   // valid for libraries and will be empty for all other target types.
@@ -240,6 +251,8 @@ class Target : public Item {
   }
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(Target, ResolvePrecompiledHeaders);
+
   // Pulls necessary information from dependencies to this one when all
   // dependencies have been resolved.
   void PullDependentTarget(const Target* dep, bool is_public);
@@ -254,10 +267,16 @@ class Target : public Item {
   // Fills the link and dependency output files when a target is resolved.
   void FillOutputFiles();
 
+  // Checks precompiled headers from configs and makes sure the resulting
+  // values are in config_values_.
+  bool ResolvePrecompiledHeaders(Err* err);
+
   // Validates the given thing when a target is resolved.
   bool CheckVisibility(Err* err) const;
   bool CheckTestonly(Err* err) const;
   bool CheckNoNestedStaticLibs(Err* err) const;
+  void CheckSourcesGenerated() const;
+  void CheckSourceGenerated(const SourceFile& source) const;
 
   OutputType output_type_;
   std::string output_name_;
@@ -270,7 +289,7 @@ class Target : public Item {
   bool complete_static_lib_;
   bool testonly_;
   FileList inputs_;
-  FileList data_;
+  std::vector<std::string> data_;
 
   LabelTargetVector private_deps_;
   LabelTargetVector public_deps_;
@@ -296,13 +315,19 @@ class Target : public Item {
   // target is marked resolved. This will not include the current target.
   std::set<const Target*> recursive_hard_deps_;
 
-  ConfigValues config_values_;  // Used for all binary targets.
-  ActionValues action_values_;  // Used for action[_foreach] targets.
+  // Used for all binary targets. The precompiled header values in this struct
+  // will be resolved to the ones to use for this target, if precompiled
+  // headers are used.
+  ConfigValues config_values_;
+
+  // Used for action[_foreach] targets.
+  ActionValues action_values_;
 
   // Toolchain used by this target. Null until target is resolved.
   const Toolchain* toolchain_;
 
-  // Output files. Null until the target is resolved.
+  // Output files. Empty until the target is resolved.
+  std::vector<OutputFile> computed_outputs_;
   OutputFile link_output_file_;
   OutputFile dependency_output_file_;
 

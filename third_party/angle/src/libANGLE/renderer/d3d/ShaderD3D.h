@@ -9,8 +9,8 @@
 #ifndef LIBANGLE_RENDERER_D3D_SHADERD3D_H_
 #define LIBANGLE_RENDERER_D3D_SHADERD3D_H_
 
+#include "libANGLE/renderer/d3d/WorkaroundsD3D.h"
 #include "libANGLE/renderer/ShaderImpl.h"
-#include "libANGLE/renderer/Workarounds.h"
 #include "libANGLE/Shader.h"
 
 #include <map>
@@ -43,6 +43,7 @@ class ShaderD3D : public ShaderImpl
     bool usesDepthRange() const { return mUsesDepthRange; }
     bool usesPointSize() const { return mUsesPointSize; }
     bool usesDeferredInit() const { return mUsesDeferredInit; }
+    bool usesFrontFacing() const { return mUsesFrontFacing; }
 
     GLenum getShaderType() const;
     ShShaderOutput getCompilerOutputType() const;

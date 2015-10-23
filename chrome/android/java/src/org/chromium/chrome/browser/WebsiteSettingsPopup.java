@@ -11,8 +11,14 @@ import android.animation.ObjectAnimator;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Process;
+import android.provider.Settings;
 import android.support.v7.widget.AppCompatTextView;
 import android.text.Layout;
 import android.text.Spannable;
@@ -37,17 +43,25 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
-import org.chromium.base.CalledByNative;
+import org.chromium.base.CommandLine;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.omnibox.OmniboxUrlEmphasizer;
+import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.preferences.Preferences;
+import org.chromium.chrome.browser.preferences.PreferencesLauncher;
+import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.ssl.ConnectionSecurityHelper;
-import org.chromium.chrome.browser.ssl.ConnectionSecurityHelperSecurityLevel;
+import org.chromium.chrome.browser.ssl.ConnectionSecurity;
+import org.chromium.chrome.browser.ssl.ConnectionSecurityLevel;
 import org.chromium.chrome.browser.toolbar.ToolbarModel;
+import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.ui.base.Clipboard;
 import org.chromium.ui.base.DeviceFormFactor;
+import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.base.WindowAndroid.PermissionCallback;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
 
 import java.net.URI;
@@ -209,6 +223,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
     private final Context mContext;
     private final Profile mProfile;
     private final WebContents mWebContents;
+    private final WindowAndroid mWindowAndroid;
 
     // A pointer to the C++ object for this UI.
     private final long mNativeWebsiteSettingsPopup;
@@ -232,6 +247,8 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
     // Animation which is currently running, if there is one.
     private AnimatorSet mCurrentAnimation = null;
 
+    private boolean mDismissWithoutAnimation;
+
     // The full URL from the URL bar, which is copied to the user's clipboard when they select 'Copy
     // URL'.
     private String mFullUrl;
@@ -244,11 +261,17 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
     // chrome://settings page).
     private boolean mIsInternalPage;
 
-    // The security level of the page (a valid ConnectionSecurityHelperSecurityLevel).
+    // The security level of the page (a valid ConnectionSecurityLevel).
     private int mSecurityLevel;
 
     // Whether the security level of the page was deprecated due to SHA-1.
     private boolean mDeprecatedSHA1Present;
+
+    // Whether to use the read-only permissions list.
+    private boolean mIsReadOnlyDialog;
+
+    // Permissions available to be displayed in mPermissionsList.
+    private List<PageInfoPermissionEntry> mDisplayedPermissions;
 
     /**
      * Creates the WebsiteSettingsPopup, but does not display it. Also initializes the corresponding
@@ -262,10 +285,15 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         mContext = context;
         mProfile = profile;
         mWebContents = webContents;
+        mIsReadOnlyDialog = enableReadOnlyPopup();
+        mWindowAndroid = ContentViewCore.fromWebContents(mWebContents).getWindowAndroid();
 
         // Find the container and all it's important subviews.
-        mContainer = (LinearLayout) LayoutInflater.from(mContext).inflate(
-                R.layout.website_settings, null);
+        int containerLayout = R.layout.website_settings_editable;
+        if (mIsReadOnlyDialog) {
+            containerLayout = R.layout.website_settings;
+        }
+        mContainer = (LinearLayout) LayoutInflater.from(mContext).inflate(containerLayout, null);
         mContainer.setVisibility(View.INVISIBLE);
         mContainer.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
             @Override
@@ -288,24 +316,31 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         mPermissionsList = (LinearLayout) mContainer
                 .findViewById(R.id.website_settings_permissions_list);
 
-        mCopyUrlButton = (Button) mContainer.findViewById(R.id.website_settings_copy_url_button);
-        mCopyUrlButton.setOnClickListener(this);
-
-        mSiteSettingsButton = (Button) mContainer
-                .findViewById(R.id.website_settings_site_settings_button);
+        mSiteSettingsButton =
+                (Button) mContainer.findViewById(R.id.website_settings_site_settings_button);
         mSiteSettingsButton.setOnClickListener(this);
         // Hide the Site Settings button until there's a link to take it to.
         // TODO(sashab,finnur): Make this button visible for well-formed, non-internal URLs.
         mSiteSettingsButton.setVisibility(View.GONE);
 
-        mHorizontalSeparator = mContainer
-                .findViewById(R.id.website_settings_horizontal_separator);
-        mLowerDialogArea = mContainer.findViewById(R.id.website_settings_lower_dialog_area);
+        if (mIsReadOnlyDialog) {
+            mCopyUrlButton = null;
+            mHorizontalSeparator = null;
+            mLowerDialogArea = null;
+            mSiteSettingsButton.setVisibility(View.VISIBLE);
+            mDisplayedPermissions = new ArrayList<PageInfoPermissionEntry>();
+        } else {
+            mCopyUrlButton =
+                    (Button) mContainer.findViewById(R.id.website_settings_copy_url_button);
+            mCopyUrlButton.setOnClickListener(this);
 
-        // Hide the horizontal separator for sites with no permissions.
-        // TODO(sashab,finnur): Show this for all sites with either the site settings button or
-        // permissions (ie when the bottom area of the dialog is not empty).
-        setVisibilityOfLowerDialogArea(false);
+            mHorizontalSeparator = mContainer
+                    .findViewById(R.id.website_settings_horizontal_separator);
+            mLowerDialogArea = mContainer.findViewById(R.id.website_settings_lower_dialog_area);
+        }
+
+        // Hide the permissions list for sites with no permissions.
+        setVisibilityOfPermissionsList(false);
 
         // Create the dialog.
         mDialog = new Dialog(mContext) {
@@ -315,7 +350,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
 
             @Override
             public void dismiss() {
-                if (DeviceFormFactor.isTablet(mContext)) {
+                if (DeviceFormFactor.isTablet(mContext) || mDismissWithoutAnimation) {
                     // Dismiss the dialog without any custom animations on tablet.
                     super.dismiss();
                 } else {
@@ -357,6 +392,15 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
                 // is stale so dismiss the dialog.
                 mDialog.dismiss();
             }
+
+            @Override
+            public void destroy() {
+                super.destroy();
+                // Force the dialog to close immediately in case the destroy was from Chrome
+                // quitting.
+                mDismissWithoutAnimation = true;
+                mDialog.dismiss();
+            }
         };
         mDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
             @Override
@@ -376,7 +420,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
             mParsedUrl = null;
             mIsInternalPage = false;
         }
-        mSecurityLevel = ConnectionSecurityHelper.getSecurityLevelForWebContents(mWebContents);
+        mSecurityLevel = ConnectionSecurity.getSecurityLevelForWebContents(mWebContents);
         mDeprecatedSHA1Present = ToolbarModel.isDeprecatedSHA1Present(mWebContents);
 
         SpannableStringBuilder urlBuilder = new SpannableStringBuilder(mFullUrl);
@@ -388,17 +432,28 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         // can calculate its ideal height).
         mUrlConnectionMessage.setText(getUrlConnectionMessage());
         if (isConnectionDetailsLinkVisible()) mUrlConnectionMessage.setOnClickListener(this);
+
+        if (mParsedUrl == null || mParsedUrl.getScheme() == null
+                || !(mParsedUrl.getScheme().equals("http")
+                           || mParsedUrl.getScheme().equals("https"))) {
+            mSiteSettingsButton.setVisibility(View.GONE);
+        }
     }
 
     /**
-     * Sets the visibility of the lower area of the dialog (containing the permissions and 'Site
-     * Settings' button).
+     * Sets the visibility of the permissions list, which contains padding and borders that should
+     * not be shown if a site has no permissions.
      *
      * @param isVisible Whether to show or hide the dialog area.
      */
-    private void setVisibilityOfLowerDialogArea(boolean isVisible) {
-        mHorizontalSeparator.setVisibility(isVisible ? View.VISIBLE : View.GONE);
-        mLowerDialogArea.setVisibility(isVisible ? View.VISIBLE : View.GONE);
+    private void setVisibilityOfPermissionsList(boolean isVisible) {
+        int visibility = isVisible ? View.VISIBLE : View.GONE;
+        if (mLowerDialogArea != null) {
+            mHorizontalSeparator.setVisibility(visibility);
+            mLowerDialogArea.setVisibility(visibility);
+        } else {
+            mPermissionsList.setVisibility(visibility);
+        }
     }
 
     /**
@@ -434,7 +489,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
      * Gets the message to display in the connection message box for the given security level. Does
      * not apply to SECURITY_ERROR pages, since these have their own coloured/formatted message.
      *
-     * @param securityLevel A valid ConnectionSecurityHelperSecurityLevel, which is the security
+     * @param securityLevel A valid ConnectionSecurityLevel, which is the security
      *                      level of the page.
      * @param isInternalPage Whether or not this page is an internal chrome page (e.g. the
      *                       chrome://settings page).
@@ -444,13 +499,13 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         if (isInternalPage) return R.string.page_info_connection_internal_page;
 
         switch (securityLevel) {
-            case ConnectionSecurityHelperSecurityLevel.NONE:
+            case ConnectionSecurityLevel.NONE:
                 return R.string.page_info_connection_http;
-            case ConnectionSecurityHelperSecurityLevel.SECURE:
-            case ConnectionSecurityHelperSecurityLevel.EV_SECURE:
+            case ConnectionSecurityLevel.SECURE:
+            case ConnectionSecurityLevel.EV_SECURE:
                 return R.string.page_info_connection_https;
-            case ConnectionSecurityHelperSecurityLevel.SECURITY_WARNING:
-            case ConnectionSecurityHelperSecurityLevel.SECURITY_POLICY_WARNING:
+            case ConnectionSecurityLevel.SECURITY_WARNING:
+            case ConnectionSecurityLevel.SECURITY_POLICY_WARNING:
                 return R.string.page_info_connection_mixed;
             default:
                 assert false : "Invalid security level specified: " + securityLevel;
@@ -463,7 +518,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
      * HTTPS connections.
      */
     private boolean isConnectionDetailsLinkVisible() {
-        return !mIsInternalPage && mSecurityLevel != ConnectionSecurityHelperSecurityLevel.NONE;
+        return !mIsInternalPage && mSecurityLevel != ConnectionSecurityLevel.NONE;
     }
 
     /**
@@ -475,7 +530,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         if (mDeprecatedSHA1Present) {
             messageBuilder.append(
                     mContext.getResources().getString(R.string.page_info_connection_sha1));
-        } else if (mSecurityLevel != ConnectionSecurityHelperSecurityLevel.SECURITY_ERROR) {
+        } else if (mSecurityLevel != ConnectionSecurityLevel.SECURITY_ERROR) {
             messageBuilder.append(mContext.getResources().getString(
                     getConnectionMessageId(mSecurityLevel, mIsInternalPage)));
         } else {
@@ -488,18 +543,8 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
                 originToDisplay = mFullUrl;
             }
 
-            String leadingText = mContext.getResources().getString(
-                    R.string.page_info_connection_broken_leading_text);
-            String followingText = mContext.getResources().getString(
-                    R.string.page_info_connection_broken_following_text, originToDisplay);
-            messageBuilder.append(leadingText + " " + followingText);
-            final ForegroundColorSpan redSpan = new ForegroundColorSpan(mContext.getResources()
-                    .getColor(R.color.website_settings_connection_broken_leading_text));
-            final StyleSpan boldSpan = new StyleSpan(android.graphics.Typeface.BOLD);
-            messageBuilder.setSpan(redSpan, 0, leadingText.length(),
-                    Spannable.SPAN_INCLUSIVE_EXCLUSIVE);
-            messageBuilder.setSpan(boldSpan, 0, leadingText.length(),
-                    Spannable.SPAN_INCLUSIVE_EXCLUSIVE);
+            messageBuilder.append(mContext.getResources().getString(
+                    R.string.page_info_connection_broken, originToDisplay));
         }
 
         if (isConnectionDetailsLinkVisible()) {
@@ -516,6 +561,23 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         return messageBuilder;
     }
 
+    private boolean hasAndroidPermission(int contentSettingType) {
+        String androidPermission = PrefServiceBridge.getAndroidPermissionForContentSetting(
+                contentSettingType);
+        return androidPermission == null
+                || (mContext.checkPermission(androidPermission, Process.myPid(), Process.myUid())
+                           == PackageManager.PERMISSION_GRANTED);
+    }
+
+    private boolean isAndroidLocationDisabled() {
+        try {
+            return Settings.Secure.getInt(mContext.getContentResolver(),
+                    Settings.Secure.LOCATION_MODE) == Settings.Secure.LOCATION_MODE_OFF;
+        } catch (Settings.SettingNotFoundException e) {
+            return false;
+        }
+    }
+
     /**
      * Adds a new row for the given permission.
      *
@@ -526,10 +588,15 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
     @CalledByNative
     private void addPermissionSection(String name, int type, int currentSetting) {
         // We have at least one permission, so show the lower permissions area.
-        setVisibilityOfLowerDialogArea(true);
+        setVisibilityOfPermissionsList(true);
+
+        if (mIsReadOnlyDialog) {
+            mDisplayedPermissions.add(new PageInfoPermissionEntry(name, type, currentSetting));
+            return;
+        }
 
         View permissionRow = LayoutInflater.from(mContext).inflate(
-                R.layout.website_settings_permission_row, null);
+                R.layout.website_settings_permission_row_editable, null);
 
         ImageView permission_icon = (ImageView) permissionRow.findViewById(
                 R.id.website_settings_permission_icon);
@@ -567,6 +634,85 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         permission_spinner.setAdapter(adapter);
         permission_spinner.setSelection(selectedSettingIndex, false);
         permission_spinner.setOnItemSelectedListener(this);
+        mPermissionsList.addView(permissionRow);
+    }
+
+    /**
+     * Update the permissions view based on the contents of mDisplayedPermissions.
+     */
+    @CalledByNative
+    private void updatePermissionDisplay() {
+        if (mIsReadOnlyDialog) {
+            mPermissionsList.removeAllViews();
+            for (PageInfoPermissionEntry permission : mDisplayedPermissions) {
+                addReadOnlyPermissionSection(permission);
+            }
+        }
+    }
+
+    private void addReadOnlyPermissionSection(PageInfoPermissionEntry permission) {
+        View permissionRow = LayoutInflater.from(mContext).inflate(
+                R.layout.website_settings_permission_row, null);
+
+        ImageView permissionIcon = (ImageView) permissionRow.findViewById(
+                R.id.website_settings_permission_icon);
+        permissionIcon.setImageResource(getImageResourceForPermission(permission.type));
+
+        if (permission.value == ContentSetting.ALLOW) {
+            int warningTextResource = 0;
+
+            // If warningTextResource is non-zero, then the view must be tagged with either
+            // permission_intent_override or permission_type.
+            if (permission.type == ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION
+                    && isAndroidLocationDisabled()) {
+                warningTextResource = R.string.page_info_android_location_blocked;
+                permissionRow.setTag(R.id.permission_intent_override,
+                        new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+            } else if (!hasAndroidPermission(permission.type)) {
+                warningTextResource = R.string.page_info_android_permission_blocked;
+                permissionRow.setTag(R.id.permission_type,
+                        PrefServiceBridge.getAndroidPermissionForContentSetting(permission.type));
+            }
+
+            if (warningTextResource != 0) {
+                TextView permissionUnavailable = (TextView) permissionRow.findViewById(
+                        R.id.website_settings_permission_unavailable_message);
+                permissionUnavailable.setVisibility(View.VISIBLE);
+                permissionUnavailable.setText(warningTextResource);
+
+                permissionIcon.setImageResource(R.drawable.exclamation_triangle);
+                permissionIcon.setColorFilter(
+                        mContext.getResources().getColor(R.color.website_settings_popup_text_link));
+
+                permissionRow.setOnClickListener(this);
+            }
+        }
+
+        TextView permissionStatus = (TextView) permissionRow.findViewById(
+                R.id.website_settings_permission_status);
+        SpannableStringBuilder builder = new SpannableStringBuilder();
+        SpannableString nameString = new SpannableString(permission.name);
+        final StyleSpan boldSpan = new StyleSpan(android.graphics.Typeface.BOLD);
+        nameString.setSpan(boldSpan, 0, nameString.length(), Spannable.SPAN_INCLUSIVE_EXCLUSIVE);
+
+        builder.append(nameString);
+        builder.append(" – ");  // en-dash.
+        String status_text = "";
+        switch (permission.value) {
+            case ContentSetting.ALLOW:
+                status_text =
+                        mContext.getResources().getString(R.string.page_info_permission_allowed);
+                break;
+            case ContentSetting.BLOCK:
+                status_text =
+                        mContext.getResources().getString(R.string.page_info_permission_blocked);
+                break;
+            default:
+                assert false : "Invalid setting " + permission.value + " for permission "
+                        + permission.type;
+        }
+        builder.append(status_text);
+        permissionStatus.setText(builder);
         mPermissionsList.addView(permissionRow);
     }
 
@@ -622,31 +768,84 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         // Do nothing intentionally.
     }
 
+    /**
+     * Dismiss the popup, and then run a task after the animation has completed (if there is one).
+     */
+    private void runAfterDismiss(Runnable task) {
+        mDialog.dismiss();
+        if (DeviceFormFactor.isTablet(mContext)) {
+            task.run();
+        } else {
+            mContainer.postDelayed(task, FADE_DURATION + CLOSE_CLEANUP_DELAY);
+        }
+    }
+
     @Override
     public void onClick(View view) {
         if (view == mCopyUrlButton) {
             new Clipboard(mContext).setText(mFullUrl, mFullUrl);
             mDialog.dismiss();
         } else if (view == mSiteSettingsButton) {
-            // TODO(sashab,finnur): Make this open the Website Settings dialog.
-            assert false : "No Website Settings here!";
-            mDialog.dismiss();
+            // Delay while the WebsiteSettingsPopup closes.
+            runAfterDismiss(new Runnable() {
+                @Override
+                public void run() {
+                    Bundle fragmentArguments =
+                            SingleWebsitePreferences.createFragmentArgsForSite(mFullUrl);
+                    Intent preferencesIntent = PreferencesLauncher.createIntentForSettingsPage(
+                            mContext, SingleWebsitePreferences.class.getName());
+                    preferencesIntent.putExtra(
+                            Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, fragmentArguments);
+                    mContext.startActivity(preferencesIntent);
+                }
+            });
         } else if (view == mUrlTitle) {
             // Expand/collapse the displayed URL title.
             mUrlTitle.toggleTruncation();
         } else if (view == mUrlConnectionMessage) {
-            if (DeviceFormFactor.isTablet(mContext)) {
-                ConnectionInfoPopup.show(mContext, mWebContents);
-            } else {
-                // Delay while the WebsiteSettingsPopup closes.
-                mContainer.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
+            runAfterDismiss(new Runnable() {
+                @Override
+                public void run() {
+                    if (!mWebContents.isDestroyed()) {
                         ConnectionInfoPopup.show(mContext, mWebContents);
                     }
-                }, FADE_DURATION + CLOSE_CLEANUP_DELAY);
+                }
+            });
+        } else if (view.getId() == R.id.website_settings_permission_row) {
+            final Object intentOverride = view.getTag(R.id.permission_intent_override);
+
+            if (intentOverride == null && mWindowAndroid != null) {
+                // Try and immediately request missing Android permissions where possible.
+                final String permissionType = (String) view.getTag(R.id.permission_type);
+                if (mWindowAndroid.canRequestPermission(permissionType)) {
+                    final String[] permissionRequest = new String[] {permissionType};
+                    mWindowAndroid.requestPermissions(permissionRequest, new PermissionCallback() {
+                        @Override
+                        public void onRequestPermissionsResult(
+                                String[] permissions, int[] grantResults) {
+                            if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                                updatePermissionDisplay();
+                            }
+                        }
+                    });
+                    return;
+                }
             }
-            mDialog.dismiss();
+
+            runAfterDismiss(new Runnable() {
+                @Override
+                public void run() {
+                    Intent settingsIntent;
+                    if (intentOverride != null) {
+                        settingsIntent = (Intent) intentOverride;
+                    } else {
+                        settingsIntent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                        settingsIntent.setData(Uri.parse("package:" + mContext.getPackageName()));
+                    }
+                    settingsIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    mContext.startActivity(settingsIntent);
+                }
+            });
         }
     }
 
@@ -657,10 +856,15 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         List<View> animatableViews = new ArrayList<View>();
         animatableViews.add(mUrlTitle);
         animatableViews.add(mUrlConnectionMessage);
-        animatableViews.add(mCopyUrlButton);
-        animatableViews.add(mHorizontalSeparator);
+        if (!mIsReadOnlyDialog) {
+            animatableViews.add(mCopyUrlButton);
+            animatableViews.add(mHorizontalSeparator);
+        }
         for (int i = 0; i < mPermissionsList.getChildCount(); i++) {
             animatableViews.add(mPermissionsList.getChildAt(i));
+        }
+        if (mIsReadOnlyDialog) {
+            animatableViews.add(mSiteSettingsButton);
         }
 
         return animatableViews;
@@ -740,6 +944,11 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         if (mCurrentAnimation != null) mCurrentAnimation.cancel();
         mCurrentAnimation = animation;
         return animation;
+    }
+
+    private static boolean enableReadOnlyPopup() {
+        return !CommandLine.getInstance().hasSwitch(
+                ChromeSwitches.DISABLE_READ_ONLY_WEBSITE_SETTINGS_POPUP);
     }
 
     /**

@@ -13,24 +13,29 @@ var ExtensionViewConstants =
 
 // An array of <extensionview>'s public-facing API methods.
 var EXTENSION_VIEW_API_METHODS = [
-  // Sets the extension ID and src for the guest. Must be called every time
-  // the extension ID changes. This is the only way to set the extension ID.
-  'connect'
+  // Loads the given src into extensionview. Must be called every time the
+  // the extensionview should load a new page. This is the only way to set
+  // the extension and src attributes. Returns a promise indicating whether
+  // or not load was successful.
+  'load'
 ];
 
 // -----------------------------------------------------------------------------
 // Custom API method implementations.
 
-ExtensionViewImpl.prototype.connect = function(extension, src) {
-  this.guest.destroy();
-
-  // Sets the extension id and src.
-  this.attributes[ExtensionViewConstants.ATTRIBUTE_EXTENSION]
-      .setValueIgnoreMutation(extension);
-  this.attributes[ExtensionViewConstants.ATTRIBUTE_SRC]
-      .setValueIgnoreMutation(src);
-
-  this.createGuest();
+ExtensionViewImpl.prototype.load = function(src) {
+  return new Promise(function(resolve, reject) {
+    this.loadQueue.push({src: src, resolve: resolve, reject: reject});
+    this.loadNextSrc();
+  }.bind(this))
+  .then(function onLoadResolved() {
+    this.pendingLoad = null;
+    this.loadNextSrc();
+  }.bind(this), function onLoadRejected() {
+    this.pendingLoad = null;
+    this.loadNextSrc();
+    reject('Failed to load.');
+  }.bind(this));
 };
 
 // -----------------------------------------------------------------------------

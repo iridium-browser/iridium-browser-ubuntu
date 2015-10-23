@@ -11,6 +11,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/timer/timer.h"
 #include "extensions/browser/api/messaging/native_messaging_channel.h"
+#include "remoting/host/native_messaging/log_message_handler.h"
 #include "remoting/host/setup/daemon_controller.h"
 #include "remoting/host/setup/oauth_client.h"
 
@@ -145,7 +146,7 @@ class Me2MeNativeMessagingHost
   // Create and connect to an elevated host process if necessary.
   // |elevated_channel_| will contain the native messaging channel to the
   // elevated host if the function succeeds.
-  void Me2MeNativeMessagingHost::EnsureElevatedHostCreated();
+  void EnsureElevatedHostCreated();
 
   // Disconnect and shut down the elevated host.
   void DisconnectElevatedHost();
@@ -173,6 +174,9 @@ class Me2MeNativeMessagingHost
   // Native messaging channel used to communicate with the native message
   // client.
   scoped_ptr<extensions::NativeMessagingChannel> channel_;
+
+  LogMessageHandler log_message_handler_;
+
   scoped_refptr<DaemonController> daemon_controller_;
 
   // Used to load and update the paired clients for this host.

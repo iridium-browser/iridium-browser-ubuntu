@@ -6,13 +6,14 @@
 
 #import <WebKit/WebKit.h>
 
+#include "base/ios/ios_util.h"
 #import "base/ios/weak_nsobject.h"
 #include "ios/web/public/test/test_browser_state.h"
 #include "ios/web/public/test/web_test_util.h"
 #include "ios/web/public/web_client.h"
 #import "ios/web/web_state/js/page_script_util.h"
-#include "testing/gtest_mac.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/gtest_mac.h"
 #include "testing/platform_test.h"
 
 namespace web {
@@ -68,6 +69,37 @@ TEST_F(WKWebViewConfigurationProviderTest, ConfigurationOwnerhip) {
             other_provider.GetWebViewConfiguration().processPool);
 }
 
+// TODO(eugenebut): Cleanup this macro, once all bots switched to iOS9 SDK
+// (crbug.com/523365).
+#if defined(__IPHONE_9_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_9_0
+
+// Tests Non-OffTheRecord configuration.
+TEST_F(WKWebViewConfigurationProviderTest, NoneOffTheRecordConfiguration) {
+  CR_TEST_REQUIRES_WK_WEB_VIEW();
+  if (!base::ios::IsRunningOnIOS9OrLater())
+    return;
+
+  browser_state_.SetOffTheRecord(false);
+  WKWebViewConfigurationProvider& provider = GetProvider(&browser_state_);
+  EXPECT_TRUE(provider.GetWebViewConfiguration().websiteDataStore.persistent);
+}
+
+// Tests OffTheRecord configuration.
+TEST_F(WKWebViewConfigurationProviderTest, OffTheRecordConfiguration) {
+  CR_TEST_REQUIRES_WK_WEB_VIEW();
+  if (!base::ios::IsRunningOnIOS9OrLater())
+    return;
+
+  browser_state_.SetOffTheRecord(true);
+  WKWebViewConfigurationProvider& provider = GetProvider(&browser_state_);
+  WKWebViewConfiguration* config = provider.GetWebViewConfiguration();
+  ASSERT_TRUE(config);
+  EXPECT_FALSE(config.websiteDataStore.persistent);
+}
+
+#endif  // defined(__IPHONE_9_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >=
+        // __IPHONE_9_0
+
 // Tests that internal configuration object can not be changed by clients.
 TEST_F(WKWebViewConfigurationProviderTest, ConfigurationProtection) {
   CR_TEST_REQUIRES_WK_WEB_VIEW();
@@ -79,10 +111,15 @@ TEST_F(WKWebViewConfigurationProviderTest, ConfigurationProtection) {
   base::scoped_nsobject<WKUserContentController> userContentController(
       [[config userContentController] retain]);
 
-  // nil-out the properties of returned configuration object.
-  config.processPool = nil;
-  config.preferences = nil;
-  config.userContentController = nil;
+  // Change the properties of returned configuration object.
+  TestBrowserState other_browser_state;
+  WKWebViewConfiguration* other_wk_web_view_configuration =
+      GetProvider(&other_browser_state).GetWebViewConfiguration();
+  ASSERT_TRUE(other_wk_web_view_configuration);
+  config.processPool = other_wk_web_view_configuration.processPool;
+  config.preferences = other_wk_web_view_configuration.preferences;
+  config.userContentController =
+      other_wk_web_view_configuration.userContentController;
 
   // Make sure that the properties of internal configuration were not changed.
   EXPECT_TRUE(provider.GetWebViewConfiguration().processPool);
@@ -92,33 +129,6 @@ TEST_F(WKWebViewConfigurationProviderTest, ConfigurationProtection) {
   EXPECT_TRUE(provider.GetWebViewConfiguration().userContentController);
   EXPECT_EQ(userContentController.get(),
             provider.GetWebViewConfiguration().userContentController);
-}
-
-// Tests that |HasWebViewConfiguration| returns false by default.
-TEST_F(WKWebViewConfigurationProviderTest, NoConfigurationByDefault) {
-  CR_TEST_REQUIRES_WK_WEB_VIEW();
-
-  EXPECT_FALSE(GetProvider().HasWebViewConfiguration());
-}
-
-// Tests that |HasWebViewConfiguration| returns true after
-// |GetWebViewConfiguration| call and false after |Purge| call.
-TEST_F(WKWebViewConfigurationProviderTest, HasWebViewConfiguration) {
-  CR_TEST_REQUIRES_WK_WEB_VIEW();
-
-  // Valid configuration after |GetWebViewConfiguration| call.
-  @autoreleasepool {  // Make sure that resulting copy is deallocated.
-    GetProvider().GetWebViewConfiguration();
-  }
-  EXPECT_TRUE(GetProvider().HasWebViewConfiguration());
-
-  // No configuration after |Purge| call.
-  GetProvider().Purge();
-  EXPECT_FALSE(GetProvider().HasWebViewConfiguration());
-
-  // Valid configuration after |GetWebViewConfiguration| call.
-  GetProvider().GetWebViewConfiguration();
-  EXPECT_TRUE(GetProvider().HasWebViewConfiguration());
 }
 
 // Tests that configuration is deallocated after |Purge| call.

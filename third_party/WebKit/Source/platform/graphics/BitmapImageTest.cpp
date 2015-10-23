@@ -51,9 +51,9 @@ public:
         {
             m_lastDecodedSizeChangedDelta = delta;
         }
-        virtual void didDraw(const Image*) override { }
-        virtual bool shouldPauseAnimation(const Image*) override { return false; }
-        virtual void animationAdvanced(const Image*) override { }
+        void didDraw(const Image*) override { }
+        bool shouldPauseAnimation(const Image*) override { return false; }
+        void animationAdvanced(const Image*) override { }
 
         virtual void changedInRect(const Image*, const IntRect&) { }
 
@@ -75,8 +75,7 @@ public:
     size_t frameCount() { return m_image->frameCount(); }
     void frameAtIndex(size_t index)
     {
-        SkBitmap dummy;
-        ASSERT_TRUE(m_image->frameAtIndex(index, &dummy));
+        m_image->frameAtIndex(index);
     }
     void setCurrentFrame(size_t frame) { m_image->m_currentFrame = frame; }
     size_t frameDecodedSize(size_t frame) { return m_image->m_frames[frame].m_frameBytes; }
@@ -122,7 +121,7 @@ public:
     }
 
 protected:
-    virtual void SetUp() override
+    void SetUp() override
     {
         DeferredImageDecoder::setEnabled(m_enableDeferredDecoding);
         m_image = BitmapImage::create(&m_imageObserver);
@@ -204,8 +203,6 @@ TEST_F(BitmapImageTest, jpegHasColorProfile)
     EXPECT_EQ(1u, decodedFramesCount());
     EXPECT_EQ(227700u, decodedSize());
     EXPECT_TRUE(m_image->hasColorProfile());
-
-    destroyDecodedData(true);
 }
 
 TEST_F(BitmapImageTest, pngHasColorProfile)
@@ -214,8 +211,6 @@ TEST_F(BitmapImageTest, pngHasColorProfile)
     EXPECT_EQ(1u, decodedFramesCount());
     EXPECT_EQ(65536u, decodedSize());
     EXPECT_TRUE(m_image->hasColorProfile());
-
-    destroyDecodedData(true);
 }
 
 TEST_F(BitmapImageTest, webpHasColorProfile)
@@ -224,8 +219,6 @@ TEST_F(BitmapImageTest, webpHasColorProfile)
     EXPECT_EQ(1u, decodedFramesCount());
     EXPECT_EQ(2560000u, decodedSize());
     EXPECT_TRUE(m_image->hasColorProfile());
-
-    destroyDecodedData(true);
 }
 
 #endif // USE(QCMSLIB)

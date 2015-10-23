@@ -12,6 +12,7 @@
 
 #include "SkRect.h"
 
+struct SkRSXform;
 class SkString;
 
 /** \class SkMatrix
@@ -244,6 +245,9 @@ public:
     /** Set the matrix to rotate by the specified sine and cosine values.
     */
     void setSinCos(SkScalar sinValue, SkScalar cosValue);
+
+    SkMatrix& setRSXform(const SkRSXform&);
+
     /** Set the matrix to skew by sx and sy, with a pivot point at (px, py).
         The pivot point is the coordinate that should remain unchanged by the
         specified transformation.
@@ -365,6 +369,11 @@ public:
         @return true if the matrix can be represented by the rectangle mapping.
     */
     bool setRectToRect(const SkRect& src, const SkRect& dst, ScaleToFit stf);
+    static SkMatrix MakeRectToRect(const SkRect& src, const SkRect& dst, ScaleToFit stf) {
+        SkMatrix m;
+        m.setRectToRect(src, dst, stf);
+        return m;
+    }
 
     /** Set the matrix such that the specified src points would map to the
         specified dst points. count must be within [0..4].
@@ -721,9 +730,9 @@ private:
 
     /** Are all elements of the matrix finite?
      */
-    bool isFinite() const;
+    bool isFinite() const { return SkScalarsAreFinite(fMat, 9); }
 
-    static void ComputeInv(SkScalar dst[9], const SkScalar src[9], SkScalar invDet, bool isPersp);
+    static void ComputeInv(SkScalar dst[9], const SkScalar src[9], double invDet, bool isPersp);
 
     void setScaleTranslate(SkScalar sx, SkScalar sy, SkScalar tx, SkScalar ty) {
         fMat[kMScaleX] = sx;

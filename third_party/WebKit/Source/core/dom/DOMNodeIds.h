@@ -8,6 +8,7 @@
 #include "core/CoreExport.h"
 #include "core/dom/Node.h"
 #include "core/dom/WeakIdentifierMap.h"
+#include "wtf/Allocator.h"
 
 namespace blink {
 
@@ -18,13 +19,13 @@ template<> struct WeakIdentifierMapTraits<Node> {
 };
 #endif
 
-extern template class WeakIdentifierMap<Node>;
-using WeakNodeMap = WeakIdentifierMap<Node>;
+DECLARE_WEAK_IDENTIFIER_MAP(Node);
 
 class CORE_EXPORT DOMNodeIds {
+    STATIC_ONLY(DOMNodeIds);
 public:
     static int idForNode(Node*);
-    static Node* nodeForId(int);
+    static Node* nodeForId(int id);
 };
 
 } // namespace blink

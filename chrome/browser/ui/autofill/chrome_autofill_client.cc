@@ -13,31 +13,33 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/profile_identity_provider.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller_impl.h"
-#include "chrome/browser/ui/autofill/card_unmask_prompt_view.h"
+#include "chrome/browser/ui/autofill/create_card_unmask_prompt_view.h"
 #include "chrome/browser/ui/autofill/credit_card_scanner_controller.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/url_constants.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/core/browser/autofill_cc_infobar_delegate.h"
+#include "components/autofill/core/browser/ui/card_unmask_prompt_view.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/password_manager/content/browser/content_password_manager_driver.h"
+#include "components/signin/core/browser/profile_identity_provider.h"
 #include "components/user_prefs/user_prefs.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "ui/gfx/geometry/rect.h"
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/android/chromium_application.h"
+#include "chrome/browser/android/chrome_application.h"
 #include "chrome/browser/ui/android/autofill/autofill_logger_android.h"
 #else
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
@@ -51,7 +53,6 @@ namespace autofill {
 ChromeAutofillClient::ChromeAutofillClient(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       unmask_controller_(
-          web_contents,
           base::Bind(&LoadRiskData, 0, web_contents),
           user_prefs::UserPrefs::Get(web_contents->GetBrowserContext()),
           Profile::FromBrowserContext(web_contents->GetBrowserContext())
@@ -117,14 +118,15 @@ IdentityProvider* ChromeAutofillClient::GetIdentityProvider() {
     Profile* profile =
         Profile::FromBrowserContext(web_contents()->GetBrowserContext())
             ->GetOriginalProfile();
-    LoginUIService* login_service = nullptr;
+    base::Closure login_callback;
 #if !defined(OS_ANDROID)
-    login_service = LoginUIServiceFactory::GetForProfile(profile);
+    login_callback =
+        LoginUIServiceFactory::GetShowLoginPopupCallbackForProfile(profile);
 #endif
     identity_provider_.reset(new ProfileIdentityProvider(
         SigninManagerFactory::GetForProfile(profile),
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
-        login_service));
+        login_callback));
   }
 
   return identity_provider_.get();
@@ -136,7 +138,7 @@ rappor::RapporService* ChromeAutofillClient::GetRapporService() {
 
 void ChromeAutofillClient::ShowAutofillSettings() {
 #if defined(OS_ANDROID)
-  chrome::android::ChromiumApplication::ShowAutofillSettings();
+  chrome::android::ChromeApplication::ShowAutofillSettings();
 #else
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
   if (browser)
@@ -147,7 +149,9 @@ void ChromeAutofillClient::ShowAutofillSettings() {
 void ChromeAutofillClient::ShowUnmaskPrompt(
     const CreditCard& card,
     base::WeakPtr<CardUnmaskDelegate> delegate) {
-  unmask_controller_.ShowPrompt(card, delegate);
+  unmask_controller_.ShowPrompt(
+      CreateCardUnmaskPromptView(&unmask_controller_, web_contents()),
+      card, delegate);
 }
 
 void ChromeAutofillClient::OnUnmaskVerificationResult(GetRealPanResult result) {
@@ -303,6 +307,21 @@ void ChromeAutofillClient::LinkClicked(const GURL& url,
                                        WindowOpenDisposition disposition) {
   web_contents()->OpenURL(content::OpenURLParams(
       url, content::Referrer(), disposition, ui::PAGE_TRANSITION_LINK, false));
+}
+
+bool ChromeAutofillClient::IsContextSecure(const GURL& form_origin) {
+  content::SSLStatus ssl_status;
+  content::NavigationEntry* navigation_entry =
+      web_contents()->GetController().GetLastCommittedEntry();
+  if (!navigation_entry)
+     return false;
+
+  ssl_status = navigation_entry->GetSSL();
+  // Note: If changing the implementation below, also change
+  // AwAutofillClient::IsContextSecure. See crbug.com/505388
+  return ssl_status.security_style ==
+      content::SECURITY_STYLE_AUTHENTICATED &&
+      ssl_status.content_status == content::SSLStatus::NORMAL_CONTENT;
 }
 
 }  // namespace autofill

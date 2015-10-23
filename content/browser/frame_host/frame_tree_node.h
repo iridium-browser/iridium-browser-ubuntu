@@ -31,6 +31,16 @@ class RenderFrameHostImpl;
 // are frame-specific (as opposed to page-specific).
 class CONTENT_EXPORT FrameTreeNode {
  public:
+  class Observer {
+   public:
+    // Invoked when a FrameTreeNode is being destroyed.
+    virtual void OnFrameTreeNodeDestroyed(FrameTreeNode* node) {}
+
+    virtual ~Observer() {}
+  };
+
+  static const int kFrameTreeNodeInvalidID = -1;
+
   // Returns the FrameTreeNode with the given global |frame_tree_node_id|,
   // regardless of which FrameTree it is in.
   static FrameTreeNode* GloballyFindByID(int frame_tree_node_id);
@@ -41,10 +51,14 @@ class CONTENT_EXPORT FrameTreeNode {
                 RenderViewHostDelegate* render_view_delegate,
                 RenderWidgetHostDelegate* render_widget_delegate,
                 RenderFrameHostManager::Delegate* manager_delegate,
+                blink::WebTreeScopeType scope,
                 const std::string& name,
-                SandboxFlags sandbox_flags);
+                blink::WebSandboxFlags sandbox_flags);
 
   ~FrameTreeNode();
+
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
 
   bool IsMainFrame() const;
 
@@ -82,6 +96,13 @@ class CONTENT_EXPORT FrameTreeNode {
 
   FrameTreeNode* parent() const { return parent_; }
 
+  FrameTreeNode* opener() const { return opener_; }
+
+  // Assigns a new opener for this node and, if |opener| is non-null, registers
+  // an observer that will clear this node's opener if |opener| is ever
+  // destroyed.
+  void SetOpener(FrameTreeNode* opener);
+
   FrameTreeNode* child_at(size_t index) const {
     return children_[index];
   }
@@ -90,8 +111,13 @@ class CONTENT_EXPORT FrameTreeNode {
     return current_url_;
   }
 
-  void set_current_url(const GURL& url) {
-    current_url_ = url;
+  // Sets the last committed URL for this frame and updates
+  // has_committed_real_load accordingly.
+  void SetCurrentURL(const GURL& url);
+
+  // Returns true iff SetCurrentURL has been called with a non-blank URL.
+  bool has_committed_real_load() const {
+    return has_committed_real_load_;
   }
 
   // Set the current origin and notify proxies about the update.
@@ -100,9 +126,11 @@ class CONTENT_EXPORT FrameTreeNode {
   // Set the current name and notify proxies about the update.
   void SetFrameName(const std::string& name);
 
-  SandboxFlags effective_sandbox_flags() { return effective_sandbox_flags_; }
+  blink::WebSandboxFlags effective_sandbox_flags() {
+    return effective_sandbox_flags_;
+  }
 
-  void set_sandbox_flags(SandboxFlags sandbox_flags) {
+  void set_sandbox_flags(blink::WebSandboxFlags sandbox_flags) {
     replication_state_.sandbox_flags = sandbox_flags;
   }
 
@@ -111,7 +139,8 @@ class CONTENT_EXPORT FrameTreeNode {
   bool CommitPendingSandboxFlags();
 
   bool HasSameOrigin(const FrameTreeNode& node) const {
-    return replication_state_.origin.IsSameAs(node.replication_state_.origin);
+    return replication_state_.origin.IsSameOriginWith(
+        node.replication_state_.origin);
   }
 
   const FrameReplicationState& current_replication_state() const {
@@ -141,7 +170,8 @@ class CONTENT_EXPORT FrameTreeNode {
   // NavigationRequest of this frame. This corresponds to the start of a new
   // navigation. If there was an ongoing navigation request before calling this
   // function, it is canceled. |navigation_request| should not be null.
-  void SetNavigationRequest(scoped_ptr<NavigationRequest> navigation_request);
+  void CreatedNavigationRequest(
+      scoped_ptr<NavigationRequest> navigation_request);
 
   // PlzNavigate
   // Resets the current navigation request. |is_commit| is true if the reset is
@@ -168,7 +198,20 @@ class CONTENT_EXPORT FrameTreeNode {
   // the WebContents.
   void DidChangeLoadProgress(double load_progress);
 
+  // Called when the user directed the page to stop loading. Stops all loads
+  // happening in the FrameTreeNode. This method should be used with
+  // FrameTree::ForEach to stop all loads in the entire FrameTree.
+  bool StopLoading();
+
+  // Returns the time this frame was last focused.
+  base::TimeTicks last_focus_time() const { return last_focus_time_; }
+  void set_last_focus_time(const base::TimeTicks& last_focus_time) {
+    last_focus_time_ = last_focus_time;
+  }
+
  private:
+  class OpenerDestroyedObserver;
+
   void set_parent(FrameTreeNode* parent) { parent_ = parent; }
 
   // The next available browser-global FrameTreeNode ID.
@@ -195,14 +238,29 @@ class CONTENT_EXPORT FrameTreeNode {
   // not yet been attached to the frame tree.
   FrameTreeNode* parent_;
 
+  // The frame that opened this frame, if any.  Will be set to null if the
+  // opener is closed, or if this frame disowns its opener by setting its
+  // window.opener to null.
+  FrameTreeNode* opener_;
+
+  // An observer that clears this node's |opener_| if the opener is destroyed.
+  // This observer is added to the |opener_|'s observer list when the |opener_|
+  // is set to a non-null node, and it is removed from that list when |opener_|
+  // changes or when this node is destroyed.  It is also cleared if |opener_|
+  // is disowned.
+  scoped_ptr<OpenerDestroyedObserver> opener_observer_;
+
   // The immediate children of this specific frame.
   ScopedVector<FrameTreeNode> children_;
 
-  // Track the current frame's last committed URL, so we can estimate the
-  // process impact of out-of-process iframes.
-  // TODO(creis): Remove this when we can store subframe URLs in the
-  // NavigationController.
+  // Track the current frame's last committed URL.
+  // TODO(creis): Consider storing a reference to the last committed
+  // FrameNavigationEntry here once those are created in all modes.
   GURL current_url_;
+
+  // Whether this frame has committed any real load, replacing its initial
+  // about:blank page.
+  bool has_committed_real_load_;
 
   // Track information that needs to be replicated to processes that have
   // proxies for this frame.
@@ -216,7 +274,7 @@ class CONTENT_EXPORT FrameTreeNode {
   // directives in the browser process, |effective_sandbox_flags_| should be
   // used.  |effective_sandbox_flags_| is updated with any pending sandbox
   // flags when a navigation for this frame commits.
-  SandboxFlags effective_sandbox_flags_;
+  blink::WebSandboxFlags effective_sandbox_flags_;
 
   // Used to track this node's loading progress (from 0 to 1).
   double loading_progress_;
@@ -225,6 +283,11 @@ class CONTENT_EXPORT FrameTreeNode {
   // Owns an ongoing NavigationRequest until it is ready to commit. It will then
   // be reset and a RenderFrameHost will be responsible for the navigation.
   scoped_ptr<NavigationRequest> navigation_request_;
+
+  // List of objects observing this FrameTreeNode.
+  base::ObserverList<Observer> observers_;
+
+  base::TimeTicks last_focus_time_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameTreeNode);
 };

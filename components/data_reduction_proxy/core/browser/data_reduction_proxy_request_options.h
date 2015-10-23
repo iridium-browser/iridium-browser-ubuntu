@@ -13,10 +13,6 @@
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 
-namespace base {
-class DictionaryValue;
-}
-
 namespace net {
 class HostPortPair;
 class HttpRequestHeaders;
@@ -61,6 +57,7 @@ typedef enum {
 } Client;
 #undef CLIENT_ENUM
 
+class ClientConfig;
 class DataReductionProxyConfig;
 
 class DataReductionProxyRequestOptions {
@@ -122,7 +119,7 @@ class DataReductionProxyRequestOptions {
 
   // Populates |response| with the Data Reduction Proxy authentication info.
   // Virtualized for testing.
-  virtual void PopulateConfigResponse(base::DictionaryValue* response) const;
+  virtual void PopulateConfigResponse(ClientConfig* config) const;
 
   // Sets the credentials for sending to the Data Reduction Proxy.
   void SetCredentials(const std::string& session,
@@ -131,8 +128,15 @@ class DataReductionProxyRequestOptions {
   // Sets the credentials for sending to the Data Reduction Proxy.
   void SetSecureSession(const std::string& secure_session);
 
+  // Retrieves the credentials for sending to the Data Reduction Proxy.
+  const std::string& GetSecureSession() const;
+
+  // Invalidates the secure session credentials.
+  void Invalidate();
+
  protected:
-  void SetHeader(net::HttpRequestHeaders* headers);
+  void SetHeader(const net::URLRequest* request,
+                 net::HttpRequestHeaders* headers);
 
   // Returns a UTF16 string that's the hash of the configured authentication
   // |key| and |salt|. Returns an empty UTF16 string if no key is configured or
@@ -151,9 +155,6 @@ class DataReductionProxyRequestOptions {
                                    const std::string& version,
                                    DataReductionProxyConfig* config);
 
-  // Visible for testing.
-  virtual const std::string& GetSecureSession() const;
-
  private:
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyRequestOptionsTest,
                            AuthHashForSalt);
@@ -170,8 +171,8 @@ class DataReductionProxyRequestOptions {
   // Updates client type, build, and patch.
   void UpdateVersion();
 
-  // Updates the value of LoFi and regenerates the header if necessary.
-  void UpdateLoFi();
+  // May regenerate the Chrome Proxy header based on changes in Lo-Fi status.
+  void MayRegenerateHeaderBasedOnLoFi(const net::URLRequest* request);
 
   // Update the value of the experiments to be run and regenerate the header if
   // necessary.
@@ -190,7 +191,8 @@ class DataReductionProxyRequestOptions {
   // |proxy_server| is a data reduction proxy used for ssl tunneling via
   // HTTP CONNECT, or |expect_ssl| is false and |proxy_server| is a data
   // reduction proxy for HTTP traffic.
-  void MaybeAddRequestHeaderImpl(const net::HostPortPair& proxy_server,
+  void MaybeAddRequestHeaderImpl(const net::URLRequest* request,
+                                 const net::HostPortPair& proxy_server,
                                  bool expect_ssl,
                                  net::HttpRequestHeaders* request_headers);
 

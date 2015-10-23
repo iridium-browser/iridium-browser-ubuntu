@@ -17,7 +17,6 @@
 #include "content/public/renderer/render_process_observer.h"
 #include "extensions/common/event_filter.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_set.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/renderer/resource_bundle_source_map.h"
@@ -74,8 +73,6 @@ class Dispatcher : public content::RenderProcessObserver,
     return function_names_;
   }
 
-  const ExtensionSet* extensions() const { return &extensions_; }
-
   const ScriptContextSet& script_context_set() const {
     return *script_context_set_;
   }
@@ -86,7 +83,7 @@ class Dispatcher : public content::RenderProcessObserver,
 
   RequestSender* request_sender() { return request_sender_.get(); }
 
-  void OnRenderViewCreated(content::RenderView* render_view);
+  void OnRenderFrameCreated(content::RenderFrame* render_frame);
 
   bool IsExtensionActive(const std::string& extension_id) const;
 
@@ -95,16 +92,19 @@ class Dispatcher : public content::RenderProcessObserver,
                               int extension_group,
                               int world_id);
 
+  // Runs on a different thread and should not use any member variables.
+  static void DidInitializeServiceWorkerContextOnWorkerThread(
+      v8::Local<v8::Context> v8_context,
+      const GURL& url);
+
   void WillReleaseScriptContext(blink::WebLocalFrame* frame,
                                 const v8::Local<v8::Context>& context,
                                 int world_id);
 
-  void DidCreateDocumentElement(blink::WebFrame* frame);
+  // Runs on a different thread and should not use any member variables.
+  static void WillDestroyServiceWorkerContextOnWorkerThread(const GURL& url);
 
-  void DidMatchCSS(
-      blink::WebFrame* frame,
-      const blink::WebVector<blink::WebString>& newly_matching_selectors,
-      const blink::WebVector<blink::WebString>& stopped_matching_selectors);
+  void DidCreateDocumentElement(blink::WebLocalFrame* frame);
 
   void OnExtensionResponse(int request_id,
                            bool success,
@@ -116,7 +116,7 @@ class Dispatcher : public content::RenderProcessObserver,
                      const std::string& event_name) const;
 
   // Shared implementation of the various MessageInvoke IPCs.
-  void InvokeModuleSystemMethod(content::RenderView* render_view,
+  void InvokeModuleSystemMethod(content::RenderFrame* render_frame,
                                 const std::string& extension_id,
                                 const std::string& module_name,
                                 const std::string& function_name,
@@ -137,6 +137,8 @@ class Dispatcher : public content::RenderProcessObserver,
   bool WasWebRequestUsedBySomeExtensions() const { return webrequest_used_; }
 
  private:
+  // The RendererPermissionsPolicyDelegateTest.CannotScriptWebstore test needs
+  // to call the OnActivateExtension IPCs.
   friend class ::ChromeRenderViewTest;
   FRIEND_TEST_ALL_PREFIXES(RendererPermissionsPolicyDelegateTest,
                            CannotScriptWebstore);
@@ -158,7 +160,6 @@ class Dispatcher : public content::RenderProcessObserver,
   void OnDispatchOnDisconnect(int port_id, const std::string& error_message);
   void OnLoaded(
       const std::vector<ExtensionMsg_Loaded_Params>& loaded_extensions);
-  void OnLoadedInternal(scoped_refptr<const Extension> extension);
   void OnMessageInvoke(const std::string& extension_id,
                        const std::string& module_name,
                        const std::string& function_name,
@@ -244,17 +245,15 @@ class Dispatcher : public content::RenderProcessObserver,
   // |context|.
   void RequireGuestViewModules(ScriptContext* context);
 
+  // Adds features that are specific to the current channel.
+  void AddChannelSpecificFeatures();
+
   // The delegate for this dispatcher. Not owned, but must extend beyond the
   // Dispatcher's own lifetime.
   DispatcherDelegate* delegate_;
 
   // True if the IdleNotification timer should be set.
   bool set_idle_notifications_;
-
-  // Contains all loaded extensions.  This is essentially the renderer
-  // counterpart to ExtensionService in the browser. It contains information
-  // about all extensions currently loaded by the browser.
-  ExtensionSet extensions_;
 
   // The IDs of extensions that failed to load, mapped to the error message
   // generated on failure.

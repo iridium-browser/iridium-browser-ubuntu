@@ -17,11 +17,25 @@ namespace rx
 
 class FunctionsGL;
 class StateManagerGL;
+struct WorkaroundsGL;
+
+struct LUMAWorkaround
+{
+    bool enabled;
+    GLenum sourceFormat;
+    GLenum workaroundFormat;
+
+    LUMAWorkaround();
+    LUMAWorkaround(bool enabled, GLenum sourceFormat, GLenum workaroundFormat);
+};
 
 class TextureGL : public TextureImpl
 {
   public:
-    TextureGL(GLenum type, const FunctionsGL *functions, StateManagerGL *stateManager);
+    TextureGL(GLenum type,
+              const FunctionsGL *functions,
+              const WorkaroundsGL &workarounds,
+              StateManagerGL *stateManager);
     ~TextureGL() override;
 
     void setUsage(GLenum usage) override;
@@ -32,9 +46,9 @@ class TextureGL : public TextureImpl
                           const gl::PixelUnpackState &unpack, const uint8_t *pixels) override;
 
     gl::Error setCompressedImage(GLenum target, size_t level, GLenum internalFormat, const gl::Extents &size,
-                                 const gl::PixelUnpackState &unpack, const uint8_t *pixels) override;
+                                 const gl::PixelUnpackState &unpack, size_t imageSize, const uint8_t *pixels) override;
     gl::Error setCompressedSubImage(GLenum target, size_t level, const gl::Box &area, GLenum format,
-                                    const gl::PixelUnpackState &unpack, const uint8_t *pixels) override;
+                                    const gl::PixelUnpackState &unpack, size_t imageSize, const uint8_t *pixels) override;
 
     gl::Error copyImage(GLenum target, size_t level, const gl::Rectangle &sourceArea, GLenum internalFormat,
                         const gl::Framebuffer *source) override;
@@ -47,6 +61,8 @@ class TextureGL : public TextureImpl
 
     void bindTexImage(egl::Surface *surface) override;
     void releaseTexImage() override;
+
+    gl::Error setEGLImageTarget(GLenum target, egl::Image *image) override;
 
     void syncSamplerState(const gl::SamplerState &samplerState) const;
     GLuint getTextureID() const;
@@ -61,7 +77,10 @@ class TextureGL : public TextureImpl
     GLenum mTextureType;
 
     const FunctionsGL *mFunctions;
+    const WorkaroundsGL &mWorkarounds;
     StateManagerGL *mStateManager;
+
+    std::vector<LUMAWorkaround> mLUMAWorkaroundLevels;
 
     mutable gl::SamplerState mAppliedSamplerState;
     GLuint mTextureID;

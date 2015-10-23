@@ -57,8 +57,7 @@ const float kMaxStableAngle = 340.0f;
 // This is used to prevent entering maximize mode if an erroneous accelerometer
 // reading makes the lid appear to be fully open when the user is opening the
 // lid from a closed position.
-const base::TimeDelta kLidRecentlyOpenedDuration =
-    base::TimeDelta::FromSeconds(2);
+const int kLidRecentlyOpenedDurationSeconds = 2;
 
 #if defined(OS_CHROMEOS)
 // When the device approaches vertical orientation (i.e. portrait orientation)
@@ -108,7 +107,14 @@ MaximizeModeController::MaximizeModeController()
       ash::UMA_MAXIMIZE_MODE_INITIALLY_DISABLED);
 
 #if defined(OS_CHROMEOS)
-  chromeos::AccelerometerReader::GetInstance()->AddObserver(this);
+  // TODO(jonross): Do not create MaximizeModeController if the flag is
+  // unavailable. This will require refactoring
+  // IsMaximizeModeWindowManagerEnabled to check for the existance of the
+  // controller.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshEnableTouchView)) {
+    chromeos::AccelerometerReader::GetInstance()->AddObserver(this);
+  }
   chromeos::DBusThreadManager::Get()->
       GetPowerManagerClient()->AddObserver(this);
 #endif  // OS_CHROMEOS
@@ -117,7 +123,10 @@ MaximizeModeController::MaximizeModeController()
 MaximizeModeController::~MaximizeModeController() {
   Shell::GetInstance()->RemoveShellObserver(this);
 #if defined(OS_CHROMEOS)
-  chromeos::AccelerometerReader::GetInstance()->RemoveObserver(this);
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshEnableTouchView)) {
+    chromeos::AccelerometerReader::GetInstance()->RemoveObserver(this);
+  }
   chromeos::DBusThreadManager::Get()->
       GetPowerManagerClient()->RemoveObserver(this);
 #endif  // OS_CHROMEOS
@@ -369,7 +378,7 @@ bool MaximizeModeController::WasLidOpenedRecently() const {
   base::TimeTicks now = tick_clock_->NowTicks();
   DCHECK(now >= last_lid_open_time_);
   base::TimeDelta elapsed_time = now - last_lid_open_time_;
-  return elapsed_time <= kLidRecentlyOpenedDuration;
+  return elapsed_time.InSeconds() <= kLidRecentlyOpenedDurationSeconds;
 }
 
 void MaximizeModeController::SetTickClockForTest(

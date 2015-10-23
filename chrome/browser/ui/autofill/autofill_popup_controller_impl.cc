@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/autofill/autofill_popup_view.h"
@@ -14,6 +15,7 @@
 #include "components/autofill/core/browser/autofill_popup_delegate.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
 #include "components/autofill/core/browser/suggestion.h"
+#include "components/autofill/core/common/autofill_switches.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "grit/components_scaled_resources.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -60,10 +62,12 @@ const DataResource kDataResources[] = {
   { "jcbCC", IDR_AUTOFILL_CC_GENERIC },
   { "masterCardCC", IDR_AUTOFILL_CC_MASTERCARD },
   { "visaCC", IDR_AUTOFILL_CC_VISA },
+#if defined(OS_ANDROID)
   { "scanCreditCardIcon", IDR_AUTOFILL_CC_SCAN_NEW },
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+  { "settings", IDR_AUTOFILL_SETTINGS },
+#elif defined(OS_MACOSX) && !defined(OS_IOS)
   { "macContactsIcon", IDR_AUTOFILL_MAC_CONTACTS_ICON },
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+#endif
 };
 
 }  // namespace
@@ -101,11 +105,11 @@ AutofillPopupControllerImpl::AutofillPopupControllerImpl(
     const gfx::RectF& element_bounds,
     base::i18n::TextDirection text_direction)
     : controller_common_(new PopupControllerCommon(element_bounds,
+                                                   text_direction,
                                                    container_view,
                                                    web_contents)),
       view_(NULL),
       delegate_(delegate),
-      text_direction_(text_direction),
       weak_ptr_factory_(this) {
   ClearState();
   controller_common_->SetKeyPressCallback(
@@ -343,17 +347,29 @@ void AutofillPopupControllerImpl::SelectionCleared() {
 
 void AutofillPopupControllerImpl::AcceptSuggestion(size_t index) {
   const autofill::Suggestion& suggestion = suggestions_[index];
-  delegate_->DidAcceptSuggestion(suggestion.value, suggestion.frontend_id);
+  delegate_->DidAcceptSuggestion(suggestion.value, suggestion.frontend_id,
+                                 index);
 }
 
 int AutofillPopupControllerImpl::GetIconResourceID(
     const base::string16& resource_name) const {
+  int result = -1;
   for (size_t i = 0; i < arraysize(kDataResources); ++i) {
-    if (resource_name == base::ASCIIToUTF16(kDataResources[i].name))
-      return kDataResources[i].id;
+    if (resource_name == base::ASCIIToUTF16(kDataResources[i].name)) {
+      result = kDataResources[i].id;
+      break;
+    }
   }
 
-  return -1;
+#if defined(OS_ANDROID)
+  if (result == IDR_AUTOFILL_CC_SCAN_NEW &&
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableAccessorySuggestionView)) {
+    result = IDR_AUTOFILL_CC_SCAN_NEW_KEYBOARD_ACCESSORY;
+  }
+#endif  // OS_ANDROID
+
+  return result;
 }
 
 bool AutofillPopupControllerImpl::IsWarning(size_t index) const {
@@ -395,7 +411,7 @@ const gfx::RectF& AutofillPopupControllerImpl::element_bounds() const {
 }
 
 bool AutofillPopupControllerImpl::IsRTL() const {
-  return text_direction_ == base::i18n::RIGHT_TO_LEFT;
+  return controller_common_->is_rtl();
 }
 
 size_t AutofillPopupControllerImpl::GetLineCount() const {
@@ -415,6 +431,38 @@ const base::string16& AutofillPopupControllerImpl::GetElidedValueAt(
 const base::string16& AutofillPopupControllerImpl::GetElidedLabelAt(
     size_t row) const {
   return elided_labels_[row];
+}
+
+bool AutofillPopupControllerImpl::GetRemovalConfirmationText(
+    int list_index,
+    base::string16* title,
+    base::string16* body) {
+  return delegate_->GetDeletionConfirmationText(
+      suggestions_[list_index].value, suggestions_[list_index].frontend_id,
+      title, body);
+}
+
+bool AutofillPopupControllerImpl::RemoveSuggestion(int list_index) {
+  if (!delegate_->RemoveSuggestion(suggestions_[list_index].value,
+                                   suggestions_[list_index].frontend_id)) {
+    return false;
+  }
+
+  // Remove the deleted element.
+  suggestions_.erase(suggestions_.begin() + list_index);
+  elided_values_.erase(elided_values_.begin() + list_index);
+  elided_labels_.erase(elided_labels_.begin() + list_index);
+
+  SetSelectedLine(kNoSelection);
+
+  if (HasSuggestions()) {
+    delegate_->ClearPreviewedForm();
+    UpdateBoundsAndRedrawPopup();
+  } else {
+    Hide();
+  }
+
+  return true;
 }
 
 #if !defined(OS_ANDROID)
@@ -499,27 +547,7 @@ bool AutofillPopupControllerImpl::RemoveSelectedLine() {
 
   DCHECK_GE(selected_line_, 0);
   DCHECK_LT(selected_line_, static_cast<int>(GetLineCount()));
-
-  if (!delegate_->RemoveSuggestion(suggestions_[selected_line_].value,
-                                   suggestions_[selected_line_].frontend_id)) {
-    return false;
-  }
-
-  // Remove the deleted element.
-  suggestions_.erase(suggestions_.begin() + selected_line_);
-  elided_values_.erase(elided_values_.begin() + selected_line_);
-  elided_labels_.erase(elided_labels_.begin() + selected_line_);
-
-  SetSelectedLine(kNoSelection);
-
-  if (HasSuggestions()) {
-    delegate_->ClearPreviewedForm();
-    UpdateBoundsAndRedrawPopup();
-  } else {
-    Hide();
-  }
-
-  return true;
+  return RemoveSuggestion(selected_line_);
 }
 
 int AutofillPopupControllerImpl::LineFromY(int y) {

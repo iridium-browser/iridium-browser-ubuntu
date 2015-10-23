@@ -4,12 +4,19 @@
 
 module mojo;
 
-import "components/native_viewport/public/interfaces/native_viewport.mojom";
-import "components/surfaces/public/interfaces/surface_id.mojom";
+import "components/view_manager/public/interfaces/surface_id.mojom";
 import "components/view_manager/public/interfaces/view_manager_constants.mojom";
 import "mojo/application/public/interfaces/service_provider.mojom";
+import "network/public/interfaces/url_loader.mojom";
 import "ui/mojo/events/input_events.mojom";
+import "ui/mojo/ime/text_input_state.mojom";
 import "ui/mojo/geometry/geometry.mojom";
+
+struct ViewportMetrics {
+  Size size_in_pixels;
+  // A value of 0 indicates the real value is not yet available.
+  float device_pixel_ratio = 0.0;
+};
 
 struct ViewData {
   uint32 parent_id;
@@ -105,45 +112,58 @@ interface ViewManagerService {
   // Shows the surface in the specified view.
   SetViewSurfaceId(uint32 view_id, SurfaceId surface_id) => (bool success);
 
+  // Tells the ViewManagerService that the ViewManagerClient wants to get
+  // OnEmbedForDescendant() when EmbedAllowingReembed() is invoked on any
+  // descendant Views.
+  //
+  // See Embed() docs for more details.
+  //
+  // TODO(sky): this needs to be restricted in some way. Maybe the root can
+  // grant this ability?
+  SetEmbedRoot();
+
   // A connection may grant access to a view from another connection by way of
-  // the embed functions. There are two variants of this call:
+  // the embed functions. The following variants exist:
   //
-  // . EmbedUrl: the ViewManager connects to the app at the supplied url and
-  //   asks it for a ViewManagerClient.
-  // . With the second variant a ViewManagerClient is directly supplied.
+  // . Embed: the client supplies the ViewManagerClient to embed.
+  // . EmbedAllowingReembed: walks the view tree for the first embed root
+  //   ancestor and asks it to perform the embed (OnEmbedForDescendant()).
+  //   The embed root ancestor may allow or disallow the request. If there is no
+  //   embed root ancestor ViewManager connects to the application and requests
+  //   a ViewManagerClient from it.
   //
-  // In both cases the new ViewManagerClient is configured with a root of
+  // In all cases the new ViewManagerClient is configured with a root of
   // |view_id|.
   //
   // The caller must have created |view_id|. If not the request fails and the
   // response is false.
   //
-  // A view may only be a root of one connection at a time. Subsequent calls to
-  // Embed() for the same view result in the view being removed from the
-  // currently embedded app. The embedded app is told this by way of
-  // OnViewDeleted().
+  // A view may only have one embedding in it at a time. Subsequent calls to
+  // Embed() for the same view result in the currently embedded
+  // ViewManagerClient being removed. The embedded app is told this by way of
+  // OnUnembed(), which is followed by OnViewDeleted() (as the connection no
+  // longer has access to the view).
   //
   // The embedder can detect when the embedded app disconnects by way of
   // OnEmbeddedAppDisconnected().
   //
-  // When a connection embeds an app the connection no longer has priviledges
+  // When a connection embeds an app the connection no longer has privileges
   // to access or see any of the children of the view. If the view had existing
   // children the children are removed. The one exception is the root
-  // connection.
-  //
-  // |services| encapsulates services offered by the embedder to the embedded
-  // app alongside this Embed() call. |exposed_services| provides a means for
-  // the embedder to connect to services exposed by the embedded app. Note that
-  // if a different app is subsequently embedded at |view_id| the
-  // ServiceProvider connections to its client in the embedded app and any
-  // services it provided are not broken and continue to be valid.
-  EmbedUrl(string url,
-           uint32 view_id,
-           ServiceProvider&? services,
-           ServiceProvider? exposed_services) => (bool success);
+  // connection and any embed roots. The root always see the full tree, and
+  // embed roots see the complete tree at their embed point.
   Embed(uint32 view_id, ViewManagerClient client) => (bool success);
+  EmbedAllowingReembed(uint32 view_id, URLRequest request) => (bool success);
 
   SetFocus(uint32 view_id) => (bool success);
+
+  // Set text input state for the given view.
+  SetViewTextInputState(uint32 view_id, TextInputState state);
+
+  // Set the input method editor UI (software keyboard, etc) visibility.
+  // If state is non-null, the specified view's text input state is updated.
+  // Otherwise the existing state is used.
+  SetImeVisibility(uint32 view_id, bool visible, TextInputState? state);
 };
 
 // Changes to views are not sent to the connection that originated the
@@ -155,15 +175,22 @@ interface ViewManagerClient {
   // will be a handle back to the view manager service, unless the connection is
   // to the WindowManager in which case it will be null.
   OnEmbed(uint16 connection_id,
-          string embedder_url,
           ViewData root,
           ViewManagerService? view_manager_service,
-          ServiceProvider&? services,
-          ServiceProvider? exposed_services,
           uint32 focused_view);
+
+  // Asks the ViewManagerClient that was marked as an embed root for the
+  // ViewManagerClient to embed in |view|. The embed can be disallowed by
+  // calling the callback with nullptr.
+  OnEmbedForDescendant(uint32 view, URLRequest request) =>
+      (ViewManagerClient? client);
 
   // Invoked when the application embedded at |view| is disconnected.
   OnEmbeddedAppDisconnected(uint32 view);
+
+  // Sent when another connection is embedded in the View this connection was
+  // previously embedded in. See Embed() for more information.
+  OnUnembed();
 
   // Invoked when a view's bounds have changed.
   OnViewBoundsChanged(uint32 view,

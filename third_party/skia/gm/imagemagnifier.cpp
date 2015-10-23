@@ -46,7 +46,7 @@ protected:
             int y = rand.nextULessThan(HEIGHT);
             SkPaint paint;
             sk_tool_utils::set_portable_typeface(&paint);
-            paint.setColor(rand.nextBits(24) | 0xFF000000);
+            paint.setColor(sk_tool_utils::color_to_565(rand.nextBits(24) | 0xFF000000));
             paint.setTextSize(rand.nextRangeScalar(0, 300));
             paint.setAntiAlias(true);
             canvas->drawText(str, strlen(str), SkIntToScalar(x),

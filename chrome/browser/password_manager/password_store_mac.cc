@@ -16,10 +16,12 @@
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/mac/security_wrappers.h"
+#include "components/os_crypt/os_crypt.h"
 #include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/login_database.h"
 #include "components/password_manager/core/browser/password_store_change.h"
@@ -413,7 +415,7 @@ bool FillPasswordFormFromKeychainItem(const AppleKeychain& keychain,
   // practice, other browsers seem to use a "" or " " password (and a special
   // user name) to indicated blacklist entries.
   if (extract_password_data && (form->password_value.empty() ||
-                                EqualsASCII(form->password_value, " "))) {
+                                base::EqualsASCII(form->password_value, " "))) {
     form->blacklisted_by_user = true;
   }
 
@@ -433,6 +435,36 @@ bool FillPasswordFormFromKeychainItem(const AppleKeychain& keychain,
     }
   }
   return true;
+}
+
+bool HasChromeCreatorCode(const AppleKeychain& keychain,
+                          const SecKeychainItemRef& keychain_item) {
+  SecKeychainAttributeInfo attr_info;
+  UInt32 tags[] = {kSecCreatorItemAttr};
+  attr_info.count = arraysize(tags);
+  attr_info.tag = tags;
+  attr_info.format = nullptr;
+
+  SecKeychainAttributeList* attr_list;
+  UInt32 password_length;
+  OSStatus result = keychain.ItemCopyAttributesAndData(
+      keychain_item, &attr_info, nullptr, &attr_list,
+      &password_length, nullptr);
+  if (result != noErr)
+    return false;
+  OSType creator_code = 0;
+  for (unsigned int i = 0; i < attr_list->count; i++) {
+    SecKeychainAttribute attr = attr_list->attr[i];
+    if (!attr.data) {
+      continue;
+    }
+    if (attr.tag == kSecCreatorItemAttr) {
+      creator_code = *(static_cast<FourCharCode*>(attr.data));
+      break;
+    }
+  }
+  keychain.ItemFreeAttributesAndData(attr_list, nullptr);
+  return creator_code && creator_code == base::mac::CreatorCodeForApplication();
 }
 
 bool FormsMatchForMerge(const PasswordForm& form_a,
@@ -502,9 +534,9 @@ void MergePasswordForms(ScopedVector<autofill::PasswordForm>* keychain_forms,
     if (best_match) {
       used_keychain_forms.insert(best_match);
       form->password_value = best_match->password_value;
-      merged_forms->push_back(form.release());
+      merged_forms->push_back(form.Pass());
     } else {
-      unused_database_forms.push_back(form.release());
+      unused_database_forms.push_back(form.Pass());
     }
   });
   database_forms->swap(unused_database_forms);
@@ -570,7 +602,7 @@ void GetPasswordsForForms(const AppleKeychain& keychain,
         ExtractPasswordsMergeableWithForm(keychain, item_form_pairs, *form);
 
     ScopedVector<autofill::PasswordForm> db_form_container;
-    db_form_container.push_back(form.release());
+    db_form_container.push_back(form.Pass());
     MergePasswordForms(&keychain_matches, &db_form_container, passwords);
     AppendSecondToFirst(&unused_db_forms, &db_form_container);
   });
@@ -654,7 +686,7 @@ ScopedVector<autofill::PasswordForm> ExtractPasswordsMergeableWithForm(
           true);  // Load password attributes and data.
       // Do not include blacklisted items found in the keychain.
       if (!form_with_password->blacklisted_by_user)
-        matches.push_back(form_with_password.release());
+        matches.push_back(form_with_password.Pass());
     }
   }
   return matches.Pass();
@@ -804,7 +836,7 @@ MacKeychainPasswordFormAdapter::ConvertKeychainItemsToForms(
     scoped_ptr<PasswordForm> form(new PasswordForm());
     if (internal_keychain_helpers::FillPasswordFormFromKeychainItem(
             *keychain_, item, form.get(), true)) {
-      forms.push_back(form.release());
+      forms.push_back(form.Pass());
     }
     keychain_->Free(item);
   }
@@ -917,53 +949,116 @@ OSType MacKeychainPasswordFormAdapter::CreatorCodeForSearch() {
 PasswordStoreMac::PasswordStoreMac(
     scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner,
     scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner,
-    scoped_ptr<AppleKeychain> keychain,
-    scoped_ptr<password_manager::LoginDatabase> login_db)
+    scoped_ptr<AppleKeychain> keychain)
     : password_manager::PasswordStore(main_thread_runner, db_thread_runner),
       keychain_(keychain.Pass()),
-      login_metadata_db_(login_db.Pass()) {
-  DCHECK(keychain_.get());
-  DCHECK(login_metadata_db_.get());
+      login_metadata_db_(nullptr) {
+  DCHECK(keychain_);
 }
 
 PasswordStoreMac::~PasswordStoreMac() {}
 
+void PasswordStoreMac::InitWithTaskRunner(
+    scoped_refptr<base::SingleThreadTaskRunner> background_task_runner) {
+  db_thread_runner_ = background_task_runner;
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
+}
+
+PasswordStoreMac::MigrationResult PasswordStoreMac::ImportFromKeychain() {
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
+  if (!login_metadata_db_)
+    return LOGIN_DB_UNAVAILABLE;
+
+  ScopedVector<PasswordForm> database_forms;
+  if (!login_metadata_db_->GetAutofillableLogins(&database_forms))
+    return LOGIN_DB_FAILURE;
+
+  ScopedVector<PasswordForm> uninteresting_forms;
+  internal_keychain_helpers::ExtractNonKeychainForms(&database_forms,
+                                                     &uninteresting_forms);
+  // If there are no passwords to lookup in the Keychain then we're done.
+  if (database_forms.empty())
+    return MIGRATION_OK;
+
+  // Mute the Keychain.
+  chrome::ScopedSecKeychainSetUserInteractionAllowed user_interaction_allowed(
+      false);
+
+  // Make sure that the encryption key is retrieved from the Keychain so the
+  // encryption can be done.
+  std::string ciphertext;
+  if (!OSCrypt::EncryptString("test", &ciphertext))
+    return ENCRYPTOR_FAILURE;
+
+  // Retrieve the passwords.
+  // Get all the password attributes first.
+  std::vector<SecKeychainItemRef> keychain_items;
+  std::vector<internal_keychain_helpers::ItemFormPair> item_form_pairs =
+      internal_keychain_helpers::
+          ExtractAllKeychainItemAttributesIntoPasswordForms(&keychain_items,
+                                                            *keychain_);
+
+  // Next, compare the attributes of the PasswordForms in |database_forms|
+  // against those in |item_form_pairs|, and extract password data for each
+  // matching PasswordForm using its corresponding SecKeychainItemRef.
+  size_t unmerged_forms_count = 0;
+  size_t chrome_owned_locked_forms_count = 0;
+  for (PasswordForm* form : database_forms) {
+    ScopedVector<autofill::PasswordForm> keychain_matches =
+        internal_keychain_helpers::ExtractPasswordsMergeableWithForm(
+            *keychain_, item_form_pairs, *form);
+
+    const PasswordForm* best_match =
+        BestKeychainFormForForm(*form, keychain_matches.get());
+    if (best_match) {
+      form->password_value = best_match->password_value;
+    } else {
+      unmerged_forms_count++;
+      // Check if any corresponding keychain items are created by Chrome.
+      for (const auto& item_form_pair : item_form_pairs) {
+        if (internal_keychain_helpers::FormIsValidAndMatchesOtherForm(
+                *form, *item_form_pair.second) &&
+            internal_keychain_helpers::HasChromeCreatorCode(
+                *keychain_, *item_form_pair.first))
+          chrome_owned_locked_forms_count++;
+      }
+    }
+  }
+  STLDeleteContainerPairSecondPointers(item_form_pairs.begin(),
+                                       item_form_pairs.end());
+  for (SecKeychainItemRef item : keychain_items)
+    keychain_->Free(item);
+
+  if (unmerged_forms_count) {
+    UMA_HISTOGRAM_COUNTS(
+        "PasswordManager.KeychainMigration.NumPasswordsOnFailure",
+        database_forms.size());
+    UMA_HISTOGRAM_COUNTS("PasswordManager.KeychainMigration.NumFailedPasswords",
+                         unmerged_forms_count);
+    UMA_HISTOGRAM_COUNTS(
+        "PasswordManager.KeychainMigration.NumChromeOwnedInaccessiblePasswords",
+        chrome_owned_locked_forms_count);
+    return KEYCHAIN_BLOCKED;
+  }
+  // Now all the passwords are available. It's time to update LoginDatabase.
+  login_metadata_db_->set_clear_password_values(false);
+  for (PasswordForm* form : database_forms)
+    login_metadata_db_->UpdateLogin(*form);
+  return MIGRATION_OK;
+}
+
+void PasswordStoreMac::set_login_metadata_db(
+    password_manager::LoginDatabase* login_db) {
+  login_metadata_db_ = login_db;
+  if (login_metadata_db_)
+    login_metadata_db_->set_clear_password_values(true);
+}
+
 bool PasswordStoreMac::Init(
     const syncer::SyncableService::StartSyncFlare& flare) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  thread_.reset(new base::Thread("Chrome_PasswordStore_Thread"));
-
-  if (!thread_->Start()) {
-    thread_.reset(NULL);
-    return false;
-  }
-
-  ScheduleTask(base::Bind(&PasswordStoreMac::InitOnBackgroundThread, this));
-  return password_manager::PasswordStore::Init(flare);
-}
-
-void PasswordStoreMac::InitOnBackgroundThread() {
-  DCHECK(thread_->message_loop() == base::MessageLoop::current());
-  DCHECK(login_metadata_db_);
-  if (!login_metadata_db_->Init()) {
-    login_metadata_db_.reset();
-    LOG(ERROR) << "Could not create/open login database.";
-  }
-}
-
-void PasswordStoreMac::Shutdown() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  password_manager::PasswordStore::Shutdown();
-  thread_->Stop();
-}
-
-// Mac stores passwords in the system keychain, which can block for an
-// arbitrarily long time (most notably, it can block on user confirmation
-// from a dialog). Run tasks on a dedicated thread to avoid blocking the DB
-// thread.
-scoped_refptr<base::SingleThreadTaskRunner>
-PasswordStoreMac::GetBackgroundTaskRunner() {
-  return (thread_.get()) ? thread_->message_loop_proxy() : NULL;
+  // The class should be used inside PasswordStoreProxyMac only.
+  NOTREACHED();
+  return true;
 }
 
 void PasswordStoreMac::ReportMetricsImpl(const std::string& sync_username,
@@ -976,7 +1071,7 @@ void PasswordStoreMac::ReportMetricsImpl(const std::string& sync_username,
 
 PasswordStoreChangeList PasswordStoreMac::AddLoginImpl(
     const PasswordForm& form) {
-  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   if (login_metadata_db_ && AddToKeychainIfNecessary(form))
     return login_metadata_db_->AddLogin(form);
   return PasswordStoreChangeList();
@@ -984,7 +1079,7 @@ PasswordStoreChangeList PasswordStoreMac::AddLoginImpl(
 
 PasswordStoreChangeList PasswordStoreMac::UpdateLoginImpl(
     const PasswordForm& form) {
-  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   if (!login_metadata_db_)
     return PasswordStoreChangeList();
 
@@ -1008,7 +1103,7 @@ PasswordStoreChangeList PasswordStoreMac::UpdateLoginImpl(
 
 PasswordStoreChangeList PasswordStoreMac::RemoveLoginImpl(
     const PasswordForm& form) {
-  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   PasswordStoreChangeList changes;
   if (login_metadata_db_ && login_metadata_db_->RemoveLogin(form)) {
     // See if we own a Keychain item associated with this item. We can do an
@@ -1120,25 +1215,9 @@ ScopedVector<autofill::PasswordForm> PasswordStoreMac::FillMatchingLogins(
   return matched_forms.Pass();
 }
 
-void PasswordStoreMac::GetBlacklistLoginsImpl(
-    scoped_ptr<PasswordStore::GetLoginsRequest> request) {
-  ScopedVector<PasswordForm> obtained_forms;
-  if (!FillBlacklistLogins(&obtained_forms))
-    obtained_forms.clear();
-  request->NotifyConsumerWithResults(obtained_forms.Pass());
-}
-
-void PasswordStoreMac::GetAutofillableLoginsImpl(
-    scoped_ptr<PasswordStore::GetLoginsRequest> request) {
-  ScopedVector<PasswordForm> obtained_forms;
-  if (!FillAutofillableLogins(&obtained_forms))
-    obtained_forms.clear();
-  request->NotifyConsumerWithResults(obtained_forms.Pass());
-}
-
 bool PasswordStoreMac::FillAutofillableLogins(
     ScopedVector<PasswordForm>* forms) {
-  DCHECK_EQ(thread_->message_loop(), base::MessageLoop::current());
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   forms->clear();
 
   ScopedVector<PasswordForm> database_forms;
@@ -1158,26 +1237,26 @@ bool PasswordStoreMac::FillAutofillableLogins(
 }
 
 bool PasswordStoreMac::FillBlacklistLogins(ScopedVector<PasswordForm>* forms) {
-  DCHECK_EQ(thread_->message_loop(), base::MessageLoop::current());
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   return login_metadata_db_ && login_metadata_db_->GetBlacklistLogins(forms);
 }
 
 void PasswordStoreMac::AddSiteStatsImpl(
     const password_manager::InteractionsStats& stats) {
-  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   if (login_metadata_db_)
     login_metadata_db_->stats_table().AddRow(stats);
 }
 
 void PasswordStoreMac::RemoveSiteStatsImpl(const GURL& origin_domain) {
-  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   if (login_metadata_db_)
     login_metadata_db_->stats_table().RemoveRow(origin_domain);
 }
 
 scoped_ptr<password_manager::InteractionsStats>
 PasswordStoreMac::GetSiteStatsImpl(const GURL& origin_domain) {
-  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   return login_metadata_db_
              ? login_metadata_db_->stats_table().GetRow(origin_domain)
              : scoped_ptr<password_manager::InteractionsStats>();
@@ -1218,7 +1297,7 @@ void PasswordStoreMac::RemoveDatabaseForms(
   MoveAllFormsOut(forms, [this, &removed_forms](
                              scoped_ptr<autofill::PasswordForm> form) {
     if (login_metadata_db_->RemoveLogin(*form))
-      removed_forms.push_back(form.release());
+      removed_forms.push_back(form.Pass());
   });
   removed_forms.swap(*forms);
 }

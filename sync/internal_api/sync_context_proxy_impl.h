@@ -12,10 +12,9 @@
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/sync_context_proxy.h"
 
-namespace syncer {
-
-class SyncContext;
+namespace syncer_v2 {
 class ModelTypeSyncProxyImpl;
+class SyncContext;
 struct DataTypeState;
 
 // Encapsulates a reference to the sync context and the thread it's running on.

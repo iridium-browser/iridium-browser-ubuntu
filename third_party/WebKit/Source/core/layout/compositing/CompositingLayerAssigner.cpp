@@ -172,8 +172,9 @@ CompositingReasons CompositingLayerAssigner::getReasonsPreventingSquashing(const
     if (layer->hasFilter() || compositingInputs.filterAncestor != squashingLayerCompositingInputs.filterAncestor)
         return CompositingReasonSquashingFilterMismatch;
 
-    if (layer->layoutObject()->style()->position() == FixedPosition)
-        return CompositingReasonSquashingPositionFixedIsDisallowed;
+    if (compositingInputs.nearestFixedPositionLayer != squashingLayerCompositingInputs.nearestFixedPositionLayer)
+        return CompositingReasonSquashingNearestFixedPositionMismatch;
+    ASSERT(layer->layoutObject()->style()->position() != FixedPosition);
 
     return CompositingReasonNone;
 }
@@ -191,7 +192,7 @@ void CompositingLayerAssigner::updateSquashingAssignment(DeprecatedPaintLayer* l
         ASSERT(squashingState.hasMostRecentMapping);
 
         bool changedSquashingLayer =
-            squashingState.mostRecentMapping->updateSquashingLayerAssignment(layer, squashingState.mostRecentMapping->owningLayer(), squashingState.nextSquashedLayerIndex);
+            squashingState.mostRecentMapping->updateSquashingLayerAssignment(layer, squashingState.nextSquashedLayerIndex);
         if (!changedSquashingLayer)
             return;
 
@@ -210,7 +211,7 @@ void CompositingLayerAssigner::updateSquashingAssignment(DeprecatedPaintLayer* l
             // Before removing |layer| from an already-existing squashing layer that may have other content, issue a paint invalidation.
             m_compositor->paintInvalidationOnCompositingChange(layer);
             layer->groupedMapping()->setNeedsGraphicsLayerUpdate(GraphicsLayerUpdateSubtree);
-            layer->setGroupedMapping(0);
+            layer->setGroupedMapping(nullptr, DeprecatedPaintLayer::InvalidateLayerAndRemoveFromMapping);
         }
 
         // If we need to issue paint invalidations, do so now that we've removed it from a squashed layer.
@@ -241,10 +242,7 @@ void CompositingLayerAssigner::assignLayersToBackingsForReflectionLayer(Deprecat
 static ScrollingCoordinator* scrollingCoordinatorFromLayer(DeprecatedPaintLayer& layer)
 {
     Page* page = layer.layoutObject()->frame()->page();
-    if (!page)
-        return 0;
-
-    return page->scrollingCoordinator();
+    return (!page) ? nullptr : page->scrollingCoordinator();
 }
 
 void CompositingLayerAssigner::assignLayersToBackingsInternal(DeprecatedPaintLayer* layer, SquashingState& squashingState, Vector<DeprecatedPaintLayer*>& layersNeedingPaintInvalidation)
@@ -298,7 +296,7 @@ void CompositingLayerAssigner::assignLayersToBackingsInternal(DeprecatedPaintLay
         layer->scrollParent()->scrollableArea()->setTopmostScrollChild(layer);
 
     if (layer->needsCompositedScrolling())
-        layer->scrollableArea()->setTopmostScrollChild(0);
+        layer->scrollableArea()->setTopmostScrollChild(nullptr);
 
     DeprecatedPaintLayerStackingNodeIterator iterator(*layer->stackingNode(), NormalFlowChildren | PositiveZOrderChildren);
     while (DeprecatedPaintLayerStackingNode* curNode = iterator.next())

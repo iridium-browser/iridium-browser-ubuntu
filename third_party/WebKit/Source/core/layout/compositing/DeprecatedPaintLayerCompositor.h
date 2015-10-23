@@ -68,7 +68,7 @@ class CORE_EXPORT DeprecatedPaintLayerCompositor final : public GraphicsLayerCli
     WTF_MAKE_FAST_ALLOCATED(DeprecatedPaintLayerCompositor);
 public:
     explicit DeprecatedPaintLayerCompositor(LayoutView&);
-    virtual ~DeprecatedPaintLayerCompositor();
+    ~DeprecatedPaintLayerCompositor() override;
 
     void updateIfNeededRecursive();
 
@@ -156,8 +156,11 @@ public:
     void resetTrackedPaintInvalidationRects();
     void setTracksPaintInvalidations(bool);
 
-    virtual String debugName(const GraphicsLayer*) override;
+    String debugName(const GraphicsLayer*) override;
     DocumentLifecycle& lifecycle() const;
+
+    bool needsUpdateDescendantDependentFlags() const { return m_needsUpdateDescendantDependentFlags; }
+    void setNeedsUpdateDescendantDependentFlags() { m_needsUpdateDescendantDependentFlags = true; }
 
     void updatePotentialCompositingReasonsFromStyle(DeprecatedPaintLayer*);
 
@@ -178,9 +181,9 @@ private:
 #endif
 
     // GraphicsLayerClient implementation
-    virtual void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const IntRect&) override;
+    void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const IntRect&) override;
 
-    virtual bool isTrackingPaintInvalidations() const override;
+    bool isTrackingPaintInvalidations() const override;
 
     void updateWithoutAcceleratedCompositing(CompositingUpdateType);
     void updateIfNeeded();
@@ -207,7 +210,7 @@ private:
     bool requiresVerticalScrollbarLayer() const;
     bool requiresScrollCornerLayer() const;
 
-    void applyOverlayFullscreenVideoAdjustment();
+    void applyOverlayFullscreenVideoAdjustmentIfNeeded();
 
     LayoutView& m_layoutView;
     OwnPtr<GraphicsLayer> m_rootContentLayer;
@@ -230,6 +233,8 @@ private:
     bool m_rootShouldAlwaysCompositeDirty;
     bool m_needsUpdateFixedBackground;
     bool m_isTrackingPaintInvalidations; // Used for testing.
+    bool m_inOverlayFullscreenVideo;
+    bool m_needsUpdateDescendantDependentFlags;
 
     RootLayerAttachment m_rootLayerAttachment;
 
@@ -244,8 +249,6 @@ private:
     OwnPtr<GraphicsLayer> m_layerForHorizontalScrollbar;
     OwnPtr<GraphicsLayer> m_layerForVerticalScrollbar;
     OwnPtr<GraphicsLayer> m_layerForScrollCorner;
-
-    bool m_inOverlayFullscreenVideo;
 };
 
 } // namespace blink

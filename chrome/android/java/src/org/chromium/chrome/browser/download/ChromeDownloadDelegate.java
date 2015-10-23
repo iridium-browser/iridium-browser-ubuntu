@@ -4,8 +4,10 @@
 
 package org.chromium.chrome.browser.download;
 
+import android.Manifest.permission;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Environment;
@@ -13,19 +15,21 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.webkit.MimeTypeMap;
 import android.webkit.URLUtil;
-import android.widget.Toast;
 
-import org.chromium.base.CalledByNative;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.infobar.ConfirmInfoBar;
 import org.chromium.chrome.browser.infobar.InfoBar;
 import org.chromium.chrome.browser.infobar.InfoBarListeners;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.content.browser.ContentViewDownloadDelegate;
 import org.chromium.content.browser.DownloadInfo;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.base.WindowAndroid.PermissionCallback;
+import org.chromium.ui.widget.Toast;
 
 import java.io.File;
 
@@ -308,14 +312,15 @@ public class ChromeDownloadDelegate
      *
      * @param overwrite Whether or not we will overwrite the file.
      * @param downloadInfo The download info.
+     * @return true iff this request resulted in the tab creating the download to close.
      */
     @CalledByNative
-    private void enqueueDownloadManagerRequestFromNative(
+    private boolean enqueueDownloadManagerRequestFromNative(
             boolean overwrite, DownloadInfo downloadInfo) {
         // Android DownloadManager does not have an overwriting option.
         // We remove the file here instead.
         if (overwrite) deleteFileForOverwrite(downloadInfo);
-        enqueueDownloadManagerRequestInternal(downloadInfo);
+        return enqueueDownloadManagerRequestInternal(downloadInfo);
     }
 
     private void deleteFileForOverwrite(DownloadInfo info) {
@@ -327,10 +332,10 @@ public class ChromeDownloadDelegate
         }
     }
 
-    private void enqueueDownloadManagerRequestInternal(final DownloadInfo info) {
+    private boolean enqueueDownloadManagerRequestInternal(final DownloadInfo info) {
         DownloadManagerService.getDownloadManagerService(
                 mContext.getApplicationContext()).enqueueDownloadManagerRequest(info, true);
-        closeBlankTab();
+        return closeBlankTab();
     }
 
     /**
@@ -474,15 +479,17 @@ public class ChromeDownloadDelegate
 
     /**
      * Close a blank tab just opened for the download purpose.
+     * @return true iff the tab was closed.
      */
-    private void closeBlankTab() {
+    private boolean closeBlankTab() {
         WebContents contents = mTab.getWebContents();
         boolean isInitialNavigation = contents == null
                 || contents.getNavigationController().isInitialNavigation();
         if (isInitialNavigation) {
             // Tab is created just for download, close it.
-            mTabModelSelector.closeTab(mTab);
+            return mTabModelSelector.closeTab(mTab);
         }
+        return false;
     }
 
     /**
@@ -497,10 +504,27 @@ public class ChromeDownloadDelegate
         String scheme = uri.normalizeScheme().getScheme();
         if (!"http".equals(scheme) && !"https".equals(scheme)) return false;
         String path = uri.getPath();
-        // OMA downloads have extension "dm" or "dd".
-        if (path != null && (path.endsWith(".dm") || path.endsWith(".dd"))) {
-            DownloadInfo downloadInfo = new DownloadInfo.Builder().setUrl(url).build();
-            onDownloadStartNoStream(downloadInfo);
+        // OMA downloads have extension "dm" or "dd". For the latter, it
+        // can be handled when native download completes.
+        if (path != null && (path.endsWith(".dm"))) {
+            final DownloadInfo downloadInfo = new DownloadInfo.Builder().setUrl(url).build();
+            if (mTab == null) return true;
+            WindowAndroid window = mTab.getWindowAndroid();
+            if (window.hasPermission(permission.WRITE_EXTERNAL_STORAGE)) {
+                onDownloadStartNoStream(downloadInfo);
+            } else if (window.canRequestPermission(permission.WRITE_EXTERNAL_STORAGE)) {
+                PermissionCallback permissionCallback = new PermissionCallback() {
+                    @Override
+                    public void onRequestPermissionsResult(
+                            String[] permissions, int[] grantResults) {
+                        if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                            onDownloadStartNoStream(downloadInfo);
+                        }
+                    }
+                };
+                window.requestPermissions(
+                        new String[] {permission.WRITE_EXTERNAL_STORAGE}, permissionCallback);
+            }
             return true;
         }
         return false;

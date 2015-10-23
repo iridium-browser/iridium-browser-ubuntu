@@ -33,12 +33,11 @@ class ProgramImpl : angle::NonCopyable
   public:
     typedef int SemanticIndexArray[gl::MAX_VERTEX_ATTRIBS];
 
-    ProgramImpl() { }
+    ProgramImpl(const gl::Program::Data &data);
     virtual ~ProgramImpl();
 
     virtual bool usesPointSize() const = 0;
     virtual int getShaderVersion() const = 0;
-    virtual GLenum getTransformFeedbackBufferMode() const = 0;
 
     virtual GLenum getBinaryFormat() = 0;
     virtual LinkResult load(gl::InfoLog &infoLog, gl::BinaryInputStream *stream) = 0;
@@ -46,8 +45,6 @@ class ProgramImpl : angle::NonCopyable
 
     virtual LinkResult link(const gl::Data &data, gl::InfoLog &infoLog,
                             gl::Shader *fragmentShader, gl::Shader *vertexShader,
-                            const std::vector<std::string> &transformFeedbackVaryings,
-                            GLenum transformFeedbackBufferMode,
                             int *registers, std::vector<gl::LinkedVarying> *linkedVaryings,
                             std::map<int, gl::VariableLocation> *outputVariables) = 0;
 
@@ -87,8 +84,7 @@ class ProgramImpl : angle::NonCopyable
     virtual void updateSamplerMapping() = 0;
     virtual bool validateSamplers(gl::InfoLog *infoLog, const gl::Caps &caps) = 0;
 
-    virtual LinkResult compileProgramExecutables(gl::InfoLog &infoLog, gl::Shader *fragmentShader, gl::Shader *vertexShader,
-                                                 int registers) = 0;
+    virtual LinkResult compileProgramExecutables(gl::InfoLog &infoLog, int registers) = 0;
 
     virtual bool linkUniforms(gl::InfoLog &infoLog, const gl::Shader &vertexShader, const gl::Shader &fragmentShader,
                               const gl::Caps &caps) = 0;
@@ -101,14 +97,14 @@ class ProgramImpl : angle::NonCopyable
                                             unsigned int registerIndex, const gl::Caps &caps) = 0;
 
     const std::vector<gl::LinkedUniform*> &getUniforms() const { return mUniforms; }
-    const std::vector<gl::VariableLocation> &getUniformIndices() const { return mUniformIndex; }
+    const std::map<GLuint, gl::VariableLocation> &getUniformIndices() const { return mUniformIndex; }
     const std::vector<gl::UniformBlock*> &getUniformBlocks() const { return mUniformBlocks; }
     const std::vector<gl::LinkedVarying> &getTransformFeedbackLinkedVaryings() const { return mTransformFeedbackLinkedVaryings; }
     const std::vector<sh::Attribute> getShaderAttributes() { return mShaderAttributes; }
     const SemanticIndexArray &getSemanticIndexes() const { return mSemanticIndex; }
 
     std::vector<gl::LinkedUniform*> &getUniforms() { return mUniforms; }
-    std::vector<gl::VariableLocation> &getUniformIndices() { return mUniformIndex; }
+    std::map<GLuint, gl::VariableLocation> &getUniformIndices() { return mUniformIndex; }
     std::vector<gl::UniformBlock*> &getUniformBlocks() { return mUniformBlocks; }
     std::vector<gl::LinkedVarying> &getTransformFeedbackLinkedVaryings() { return mTransformFeedbackLinkedVaryings; }
     SemanticIndexArray &getSemanticIndexes() { return mSemanticIndex; }
@@ -127,8 +123,13 @@ class ProgramImpl : angle::NonCopyable
     virtual void reset();
 
   protected:
+    const gl::Program::Data &mData;
+
     std::vector<gl::LinkedUniform*> mUniforms;
-    std::vector<gl::VariableLocation> mUniformIndex;
+
+    // TODO: use a hash map
+    std::map<GLuint, gl::VariableLocation> mUniformIndex;
+
     std::vector<gl::UniformBlock*> mUniformBlocks;
     std::vector<gl::LinkedVarying> mTransformFeedbackLinkedVaryings;
 

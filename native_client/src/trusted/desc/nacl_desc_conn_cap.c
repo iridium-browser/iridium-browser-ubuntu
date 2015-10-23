@@ -203,6 +203,11 @@ static struct NaClDescVtbl const kNaClDescConnCapVtbl = {
   NaClDescPReadNotImplemented,
   NaClDescPWriteNotImplemented,
   NaClDescConnCapFstat,
+  NaClDescFchdirNotImplemented,
+  NaClDescFchmodNotImplemented,
+  NaClDescFsyncNotImplemented,
+  NaClDescFdatasyncNotImplemented,
+  NaClDescFtruncateNotImplemented,
   NaClDescGetdentsNotImplemented,
   NaClDescConnCapExternalizeSize,
   NaClDescConnCapExternalize,
@@ -231,13 +236,11 @@ static struct NaClDescVtbl const kNaClDescConnCapVtbl = {
 };
 
 int NaClDescConnCapInternalize(struct NaClDesc               **out_desc,
-                               struct NaClDescXferState      *xfer,
-                               struct NaClDescQuotaInterface *quota_interface) {
+                               struct NaClDescXferState      *xfer) {
   int                       rv;
   struct NaClSocketAddress  nsa;
   struct NaClDescConnCap    *ndccp;
 
-  UNREFERENCED_PARAMETER(quota_interface);
   rv = -NACL_ABI_EIO;  /* catch-all */
 
   ndccp = malloc(sizeof *ndccp);

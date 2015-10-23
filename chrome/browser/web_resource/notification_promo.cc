@@ -20,9 +20,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/app_list/app_list_util.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
-#include "chrome/common/chrome_version_info.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/user_metrics.h"
 #include "net/base/url_util.h"
 #include "ui/base/device_form_factor.h"
@@ -86,16 +87,15 @@ const char* ChannelString() {
   // TODO(achuith): Move NotificationPromo::PromoServerURL to the blocking pool.
   base::ThreadRestrictions::ScopedAllowIO allow_io;
 #endif
-  const chrome::VersionInfo::Channel channel =
-      chrome::VersionInfo::GetChannel();
+  const version_info::Channel channel = chrome::GetChannel();
   switch (channel) {
-    case chrome::VersionInfo::CHANNEL_CANARY:
+    case version_info::Channel::CANARY:
       return "canary";
-    case chrome::VersionInfo::CHANNEL_DEV:
+    case version_info::Channel::DEV:
       return "dev";
-    case chrome::VersionInfo::CHANNEL_BETA:
+    case version_info::Channel::BETA:
       return "beta";
-    case chrome::VersionInfo::CHANNEL_STABLE:
+    case version_info::Channel::STABLE:
       return "stable";
     default:
       return "none";
@@ -470,7 +470,7 @@ GURL NotificationPromo::PromoServerURL() {
   GURL url(promo_server_url);
   AppendQueryParameter(&url, "dist", ChannelString());
   AppendQueryParameter(&url, "osname", PlatformString());
-  AppendQueryParameter(&url, "branding", chrome::VersionInfo().Version());
+  AppendQueryParameter(&url, "branding", version_info::GetVersionNumber());
   AppendQueryParameter(&url, "osver", base::SysInfo::OperatingSystemVersion());
   DVLOG(1) << "PromoServerURL=" << url.spec();
   // Note that locale param is added by WebResourceService.

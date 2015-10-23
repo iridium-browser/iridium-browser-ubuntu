@@ -13,10 +13,22 @@
 
 #include <string>
 
+// Hack: Define+undefine int64 and uint64 to avoid typedef conflict with NSS.
+// TODO(kjellander): Remove when webrtc:4497 is completed.
+#define uint64 foo_uint64
+#define int64 foo_int64
 #include "cert.h"
+#undef uint64
+#undef int64
 #include "nspr.h"
 #include "hasht.h"
 #include "keythi.h"
+
+#ifdef NSS_SSL_RELATIVE_PATH
+#include "ssl.h"
+#else
+#include "net/third_party/nss/ssl/ssl.h"
+#endif
 
 #include "webrtc/base/common.h"
 #include "webrtc/base/logging.h"
@@ -27,20 +39,26 @@ namespace rtc {
 
 class NSSKeyPair {
  public:
-  NSSKeyPair(SECKEYPrivateKey* privkey, SECKEYPublicKey* pubkey) :
-      privkey_(privkey), pubkey_(pubkey) {}
+  NSSKeyPair(SECKEYPrivateKey* privkey, SECKEYPublicKey* pubkey)
+      : privkey_(privkey), pubkey_(pubkey), ssl_kea_type_(ssl_kea_null) {}
+  NSSKeyPair(SECKEYPrivateKey* privkey,
+             SECKEYPublicKey* pubkey,
+             SSLKEAType ssl_kea_type)
+      : privkey_(privkey), pubkey_(pubkey), ssl_kea_type_(ssl_kea_type) {}
   ~NSSKeyPair();
 
   // Generate a 1024-bit RSA key pair.
-  static NSSKeyPair* Generate();
+  static NSSKeyPair* Generate(KeyType key_type);
   NSSKeyPair* GetReference();
 
   SECKEYPrivateKey* privkey() const { return privkey_; }
   SECKEYPublicKey * pubkey() const { return pubkey_; }
+  SSLKEAType ssl_kea_type() const { return ssl_kea_type_; }
 
  private:
   SECKEYPrivateKey* privkey_;
   SECKEYPublicKey* pubkey_;
+  SSLKEAType ssl_kea_type_;
 
   DISALLOW_COPY_AND_ASSIGN(NSSKeyPair);
 };
@@ -97,7 +115,8 @@ class NSSCertificate : public SSLCertificate {
 // Represents a SSL key pair and certificate for NSS.
 class NSSIdentity : public SSLIdentity {
  public:
-  static NSSIdentity* Generate(const std::string& common_name);
+  static NSSIdentity* Generate(const std::string& common_name,
+                               KeyType key_type);
   static NSSIdentity* GenerateForTest(const SSLIdentityParams& params);
   static SSLIdentity* FromPEMStrings(const std::string& private_key,
                                      const std::string& certificate);

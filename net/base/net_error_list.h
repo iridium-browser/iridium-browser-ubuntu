@@ -206,9 +206,6 @@ NET_ERROR(SSL_BAD_RECORD_MAC_ALERT, -126)
 // The proxy requested authentication (for tunnel establishment).
 NET_ERROR(PROXY_AUTH_REQUESTED, -127)
 
-// A known TLS strict server didn't offer the renegotiation extension.
-NET_ERROR(SSL_UNSAFE_NEGOTIATION, -128)
-
 // The SSL server attempted to use a weak ephemeral Diffie-Hellman key.
 NET_ERROR(SSL_WEAK_SERVER_EPHEMERAL_DH_KEY, -129)
 
@@ -350,6 +347,11 @@ NET_ERROR(SSL_FALLBACK_BEYOND_MINIMUM_VERSION, -165)
 // problem.
 NET_ERROR(ICANN_NAME_COLLISION, -166)
 
+// The SSL server presented a certificate which could not be decoded. This is
+// not a certificate error code as no X509Certificate object is available. This
+// error is fatal.
+NET_ERROR(SSL_SERVER_CERT_BAD_FORMAT, -167)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.
@@ -357,8 +359,8 @@ NET_ERROR(ICANN_NAME_COLLISION, -166)
 // The server responded with a certificate whose common name did not match
 // the host name.  This could mean:
 //
-// 1. An attacker has redirected our traffic to his server and is
-//    presenting a certificate for which he knows the private key.
+// 1. An attacker has redirected our traffic to their server and is
+//    presenting a certificate for which they know the private key.
 //
 // 2. The server is misconfigured and responding with the wrong cert.
 //
@@ -373,7 +375,7 @@ NET_ERROR(CERT_COMMON_NAME_INVALID, -200)
 // The server responded with a certificate that, by our clock, appears to
 // either not yet be valid or to have expired.  This could mean:
 //
-// 1. An attacker is presenting an old certificate for which he has
+// 1. An attacker is presenting an old certificate for which they have
 //    managed to obtain the private key.
 //
 // 2. The server is misconfigured and is not presenting a valid cert.
@@ -386,7 +388,7 @@ NET_ERROR(CERT_DATE_INVALID, -201)
 // we don't trust.  The could mean:
 //
 // 1. An attacker has substituted the real certificate for a cert that
-//    contains his public key and is signed by his cousin.
+//    contains their public key and is signed by their cousin.
 //
 // 2. The server operator has a legitimate certificate from a CA we don't
 //    know about, but should trust.
@@ -645,6 +647,10 @@ NET_ERROR(PAC_SCRIPT_TERMINATED, -367)
 // https://tools.ietf.org/id/draft-ietf-httpbis-alt-svc-06.html#host_auth.
 NET_ERROR(ALTERNATIVE_CERT_NOT_VALID_FOR_ORIGIN, -368)
 
+// Request is throttled because of a Backoff header.
+// See: crbug.com/486891.
+NET_ERROR(TEMPORARY_BACKOFF, -369)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -762,8 +768,7 @@ NET_ERROR(PKCS12_IMPORT_UNSUPPORTED, -709)
 // Key generation failed.
 NET_ERROR(KEY_GENERATION_FAILED, -710)
 
-// Server-bound certificate generation failed.
-NET_ERROR(ORIGIN_BOUND_CERT_GENERATION_FAILED, -711)
+// Error -711 was removed (ORIGIN_BOUND_CERT_GENERATION_FAILED)
 
 // Failure to export private key.
 NET_ERROR(PRIVATE_KEY_EXPORT_FAILED, -712)

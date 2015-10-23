@@ -49,7 +49,7 @@ class MIDIOutput;
 class MIDIOutputMap;
 
 class MIDIAccess final : public RefCountedGarbageCollectedEventTargetWithInlineData<MIDIAccess>, public ActiveDOMObject, public MIDIAccessorClient {
-    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<MIDIAccess>);
+    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(MIDIAccess);
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MIDIAccess);
 public:
@@ -65,7 +65,7 @@ public:
     MIDIOutputMap* outputs() const;
 
     EventListener* onstatechange();
-    void setOnstatechange(PassRefPtr<EventListener>);
+    void setOnstatechange(PassRefPtrWillBeRawPtr<EventListener>);
 
     bool sysexEnabled() const { return m_sysexEnabled; }
 
@@ -93,6 +93,10 @@ public:
     // |timeStampInMilliseconds| is in the same time coordinate system as performance.now().
     void sendMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStampInMilliseconds);
 
+    // Eager finalization needed to promptly release m_accessor. Otherwise
+    // its client back reference could end up being unsafely used during
+    // the lazy sweeping phase.
+    EAGERLY_FINALIZE();
     DECLARE_VIRTUAL_TRACE();
 
 private:

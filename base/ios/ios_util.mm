@@ -4,6 +4,8 @@
 
 #include "base/ios/ios_util.h"
 
+#import <Foundation/Foundation.h>
+
 #include "base/sys_info.h"
 
 namespace {
@@ -20,8 +22,13 @@ const int32* OSVersionAsArray() {
 namespace base {
 namespace ios {
 
+// When dropping iOS7 support, also address issues listed in crbug.com/502968.
 bool IsRunningOnIOS8OrLater() {
   return IsRunningOnOrLater(8, 0, 0);
+}
+
+bool IsRunningOnIOS9OrLater() {
+  return IsRunningOnOrLater(9, 0, 0);
 }
 
 bool IsRunningOnOrLater(int32 major, int32 minor, int32 bug_fix) {
@@ -32,6 +39,11 @@ bool IsRunningOnOrLater(int32 major, int32 minor, int32 bug_fix) {
       return current_version[i] > version[i];
   }
   return true;
+}
+
+bool IsInForcedRTL() {
+  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+  return [defaults boolForKey:@"AppleTextDirection"];
 }
 
 }  // namespace ios

@@ -66,7 +66,6 @@ class ShellExtensionsBrowserClient : public ExtensionsBrowserClient {
   scoped_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate() override;
   bool DidVersionUpdate(content::BrowserContext* context) override;
   void PermitExternalProtocolHandler() override;
-  scoped_ptr<AppSorting> CreateAppSorting() override;
   bool IsRunningInForcedAppMode() override;
   ApiActivityMonitor* GetApiActivityMonitor(
       content::BrowserContext* context) override;
@@ -79,12 +78,15 @@ class ShellExtensionsBrowserClient : public ExtensionsBrowserClient {
       content::BrowserContext* context) const override;
   const ComponentExtensionResourceManager*
   GetComponentExtensionResourceManager() override;
-  void BroadcastEventToRenderers(const std::string& event_name,
+  void BroadcastEventToRenderers(events::HistogramValue histogram_value,
+                                 const std::string& event_name,
                                  scoped_ptr<base::ListValue> args) override;
   net::NetLog* GetNetLog() override;
   ExtensionCache* GetExtensionCache() override;
   bool IsBackgroundUpdateAllowed() override;
   bool IsMinBrowserVersionSupported(const std::string& min_version) override;
+  ExtensionWebContentsObserver* GetExtensionWebContentsObserver(
+      content::WebContents* web_contents) override;
 
   // Sets the API client.
   void SetAPIClientForTest(ExtensionsAPIClient* api_client);

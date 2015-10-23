@@ -7,7 +7,7 @@
 #include <cstddef>
 
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/android/chromium_application.h"
+#include "chrome/browser/android/chrome_application.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -30,20 +30,20 @@ void GeneratedPasswordSavedInfoBarDelegateAndroid::OnInlineLinkClicked() {
             content::Referrer(), NEW_FOREGROUND_TAB,
             ui::PAGE_TRANSITION_LINK, false));
   } else {
-    chrome::android::ChromiumApplication::ShowPasswordSettings();
+    chrome::android::ChromeApplication::ShowPasswordSettings();
   }
 }
 
 GeneratedPasswordSavedInfoBarDelegateAndroid::
     GeneratedPasswordSavedInfoBarDelegateAndroid(
-        content::WebContents* web_contents)
-        : button_label_(l10n_util::GetStringUTF16(IDS_OK)),
-          web_contents_(web_contents),
-          smart_lock_branding_enabled_(
-              !password_bubble_experiment::IsSmartLockBrandingEnabled(
-                  ProfileSyncServiceFactory::GetForProfile(
-                      Profile::FromBrowserContext(
-                          web_contents->GetBrowserContext())))) {
+        content::WebContents *web_contents)
+    : button_label_(l10n_util::GetStringUTF16(IDS_OK)),
+      web_contents_(web_contents),
+      smart_lock_branding_enabled_(
+          password_bubble_experiment::IsSmartLockBrandingEnabled(
+              ProfileSyncServiceFactory::GetForProfile(
+                  Profile::FromBrowserContext(
+                      web_contents->GetBrowserContext())))) {
   base::string16 link = l10n_util::GetStringUTF16(
       IDS_MANAGE_PASSWORDS_LINK);
   int confirmation_id = IDS_MANAGE_PASSWORDS_CONFIRM_GENERATED_TEXT_INFOBAR;

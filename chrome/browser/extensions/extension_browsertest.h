@@ -79,6 +79,7 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest {
   void SetUp() override;
   void SetUpCommandLine(base::CommandLine* command_line) override;
   void SetUpOnMainThread() override;
+  void TearDownOnMainThread() override;
 
   const extensions::Extension* LoadExtension(const base::FilePath& path);
 
@@ -110,6 +111,9 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest {
   // LoadExtensionAsComponentWithManifest(path, extensions::kManifestFilename).
   const extensions::Extension* LoadExtensionAsComponent(
       const base::FilePath& path);
+
+  // Loads and launches the app from |path|, and returns it.
+  const extensions::Extension* LoadAndLaunchApp(const base::FilePath& path);
 
   // Pack the extension in |dir_path| into a crx file and return its path.
   // Return an empty FilePath if there were errors.

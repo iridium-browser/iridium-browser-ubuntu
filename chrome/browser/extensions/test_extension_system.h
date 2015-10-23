@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_TEST_EXTENSION_SYSTEM_H_
 #define CHROME_BROWSER_EXTENSIONS_TEST_EXTENSION_SYSTEM_H_
 
-#include "base/memory/scoped_vector.h"
+#include "base/memory/scoped_ptr.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/one_shot_event.h"
 
@@ -15,7 +15,6 @@ class TestingValueStore;
 namespace base {
 class CommandLine;
 class FilePath;
-class Time;
 }
 
 namespace content {
@@ -23,11 +22,6 @@ class BrowserContext;
 }
 
 namespace extensions {
-class DeclarativeUserScriptManager;
-class ExtensionPrefs;
-class RuntimeData;
-class SharedUserScriptMaster;
-class StandardManagementPolicyProvider;
 
 // Test ExtensionSystem, for use with TestingProfile.
 class TestExtensionSystem : public ExtensionSystem {
@@ -38,12 +32,6 @@ class TestExtensionSystem : public ExtensionSystem {
   // KeyedService implementation.
   void Shutdown() override;
 
-  // Creates an ExtensionPrefs with the testing profile and returns it.
-  // Useful for tests that need to modify prefs before creating the
-  // ExtensionService.
-  ExtensionPrefs* CreateExtensionPrefs(const base::CommandLine* command_line,
-                                       const base::FilePath& install_directory);
-
   // Creates an ExtensionService initialized with the testing profile and
   // returns it, and creates ExtensionPrefs if it hasn't been created yet.
   ExtensionService* CreateExtensionService(
@@ -53,26 +41,18 @@ class TestExtensionSystem : public ExtensionSystem {
 
   void CreateSocketManager();
 
-  // Creates a LazyBackgroundTaskQueue. If not invoked, the
-  // LazyBackgroundTaskQueue is NULL.
-  void CreateLazyBackgroundTaskQueue();
-
   void InitForRegularProfile(bool extensions_enabled) override {}
   void SetExtensionService(ExtensionService* service);
   ExtensionService* extension_service() override;
   RuntimeData* runtime_data() override;
   ManagementPolicy* management_policy() override;
   SharedUserScriptMaster* shared_user_script_master() override;
-  DeclarativeUserScriptManager* declarative_user_script_manager() override;
   StateStore* state_store() override;
   StateStore* rules_store() override;
   TestingValueStore* value_store() { return value_store_; }
   InfoMap* info_map() override;
-  LazyBackgroundTaskQueue* lazy_background_task_queue() override;
-  void SetEventRouter(scoped_ptr<EventRouter> event_router);
-  EventRouter* event_router() override;
-  InstallVerifier* install_verifier() override;
   QuotaService* quota_service() override;
+  AppSorting* app_sorting() override;
   const OneShotEvent& ready() const override;
   ContentVerifier* content_verifier() override;
   scoped_ptr<ExtensionSet> GetDependentExtensions(
@@ -83,7 +63,12 @@ class TestExtensionSystem : public ExtensionSystem {
   void SetReady() { ready_.Signal(); }
 
   // Factory method for tests to use with SetTestingProfile.
-  static KeyedService* Build(content::BrowserContext* profile);
+  static scoped_ptr<KeyedService> Build(content::BrowserContext* profile);
+
+  // Used by ExtensionPrefsTest to re-create the AppSorting after it has
+  // re-created the ExtensionPrefs instance (this can never happen in non-test
+  // code).
+  void RecreateAppSorting();
 
  protected:
   Profile* profile_;
@@ -92,15 +77,12 @@ class TestExtensionSystem : public ExtensionSystem {
   scoped_ptr<StateStore> state_store_;
   // A pointer to the TestingValueStore owned by |state_store_|.
   TestingValueStore* value_store_;
-  scoped_ptr<DeclarativeUserScriptManager> declarative_user_script_manager_;
   scoped_ptr<ManagementPolicy> management_policy_;
   scoped_ptr<RuntimeData> runtime_data_;
   scoped_ptr<ExtensionService> extension_service_;
   scoped_refptr<InfoMap> info_map_;
-  scoped_ptr<LazyBackgroundTaskQueue> lazy_background_task_queue_;
-  scoped_ptr<EventRouter> event_router_;
-  scoped_ptr<InstallVerifier> install_verifier_;
   scoped_ptr<QuotaService> quota_service_;
+  scoped_ptr<AppSorting> app_sorting_;
   OneShotEvent ready_;
 };
 

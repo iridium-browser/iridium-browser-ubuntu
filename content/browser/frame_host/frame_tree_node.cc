@@ -14,6 +14,8 @@
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/common/frame_messages.h"
+#include "content/common/site_isolation_policy.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 
@@ -37,6 +39,24 @@ const double kLoadingProgressDone = 1.0;
 
 }  // namespace
 
+// This observer watches the opener of its owner FrameTreeNode and clears the
+// owner's opener if the opener is destroyed.
+class FrameTreeNode::OpenerDestroyedObserver : public FrameTreeNode::Observer {
+ public:
+  OpenerDestroyedObserver(FrameTreeNode* owner) : owner_(owner) {}
+
+  // FrameTreeNode::Observer
+  void OnFrameTreeNodeDestroyed(FrameTreeNode* node) override {
+    CHECK_EQ(owner_->opener(), node);
+    owner_->SetOpener(nullptr);
+  }
+
+ private:
+  FrameTreeNode* owner_;
+
+  DISALLOW_COPY_AND_ASSIGN(OpenerDestroyedObserver);
+};
+
 int FrameTreeNode::next_frame_tree_node_id_ = 1;
 
 // static
@@ -53,8 +73,9 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
                              RenderViewHostDelegate* render_view_delegate,
                              RenderWidgetHostDelegate* render_widget_delegate,
                              RenderFrameHostManager::Delegate* manager_delegate,
+                             blink::WebTreeScopeType scope,
                              const std::string& name,
-                             SandboxFlags sandbox_flags)
+                             blink::WebSandboxFlags sandbox_flags)
     : frame_tree_(frame_tree),
       navigator_(navigator),
       render_manager_(this,
@@ -64,7 +85,10 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
                       manager_delegate),
       frame_tree_node_id_(next_frame_tree_node_id_++),
       parent_(NULL),
-      replication_state_(name, sandbox_flags),
+      opener_(nullptr),
+      opener_observer_(nullptr),
+      has_committed_real_load_(false),
+      replication_state_(scope, name, sandbox_flags),
       // Effective sandbox flags also need to be set, since initial sandbox
       // flags should apply to the initial empty document in the frame.
       effective_sandbox_flags_(sandbox_flags),
@@ -77,8 +101,20 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
 
 FrameTreeNode::~FrameTreeNode() {
   frame_tree_->FrameRemoved(this);
+  FOR_EACH_OBSERVER(Observer, observers_, OnFrameTreeNodeDestroyed(this));
+
+  if (opener_)
+    opener_->RemoveObserver(opener_observer_.get());
 
   g_frame_tree_node_id_map.Get().erase(frame_tree_node_id_);
+}
+
+void FrameTreeNode::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void FrameTreeNode::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 bool FrameTreeNode::IsMainFrame() const {
@@ -105,8 +141,8 @@ void FrameTreeNode::AddChild(scoped_ptr<FrameTreeNode> child,
   // about the new frame.  Create a proxy for the child frame in all
   // SiteInstances that have a proxy for the frame's parent, since all frames
   // in a frame tree should have the same set of proxies.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kSitePerProcess))
+  // TODO(alexmos, nick): We ought to do this for non-oopif too, for openers.
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible())
     render_manager_.CreateProxiesForChildFrame(child.get());
 
   children_.push_back(child.release());
@@ -138,8 +174,29 @@ void FrameTreeNode::ResetForNewProcess() {
   old_children.clear();  // May notify observers.
 }
 
+void FrameTreeNode::SetOpener(FrameTreeNode* opener) {
+  if (opener_) {
+    opener_->RemoveObserver(opener_observer_.get());
+    opener_observer_.reset();
+  }
+
+  opener_ = opener;
+
+  if (opener_) {
+    if (!opener_observer_)
+      opener_observer_ = make_scoped_ptr(new OpenerDestroyedObserver(this));
+    opener_->AddObserver(opener_observer_.get());
+  }
+}
+
+void FrameTreeNode::SetCurrentURL(const GURL& url) {
+  if (!has_committed_real_load_ && url != GURL(url::kAboutBlankURL))
+    has_committed_real_load_ = true;
+  current_url_ = url;
+}
+
 void FrameTreeNode::SetCurrentOrigin(const url::Origin& origin) {
-  if (!origin.IsSameAs(replication_state_.origin))
+  if (!origin.IsSameOriginWith(replication_state_.origin))
     render_manager_.OnDidUpdateOrigin(origin);
   replication_state_.origin = origin;
 }
@@ -187,6 +244,11 @@ bool FrameTreeNode::IsLoading() const {
           switches::kEnableBrowserSideNavigation)) {
     if (navigation_request_)
       return true;
+
+    RenderFrameHostImpl* speculative_frame_host =
+        render_manager_.speculative_frame_host();
+    if (speculative_frame_host && speculative_frame_host->is_loading())
+      return true;
   } else {
     if (pending_frame_host && pending_frame_host->is_loading())
       return true;
@@ -201,7 +263,7 @@ bool FrameTreeNode::CommitPendingSandboxFlags() {
   return did_change_flags;
 }
 
-void FrameTreeNode::SetNavigationRequest(
+void FrameTreeNode::CreatedNavigationRequest(
     scoped_ptr<NavigationRequest> navigation_request) {
   CHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableBrowserSideNavigation));
@@ -218,6 +280,8 @@ void FrameTreeNode::SetNavigationRequest(
   }
 
   navigation_request_ = navigation_request.Pass();
+
+  render_manager()->DidCreateNavigationRequest(*navigation_request_);
 }
 
 void FrameTreeNode::ResetNavigationRequest(bool is_commit) {
@@ -303,6 +367,21 @@ void FrameTreeNode::DidStopLoading() {
 void FrameTreeNode::DidChangeLoadProgress(double load_progress) {
   loading_progress_ = load_progress;
   frame_tree_->UpdateLoadProgress();
+}
+
+bool FrameTreeNode::StopLoading() {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserSideNavigation)) {
+    ResetNavigationRequest(false);
+  }
+
+  // TODO(nasko): see if child frames should send IPCs in site-per-process
+  // mode.
+  if (!IsMainFrame())
+    return true;
+
+  render_manager_.Stop();
+  return true;
 }
 
 }  // namespace content

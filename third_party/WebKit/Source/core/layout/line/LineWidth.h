@@ -30,21 +30,20 @@
 #ifndef LineWidth_h
 #define LineWidth_h
 
+#include "core/layout/api/LineLayoutBlockFlow.h"
 #include "platform/LayoutUnit.h"
 
 namespace blink {
 
 class FloatingObject;
-class LayoutObject;
-class LayoutRubyRun;
-class LayoutBlockFlow;
+class LineLayoutRubyRun;
 
 enum IndentTextOrNot { DoNotIndentText, IndentText };
 enum WhitespaceTreatment { ExcludeWhitespace, IncludeWhitespace };
 
 class LineWidth {
 public:
-    LineWidth(LayoutBlockFlow&, bool isFirstLine, IndentTextOrNot shouldIndentText);
+    LineWidth(LineLayoutBlockFlow, bool isFirstLine, IndentTextOrNot shouldIndentText);
 
     bool fitsOnLine() const { return currentWidth() <= (m_availableWidth + LayoutUnit::epsilon()); }
     bool fitsOnLine(float extra) const { return currentWidth() + extra <= (m_availableWidth + LayoutUnit::epsilon()); }
@@ -61,10 +60,10 @@ public:
     float trailingWhitespaceWidth() const { return m_trailingWhitespaceWidth; }
 
     void updateAvailableWidth(LayoutUnit minimumHeight = 0);
-    void shrinkAvailableWidthForNewFloatIfNeeded(FloatingObject*);
+    void shrinkAvailableWidthForNewFloatIfNeeded(const FloatingObject&);
     void addUncommittedWidth(float delta) { m_uncommittedWidth += delta; }
     void commit();
-    void applyOverhang(LayoutRubyRun*, LayoutObject* startLayoutObject, LayoutObject* endLayoutObject);
+    void applyOverhang(LineLayoutRubyRun, LineLayoutItem startLayoutItem, LineLayoutItem endLayoutItem);
     void fitBelowFloats(bool isFirstLine = false);
     void setTrailingWhitespaceWidth(float width) { m_trailingWhitespaceWidth = width; }
 
@@ -75,7 +74,7 @@ private:
     void updateLineDimension(LayoutUnit newLineTop, LayoutUnit newLineWidth, const float& newLineLeft, const float& newLineRight);
     void wrapNextToShapeOutside(bool isFirstLine);
 
-    LayoutBlockFlow& m_block;
+    LineLayoutBlockFlow m_block;
     float m_uncommittedWidth;
     float m_committedWidth;
     float m_overhangWidth; // The amount by which |m_availableWidth| has been inflated to account for possible contraction due to ruby overhang.

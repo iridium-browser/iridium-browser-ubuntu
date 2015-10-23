@@ -14,13 +14,12 @@
 #include "base/prefs/persistent_pref_store.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/sequenced_task_runner.h"
-#include "chrome/browser/prefs/tracked/pref_hash_store_impl.h"
-#include "chrome/browser/prefs/tracked/pref_service_hash_store_contents.h"
-#include "chrome/browser/prefs/tracked/segregated_pref_store.h"
-#include "chrome/browser/prefs/tracked/tracked_preferences_migration.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/user_prefs/tracked/pref_hash_store_impl.h"
+#include "components/user_prefs/tracked/pref_service_hash_store_contents.h"
+#include "components/user_prefs/tracked/segregated_pref_store.h"
+#include "components/user_prefs/tracked/tracked_preferences_migration.h"
 
 namespace {
 
@@ -34,11 +33,10 @@ void RemoveValueSilently(const base::WeakPtr<JsonPrefStore> pref_store,
 
 }  // namespace
 
-// TODO(erikwright): Enable this on Chrome OS and Android once MACs are moved
-// out of Local State. This will resolve a race condition on Android and a
-// privacy issue on ChromeOS. http://crbug.com/349158
+// Preference tracking and protection is not required on platforms where other
+// apps do not have access to chrome's persistent storage.
 const bool ProfilePrefStoreManager::kPlatformSupportsPreferenceTracking =
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS) || defined(OS_IOS)
     false;
 #else
     true;

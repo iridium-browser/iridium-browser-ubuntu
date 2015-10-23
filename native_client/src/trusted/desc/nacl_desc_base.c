@@ -188,8 +188,7 @@ int NaClDescInternalizeCtor(struct NaClDesc *vself,
 
 int (*NaClDescInternalize[NACL_DESC_TYPE_MAX])(
     struct NaClDesc **,
-    struct NaClDescXferState *,
-    struct NaClDescQuotaInterface *) = {
+    struct NaClDescXferState *) = {
   NaClDescInvalidInternalize,
   NaClDescInternalizeNotImplemented,
   NaClDescIoInternalize,
@@ -209,7 +208,7 @@ int (*NaClDescInternalize[NACL_DESC_TYPE_MAX])(
   NaClDescSyncSocketInternalize,
   NaClDescXferableDataDescInternalize,
   NaClDescInternalizeNotImplemented,  /* imc socket */
-  NaClDescQuotaInternalize,           /* quota wrapper */
+  NaClDescInternalizeNotImplemented,  /* quota wrapper */
   NaClDescInternalizeNotImplemented,  /* custom */
   NaClDescNullInternalize,
 };
@@ -362,6 +361,52 @@ int NaClDescFstatNotImplemented(struct NaClDesc         *vself,
   return -NACL_ABI_EINVAL;
 }
 
+int NaClDescFchdirNotImplemented(struct NaClDesc *vself) {
+  NaClLog(LOG_ERROR,
+          "Fchdir method is not implemented for object of type %s\n",
+          NaClDescTypeString(((struct NaClDescVtbl const *)
+                              vself->base.vtbl)->typeTag));
+  return -NACL_ABI_EINVAL;
+}
+
+int NaClDescFchmodNotImplemented(struct NaClDesc *vself,
+                                 int             mode) {
+  UNREFERENCED_PARAMETER(mode);
+
+  NaClLog(LOG_ERROR,
+          "Fchmod method is not implemented for object of type %s\n",
+          NaClDescTypeString(((struct NaClDescVtbl const *)
+                              vself->base.vtbl)->typeTag));
+  return -NACL_ABI_EINVAL;
+}
+
+int NaClDescFsyncNotImplemented(struct NaClDesc *vself) {
+  NaClLog(LOG_ERROR,
+          "Fsync method is not implemented for object of type %s\n",
+          NaClDescTypeString(((struct NaClDescVtbl const *)
+                              vself->base.vtbl)->typeTag));
+  return -NACL_ABI_EINVAL;
+}
+
+int NaClDescFdatasyncNotImplemented(struct NaClDesc *vself) {
+  NaClLog(LOG_ERROR,
+          "Fdatasync method is not implemented for object of type %s\n",
+          NaClDescTypeString(((struct NaClDescVtbl const *)
+                              vself->base.vtbl)->typeTag));
+  return -NACL_ABI_EINVAL;
+}
+
+int NaClDescFtruncateNotImplemented(struct NaClDesc  *vself,
+                                    nacl_abi_off_t   length) {
+  UNREFERENCED_PARAMETER(length);
+
+  NaClLog(LOG_ERROR,
+          "Ftruncate method is not implemented for object of type %s\n",
+          NaClDescTypeString(((struct NaClDescVtbl const *)
+                              vself->base.vtbl)->typeTag));
+  return -NACL_ABI_EINVAL;
+}
+
 ssize_t NaClDescGetdentsNotImplemented(struct NaClDesc          *vself,
                                        void                     *dirp,
                                        size_t                   count) {
@@ -480,11 +525,9 @@ ssize_t NaClDescSendMsgNotImplemented(
 ssize_t NaClDescRecvMsgNotImplemented(
     struct NaClDesc                 *vself,
     struct NaClImcTypedMsgHdr       *nitmhp,
-    int                             flags,
-    struct NaClDescQuotaInterface   *quota_interface) {
+    int                             flags) {
   UNREFERENCED_PARAMETER(nitmhp);
   UNREFERENCED_PARAMETER(flags);
-  UNREFERENCED_PARAMETER(quota_interface);
 
   NaClLog(LOG_ERROR,
           "RecvMsg method is not implemented for object of type %s\n",
@@ -569,11 +612,9 @@ int NaClDescGetValueNotImplemented(struct NaClDesc  *vself) {
 
 int NaClDescInternalizeNotImplemented(
     struct NaClDesc                **out_desc,
-    struct NaClDescXferState       *xfer,
-    struct NaClDescQuotaInterface  *quota_interface) {
+    struct NaClDescXferState       *xfer) {
   UNREFERENCED_PARAMETER(out_desc);
   UNREFERENCED_PARAMETER(xfer);
-  UNREFERENCED_PARAMETER(quota_interface);
 
   NaClLog(LOG_ERROR,
           "Attempted transfer of non-transferable descriptor\n");
@@ -702,6 +743,11 @@ struct NaClDescVtbl const kNaClDescVtbl = {
   NaClDescPReadNotImplemented,
   NaClDescPWriteNotImplemented,
   NaClDescFstatNotImplemented,
+  NaClDescFchdirNotImplemented,
+  NaClDescFchmodNotImplemented,
+  NaClDescFsyncNotImplemented,
+  NaClDescFdatasyncNotImplemented,
+  NaClDescFtruncateNotImplemented,
   NaClDescGetdentsNotImplemented,
   NaClDescExternalizeSizeNotImplemented,
   NaClDescExternalizeNotImplemented,

@@ -21,9 +21,8 @@ const char kGooglemailDomain[] = "googlemail.com";
 
 std::string CanonicalizeEmailImpl(const std::string& email_address,
                                   bool change_googlemail_to_gmail) {
-  std::vector<std::string> parts;
-  char at = '@';
-  base::SplitString(email_address, at, &parts);
+  std::vector<std::string> parts = base::SplitString(
+      email_address, "@", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (parts.size() != 2U) {
     NOTREACHED() << "expecting exactly one @, but got "
                  << (parts.empty() ? 0 : parts.size() - 1)
@@ -36,12 +35,30 @@ std::string CanonicalizeEmailImpl(const std::string& email_address,
       base::RemoveChars(parts[0], ".", &parts[0]);
   }
 
-  std::string new_email = base::StringToLowerASCII(JoinString(parts, at));
+  std::string new_email = base::ToLowerASCII(base::JoinString(parts, "@"));
   VLOG(1) << "Canonicalized " << email_address << " to " << new_email;
   return new_email;
 }
 
 }  // namespace
+
+
+ListedAccount::ListedAccount() {}
+
+ListedAccount::~ListedAccount() {}
+
+bool ListedAccount::operator==(const ListedAccount& other) const {
+  // Only use ids for comparison if they've been computed by some caller, since
+  // this class does not assign the id.
+  if (!id.empty() && !other.id.empty()) {
+    return id == other.id;
+  } else {
+    return email == other.email &&
+           gaia_id == other.gaia_id &&
+           valid == other.valid &&
+           raw_email == other.raw_email;
+  }
+}
 
 std::string CanonicalizeEmail(const std::string& email_address) {
   // CanonicalizeEmail() is called to process email strings that are eventually
@@ -54,7 +71,7 @@ std::string CanonicalizeEmail(const std::string& email_address) {
 std::string CanonicalizeDomain(const std::string& domain) {
   // Canonicalization of domain names means lower-casing them. Make sure to
   // update this function in sync with Canonicalize if this ever changes.
-  return base::StringToLowerASCII(domain);
+  return base::ToLowerASCII(domain);
 }
 
 std::string SanitizeEmail(const std::string& email_address) {
@@ -94,12 +111,11 @@ bool IsGaiaSignonRealm(const GURL& url) {
 
 
 bool ParseListAccountsData(
-    const std::string& data,
-    std::vector<std::pair<std::string, bool> >* accounts) {
+    const std::string& data, std::vector<ListedAccount>* accounts) {
   accounts->clear();
 
   // Parse returned data and make sure we have data.
-  scoped_ptr<base::Value> value(base::JSONReader::Read(data));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(data);
   if (!value)
     return false;
 
@@ -128,8 +144,16 @@ bool ParseListAccountsData(
         if (!account->GetInteger(9, &is_email_valid))
           is_email_valid = 1;
 
-        accounts->push_back(
-            std::make_pair(CanonicalizeEmail(email), is_email_valid != 0));
+        std::string gaia_id;
+        // ListAccounts must also return the Gaia Id.
+        if (account->GetString(10, &gaia_id) && !gaia_id.empty()) {
+          ListedAccount listed_account;
+          listed_account.email = CanonicalizeEmail(email);
+          listed_account.gaia_id = gaia_id;
+          listed_account.valid = is_email_valid != 0;
+          listed_account.raw_email = email;
+          accounts->push_back(listed_account);
+        }
       }
     }
   }

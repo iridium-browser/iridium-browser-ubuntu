@@ -170,8 +170,8 @@ class ExtensionDevToolsInfoBarDelegate : public ConfirmInfoBarDelegate {
 
   // ConfirmInfoBarDelegate:
   Type GetInfoBarType() const override;
+  bool ShouldExpire(const NavigationDetails& details) const override;
   void InfoBarDismissed() override;
-  bool ShouldExpireInternal(const NavigationDetails& details) const override;
   base::string16 GetMessageText() const override;
   int GetButtons() const override;
   bool Cancel() override;
@@ -214,14 +214,14 @@ ExtensionDevToolsInfoBarDelegate::GetInfoBarType() const {
   return WARNING_TYPE;
 }
 
+bool ExtensionDevToolsInfoBarDelegate::ShouldExpire(
+    const NavigationDetails& details) const {
+  return false;
+}
+
 void ExtensionDevToolsInfoBarDelegate::InfoBarDismissed() {
   if (client_host_)
     client_host_->MarkAsDismissed();
-}
-
-bool ExtensionDevToolsInfoBarDelegate::ShouldExpireInternal(
-    const NavigationDetails& details) const {
-  return false;
 }
 
 base::string16 ExtensionDevToolsInfoBarDelegate::GetMessageText() const {
@@ -385,7 +385,7 @@ void ExtensionDevToolsClientHost::SendMessageToBackend(
   }
 
   std::string json_args;
-  base::JSONWriter::Write(&protocol_request, &json_args);
+  base::JSONWriter::Write(protocol_request, &json_args);
   agent_host_->DispatchProtocolMessage(json_args);
 }
 
@@ -399,7 +399,8 @@ void ExtensionDevToolsClientHost::SendDetachedEvent() {
 
   scoped_ptr<base::ListValue> args(OnDetach::Create(debuggee_,
                                                     detach_reason_));
-  scoped_ptr<Event> event(new Event(OnDetach::kEventName, args.Pass()));
+  scoped_ptr<Event> event(
+      new Event(events::DEBUGGER_ON_DETACH, OnDetach::kEventName, args.Pass()));
   event->restrict_to_browser_context = profile_;
   EventRouter::Get(profile_)
       ->DispatchEventToExtension(extension_id_, event.Pass());
@@ -440,7 +441,7 @@ void ExtensionDevToolsClientHost::DispatchProtocolMessage(
   if (!EventRouter::Get(profile_))
     return;
 
-  scoped_ptr<base::Value> result(base::JSONReader::Read(message));
+  scoped_ptr<base::Value> result = base::JSONReader::Read(message);
   if (!result->IsType(base::Value::TYPE_DICTIONARY))
     return;
   base::DictionaryValue* dictionary =
@@ -459,7 +460,8 @@ void ExtensionDevToolsClientHost::DispatchProtocolMessage(
 
     scoped_ptr<base::ListValue> args(
         OnEvent::Create(debuggee_, method_name, params));
-    scoped_ptr<Event> event(new Event(OnEvent::kEventName, args.Pass()));
+    scoped_ptr<Event> event(
+        new Event(events::DEBUGGER_ON_EVENT, OnEvent::kEventName, args.Pass()));
     event->restrict_to_browser_context = profile_;
     EventRouter::Get(profile_)
         ->DispatchEventToExtension(extension_id_, event.Pass());
@@ -508,7 +510,7 @@ bool DebuggerFunction::InitAgentHost() {
     if (result && web_contents) {
       // TODO(rdevlin.cronin) This should definitely be GetLastCommittedURL().
       GURL url = web_contents->GetVisibleURL();
-      if (PermissionsData::IsRestrictedUrl(url, url, extension(), &error_))
+      if (PermissionsData::IsRestrictedUrl(url, extension(), &error_))
         return false;
       agent_host_ = DevToolsAgentHost::GetOrCreateFor(web_contents);
     }
@@ -518,7 +520,6 @@ bool DebuggerFunction::InitAgentHost() {
             ->GetBackgroundHostForExtension(*debuggee_.extension_id);
     if (extension_host) {
       if (PermissionsData::IsRestrictedUrl(extension_host->GetURL(),
-                                           extension_host->GetURL(),
                                            extension(),
                                            &error_)) {
         return false;
@@ -530,7 +531,6 @@ bool DebuggerFunction::InitAgentHost() {
     agent_host_ = DevToolsAgentHost::GetForId(*debuggee_.target_id);
     if (agent_host_.get()) {
       if (PermissionsData::IsRestrictedUrl(agent_host_->GetURL(),
-                                           agent_host_->GetURL(),
                                            extension(),
                                            &error_)) {
         agent_host_ = nullptr;
@@ -666,7 +666,7 @@ void DebuggerSendCommandFunction::SendResponseBody(
     base::DictionaryValue* response) {
   base::Value* error_body;
   if (response->Get("error", &error_body)) {
-    base::JSONWriter::Write(error_body, &error_);
+    base::JSONWriter::Write(*error_body, &error_);
     SendResponse(false);
     return;
   }

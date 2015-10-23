@@ -13,11 +13,12 @@
   ],
   'variables': {
     'native_lib_target': 'libwebviewchromium',
+    'native_lib_version_name': '<(version_full)',
     'never_lint': 1,
     'R_package': 'com.android.webview.chromium',
     'R_package_relpath': 'com/android/webview/chromium',
     'shared_resources': 1,
-    'extensions_to_not_compress': 'pak,bin,dat',
+    'extensions_to_not_compress': '.lpak,.pak,.bin,.dat',
     'asset_location': '<(INTERMEDIATE_DIR)/assets/',
     'snapshot_copy_files': '<(snapshot_copy_files)',
     'jinja_inputs': ['<(android_manifest_template_path)'],
@@ -26,17 +27,16 @@
     'android_manifest_template_vars': [ ],
     'android_manifest_template_path': '<(DEPTH)/android_webview/apk/java/AndroidManifest.xml',
     'android_manifest_path': '<(jinja_output)',
-    # TODO: crbug.com/442348 Update proguard.flags and re-enable.
-    'proguard_enabled': 'false',
+    'proguard_enabled': 'true',
     'proguard_flags_paths': ['<(DEPTH)/android_webview/apk/java/proguard.flags'],
     # TODO: crbug.com/405035 Find a better solution for WebView .pak files.
     'additional_input_paths': [
-      '<@(webview_locales_output_paks)',
       '<(asset_location)/webviewchromium.pak',
       '<(asset_location)/webview_licenses.notice',
       '<@(snapshot_additional_input_paths)',
     ],
     'includes': [
+      '../../build/util/version.gypi',
       '../snapshot_copying.gypi',
     ],
     'conditions': [
@@ -51,7 +51,6 @@
     {
       'destination': '<(asset_location)',
       'files': [
-        '<@(webview_locales_input_paks)',
         '<(PRODUCT_DIR)/android_webview_assets/webviewchromium.pak',
         '<@(snapshot_copy_files)',
       ],
@@ -85,7 +84,6 @@
     },
   ],
   'includes': [
-    'system_webview_locales_paks.gypi',
     '../../build/java_apk.gypi',
     '../../build/android/jinja_template.gypi',
   ],

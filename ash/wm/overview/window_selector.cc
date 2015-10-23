@@ -22,6 +22,7 @@
 #include "ash/wm/overview/window_selector_item.h"
 #include "ash/wm/panels/panel_layout_manager.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_util.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
@@ -224,8 +225,7 @@ bool WindowSelector::IsSelectable(aura::Window* window) {
       state->GetStateType() == wm::WINDOW_STATE_TYPE_DOCKED_MINIMIZED) {
     return false;
   }
-  return window->type() == ui::wm::WINDOW_TYPE_NORMAL ||
-         window->type() == ui::wm::WINDOW_TYPE_PANEL;
+  return state->IsUserPositionable();
 }
 
 WindowSelector::WindowSelector(WindowSelectorDelegate* delegate)
@@ -255,7 +255,17 @@ void WindowSelector::Init(const WindowList& windows) {
   if (restore_focus_window_)
     restore_focus_window_->AddObserver(this);
 
-  const aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+  std::sort(root_windows.begin(), root_windows.end(),
+            [](const aura::Window* a, const aura::Window* b) {
+              // Since we don't know if windows are vertically or horizontally
+              // oriented we use both x and y position. This may be confusing
+              // if you have 3 or more monitors which are not strictly
+              // horizontal or vertical but that case is not yet supported.
+              return (a->GetBoundsInScreen().x() + a->GetBoundsInScreen().y()) <
+                     (b->GetBoundsInScreen().x() + b->GetBoundsInScreen().y());
+            });
+
   for (aura::Window::Windows::const_iterator iter = root_windows.begin();
        iter != root_windows.end(); iter++) {
     // Observed switchable containers for newly created windows on all root
@@ -277,7 +287,7 @@ void WindowSelector::Init(const WindowList& windows) {
     if (grid->empty())
       continue;
     num_items_ += grid->size();
-    grid_list_.push_back(grid.release());
+    grid_list_.push_back(grid.Pass());
   }
 
   {
@@ -387,9 +397,15 @@ void WindowSelector::OnGridEmpty(WindowGrid* grid) {
   ScopedVector<WindowGrid>::iterator iter =
       std::find(grid_list_.begin(), grid_list_.end(), grid);
   DCHECK(iter != grid_list_.end());
+  size_t index = iter - grid_list_.begin();
   grid_list_.erase(iter);
-  // TODO(flackr): Use the previous index for more than two displays.
-  selected_grid_index_ = 0;
+  if (index > 0 && selected_grid_index_ >= index) {
+    selected_grid_index_--;
+    // If the grid which became empty was the one with the selected window, we
+    // need to select a window on the newly selected grid.
+    if (selected_grid_index_ == index - 1)
+      Move(LEFT, true);
+  }
   if (grid_list_.empty())
     CancelSelection();
 }
@@ -466,6 +482,7 @@ void WindowSelector::OnDisplayRemoved(const gfx::Display& display) {
 void WindowSelector::OnDisplayMetricsChanged(const gfx::Display& display,
                                              uint32_t metrics) {
   PositionWindows(/* animate */ false);
+  RepositionTextFilterOnDisplayMetricsChange();
 }
 
 void WindowSelector::OnWindowAdded(aura::Window* new_window) {
@@ -489,8 +506,10 @@ void WindowSelector::OnWindowDestroying(aura::Window* window) {
     restore_focus_window_ = nullptr;
 }
 
-void WindowSelector::OnWindowActivated(aura::Window* gained_active,
-                                       aura::Window* lost_active) {
+void WindowSelector::OnWindowActivated(
+    aura::client::ActivationChangeObserver::ActivationReason reason,
+    aura::Window* gained_active,
+    aura::Window* lost_active) {
   if (ignore_activations_ ||
       !gained_active ||
       gained_active == text_filter_widget_->GetNativeWindow()) {
@@ -518,7 +537,9 @@ void WindowSelector::OnWindowActivated(aura::Window* gained_active,
 
 void WindowSelector::OnAttemptToReactivateWindow(aura::Window* request_active,
                                                  aura::Window* actual_active) {
-  OnWindowActivated(request_active, actual_active);
+  OnWindowActivated(aura::client::ActivationChangeObserver::ActivationReason::
+                        ACTIVATION_CLIENT,
+                    request_active, actual_active);
 }
 
 void WindowSelector::ContentsChanged(views::Textfield* sender,
@@ -567,6 +588,23 @@ void WindowSelector::PositionWindows(bool animate) {
   }
 }
 
+void WindowSelector::RepositionTextFilterOnDisplayMetricsChange() {
+  aura::Window* root_window = Shell::GetPrimaryRootWindow();
+  gfx::Rect rect(
+      root_window->bounds().width() / 2 * (1 - kTextFilterScreenProportion),
+      kTextFilterDistanceFromTop,
+      root_window->bounds().width() * kTextFilterScreenProportion,
+      kTextFilterHeight);
+
+  text_filter_widget_->SetBounds(rect);
+
+  gfx::Transform transform;
+  transform.Translate(0, text_filter_string_length_ == 0
+                             ? -WindowSelector::kTextFilterBottomEdge
+                             : 0);
+  text_filter_widget_->GetNativeWindow()->SetTransform(transform);
+}
+
 void WindowSelector::ResetFocusRestoreWindow(bool focus) {
   if (!restore_focus_window_)
     return;
@@ -584,14 +622,24 @@ void WindowSelector::ResetFocusRestoreWindow(bool focus) {
 }
 
 void WindowSelector::Move(Direction direction, bool animate) {
+  // Direction to move if moving past the end of a display.
+  int display_direction = (direction == RIGHT || direction == DOWN) ? 1 : -1;
+
+  // If this is the first move and it's going backwards, start on the last
+  // display.
+  if (display_direction == -1 && !grid_list_.empty() &&
+      !grid_list_[selected_grid_index_]->is_selecting()) {
+    selected_grid_index_ = grid_list_.size() - 1;
+  }
+
   // Keep calling Move() on the grids until one of them reports no overflow or
   // we made a full cycle on all the grids.
   for (size_t i = 0;
       i <= grid_list_.size() &&
       grid_list_[selected_grid_index_]->Move(direction, animate); i++) {
-    // TODO(flackr): If there are more than two monitors, move between grids
-    // in the requested direction.
-    selected_grid_index_ = (selected_grid_index_ + 1) % grid_list_.size();
+    selected_grid_index_ =
+        (selected_grid_index_ + display_direction + grid_list_.size()) %
+        grid_list_.size();
   }
 }
 

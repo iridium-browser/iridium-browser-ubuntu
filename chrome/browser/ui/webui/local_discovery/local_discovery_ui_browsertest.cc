@@ -7,6 +7,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "chrome/browser/local_discovery/test_service_discovery_client.h"
@@ -272,9 +273,6 @@ const char kURLCloudPrintConfirm[] =
 const char kURLRegisterComplete[] =
     "http://1.2.3.4:8888/privet/register?action=complete&user=user%40host.com";
 
-const char kURLGaiaToken[] =
-    "https://accounts.google.com/o/oauth2/token";
-
 const char kSampleGaiaId[] = "12345";
 const char kSampleUser[] = "user@host.com";
 
@@ -398,13 +396,13 @@ class LocalDiscoveryUITest : public WebUIBrowserTest {
         net::URLRequestStatus::SUCCESS);
 
     fake_fetcher_factory().SetFakeResponse(
-        GURL(kURLGaiaToken),
+        GaiaUrls::GetInstance()->oauth2_token_url(),
         kResponseGaiaToken,
         net::HTTP_OK,
         net::URLRequestStatus::SUCCESS);
 
     EXPECT_CALL(fake_url_fetcher_creator(), OnCreateFakeURLFetcher(
-        kURLGaiaToken))
+        GaiaUrls::GetInstance()->oauth2_token_url().spec()))
         .Times(AnyNumber());
 
     fake_fetcher_factory().SetFakeResponse(
@@ -420,7 +418,8 @@ class LocalDiscoveryUITest : public WebUIBrowserTest {
     ProfileOAuth2TokenService* token_service =
         ProfileOAuth2TokenServiceFactory::GetForProfile(browser()->profile());
 
-    token_service->UpdateCredentials("user@host.com", "MyFakeToken");
+    token_service->UpdateCredentials(
+        signin_manager->GetAuthenticatedAccountId(), "MyFakeToken");
 
     AddLibrary(base::FilePath(FILE_PATH_LITERAL("local_discovery_ui_test.js")));
   }
@@ -441,7 +440,7 @@ class LocalDiscoveryUITest : public WebUIBrowserTest {
     base::CancelableCallback<void()> callback(base::Bind(
         &base::MessageLoop::Quit, base::Unretained(
             base::MessageLoop::current())));
-    base::MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->task_runner()->PostDelayedTask(
         FROM_HERE, callback.callback(), time_period);
 
     base::MessageLoop::current()->Run();

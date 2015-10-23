@@ -41,6 +41,7 @@
 #include "WebIconURL.h"
 #include "WebNavigationPolicy.h"
 #include "WebNavigationType.h"
+#include "WebNavigatorContentUtilsClient.h"
 #include "WebSandboxFlags.h"
 #include "WebTextDirection.h"
 #include "public/platform/WebCommon.h"
@@ -55,10 +56,11 @@
 
 namespace blink {
 
+enum class WebTreeScopeType;
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
 class WebAppBannerClient;
-class WebCachedURLRequest;
+class WebBluetooth;
 class WebColorChooser;
 class WebColorChooserClient;
 class WebContentDecryptionModule;
@@ -71,6 +73,7 @@ class WebFormElement;
 class WebGeolocationClient;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
+class WebMediaPlayerEncryptedMediaClient;
 class WebMIDIClient;
 class WebNotificationPermissionCallback;
 class WebPermissionClient;
@@ -85,8 +88,10 @@ class WebScreenOrientationClient;
 class WebString;
 class WebURL;
 class WebURLResponse;
+class WebUSBClient;
 class WebUserMediaClient;
 class WebVRClient;
+class WebWakeLockClient;
 class WebWorkerContentSettingsClientProxy;
 struct WebColorSuggestion;
 struct WebConsoleMessage;
@@ -94,7 +99,6 @@ struct WebContextMenuData;
 struct WebPluginParams;
 struct WebPopupMenuInfo;
 struct WebRect;
-struct WebTransitionElementData;
 struct WebURLError;
 
 class WebFrameClient {
@@ -109,7 +113,7 @@ public:
 
     // May return null.
     // WebContentDecryptionModule* may be null if one has not yet been set.
-    virtual WebMediaPlayer* createMediaPlayer(WebLocalFrame*, const WebURL&, WebMediaPlayerClient*, WebContentDecryptionModule*) { return 0; }
+    virtual WebMediaPlayer* createMediaPlayer(WebLocalFrame*, const WebURL&, WebMediaPlayerClient*, WebMediaPlayerEncryptedMediaClient*, WebContentDecryptionModule*) { return 0; }
 
     // May return null.
     virtual WebApplicationCacheHost* createApplicationCacheHost(WebLocalFrame*, WebApplicationCacheHostClient*) { return 0; }
@@ -149,14 +153,22 @@ public:
     // until frameDetached() is called on it.
     // Note: If you override this, you should almost certainly be overriding
     // frameDetached().
-    virtual WebFrame* createChildFrame(WebLocalFrame* parent, const WebString& frameName, WebSandboxFlags sandboxFlags) { return nullptr; }
+    virtual WebFrame* createChildFrame(WebLocalFrame* parent, WebTreeScopeType, const WebString& frameName, WebSandboxFlags sandboxFlags) { return nullptr; }
 
     // This frame set its opener to null, disowning it.
     // See http://html.spec.whatwg.org/#dom-opener.
+    // TODO(alexmos): Remove this once didChangeOpener is implemented in content.
     virtual void didDisownOpener(WebLocalFrame*) { }
 
+    // This frame has set its opener to another frame, or disowned the opener
+    // if opener is null. See http://html.spec.whatwg.org/#dom-opener.
+    virtual void didChangeOpener(WebFrame*) { }
+
+    // Specifies the reason for the detachment.
+    enum class DetachType { Remove, Swap };
+
     // This frame has been detached from the view, but has not been closed yet.
-    virtual void frameDetached(WebFrame*) { }
+    virtual void frameDetached(WebFrame*, DetachType) { }
 
     // This frame has become focused..
     virtual void frameFocused() { }
@@ -209,7 +221,6 @@ public:
         WebNavigationType navigationType;
         WebNavigationPolicy defaultPolicy;
         bool isRedirect;
-        bool isTransitionNavigation;
 
         NavigationPolicyInfo(WebURLRequest& urlRequest)
             : frame(0)
@@ -217,8 +228,7 @@ public:
             , urlRequest(urlRequest)
             , navigationType(WebNavigationTypeOther)
             , defaultPolicy(WebNavigationPolicyIgnore)
-            , isRedirect(false)
-            , isTransitionNavigation(false) { }
+            , isRedirect(false) { }
     };
 
     virtual WebNavigationPolicy decidePolicyForNavigation(const NavigationPolicyInfo& info)
@@ -259,8 +269,7 @@ public:
     virtual void didCreateDataSource(WebLocalFrame*, WebDataSource*) { }
 
     // A new provisional load has been started.
-    virtual void didStartProvisionalLoad(WebLocalFrame* localFrame, bool isTransitionNavigation,
-        double triggeringEventTime) { }
+    virtual void didStartProvisionalLoad(WebLocalFrame* localFrame, double triggeringEventTime) { }
 
     // The provisional load was redirected via a HTTP 3xx response.
     virtual void didReceiveServerRedirectForProvisionalLoad(WebLocalFrame*) { }
@@ -292,7 +301,7 @@ public:
     virtual void didChangeIcon(WebLocalFrame*, WebIconURL::Type) { }
 
     // The frame's document finished loading.
-    virtual void didFinishDocumentLoad(WebLocalFrame*) { }
+    virtual void didFinishDocumentLoad(WebLocalFrame*, bool documentIsEmpty) { }
 
     // The 'load' event was dispatched.
     virtual void didHandleOnloadEvents(WebLocalFrame*) { }
@@ -318,21 +327,12 @@ public:
     // The frame's manifest has changed.
     virtual void didChangeManifest(WebLocalFrame*) { }
 
-    // The frame's presentation URL has changed.
-    virtual void didChangeDefaultPresentation(WebLocalFrame*) { }
-
     // The frame's theme color has changed.
     virtual void didChangeThemeColor() { }
 
     // Called to dispatch a load event for this frame in the FrameOwner of an
     // out-of-process parent frame.
     virtual void dispatchLoad() { }
-
-
-    // Transition navigations -----------------------------------------------
-
-    // Provides serialized markup of transition elements for use in the following navigation.
-    virtual void addNavigationTransitionData(const WebTransitionElementData&) { }
 
     // Web Notifications ---------------------------------------------------
 
@@ -411,9 +411,6 @@ public:
 
     // Low-level resource notifications ------------------------------------
 
-    // An element will request a resource.
-    virtual void willRequestResource(WebLocalFrame*, const WebCachedURLRequest&) { }
-
     // A request is about to be sent out, and the client may modify it.  Request
     // is writable, and changes to the URL, for example, will change the request
     // made.  If this request is the result of a redirect, then redirectResponse
@@ -452,6 +449,9 @@ public:
 
     // A PingLoader was created, and a request dispatched to a URL.
     virtual void didDispatchPingLoader(WebLocalFrame*, const WebURL&) { }
+
+    // A performance timing event (e.g. first paint) occurred
+    virtual void didChangePerformanceTiming() { }
 
     // The loaders in this frame have been stopped.
     virtual void didAbortLoading(WebLocalFrame*) { }
@@ -519,6 +519,9 @@ public:
     // A WebSocket object is going to open a new WebSocket connection.
     virtual void willOpenWebSocket(WebSocketHandle*) { }
 
+    // Wake Lock -----------------------------------------------------
+
+    virtual WebWakeLockClient* wakeLockClient() { return 0; }
 
     // Geolocation ---------------------------------------------------------
 
@@ -651,6 +654,28 @@ public:
 
     // App Banners ---------------------------------------------------------
     virtual WebAppBannerClient* appBannerClient() { return 0; }
+
+    // Navigator Content Utils  --------------------------------------------
+
+    // Registers a new URL handler for the given protocol.
+    virtual void registerProtocolHandler(const WebString& scheme,
+        const WebURL& url,
+        const WebString& title) { }
+
+    // Unregisters a given URL handler for the given protocol.
+    virtual void unregisterProtocolHandler(const WebString& scheme, const WebURL& url) { }
+
+    // Check if a given URL handler is registered for the given protocol.
+    virtual WebCustomHandlersState isProtocolHandlerRegistered(const WebString& scheme, const WebURL& url)
+    {
+        return WebCustomHandlersNew;
+    }
+
+    // Bluetooth -----------------------------------------------------------
+    virtual WebBluetooth* bluetooth() { return 0; }
+
+    // WebUSB --------------------------------------------------------------
+    virtual WebUSBClient* usbClient() { return nullptr; }
 
 protected:
     virtual ~WebFrameClient() { }

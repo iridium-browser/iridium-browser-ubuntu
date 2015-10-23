@@ -44,6 +44,7 @@ template <typename NodeType> class StaticNodeTypeList;
 typedef StaticNodeTypeList<Element> StaticElementList;
 
 class SelectorDataList {
+    DISALLOW_ALLOCATION();
 public:
     void initialize(const CSSSelectorList&);
     bool matches(Element&) const;
@@ -80,7 +81,8 @@ private:
     const CSSSelector* selectorForIdLookup(const CSSSelector&) const;
 
     Vector<const CSSSelector*> m_selectors;
-    bool m_crossesTreeBoundary;
+    bool m_crossesTreeBoundary : 1;
+    bool m_needsUpdatedDistribution : 1;
 };
 
 class SelectorQuery {

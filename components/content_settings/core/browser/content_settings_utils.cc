@@ -9,69 +9,25 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
+#include "base/prefs/pref_registry.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
 #include "components/content_settings/core/browser/content_settings_rule.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/browser/website_settings_info.h"
+#include "components/content_settings/core/browser/website_settings_registry.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "url/gurl.h"
 
 namespace {
-
-// The names of the ContentSettingsType values, for use with dictionary prefs.
-const char* kTypeNames[] = {
-  "cookies",
-  "images",
-  "javascript",
-  "plugins",
-  "popups",
-  "geolocation",
-  "notifications",
-  "auto-select-certificate",
-  "fullscreen",
-  "mouselock",
-  "mixed-script",
-  "media-stream",
-  "media-stream-mic",
-  "media-stream-camera",
-  "register-protocol-handler",
-  "ppapi-broker",
-  "multiple-automatic-downloads",
-  "midi-sysex",
-  "push-messaging",
-  "ssl-cert-decisions",
-#if defined(OS_WIN)
-  "metro-switch-to-desktop",
-#elif defined(OS_ANDROID) || defined(OS_CHROMEOS)
-  "protected-media-identifier",
-#endif
-  "app-banner",
-};
-static_assert(arraysize(kTypeNames) == CONTENT_SETTINGS_NUM_TYPES,
-              "kTypeNames should have CONTENT_SETTINGS_NUM_TYPES elements");
 
 const char kPatternSeparator[] = ",";
 
 }  // namespace
 
 namespace content_settings {
-
-std::string GetTypeName(ContentSettingsType type) {
-  return std::string(kTypeNames[type]);
-}
-
-bool GetTypeFromName(const std::string& name,
-                     ContentSettingsType* return_setting) {
-  for (size_t type = 0; type < CONTENT_SETTINGS_NUM_TYPES; ++type) {
-    if (name.compare(kTypeNames[type]) == 0) {
-      *return_setting = static_cast<ContentSettingsType>(type);
-      return true;
-    }
-  }
-  return false;
-}
 
 std::string ContentSettingToString(ContentSetting setting) {
   switch (setting) {
@@ -119,8 +75,9 @@ std::string CreatePatternString(
 }
 
 PatternPair ParsePatternString(const std::string& pattern_str) {
-  std::vector<std::string> pattern_str_list;
-  base::SplitString(pattern_str, kPatternSeparator[0], &pattern_str_list);
+  std::vector<std::string> pattern_str_list = base::SplitString(
+      pattern_str, std::string(1, kPatternSeparator[0]),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
   // If the |pattern_str| is an empty string then the |pattern_string_list|
   // contains a single empty string. In this case the empty string will be

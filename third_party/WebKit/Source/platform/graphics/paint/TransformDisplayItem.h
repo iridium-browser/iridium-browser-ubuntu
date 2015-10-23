@@ -11,42 +11,37 @@
 
 namespace blink {
 
-class PLATFORM_EXPORT BeginTransformDisplayItem : public PairedBeginDisplayItem {
-    WTF_MAKE_FAST_ALLOCATED(BeginTransformDisplayItem);
+class PLATFORM_EXPORT BeginTransformDisplayItem final : public PairedBeginDisplayItem {
 public:
-    static PassOwnPtr<BeginTransformDisplayItem> create(const DisplayItemClientWrapper& client, const AffineTransform& transform)
-    {
-        return adoptPtr(new BeginTransformDisplayItem(client, transform));
-    }
-
     BeginTransformDisplayItem(const DisplayItemClientWrapper& client, const AffineTransform& transform)
-        : PairedBeginDisplayItem(client, BeginTransform)
+        : PairedBeginDisplayItem(client, BeginTransform, sizeof(*this))
         , m_transform(transform) { }
 
-    virtual void replay(GraphicsContext&) override;
-    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override;
+    void replay(GraphicsContext&) override;
+    void appendToWebDisplayItemList(WebDisplayItemList*) const override;
+
+    const AffineTransform& transform() const { return m_transform; }
+
+private:
+#ifndef NDEBUG
+    void dumpPropertiesAsDebugString(WTF::StringBuilder&) const final;
+#endif
 
 private:
     const AffineTransform m_transform;
 };
 
-class PLATFORM_EXPORT EndTransformDisplayItem : public PairedEndDisplayItem {
-    WTF_MAKE_FAST_ALLOCATED(EndTransformDisplayItem);
+class PLATFORM_EXPORT EndTransformDisplayItem final : public PairedEndDisplayItem {
 public:
-    static PassOwnPtr<EndTransformDisplayItem> create(const DisplayItemClientWrapper& client)
-    {
-        return adoptPtr(new EndTransformDisplayItem(client));
-    }
-
     EndTransformDisplayItem(const DisplayItemClientWrapper& client)
-        : PairedEndDisplayItem(client, EndTransform) { }
+        : PairedEndDisplayItem(client, EndTransform, sizeof(*this)) { }
 
-    virtual void replay(GraphicsContext&) override;
-    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override;
+    void replay(GraphicsContext&) override;
+    void appendToWebDisplayItemList(WebDisplayItemList*) const override;
 
 private:
 #if ENABLE(ASSERT)
-    virtual bool isEndAndPairedWith(const DisplayItem& other) const override final { return other.type() == BeginTransform; }
+    bool isEndAndPairedWith(DisplayItem::Type otherType) const final { return otherType == BeginTransform; }
 #endif
 };
 

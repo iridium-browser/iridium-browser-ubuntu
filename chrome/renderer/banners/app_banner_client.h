@@ -25,11 +25,15 @@ class AppBannerClient : public content::RenderFrameObserver,
 
  private:
   // content::RenderFrame::Observer implementation.
+  void OnDestruct() override;
+
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // WebAppBannerClient implementation.
   void registerBannerCallbacks(int request_id,
                                blink::WebAppBannerCallbacks*) override;
+
+  void showAppBanner(int request_id);
 
   void ResolveEvent(int request_id,
                     const std::string& platform,

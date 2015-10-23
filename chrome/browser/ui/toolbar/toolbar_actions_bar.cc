@@ -5,7 +5,10 @@
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 
 #include "base/auto_reset.h"
+#include "base/location.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_message_bubble_controller.h"
 #include "chrome/browser/extensions/extension_util.h"
@@ -22,6 +25,7 @@
 #include "chrome/common/pref_names.h"
 #include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/runtime_data.h"
 #include "extensions/common/extension.h"
@@ -86,7 +90,7 @@ void SortContainer(std::vector<Type1>* to_sort,
       size_t j = i + 1;
       while (!equal(to_sort->at(j), reference[i])) {
         ++j;
-        DCHECK_LE(j, to_sort->size()) <<
+        DCHECK_LT(j, to_sort->size()) <<
             "Item in |reference| not found in |to_sort|.";
       }
       std::swap(to_sort->at(i), to_sort->at(j));
@@ -116,7 +120,7 @@ ToolbarActionsBar::ToolbarActionsBar(ToolbarActionsBarDelegate* delegate,
                                      ToolbarActionsBar* main_bar)
     : delegate_(delegate),
       browser_(browser),
-      model_(extensions::ExtensionToolbarModel::Get(browser_->profile())),
+      model_(ToolbarActionsModel::Get(browser_->profile())),
       main_bar_(main_bar),
       platform_settings_(main_bar != nullptr),
       popup_owner_(nullptr),
@@ -255,26 +259,37 @@ size_t ToolbarActionsBar::GetIconCount() const {
   // icons than we have, and we should always have a view per item in the model.
   // (The only exception is if this is in initialization.)
   if (!toolbar_actions_.empty() && !suppress_layout_ &&
-      model_->extensions_initialized()) {
-    size_t num_extension_actions = 0u;
-    for (ToolbarActionViewController* action : toolbar_actions_) {
-      // No component action should ever have a valid extension id, so we can
-      // use this to check the extension amount.
-      if (crx_file::id_util::IdIsValid(action->GetId()))
-        ++num_extension_actions;
-    }
-
-    int num_component_actions =
-        ComponentToolbarActionsFactory::GetInstance()->
-            GetNumComponentActions();
-    size_t num_total_actions = num_extension_actions + num_component_actions;
-
-    DCHECK_LE(visible_icons, num_total_actions);
-    DCHECK_EQ(model_->toolbar_items().size(), num_extension_actions);
+      model_->actions_initialized()) {
+    DCHECK_LE(visible_icons, toolbar_actions_.size());
+    DCHECK_EQ(model_->toolbar_items().size(), toolbar_actions_.size());
   }
 #endif
 
   return visible_icons;
+}
+
+gfx::Rect ToolbarActionsBar::GetFrameForIndex(size_t index) const {
+  size_t start_index = in_overflow_mode() ?
+      toolbar_actions_.size() - GetIconCount() : 0u;
+
+  // If the index is for an action that is before range we show (i.e., is for
+  // a button that's on the main bar, and this is the overflow), send back an
+  // empty rect.
+  if (index < start_index)
+    return gfx::Rect();
+
+  size_t relative_index = index - start_index;
+  int icons_per_overflow_row = platform_settings().icons_per_overflow_menu_row;
+  size_t row_index = in_overflow_mode() ?
+      relative_index / icons_per_overflow_row : 0;
+  size_t index_in_row = in_overflow_mode() ?
+      relative_index % icons_per_overflow_row : relative_index;
+
+  return gfx::Rect(platform_settings().left_padding +
+                       index_in_row * IconWidth(true),
+                   row_index * IconHeight(),
+                   IconWidth(false),
+                   IconHeight());
 }
 
 std::vector<ToolbarActionViewController*>
@@ -304,7 +319,7 @@ void ToolbarActionsBar::CreateActions() {
   DCHECK(toolbar_actions_.empty());
   // We wait for the extension system to be initialized before we add any
   // actions, as they rely on the extension system to function.
-  if (!model_ || !model_->extensions_initialized())
+  if (!model_ || !model_->actions_initialized())
     return;
 
   {
@@ -315,37 +330,14 @@ void ToolbarActionsBar::CreateActions() {
     // We don't redraw the view while creating actions.
     base::AutoReset<bool> layout_resetter(&suppress_layout_, true);
 
-    // Extension actions come first.
-    extensions::ExtensionActionManager* action_manager =
-        extensions::ExtensionActionManager::Get(browser_->profile());
-    const extensions::ExtensionList& toolbar_items = model_->toolbar_items();
-    for (const scoped_refptr<const extensions::Extension>& extension :
-             toolbar_items) {
-      toolbar_actions_.push_back(new ExtensionActionViewController(
-          extension.get(),
-          browser_,
-          action_manager->GetExtensionAction(*extension),
-          this));
-    }
-
-    // Component actions come second, and are suppressed if the extension
-    // actions are being highlighted.
+    // Get the toolbar actions.
+    toolbar_actions_ = model_->CreateActions(browser_, this);
     if (!model_->is_highlighting()) {
       // TODO(robliao): Remove ScopedTracker below once https://crbug.com/463337
       // is fixed.
       tracked_objects::ScopedTracker tracking_profile2(
           FROM_HERE_WITH_EXPLICIT_FUNCTION(
               "ToolbarActionsBar::CreateActions2"));
-
-      ScopedVector<ToolbarActionViewController> component_actions =
-          ComponentToolbarActionsFactory::GetInstance()->
-              GetComponentToolbarActions();
-      DCHECK(component_actions.empty() ||
-          extensions::FeatureSwitch::extension_action_redesign()->IsEnabled());
-      toolbar_actions_.insert(toolbar_actions_.end(),
-                              component_actions.begin(),
-                              component_actions.end());
-      component_actions.weak_clear();
     }
 
     if (!toolbar_actions_.empty()) {
@@ -369,18 +361,19 @@ void ToolbarActionsBar::CreateActions() {
 
   // CreateActions() can be called multiple times, so we need to make sure we
   // haven't already shown the bubble.
-  if (!checked_extension_bubble_) {
+  // Extension bubbles can also highlight a subset of actions, so don't show the
+  // bubble if the toolbar is already highlighting a different set.
+  if (!checked_extension_bubble_ && !is_highlighting()) {
     checked_extension_bubble_ = true;
     // CreateActions() can be called as part of the browser window set up, which
     // we need to let finish before showing the actions.
     scoped_ptr<extensions::ExtensionMessageBubbleController> controller =
-        ExtensionMessageBubbleFactory(browser_->profile()).GetController();
+        ExtensionMessageBubbleFactory(browser_).GetController();
     if (controller) {
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(&ToolbarActionsBar::MaybeShowExtensionBubble,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     base::Passed(controller.Pass())));
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(&ToolbarActionsBar::MaybeShowExtensionBubble,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                base::Passed(controller.Pass())));
     }
   }
 }
@@ -434,8 +427,8 @@ void ToolbarActionsBar::OnDragDrop(int dragged_index,
     delta = -1;
   else if (drag_type == DRAG_TO_MAIN)
     delta = 1;
-  model_->MoveExtensionIcon(toolbar_actions_[dragged_index]->GetId(),
-                            dropped_index);
+  model_->MoveActionIcon(toolbar_actions_[dragged_index]->GetId(),
+                         dropped_index);
   if (delta)
     model_->SetVisibleIconCount(model_->visible_icon_count() + delta);
 }
@@ -451,8 +444,11 @@ void ToolbarActionsBar::OnAnimationEnded() {
   }
 }
 
-bool ToolbarActionsBar::IsActionVisible(
+bool ToolbarActionsBar::IsActionVisibleOnMainBar(
     const ToolbarActionViewController* action) const {
+  if (in_overflow_mode())
+    return main_bar_->IsActionVisibleOnMainBar(action);
+
   size_t index = std::find(toolbar_actions_.begin(),
                            toolbar_actions_.end(),
                            action) - toolbar_actions_.begin();
@@ -461,8 +457,9 @@ bool ToolbarActionsBar::IsActionVisible(
 
 void ToolbarActionsBar::PopOutAction(ToolbarActionViewController* controller,
                                      const base::Closure& closure) {
+  DCHECK(!in_overflow_mode()) << "Only the main bar can pop out actions.";
   DCHECK(!popped_out_action_) << "Only one action can be popped out at a time!";
-  bool needs_redraw = !IsActionVisible(controller);
+  bool needs_redraw = !IsActionVisibleOnMainBar(controller);
   popped_out_action_ = controller;
   if (needs_redraw) {
     // We suppress animation for this draw, because we need the action to get
@@ -474,18 +471,19 @@ void ToolbarActionsBar::PopOutAction(ToolbarActionViewController* controller,
   ResizeDelegate(gfx::Tween::LINEAR, false);
   if (!delegate_->IsAnimating()) {
     // Don't call the closure re-entrantly.
-    base::MessageLoop::current()->PostTask(FROM_HERE, closure);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, closure);
   } else {
     popped_out_closure_ = closure;
   }
 }
 
 void ToolbarActionsBar::UndoPopOut() {
+  DCHECK(!in_overflow_mode()) << "Only the main bar can pop out actions.";
   DCHECK(popped_out_action_);
   ToolbarActionViewController* controller = popped_out_action_;
   popped_out_action_ = nullptr;
   popped_out_closure_.Reset();
-  if (!IsActionVisible(controller))
+  if (!IsActionVisibleOnMainBar(controller))
     delegate_->Redraw(true);
   ResizeDelegate(gfx::Tween::LINEAR, false);
 }
@@ -518,8 +516,10 @@ void ToolbarActionsBar::MaybeShowExtensionBubble(
     // If the toolbar is animating, we can't effectively anchor the bubble,
     // so wait until animation stops.
     pending_extension_bubble_controller_ = controller.Pass();
-  } else {
-    const extensions::ExtensionIdList& affected_extensions =
+  } else if (controller->ShouldShow()) {
+    // We check ShouldShow() above because the affected extensions may have been
+    // removed since the controller was initialized.
+    const std::vector<std::string>& affected_extensions =
         controller->GetExtensionIdList();
     ToolbarActionViewController* anchor_action = nullptr;
     for (const std::string& id : affected_extensions) {
@@ -531,11 +531,20 @@ void ToolbarActionsBar::MaybeShowExtensionBubble(
   }
 }
 
-void ToolbarActionsBar::OnToolbarExtensionAdded(
-    const extensions::Extension* extension,
-    int index) {
-  DCHECK(GetActionForId(extension->id()) == nullptr) <<
-      "Asked to add a toolbar action view for an extension that already exists";
+void ToolbarActionsBar::OnToolbarActionAdded(const std::string& action_id,
+                                             int index) {
+  DCHECK(GetActionForId(action_id) == nullptr)
+      << "Asked to add a toolbar action view for an extension that already "
+         "exists";
+
+  // TODO(devlin): This is a minor layering violation and the model should pass
+  // in an action directly.
+  const extensions::Extension* extension =
+      extensions::ExtensionRegistry::Get(browser_->profile())
+          ->enabled_extensions()
+          .GetByID(action_id);
+  // Only extensions should be added after initialization.
+  DCHECK(extension);
 
   toolbar_actions_.insert(
       toolbar_actions_.begin() + index,
@@ -549,7 +558,7 @@ void ToolbarActionsBar::OnToolbarExtensionAdded(
   delegate_->AddViewForAction(toolbar_actions_[index], index);
 
   // If we are still initializing the container, don't bother animating.
-  if (!model_->extensions_initialized())
+  if (!model_->actions_initialized())
     return;
 
   // We may need to resize (e.g. to show the new icon, or the chevron). We don't
@@ -563,10 +572,9 @@ void ToolbarActionsBar::OnToolbarExtensionAdded(
   ResizeDelegate(gfx::Tween::LINEAR, true);
 }
 
-void ToolbarActionsBar::OnToolbarExtensionRemoved(
-    const extensions::Extension* extension) {
+void ToolbarActionsBar::OnToolbarActionRemoved(const std::string& action_id) {
   ToolbarActions::iterator iter = toolbar_actions_.begin();
-  while (iter != toolbar_actions_.end() && (*iter)->GetId() != extension->id())
+  while (iter != toolbar_actions_.end() && (*iter)->GetId() != action_id)
     ++iter;
 
   if (iter == toolbar_actions_.end())
@@ -584,11 +592,11 @@ void ToolbarActionsBar::OnToolbarExtensionRemoved(
   // because the icon is just going to get re-added to the same location.
   // There is an exception if this is an off-the-record profile, and the
   // extension is no longer incognito-enabled.
-  if (!extensions::ExtensionSystem::Get(browser_->profile())->runtime_data()->
-            IsBeingUpgraded(extension->id()) ||
+  if (!extensions::ExtensionSystem::Get(browser_->profile())
+           ->runtime_data()
+           ->IsBeingUpgraded(action_id) ||
       (browser_->profile()->IsOffTheRecord() &&
-       !extensions::util::IsIncognitoEnabled(extension->id(),
-                                             browser_->profile()))) {
+       !extensions::util::IsIncognitoEnabled(action_id, browser_->profile()))) {
     if (toolbar_actions_.size() > model_->visible_icon_count()) {
       // If we have more icons than we can show, then we must not be changing
       // the container size (since we either removed an icon from the main
@@ -602,11 +610,12 @@ void ToolbarActionsBar::OnToolbarExtensionRemoved(
       ResizeDelegate(gfx::Tween::EASE_OUT, false);
     }
   }
+
+  SetOverflowedActionWantsToRun();
 }
 
-void ToolbarActionsBar::OnToolbarExtensionMoved(
-    const extensions::Extension* extension,
-    int index) {
+void ToolbarActionsBar::OnToolbarActionMoved(const std::string& action_id,
+                                             int index) {
   DCHECK(index >= 0 && index < static_cast<int>(toolbar_actions_.size()));
   // Unfortunately, |index| doesn't really mean a lot to us, because this
   // window's toolbar could be different (if actions are popped out). Just
@@ -614,9 +623,8 @@ void ToolbarActionsBar::OnToolbarExtensionMoved(
   ReorderActions();
 }
 
-void ToolbarActionsBar::OnToolbarExtensionUpdated(
-    const extensions::Extension* extension) {
-  ToolbarActionViewController* action = GetActionForId(extension->id());
+void ToolbarActionsBar::OnToolbarActionUpdated(const std::string& action_id) {
+  ToolbarActionViewController* action = GetActionForId(action_id);
   // There might not be a view in cases where we are highlighting or if we
   // haven't fully initialized the actions.
   if (action) {
@@ -625,14 +633,13 @@ void ToolbarActionsBar::OnToolbarExtensionUpdated(
   }
 }
 
-bool ToolbarActionsBar::ShowExtensionActionPopup(
-    const extensions::Extension* extension,
-    bool grant_active_tab) {
+bool ToolbarActionsBar::ShowToolbarActionPopup(const std::string& action_id,
+                                               bool grant_active_tab) {
   // Don't override another popup, and only show in the active window.
   if (popup_owner() || !browser_->window()->IsActive())
     return false;
 
-  ToolbarActionViewController* action = GetActionForId(extension->id());
+  ToolbarActionViewController* action = GetActionForId(action_id);
   return action && action->ExecuteAction(grant_active_tab);
 }
 
@@ -662,6 +669,8 @@ void ToolbarActionsBar::ResizeDelegate(gfx::Tween::Type tween_type,
 }
 
 void ToolbarActionsBar::OnToolbarHighlightModeChanged(bool is_highlighting) {
+  if (!model_->actions_initialized())
+    return;
   // It's a bit of a pain that we delete and recreate everything here, but given
   // everything else going on (the lack of highlight, [n] more extensions
   // appearing, etc), it's not worth the extra complexity to create and insert
@@ -696,8 +705,8 @@ void ToolbarActionsBar::ReorderActions() {
 
   // First, reset the order to that of the model.
   auto compare = [](ToolbarActionViewController* const& action,
-                    const scoped_refptr<const extensions::Extension>& ext) {
-    return action->GetId() == ext->id();
+                    const ToolbarActionsModel::ToolbarItem& item) {
+    return action->GetId() == item.id;
   };
   SortContainer(&toolbar_actions_.get(), model_->toolbar_items(), compare);
 
@@ -732,9 +741,9 @@ void ToolbarActionsBar::SetOverflowedActionWantsToRun() {
 }
 
 ToolbarActionViewController* ToolbarActionsBar::GetActionForId(
-    const std::string& id) {
+    const std::string& action_id) {
   for (ToolbarActionViewController* action : toolbar_actions_) {
-    if (action->GetId() == id)
+    if (action->GetId() == action_id)
       return action;
   }
   return nullptr;

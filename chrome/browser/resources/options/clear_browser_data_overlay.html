@@ -1,9 +1,9 @@
 <div id="clear-browser-data-overlay" class="page not-resizable" hidden>
   <div class="close-button"></div>
   <h1 i18n-content="clearBrowserDataOverlay"></h1>
-  <div id="clear-browser-data-info-banner" hidden>
-    <span i18n-content="clearBrowserDataInfoBar"></span>
-  </div>
+  <!-- NOTE: Make sure there's not whitespace between <div></div> for
+       #clear-browser-data-info-banner as it's styled with :empty. -->
+  <div id="clear-browser-data-info-banner"></div>
   <div id="cbd-content-area" class="content-area">
     <span i18n-content="clearBrowserDataLabel"></span>
     <select id="clear-browser-data-time-period"
@@ -17,6 +17,7 @@
           <input id="delete-browsing-history-checkbox"
               pref="browser.clear_data.browsing_history" type="checkbox">
           <span i18n-content="deleteBrowsingHistoryCheckbox"></span>
+          <span class="clear-browser-data-counter"></span>
         </label>
       </div>
       <div id="delete-download-history-container" class="checkbox">
@@ -41,6 +42,7 @@
           <input id="delete-cache-checkbox"
               pref="browser.clear_data.cache" type="checkbox">
           <span i18n-content="deleteCacheCheckbox"></span>
+          <span class="clear-browser-data-counter"></span>
         </label>
       </div>
       <div id="delete-passwords-container" class="checkbox">
@@ -48,6 +50,7 @@
           <input id="delete-passwords-checkbox"
               pref="browser.clear_data.passwords" type="checkbox">
           <span i18n-content="deletePasswordsCheckbox"></span>
+          <span class="clear-browser-data-counter"></span>
         </label>
       </div>
       <div id="delete-form-data-container" class="checkbox">

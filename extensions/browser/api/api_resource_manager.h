@@ -10,6 +10,7 @@
 #include "base/containers/hash_tables.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/scoped_observer.h"
 #include "base/threading/non_thread_safe.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -22,8 +23,9 @@
 #include "extensions/common/extension.h"
 
 namespace extensions {
+class CastChannelAsyncApiFunction;
 
-namespace core_api {
+namespace api {
 class BluetoothSocketApiFunction;
 class BluetoothSocketEventDispatcher;
 class SerialEventDispatcher;
@@ -46,27 +48,6 @@ struct NamedThreadTraits {
     return content::BrowserThread::GetMessageLoopProxyForThread(T::kThreadId);
   }
 };
-
-template <typename T>
-struct TestThreadTraits {
-  static bool IsCalledOnValidThread() {
-    return content::BrowserThread::CurrentlyOn(thread_id_);
-  }
-
-  static bool IsMessageLoopValid() {
-    return content::BrowserThread::IsMessageLoopValid(thread_id_);
-  }
-
-  static scoped_refptr<base::SequencedTaskRunner> GetSequencedTaskRunner() {
-    return content::BrowserThread::GetMessageLoopProxyForThread(thread_id_);
-  }
-
-  static content::BrowserThread::ID thread_id_;
-};
-
-template <typename T>
-content::BrowserThread::ID TestThreadTraits<T>::thread_id_ =
-    content::BrowserThread::IO;
 
 // An ApiResourceManager manages the lifetime of a set of resources that
 // that live on named threads (i.e. BrowserThread::IO) which ApiFunctions use.
@@ -117,15 +98,6 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
         process_manager_observer_(this) {
     extension_registry_observer_.Add(ExtensionRegistry::Get(context));
     process_manager_observer_.Add(ProcessManager::Get(context));
-  }
-  // For Testing.
-  static ApiResourceManager<T, TestThreadTraits<T> >*
-  CreateApiResourceManagerForTest(content::BrowserContext* context,
-                                  content::BrowserThread::ID thread_id) {
-    TestThreadTraits<T>::thread_id_ = thread_id;
-    ApiResourceManager<T, TestThreadTraits<T> >* manager =
-        new ApiResourceManager<T, TestThreadTraits<T> >(context);
-    return manager;
   }
 
   virtual ~ApiResourceManager() {
@@ -192,12 +164,13 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
   // TODO(rockot): ApiResourceData could be moved out of ApiResourceManager and
   // we could avoid maintaining a friends list here.
   friend class BluetoothAPI;
-  friend class core_api::BluetoothSocketApiFunction;
-  friend class core_api::BluetoothSocketEventDispatcher;
-  friend class core_api::SerialEventDispatcher;
-  friend class core_api::TCPServerSocketEventDispatcher;
-  friend class core_api::TCPSocketEventDispatcher;
-  friend class core_api::UDPSocketEventDispatcher;
+  friend class CastChannelAsyncApiFunction;
+  friend class api::BluetoothSocketApiFunction;
+  friend class api::BluetoothSocketEventDispatcher;
+  friend class api::SerialEventDispatcher;
+  friend class api::TCPServerSocketEventDispatcher;
+  friend class api::TCPSocketEventDispatcher;
+  friend class api::UDPSocketEventDispatcher;
   friend class BrowserContextKeyedAPIFactory<ApiResourceManager<T> >;
 
   static const bool kServiceHasOwnInstanceInIncognito = true;

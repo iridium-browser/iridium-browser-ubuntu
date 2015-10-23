@@ -7,8 +7,9 @@
 
 #include <string>
 
-#include "base/callback_forward.h"
+#include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "remoting/test/remote_connection_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -22,7 +23,7 @@ namespace remoting {
 namespace test {
 
 struct RemoteApplicationDetails;
-class TestChromotingClient;
+class AppRemotingConnectionHelper;
 
 // Allows for custom handling of ExtensionMessage messages.
 typedef base::Callback<void(const protocol::ExtensionMessage& message)>
@@ -52,32 +53,13 @@ class AppRemotingConnectedClientFixture
   void TearDown() override;
 
   // RemoteConnectionObserver interface.
-  void ConnectionStateChanged(protocol::ConnectionToHost::State state,
-                              protocol::ErrorCode error_code) override;
-  void ConnectionReady(bool ready) override;
   void HostMessageReceived(const protocol::ExtensionMessage& message) override;
 
-  // Starts a connection with the remote host.
-  void StartConnection();
-
-  // Sends client details to the host in order to complete the connection.
-  void SendClientConnectionDetailsToHost();
-
-  // Handles onWindowAdded messages from the host.
-  void HandleOnWindowAddedMessage(
-      const remoting::protocol::ExtensionMessage& message);
+  // Handles messages from the host.
+  void HandleOnHostMessage(const remoting::protocol::ExtensionMessage& message);
 
   // Contains the details for the application being tested.
   const RemoteApplicationDetails& application_details_;
-
-  // Called when an ExtensionMessage is received from the host.  Used to
-  // override default message handling.
-  HostMessageReceivedCallback host_message_received_callback_;
-
-  // Indicates whether the remote connection is ready to be used for testing.
-  // True when a chromoting connection to the remote host has been established
-  // and the main application window is visible.
-  bool connection_is_ready_for_tests_;
 
   // Used to run the thread's message loop.
   scoped_ptr<base::RunLoop> run_loop_;
@@ -90,7 +72,10 @@ class AppRemotingConnectedClientFixture
   base::ThreadChecker thread_checker_;
 
   // Creates and manages the connection to the remote host.
-  scoped_ptr<TestChromotingClient> client_;
+  scoped_ptr<AppRemotingConnectionHelper> connection_helper_;
+
+  // Called when an ExtensionMessage is received from the host.
+  HostMessageReceivedCallback host_message_received_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(AppRemotingConnectedClientFixture);
 };

@@ -14,7 +14,7 @@
 #include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/web_data_service_factory.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
@@ -125,6 +125,8 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, DisabledByDefault) {
   // The type should not be enabled without the experiment enabled.
   ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
       syncer::AUTOFILL_WALLET_DATA));
+  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
+      syncer::AUTOFILL_WALLET_METADATA));
 }
 
 IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, EnabledViaPreference) {
@@ -135,6 +137,8 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, EnabledViaPreference) {
       syncer::AUTOFILL_WALLET_DATA));
   // TODO(pvalenzuela): Assert that the local root node for AUTOFILL_WALLET_DATA
   // exists.
+  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
+      syncer::AUTOFILL_WALLET_METADATA));
 }
 
 // Tests that an experiment received at sync startup time (during sign-in)
@@ -153,6 +157,8 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed";
   ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
       syncer::AUTOFILL_WALLET_DATA));
+  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
+      syncer::AUTOFILL_WALLET_METADATA));
 }
 
 // Tests receiving an enable experiment at runtime, followed by a disabled
@@ -179,6 +185,8 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
   ASSERT_FALSE(enabled_checker.TimedOut());
   ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
       syncer::AUTOFILL_WALLET_DATA));
+  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
+      syncer::AUTOFILL_WALLET_METADATA));
 
   // Then disable the experiment.
   experiment_specifics->mutable_wallet_sync()->set_enabled(false);
@@ -192,6 +200,8 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
   ASSERT_FALSE(disable_checker.TimedOut());
   ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().
       Has(syncer::AUTOFILL_WALLET_DATA));
+  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
+      syncer::AUTOFILL_WALLET_METADATA));
 }
 
 IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, Download) {

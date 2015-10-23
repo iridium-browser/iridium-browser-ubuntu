@@ -82,11 +82,13 @@ void SearchController::OpenResult(SearchResult* result, int event_flags) {
                             result->display_type(),
                             SearchResult::DISPLAY_TYPE_LAST);
 
-  UMA_HISTOGRAM_COUNTS_100(kSearchQueryLength, search_box_->text().size());
+  if (result->display_type() != SearchResult::DISPLAY_RECOMMENDATION) {
+    UMA_HISTOGRAM_COUNTS_100(kSearchQueryLength, search_box_->text().size());
 
-  if (result->distance_from_origin() >= 0) {
-    UMA_HISTOGRAM_COUNTS_100(kSearchResultDistanceFromOrigin,
-                             result->distance_from_origin());
+    if (result->distance_from_origin() >= 0) {
+      UMA_HISTOGRAM_COUNTS_100(kSearchResultDistanceFromOrigin,
+                               result->distance_from_origin());
+    }
   }
 
   result->Open(event_flags);
@@ -122,7 +124,7 @@ void SearchController::AddProvider(size_t group_id,
       &SearchController::OnResultsChanged,
       base::Unretained(this)));
   mixer_->AddProviderToGroup(group_id, provider.get());
-  providers_.push_back(provider.release());  // Takes ownership.
+  providers_.push_back(provider.Pass());
 }
 
 void SearchController::OnResultsChanged() {

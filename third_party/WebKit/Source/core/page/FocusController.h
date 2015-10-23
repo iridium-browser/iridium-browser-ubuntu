@@ -38,13 +38,10 @@ namespace blink {
 
 struct FocusCandidate;
 class Element;
-class FocusNavigationScope;
 class Frame;
-class HTMLFrameOwnerElement;
-class HTMLShadowElement;
+class InputDeviceCapabilities;
 class Node;
 class Page;
-class TreeScope;
 
 class CORE_EXPORT FocusController final : public NoBaseWillBeGarbageCollectedFinalized<FocusController> {
     WTF_MAKE_NONCOPYABLE(FocusController); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(FocusController);
@@ -57,10 +54,10 @@ public:
     Frame* focusedOrMainFrame() const;
 
     bool setInitialFocus(WebFocusType);
-    bool advanceFocus(WebFocusType type) { return advanceFocus(type, false); }
-    Node* findFocusableNode(WebFocusType, Node&);
+    bool advanceFocus(WebFocusType type, InputDeviceCapabilities* sourceCapabilities = nullptr) { return advanceFocus(type, false, sourceCapabilities); }
+    Element* findFocusableElement(WebFocusType, Node&);
 
-    bool setFocusedElement(Element*, PassRefPtrWillBeRawPtr<Frame>, WebFocusType = WebFocusTypeNone);
+    bool setFocusedElement(Element*, PassRefPtrWillBeRawPtr<Frame>, WebFocusType = WebFocusTypeNone, InputDeviceCapabilities* sourceCapabilities = nullptr);
 
     void setActive(bool);
     bool isActive() const { return m_isActive; }
@@ -73,34 +70,9 @@ public:
 private:
     explicit FocusController(Page*);
 
-    bool advanceFocus(WebFocusType, bool initialFocus);
+    bool advanceFocus(WebFocusType, bool initialFocus, InputDeviceCapabilities* sourceCapabilities = nullptr);
     bool advanceFocusDirectionally(WebFocusType);
-    bool advanceFocusInDocumentOrder(WebFocusType, bool initialFocus);
-
-    Node* findFocusableNodeAcrossFocusScopes(WebFocusType, const FocusNavigationScope&, Node*);
-    Node* findFocusableNodeAcrossFocusScopesForward(const FocusNavigationScope&, Node*);
-    Node* findFocusableNodeAcrossFocusScopesBackward(const FocusNavigationScope&, Node*);
-
-    Node* findFocusableNodeRecursively(WebFocusType, const FocusNavigationScope&, Node*);
-    Node* findFocusableNodeRecursivelyForward(const FocusNavigationScope&, Node*);
-    Node* findFocusableNodeRecursivelyBackward(const FocusNavigationScope&, Node*);
-
-    Node* findFocusableNodeDecendingDownIntoFrameDocument(WebFocusType, Node*);
-
-    // Searches through the given tree scope, starting from start node, for the next/previous
-    // selectable element that comes after/before start node.
-    // The order followed is as specified in the HTML spec[1], which is elements with tab indexes
-    // first (from lowest to highest), and then elements without tab indexes (in document order).
-    // The search algorithm also conforms the Shadow DOM spec[2], which inserts sequence in a shadow
-    // tree into its host.
-    //
-    // @param start The node from which to start searching. The node after this will be focused.
-    //        May be null.
-    // @return The focus node that comes after/before start node.
-    //
-    // [1] https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation
-    // [2] https://w3c.github.io/webcomponents/spec/shadow/#focus-navigation
-    inline Node* findFocusableNode(WebFocusType, const FocusNavigationScope&, Node* start);
+    bool advanceFocusInDocumentOrder(WebFocusType, bool initialFocus, InputDeviceCapabilities* sourceCapabilities);
 
     bool advanceFocusDirectionallyInContainer(Node* container, const LayoutRect& startingRect, WebFocusType);
     void findFocusCandidateInContainer(Node& container, const LayoutRect& startingRect, WebFocusType, FocusCandidate& closest);

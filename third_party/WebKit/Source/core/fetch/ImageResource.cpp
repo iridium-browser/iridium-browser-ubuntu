@@ -29,6 +29,7 @@
 #include "core/fetch/ResourceClient.h"
 #include "core/fetch/ResourceClientWalker.h"
 #include "core/fetch/ResourceFetcher.h"
+#include "core/fetch/ResourceLoader.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/layout/LayoutObject.h"
 #include "core/svg/graphics/SVGImage.h"
@@ -38,16 +39,33 @@
 #include "platform/SharedBuffer.h"
 #include "platform/TraceEvent.h"
 #include "platform/graphics/BitmapImage.h"
+#include "public/platform/Platform.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/StdLibExtras.h"
 
 namespace blink {
 
+ResourcePtr<ImageResource> ImageResource::fetch(FetchRequest& request, ResourceFetcher* fetcher)
+{
+    if (request.resourceRequest().requestContext() == WebURLRequest::RequestContextUnspecified)
+        request.mutableResourceRequest().setRequestContext(WebURLRequest::RequestContextImage);
+    if (fetcher->context().pageDismissalEventBeingDispatched()) {
+        KURL requestURL = request.resourceRequest().url();
+        if (requestURL.isValid() && fetcher->context().canRequest(Resource::Image, request.resourceRequest(), requestURL, request.options(), request.forPreload(), request.originRestriction()))
+            fetcher->context().sendImagePing(requestURL);
+        return 0;
+    }
+
+    if (fetcher->clientDefersImage(request.resourceRequest().url()))
+        request.setDefer(FetchRequest::DeferredByClient);
+
+    return toImageResource(fetcher->requestResource(request, ImageResourceFactory()));
+}
+
 ImageResource::ImageResource(const ResourceRequest& resourceRequest)
     : Resource(resourceRequest, Image)
     , m_devicePixelRatioHeaderValue(1.0)
     , m_image(nullptr)
-    , m_loadingMultipartContent(false)
     , m_hasDevicePixelRatioHeaderValue(false)
 {
     WTF_LOG(Timers, "new ImageResource(ResourceRequest) %p", this);
@@ -59,7 +77,6 @@ ImageResource::ImageResource(blink::Image* image)
     : Resource(ResourceRequest(""), Image)
     , m_devicePixelRatioHeaderValue(1.0)
     , m_image(image)
-    , m_loadingMultipartContent(false)
     , m_hasDevicePixelRatioHeaderValue(false)
 {
     WTF_LOG(Timers, "new ImageResource(Image) %p", this);
@@ -253,6 +270,9 @@ LayoutSize ImageResource::imageSizeForLayoutObject(const LayoutObject* layoutObj
     else
         imageSize = LayoutSize(m_image->size());
 
+    if (sizeType == IntrinsicCorrectedToDPR && m_hasDevicePixelRatioHeaderValue && m_devicePixelRatioHeaderValue > 0)
+        multiplier = 1.0 / m_devicePixelRatioHeaderValue;
+
     if (multiplier == 1.0f)
         return imageSize;
 
@@ -288,8 +308,8 @@ void ImageResource::clear()
 
 void ImageResource::setCustomAcceptHeader()
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, acceptWebP, ("image/webp,*/*;q=0.8", AtomicString::ConstructFromLiteral));
-    setAccept(acceptWebP);
+    DEFINE_STATIC_LOCAL(const AtomicString, acceptImages, ("image/webp,image/*,*/*;q=0.8", AtomicString::ConstructFromLiteral));
+    setAccept(acceptImages);
 }
 
 inline void ImageResource::createImage()
@@ -318,7 +338,7 @@ inline void ImageResource::clearImage()
 void ImageResource::appendData(const char* data, unsigned length)
 {
     Resource::appendData(data, length);
-    if (!m_loadingMultipartContent)
+    if (!loadingMultipartContent())
         updateImage(false);
 }
 
@@ -357,10 +377,10 @@ void ImageResource::updateImage(bool allDataReceived)
 
 void ImageResource::finishOnePart()
 {
-    if (m_loadingMultipartContent)
+    if (loadingMultipartContent())
         clear();
     updateImage(true);
-    if (m_loadingMultipartContent)
+    if (loadingMultipartContent())
         m_data.clear();
     Resource::finishOnePart();
 }
@@ -374,16 +394,15 @@ void ImageResource::error(Resource::Status status)
 
 void ImageResource::responseReceived(const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
-    if (m_loadingMultipartContent && m_data)
+    if (loadingMultipartContent() && m_data)
         finishOnePart();
-    else if (response.isMultipart())
-        m_loadingMultipartContent = true;
     if (RuntimeEnabledFeatures::clientHintsEnabled()) {
         m_devicePixelRatioHeaderValue = response.httpHeaderField("content-dpr").toFloat(&m_hasDevicePixelRatioHeaderValue);
         if (!m_hasDevicePixelRatioHeaderValue || m_devicePixelRatioHeaderValue <= 0.0) {
             m_devicePixelRatioHeaderValue = 1.0;
             m_hasDevicePixelRatioHeaderValue = false;
         }
+
     }
     Resource::responseReceived(response, handle);
 }
@@ -459,7 +478,7 @@ bool ImageResource::currentFrameKnownToBeOpaque(const LayoutObject* layoutObject
     if (image->isBitmapImage()) {
         TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage", "data", InspectorPaintImageEvent::data(layoutObject, *this));
         SkBitmap dummy;
-        if (!image->bitmapForCurrentFrame(&dummy)) { // force decode
+        if (!image->deprecatedBitmapForCurrentFrame(&dummy)) { // force decode
             // We don't care about failures here, since we don't use "dummy"
         }
     }
@@ -514,6 +533,11 @@ Image* ImageResource::svgImageForLayoutObject(const LayoutObject* layoutObject)
     }
 
     return imageForContainer.get();
+}
+
+bool ImageResource::loadingMultipartContent() const
+{
+    return m_loader && m_loader->loadingMultipartContent();
 }
 
 } // namespace blink

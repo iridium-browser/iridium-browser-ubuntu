@@ -74,7 +74,8 @@ void BrowserStateKeyedServiceFactory::BrowserStateDestroyed(
   KeyedServiceFactory::ContextDestroyed(context);
 }
 
-KeyedService* BrowserStateKeyedServiceFactory::BuildServiceInstanceFor(
+scoped_ptr<KeyedService>
+BrowserStateKeyedServiceFactory::BuildServiceInstanceFor(
     base::SupportsUserData* context) const {
   return BuildServiceInstanceFor(static_cast<web::BrowserState*>(context));
 }

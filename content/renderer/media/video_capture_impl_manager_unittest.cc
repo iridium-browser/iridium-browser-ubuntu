@@ -72,19 +72,17 @@ class VideoCaptureImplManagerTest : public ::testing::Test {
       : manager_(new MockVideoCaptureImplManager(
           BindToCurrentLoop(cleanup_run_loop_.QuitClosure()))) {
     params_.requested_format = media::VideoCaptureFormat(
-        gfx::Size(176, 144), 30, media::PIXEL_FORMAT_I420);
+        gfx::Size(176, 144), 30, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420);
     child_process_.reset(new ChildProcess());
   }
 
   void FakeChannelSetup() {
-    scoped_refptr<base::MessageLoopProxy> loop =
-        child_process_->io_message_loop_proxy();
-    if (!loop->BelongsToCurrentThread()) {
-      loop->PostTask(
-          FROM_HERE,
-          base::Bind(
-              &VideoCaptureImplManagerTest::FakeChannelSetup,
-              base::Unretained(this)));
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+        child_process_->io_task_runner();
+    if (!task_runner->BelongsToCurrentThread()) {
+      task_runner->PostTask(
+          FROM_HERE, base::Bind(&VideoCaptureImplManagerTest::FakeChannelSetup,
+                                base::Unretained(this)));
       return;
     }
     manager_->video_capture_message_filter()->OnFilterAdded(NULL);
@@ -92,8 +90,8 @@ class VideoCaptureImplManagerTest : public ::testing::Test {
 
  protected:
   MOCK_METHOD2(OnFrameReady,
-              void(const scoped_refptr<media::VideoFrame>&,
-                   const base::TimeTicks& estimated_capture_time));
+               void(const scoped_refptr<media::VideoFrame>&,
+                    const base::TimeTicks& estimated_capture_time));
   MOCK_METHOD0(OnStarted, void());
   MOCK_METHOD0(OnStopped, void());
 
@@ -110,11 +108,11 @@ class VideoCaptureImplManagerTest : public ::testing::Test {
     }
   }
 
-  base::Closure StartCapture(const media::VideoCaptureParams& params) {
+  base::Closure StartCapture(const media::VideoCaptureSessionId id,
+                             const media::VideoCaptureParams& params) {
     return manager_->StartCapture(
-        0, params,
-        base::Bind(&VideoCaptureImplManagerTest::OnStateUpdate,
-                   base::Unretained(this)),
+        id, params, base::Bind(&VideoCaptureImplManagerTest::OnStateUpdate,
+                               base::Unretained(this)),
         base::Bind(&VideoCaptureImplManagerTest::OnFrameReady,
                    base::Unretained(this)));
   }
@@ -129,19 +127,17 @@ class VideoCaptureImplManagerTest : public ::testing::Test {
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureImplManagerTest);
 };
 
-// Multiple clients with the same session id. There is only one
-// media::VideoCapture object.
-TEST_F(VideoCaptureImplManagerTest, MultipleClients) {
+TEST_F(VideoCaptureImplManagerTest, MultipleImpls) {
   base::Closure release_cb1 = manager_->UseDevice(0);
-  base::Closure release_cb2 = manager_->UseDevice(0);
+  base::Closure release_cb2 = manager_->UseDevice(1);
   base::Closure stop_cb1, stop_cb2;
   {
     base::RunLoop run_loop;
     base::Closure quit_closure = BindToCurrentLoop(run_loop.QuitClosure());
     EXPECT_CALL(*this, OnStarted()).WillOnce(RunClosure(quit_closure));
     EXPECT_CALL(*this, OnStarted()).RetiresOnSaturation();
-    stop_cb1 = StartCapture(params_);
-    stop_cb2 = StartCapture(params_);
+    stop_cb1 = StartCapture(0, params_);
+    stop_cb2 = StartCapture(1, params_);
     FakeChannelSetup();
     run_loop.Run();
   }
@@ -159,6 +155,13 @@ TEST_F(VideoCaptureImplManagerTest, MultipleClients) {
   release_cb1.Run();
   release_cb2.Run();
   cleanup_run_loop_.Run();
+}
+
+TEST_F(VideoCaptureImplManagerTest, RefusesMultipleClients) {
+  // TODO(ajose): EXPECT_DEATH is unsafe in a threaded context - what to use
+  // instead?
+  base::Closure release_cb1 = manager_->UseDevice(0);
+  EXPECT_DEATH(base::Closure release_cb2 = manager_->UseDevice(0), "");
 }
 
 TEST_F(VideoCaptureImplManagerTest, NoLeak) {

@@ -15,7 +15,6 @@
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/io_thread.h"
-#include "chrome/browser/net/about_protocol_handler.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
@@ -147,10 +146,10 @@ OffTheRecordProfileIOData::Handle::CreateIsolatedAppRequestContextGetter(
   return context;
 }
 
-DevToolsNetworkController*
-OffTheRecordProfileIOData::Handle::GetDevToolsNetworkController() const {
+DevToolsNetworkControllerHandle*
+OffTheRecordProfileIOData::Handle::GetDevToolsNetworkControllerHandle() const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  return io_data_->network_controller();
+  return io_data_->network_controller_handle();
 }
 
 void OffTheRecordProfileIOData::Handle::LazyInitialize() const {
@@ -219,15 +218,12 @@ void OffTheRecordProfileIOData::InitializeInternal(
       io_thread_globals->host_resolver.get());
   main_context->set_http_auth_handler_factory(
       io_thread_globals->http_auth_handler_factory.get());
-  main_context->set_fraudulent_certificate_reporter(
-      fraudulent_certificate_reporter());
   main_context->set_proxy_service(proxy_service());
-
-  main_context->set_throttler_manager(
-      io_thread_globals->throttler_manager.get());
 
   main_context->set_cert_transparency_verifier(
       io_thread_globals->cert_transparency_verifier.get());
+  main_context->set_backoff_manager(
+      io_thread_globals->url_request_backoff_manager.get());
 
   // For incognito, we use the default non-persistent HttpServerPropertiesImpl.
   set_http_server_properties(
@@ -296,12 +292,11 @@ void OffTheRecordProfileIOData::
 
   extensions_context->set_net_log(io_thread->net_log());
 
-  extensions_context->set_throttler_manager(
-      io_thread_globals->throttler_manager.get());
-
   extensions_context->set_cert_transparency_verifier(
       io_thread_globals->cert_transparency_verifier.get());
 
+  extensions_context->set_backoff_manager(
+      io_thread_globals->url_request_backoff_manager.get());
   // All we care about for extensions is the cookie store. For incognito, we
   // use a non-persistent cookie store.
   net::CookieMonster* extensions_cookie_store =

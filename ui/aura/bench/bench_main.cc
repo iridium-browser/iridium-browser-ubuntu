@@ -63,7 +63,7 @@ class ColoredLayer : public Layer, public LayerDelegate {
   // Overridden from LayerDelegate:
   void OnPaintLayer(const ui::PaintContext& context) override {
     if (draw_) {
-      ui::PaintRecorder recorder(context);
+      ui::PaintRecorder recorder(context, size());
       recorder.canvas()->DrawColor(color_);
     }
   }
@@ -170,8 +170,8 @@ class WebGLBench : public BenchCompositorObserver {
     int width = 0;
     int height = 0;
     if (!webgl_size.empty()) {
-      std::vector<std::string> split_size;
-      base::SplitString(webgl_size, 'x', &split_size);
+      std::vector<std::string> split_size = base::SplitString(
+          webgl_size, "x", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
       if (split_size.size() == 2) {
         width = atoi(split_size[0].c_str());
         height = atoi(split_size[1].c_str());

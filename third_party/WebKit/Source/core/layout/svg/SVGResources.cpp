@@ -21,12 +21,12 @@
 #include "core/layout/svg/SVGResources.h"
 
 #include "core/SVGNames.h"
-#include "core/style/SVGComputedStyle.h"
 #include "core/layout/svg/LayoutSVGResourceClipper.h"
 #include "core/layout/svg/LayoutSVGResourceFilter.h"
 #include "core/layout/svg/LayoutSVGResourceMarker.h"
 #include "core/layout/svg/LayoutSVGResourceMasker.h"
 #include "core/layout/svg/LayoutSVGResourcePaintServer.h"
+#include "core/style/SVGComputedStyle.h"
 #include "core/svg/SVGFilterElement.h"
 #include "core/svg/SVGGradientElement.h"
 #include "core/svg/SVGPatternElement.h"
@@ -374,56 +374,40 @@ void SVGResources::resourceDestroyed(LayoutSVGResourceContainer* resource)
     case MaskerResourceType:
         if (!m_clipperFilterMaskerData)
             break;
-        if (m_clipperFilterMaskerData->masker == resource) {
-            m_clipperFilterMaskerData->masker->removeAllClientsFromCache();
+        if (m_clipperFilterMaskerData->masker == resource)
             m_clipperFilterMaskerData->masker = nullptr;
-        }
         break;
     case MarkerResourceType:
         if (!m_markerData)
             break;
-        if (m_markerData->markerStart == resource) {
-            m_markerData->markerStart->removeAllClientsFromCache();
+        if (m_markerData->markerStart == resource)
             m_markerData->markerStart = nullptr;
-        }
-        if (m_markerData->markerMid == resource) {
-            m_markerData->markerMid->removeAllClientsFromCache();
+        if (m_markerData->markerMid == resource)
             m_markerData->markerMid = nullptr;
-        }
-        if (m_markerData->markerEnd == resource) {
-            m_markerData->markerEnd->removeAllClientsFromCache();
+        if (m_markerData->markerEnd == resource)
             m_markerData->markerEnd = nullptr;
-        }
         break;
     case PatternResourceType:
     case LinearGradientResourceType:
     case RadialGradientResourceType:
         if (!m_fillStrokeData)
             break;
-        if (m_fillStrokeData->fill == resource) {
-            m_fillStrokeData->fill->removeAllClientsFromCache();
+        if (m_fillStrokeData->fill == resource)
             m_fillStrokeData->fill = nullptr;
-        }
-        if (m_fillStrokeData->stroke == resource) {
-            m_fillStrokeData->stroke->removeAllClientsFromCache();
+        if (m_fillStrokeData->stroke == resource)
             m_fillStrokeData->stroke = nullptr;
-        }
         break;
     case FilterResourceType:
         if (!m_clipperFilterMaskerData)
             break;
-        if (m_clipperFilterMaskerData->filter == resource) {
-            m_clipperFilterMaskerData->filter->removeAllClientsFromCache();
+        if (m_clipperFilterMaskerData->filter == resource)
             m_clipperFilterMaskerData->filter = nullptr;
-        }
         break;
     case ClipperResourceType:
         if (!m_clipperFilterMaskerData)
             break;
-        if (m_clipperFilterMaskerData->clipper == resource) {
-            m_clipperFilterMaskerData->clipper->removeAllClientsFromCache();
+        if (m_clipperFilterMaskerData->clipper == resource)
             m_clipperFilterMaskerData->clipper = nullptr;
-        }
         break;
     default:
         ASSERT_NOT_REACHED();

@@ -19,6 +19,8 @@
       'utility/local_discovery/service_discovery_message_handler.h',
       'utility/printing_handler.cc',
       'utility/printing_handler.h',
+      'utility/safe_json_parser_handler.cc',
+      'utility/safe_json_parser_handler.h',
       'utility/shell_handler_win.cc',
       'utility/shell_handler_win.h',
       'utility/utility_message_handler.h',
@@ -65,6 +67,19 @@
       'utility/profile_import_handler.cc',
       'utility/profile_import_handler.h',
     ],
+    'chrome_utility_safe_browsing_sources': [
+      'utility/safe_browsing/mac/convert_big_endian.h',
+      'utility/safe_browsing/mac/dmg_analyzer.cc',
+      'utility/safe_browsing/mac/dmg_analyzer.h',
+      'utility/safe_browsing/mac/dmg_iterator.cc',
+      'utility/safe_browsing/mac/dmg_iterator.h',
+      'utility/safe_browsing/mac/hfs.cc',
+      'utility/safe_browsing/mac/hfs.h',
+      'utility/safe_browsing/mac/read_stream.cc',
+      'utility/safe_browsing/mac/read_stream.h',
+      'utility/safe_browsing/mac/udif.cc',
+      'utility/safe_browsing/mac/udif.h',
+    ],
     'chrome_utility_shared_media_sources': [
       'utility/media_galleries/image_metadata_extractor.cc',
       'utility/media_galleries/image_metadata_extractor.h',
@@ -101,8 +116,9 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../components/components_strings.gyp:components_strings',
+        '../components/components.gyp:safe_json_parser_message_filter',
         '../components/components.gyp:search_engines',
-        '../components/components.gyp:url_fixer',
+        '../components/url_formatter/url_formatter.gyp:url_formatter',
         '../content/content.gyp:content_common',
         '../content/content.gyp:content_utility',
         '../media/media.gyp:media',
@@ -135,6 +151,7 @@
         }],
         ['OS!="android"', {
           'dependencies': [
+            'common_mojo_bindings',
             '../net/net.gyp:net_utility_services',
           ],
           'sources': [
@@ -149,12 +166,6 @@
             'utility/importer/nss_decryptor_system_nss.cc',
             'utility/importer/nss_decryptor_system_nss.h',
           ],
-        }],
-        ['OS=="android" and use_seccomp_bpf==1', {
-          'dependencies': [
-            '../sandbox/sandbox.gyp:seccomp_bpf',
-          ],
-          'defines': ['USE_SECCOMP_BPF'],
         }],
         ['enable_extensions==1', {
           'dependencies': [
@@ -200,6 +211,18 @@
             'utility/local_discovery/service_discovery_message_handler.cc',
             'utility/local_discovery/service_discovery_message_handler.h',
           ]
+        }],
+        ['safe_browsing==1', {
+          'sources': [ '<@(chrome_utility_safe_browsing_sources)' ],
+          'conditions': [
+            ['OS=="mac"', {
+              'link_settings': {
+                'libraries': [
+                  '$(SDKROOT)/usr/lib/libbz2.dylib',
+                ],
+              },
+            }],
+          ],
         }],
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.

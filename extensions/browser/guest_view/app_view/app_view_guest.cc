@@ -6,15 +6,15 @@
 
 #include "base/command_line.h"
 #include "components/guest_view/browser/guest_view_manager.h"
-#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/common/renderer_preferences.h"
 #include "extensions/browser/api/app_runtime/app_runtime_api.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/app_window/app_delegate.h"
+#include "extensions/browser/bad_message.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/guest_view/app_view/app_view_constants.h"
 #include "extensions/browser/lazy_background_task_queue.h"
 #include "extensions/browser/process_manager.h"
@@ -24,7 +24,7 @@
 #include "extensions/strings/grit/extensions_strings.h"
 #include "ipc/ipc_message_macros.h"
 
-namespace app_runtime = extensions::core_api::app_runtime;
+namespace app_runtime = extensions::api::app_runtime;
 
 using content::RenderFrameHost;
 using content::WebContents;
@@ -64,20 +64,27 @@ bool AppViewGuest::CompletePendingRequest(
     content::BrowserContext* browser_context,
     const GURL& url,
     int guest_instance_id,
-    const std::string& guest_extension_id) {
+    const std::string& guest_extension_id,
+    content::RenderProcessHost* guest_render_process_host) {
   PendingResponseMap* response_map = pending_response_map.Pointer();
   PendingResponseMap::iterator it = response_map->find(guest_instance_id);
+  // Kill the requesting process if it is not the real guest.
   if (it == response_map->end()) {
-    // TODO(fsamuel): An app is sending invalid responses. We should probably
-    // kill it.
+    // The requester used an invalid |guest_instance_id|.
+    bad_message::ReceivedBadMessage(guest_render_process_host,
+                                    bad_message::AVG_BAD_INST_ID);
     return false;
   }
 
   linked_ptr<ResponseInfo> response_info = it->second;
   if (!response_info->app_view_guest ||
       (response_info->guest_extension->id() != guest_extension_id)) {
-    // TODO(fsamuel): An app is trying to respond to an <appview> that didn't
-    // initiate communication with it. We should kill the app here.
+    // The app is trying to communicate with an <appview> not assigned to it, or
+    // the <appview> is already dead "nullptr".
+    bad_message::BadMessageReason reason = !response_info->app_view_guest
+                                               ? bad_message::AVG_NULL_AVG
+                                               : bad_message::AVG_BAD_EXT_ID;
+    bad_message::ReceivedBadMessage(guest_render_process_host, reason);
     return false;
   }
 
@@ -103,23 +110,6 @@ AppViewGuest::AppViewGuest(content::WebContents* owner_web_contents)
 }
 
 AppViewGuest::~AppViewGuest() {
-}
-
-WindowController* AppViewGuest::GetExtensionWindowController() const {
-  return nullptr;
-}
-
-content::WebContents* AppViewGuest::GetAssociatedWebContents() const {
-  return web_contents();
-}
-
-bool AppViewGuest::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(AppViewGuest, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
 }
 
 bool AppViewGuest::HandleContextMenu(const content::ContextMenuParams& params) {
@@ -207,7 +197,7 @@ void AppViewGuest::CreateWebContents(
                                         callback))));
 
   LazyBackgroundTaskQueue* queue =
-      ExtensionSystem::Get(browser_context())->lazy_background_task_queue();
+      LazyBackgroundTaskQueue::Get(browser_context());
   if (queue->ShouldEnqueueTask(browser_context(), guest_extension)) {
     queue->AddPendingTask(browser_context(),
                           guest_extension->id(),
@@ -227,8 +217,7 @@ void AppViewGuest::CreateWebContents(
 }
 
 void AppViewGuest::DidInitialize(const base::DictionaryValue& create_params) {
-  extension_function_dispatcher_.reset(
-      new ExtensionFunctionDispatcher(browser_context(), this));
+  ExtensionsAPIClient::Get()->AttachWebContentsHelpers(web_contents());
 
   if (!url_.is_valid())
     return;
@@ -243,11 +232,6 @@ const char* AppViewGuest::GetAPINamespace() const {
 
 int AppViewGuest::GetTaskPrefix() const {
   return IDS_EXTENSION_TASK_MANAGER_APPVIEW_TAG_PREFIX;
-}
-
-void AppViewGuest::OnRequest(const ExtensionHostMsg_Request_Params& params) {
-  extension_function_dispatcher_->Dispatch(params,
-                                           web_contents()->GetRenderViewHost());
 }
 
 void AppViewGuest::CompleteCreateWebContents(
@@ -273,10 +257,10 @@ void AppViewGuest::LaunchAppAndFireEvent(
     scoped_ptr<base::DictionaryValue> data,
     const WebContentsCreatedCallback& callback,
     ExtensionHost* extension_host) {
-  ExtensionSystem* system = ExtensionSystem::Get(browser_context());
-  bool has_event_listener = system->event_router()->ExtensionHasEventListener(
-      extension_host->extension()->id(),
-      app_runtime::OnEmbedRequested::kEventName);
+  bool has_event_listener = EventRouter::Get(browser_context())
+                                ->ExtensionHasEventListener(
+                                    extension_host->extension()->id(),
+                                    app_runtime::OnEmbedRequested::kEventName);
   if (!has_event_listener) {
     callback.Run(nullptr);
     return;
@@ -292,6 +276,14 @@ void AppViewGuest::LaunchAppAndFireEvent(
 
 void AppViewGuest::SetAppDelegateForTest(AppDelegate* delegate) {
   app_delegate_.reset(delegate);
+}
+
+std::vector<int> AppViewGuest::GetAllRegisteredInstanceIdsForTesting() {
+  std::vector<int> instances;
+  for (const auto& key_value : pending_response_map.Get()) {
+    instances.push_back(key_value.first);
+  }
+  return instances;
 }
 
 }  // namespace extensions

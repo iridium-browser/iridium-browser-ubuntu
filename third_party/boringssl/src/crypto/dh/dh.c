@@ -78,7 +78,7 @@ DH *DH_new(void) { return DH_new_method(NULL); }
 DH *DH_new_method(const ENGINE *engine) {
   DH *dh = (DH *)OPENSSL_malloc(sizeof(DH));
   if (dh == NULL) {
-    OPENSSL_PUT_ERROR(DH, DH_new_method, ERR_R_MALLOC_FAILURE);
+    OPENSSL_PUT_ERROR(DH, ERR_R_MALLOC_FAILURE);
     return NULL;
   }
 
@@ -116,7 +116,7 @@ void DH_free(DH *dh) {
     return;
   }
 
-  if (CRYPTO_add(&dh->references, -1, CRYPTO_LOCK_DH) > 0) {
+  if (!CRYPTO_refcount_dec_and_test_zero(&dh->references)) {
     return;
   }
 
@@ -164,8 +164,10 @@ int DH_compute_key(unsigned char *out, const BIGNUM *peers_key, DH *dh) {
 
 int DH_size(const DH *dh) { return BN_num_bytes(dh->p); }
 
-int DH_up_ref(DH *r) {
-  CRYPTO_add(&r->references, 1, CRYPTO_LOCK_DH);
+unsigned DH_num_bits(const DH *dh) { return BN_num_bits(dh->p); }
+
+int DH_up_ref(DH *dh) {
+  CRYPTO_refcount_inc(&dh->references);
   return 1;
 }
 

@@ -47,18 +47,23 @@ public:
     static int install(ExecutionContext*, PassOwnPtrWillBeRawPtr<ScheduledAction>, int timeout, bool singleShot);
     static void removeByID(ExecutionContext*, int timeoutID);
 
-    virtual ~DOMTimer();
+    ~DOMTimer() override;
 
     // ActiveDOMObject
-    virtual void stop() override;
+    void stop() override;
 
     // The following are essentially constants. All intervals are in seconds.
     static double hiddenPageAlignmentInterval();
     static double visiblePageAlignmentInterval();
 
+    // Eager finalization is needed to promptly stop this Timer object.
+    // Otherwise timer events might fire at an object that's slated for destruction
+    // (when lazily swept), but some of its members (m_action) may already have
+    // been finalized & must not be accessed.
+    EAGERLY_FINALIZE();
     DECLARE_VIRTUAL_TRACE();
 
-    void dispose();
+    void disposeTimer();
 
 private:
     friend class DOMTimerCoordinator; // For create().
@@ -69,10 +74,10 @@ private:
     }
 
     DOMTimer(ExecutionContext*, PassOwnPtrWillBeRawPtr<ScheduledAction>, int interval, bool singleShot, int timeoutID);
-    virtual void fired() override;
+    void fired() override;
 
     // Retuns timer fire time rounded to the next multiple of timer alignment interval.
-    virtual double alignedFireTime(double) const override;
+    double alignedFireTime(double) const override;
 
     int m_timeoutID;
     int m_nestingLevel;

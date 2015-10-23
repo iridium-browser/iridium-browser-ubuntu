@@ -12,23 +12,15 @@
 
 namespace cc {
 
-OverlayProcessor::OverlayProcessor(OutputSurface* surface,
-                                   ResourceProvider* resource_provider)
-    : surface_(surface), resource_provider_(resource_provider) {}
+OverlayProcessor::OverlayProcessor(OutputSurface* surface) : surface_(surface) {
+}
 
 void OverlayProcessor::Initialize() {
   DCHECK(surface_);
-  if (!resource_provider_)
-    return;
-
-  OverlayCandidateValidator* candidates =
+  OverlayCandidateValidator* validator =
       surface_->GetOverlayCandidateValidator();
-  if (candidates) {
-    strategies_.push_back(scoped_ptr<Strategy>(
-        new OverlayStrategySingleOnTop(candidates, resource_provider_)));
-    strategies_.push_back(scoped_ptr<Strategy>(
-        new OverlayStrategyUnderlay(candidates, resource_provider_)));
-  }
+  if (validator)
+    validator->GetStrategies(&strategies_);
 }
 
 OverlayProcessor::~OverlayProcessor() {}
@@ -38,8 +30,10 @@ void OverlayProcessor::ProcessForOverlays(
     OverlayCandidateList* candidate_list) {
   for (StrategyList::iterator it = strategies_.begin(); it != strategies_.end();
        ++it) {
-    if ((*it)->Attempt(render_passes_in_draw_order, candidate_list))
+    if ((*it)->Attempt(render_passes_in_draw_order, candidate_list,
+                       surface_->device_scale_factor())) {
       return;
+    }
   }
 }
 

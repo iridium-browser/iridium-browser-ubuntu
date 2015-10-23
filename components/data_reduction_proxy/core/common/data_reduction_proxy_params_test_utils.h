@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_PARAMS_TEST_UTILS_H_
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_PARAMS_TEST_UTILS_H_
 
+#include <vector>
+
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 
 namespace base {
@@ -28,8 +30,6 @@ class TestDataReductionProxyParams : public DataReductionProxyParams {
     HAS_ORIGIN = 0x2,
     HAS_FALLBACK_ORIGIN = 0x4,
     HAS_SSL_ORIGIN = 0x08,
-    HAS_ALT_ORIGIN = 0x10,
-    HAS_ALT_FALLBACK_ORIGIN = 0x20,
     HAS_SECURE_PROXY_CHECK_URL = 0x40,
     HAS_DEV_FALLBACK_ORIGIN = 0x80,
     HAS_EVERYTHING = 0xff,
@@ -39,25 +39,20 @@ class TestDataReductionProxyParams : public DataReductionProxyParams {
                                unsigned int has_definitions);
   bool init_result() const;
 
+  void SetProxiesForHttp(const std::vector<net::ProxyServer>& proxies);
+
   // Test values to replace the values specified in preprocessor defines.
   static std::string DefaultDevOrigin();
   static std::string DefaultDevFallbackOrigin();
   static std::string DefaultOrigin();
   static std::string DefaultFallbackOrigin();
   static std::string DefaultSSLOrigin();
-  static std::string DefaultAltOrigin();
-  static std::string DefaultAltFallbackOrigin();
   static std::string DefaultSecureProxyCheckURL();
 
   static std::string FlagOrigin();
   static std::string FlagFallbackOrigin();
   static std::string FlagSSLOrigin();
-  static std::string FlagAltOrigin();
-  static std::string FlagAltFallbackOrigin();
   static std::string FlagSecureProxyCheckURL();
-
-  void set_origin(const net::ProxyServer& origin);
-  void set_fallback_origin(const net::ProxyServer& fallback_origin);
 
  protected:
   std::string GetDefaultDevOrigin() const override;
@@ -70,10 +65,6 @@ class TestDataReductionProxyParams : public DataReductionProxyParams {
 
   std::string GetDefaultSSLOrigin() const override;
 
-  std::string GetDefaultAltOrigin() const override;
-
-  std::string GetDefaultAltFallbackOrigin() const override;
-
   std::string GetDefaultSecureProxyCheckURL() const override;
 
  private:
@@ -85,4 +76,3 @@ class TestDataReductionProxyParams : public DataReductionProxyParams {
 };
 }  // namespace data_reduction_proxy
 #endif  // COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_PARAMS_TEST_UTILS_H_
-

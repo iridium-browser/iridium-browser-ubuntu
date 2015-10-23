@@ -20,7 +20,7 @@
 
 using base::StringPiece;
 using net::test::MockConnection;
-using net::test::MockSession;
+using net::test::MockQuicSpdySession;
 using net::test::SupportedVersions;
 using net::test::kInitialSessionFlowControlWindowForTest;
 using net::test::kInitialStreamFlowControlWindowForTest;
@@ -40,9 +40,8 @@ namespace test {
 
 class QuicSpdyServerStreamPeer : public QuicSpdyServerStream {
  public:
-  QuicSpdyServerStreamPeer(QuicStreamId stream_id, QuicSession* session)
-      : QuicSpdyServerStream(stream_id, session) {
-  }
+  QuicSpdyServerStreamPeer(QuicStreamId stream_id, QuicSpdySession* session)
+      : QuicSpdyServerStream(stream_id, session) {}
 
   using QuicSpdyServerStream::SendResponse;
   using QuicSpdyServerStream::SendErrorResponse;
@@ -120,7 +119,7 @@ class QuicSpdyServerStreamTest : public ::testing::TestWithParam<QuicVersion> {
 
   SpdyHeaderBlock response_headers_;
   StrictMock<MockConnection>* connection_;
-  StrictMock<MockSession> session_;
+  StrictMock<MockQuicSpdySession> session_;
   scoped_ptr<QuicSpdyServerStreamPeer> stream_;
   string headers_string_;
   string body_;
@@ -128,12 +127,12 @@ class QuicSpdyServerStreamTest : public ::testing::TestWithParam<QuicVersion> {
 
 QuicConsumedData ConsumeAllData(
     QuicStreamId id,
-    const IOVector& data,
+    const QuicIOVector& data,
     QuicStreamOffset offset,
     bool fin,
     FecProtection /*fec_protection_*/,
     QuicAckNotifier::DelegateInterface* /*ack_notifier_delegate*/) {
-  return QuicConsumedData(data.TotalBufferSize(), fin);
+  return QuicConsumedData(data.total_length, fin);
 }
 
 INSTANTIATE_TEST_CASE_P(Tests, QuicSpdyServerStreamTest,
@@ -144,7 +143,8 @@ TEST_P(QuicSpdyServerStreamTest, TestFraming) {
       WillRepeatedly(Invoke(ConsumeAllData));
   stream_->OnStreamHeaders(headers_string_);
   stream_->OnStreamHeadersComplete(false, headers_string_.size());
-  EXPECT_EQ(body_.size(), stream_->ProcessData(body_.c_str(), body_.size()));
+  stream_->OnStreamFrame(
+      QuicStreamFrame(stream_->id(), /*fin=*/false, /*offset=*/0, body_));
   EXPECT_EQ("11", StreamHeadersValue("content-length"));
   EXPECT_EQ("/", StreamHeadersValue(":path"));
   EXPECT_EQ("POST", StreamHeadersValue(":method"));
@@ -157,7 +157,8 @@ TEST_P(QuicSpdyServerStreamTest, TestFramingOnePacket) {
 
   stream_->OnStreamHeaders(headers_string_);
   stream_->OnStreamHeadersComplete(false, headers_string_.size());
-  EXPECT_EQ(body_.size(), stream_->ProcessData(body_.c_str(), body_.size()));
+  stream_->OnStreamFrame(
+      QuicStreamFrame(stream_->id(), /*fin=*/false, /*offset=*/0, body_));
   EXPECT_EQ("11", StreamHeadersValue("content-length"));
   EXPECT_EQ("/", StreamHeadersValue(":path"));
   EXPECT_EQ("POST", StreamHeadersValue(":method"));
@@ -173,10 +174,12 @@ TEST_P(QuicSpdyServerStreamTest, TestFramingExtraData) {
 
   stream_->OnStreamHeaders(headers_string_);
   stream_->OnStreamHeadersComplete(false, headers_string_.size());
-  EXPECT_EQ(body_.size(), stream_->ProcessData(body_.c_str(), body_.size()));
+  stream_->OnStreamFrame(
+      QuicStreamFrame(stream_->id(), /*fin=*/false, /*offset=*/0, body_));
   // Content length is still 11.  This will register as an error and we won't
   // accept the bytes.
-  stream_->ProcessData(large_body.c_str(), large_body.size());
+  stream_->OnStreamFrame(
+      QuicStreamFrame(stream_->id(), /*fin=*/false, body_.size(), large_body));
   EXPECT_EQ("11", StreamHeadersValue("content-length"));
   EXPECT_EQ("/", StreamHeadersValue(":path"));
   EXPECT_EQ("POST", StreamHeadersValue(":method"));
@@ -243,7 +246,7 @@ TEST_P(QuicSpdyServerStreamTest, InvalidHeadersWithFin) {
     0x31, 0x2e, 0x31,        // 1.1
   };
   StringPiece data(arr, arraysize(arr));
-  QuicStreamFrame frame(stream_->id(), true, 0, MakeIOVector(data));
+  QuicStreamFrame frame(stream_->id(), true, 0, data);
   // Verify that we don't crash when we get a invalid headers in stream frame.
   stream_->OnStreamFrame(frame);
 }

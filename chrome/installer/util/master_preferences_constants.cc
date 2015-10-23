@@ -30,6 +30,7 @@ namespace master_preferences {
   const char kDoNotCreateQuickLaunchShortcut[] =
       "do_not_create_quick_launch_shortcut";
   const char kDoNotCreateTaskbarShortcut[] = "do_not_create_taskbar_shortcut";
+  const char kDoNotCreateStartPin[] = "do_not_create_start_pin";
   const char kDoNotLaunchChrome[] = "do_not_launch_chrome";
   const char kDoNotRegisterForUpdateLaunch[] =
       "do_not_register_for_update_launch";
@@ -39,6 +40,7 @@ namespace master_preferences {
   const char kSuppressFirstRunDefaultBrowserPrompt[] =
       "suppress_first_run_default_browser_prompt";
   const char kMsi[] = "msi";
+  const char kMsiProductId[] = "msi_product_id";
   const char kMultiInstall[] = "multi_install";
   const char kRequireEula[] = "require_eula";
   const char kSystemLevel[] = "system_level";

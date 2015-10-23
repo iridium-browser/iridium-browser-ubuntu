@@ -34,7 +34,6 @@
 
 #include <sys/utsname.h>
 
-#include "client/linux/dump_writer_common/seccomp_unwinder.h"
 #include "client/linux/dump_writer_common/thread_info.h"
 #include "client/linux/dump_writer_common/ucontext_reader.h"
 #include "client/linux/handler/exception_handler.h"
@@ -50,7 +49,6 @@ using google_breakpad::LinuxPtraceDumper;
 using google_breakpad::MappingInfo;
 using google_breakpad::MappingList;
 using google_breakpad::RawContextCPU;
-using google_breakpad::SeccompUnwinder;
 using google_breakpad::ThreadInfo;
 using google_breakpad::UContextReader;
 
@@ -60,6 +58,8 @@ class MicrodumpWriter {
  public:
   MicrodumpWriter(const ExceptionHandler::CrashContext* context,
                   const MappingList& mappings,
+                  const char* build_fingerprint,
+                  const char* product_info,
                   LinuxDumper* dumper)
       : ucontext_(context ? &context->context : NULL),
 #if !defined(__ARM_EABI__) && !defined(__mips__)
@@ -67,6 +67,8 @@ class MicrodumpWriter {
 #endif
         dumper_(dumper),
         mapping_list_(mappings),
+        build_fingerprint_(build_fingerprint),
+        product_info_(product_info),
         log_line_(NULL) {
     log_line_ = reinterpret_cast<char*>(Alloc(kLineBufferSize));
     if (log_line_)
@@ -82,15 +84,15 @@ class MicrodumpWriter {
     // try to not crash.
     if (!dumper_->Init() || !log_line_)
       return false;
-    return dumper_->ThreadsSuspend();
+    return dumper_->ThreadsSuspend() && dumper_->LateInit();
   }
 
   bool Dump() {
     bool success;
     LogLine("-----BEGIN BREAKPAD MICRODUMP-----");
-    success = DumpOSInformation();
-    if (success)
-      success = DumpCrashingThread();
+    DumpProductInformation();
+    DumpOSInformation();
+    success = DumpCrashingThread();
     if (success)
       success = DumpMappings();
     LogLine("-----END BREAKPAD MICRODUMP-----");
@@ -101,9 +103,11 @@ class MicrodumpWriter {
  private:
   // Writes one line to the system log.
   void LogLine(const char* msg) {
+#if defined(__ANDROID__)
+    logger::writeToCrashLog(msg);
+#else
     logger::write(msg, my_strlen(msg));
-#if !defined(__ANDROID__)
-    logger::write("\n", 1);  // Android logger appends the \n. Linux's doesn't.
+    logger::write("\n", 1);
 #endif
   }
 
@@ -143,10 +147,17 @@ class MicrodumpWriter {
     my_strlcpy(log_line_, "", kLineBufferSize);
   }
 
-  bool DumpOSInformation() {
-    struct utsname uts;
-    if (uname(&uts))
-      return false;
+  void DumpProductInformation() {
+    LogAppend("V ");
+    if (product_info_) {
+      LogAppend(product_info_);
+    } else {
+      LogAppend("UNKNOWN:0.0.0.0");
+    }
+    LogCommitLine();
+  }
+
+  void DumpOSInformation() {
     const uint8_t n_cpus = static_cast<uint8_t>(sysconf(_SC_NPROCESSORS_CONF));
 
 #if defined(__ANDROID__)
@@ -155,8 +166,9 @@ class MicrodumpWriter {
     const char kOSId[] = "L";
 #endif
 
-// We cannot depend on uts.machine. On multiarch devices it always returns the
-// primary arch, not the one that match the executable being run.
+// Dump the runtime architecture. On multiarch devices it might not match the
+// hw architecture (the one returned by uname()), for instance in the case of
+// a 32-bit app running on a aarch64 device.
 #if defined(__aarch64__)
     const char kArch[] = "arm64";
 #elif defined(__ARMEL__)
@@ -178,13 +190,26 @@ class MicrodumpWriter {
     LogAppend(" ");
     LogAppend(n_cpus);
     LogAppend(" ");
-    LogAppend(uts.machine);
+
+    // Dump the HW architecture (e.g., armv7l, aarch64).
+    struct utsname uts;
+    const bool has_uts_info = (uname(&uts) == 0);
+    const char* hwArch = has_uts_info ? uts.machine : "unknown_hw_arch";
+    LogAppend(hwArch);
     LogAppend(" ");
-    LogAppend(uts.release);
-    LogAppend(" ");
-    LogAppend(uts.version);
+
+    // If the client has attached a build fingerprint to the MinidumpDescriptor
+    // use that one. Otherwise try to get some basic info from uname().
+    if (build_fingerprint_) {
+      LogAppend(build_fingerprint_);
+    } else if (has_uts_info) {
+      LogAppend(uts.release);
+      LogAppend(" ");
+      LogAppend(uts.version);
+    } else {
+      LogAppend("no build fingerprint available");
+    }
     LogCommitLine();
-    return true;
   }
 
   bool DumpThreadStack(uint32_t thread_id,
@@ -260,8 +285,6 @@ class MicrodumpWriter {
 #else
       UContextReader::FillCPUContext(&cpu, ucontext_);
 #endif
-      if (stack_copy)
-        SeccompUnwinder::PopSeccompStackFrame(&cpu, thread, stack_copy);
       DumpCPUState(&cpu);
     }
     return true;
@@ -367,6 +390,8 @@ class MicrodumpWriter {
 #endif
   LinuxDumper* dumper_;
   const MappingList& mapping_list_;
+  const char* const build_fingerprint_;
+  const char* const product_info_;
   char* log_line_;
 };
 }  // namespace
@@ -376,7 +401,9 @@ namespace google_breakpad {
 bool WriteMicrodump(pid_t crashing_process,
                     const void* blob,
                     size_t blob_size,
-                    const MappingList& mappings) {
+                    const MappingList& mappings,
+                    const char* build_fingerprint,
+                    const char* product_info) {
   LinuxPtraceDumper dumper(crashing_process);
   const ExceptionHandler::CrashContext* context = NULL;
   if (blob) {
@@ -388,7 +415,8 @@ bool WriteMicrodump(pid_t crashing_process,
     dumper.set_crash_signal(context->siginfo.si_signo);
     dumper.set_crash_thread(context->tid);
   }
-  MicrodumpWriter writer(context, mappings, &dumper);
+  MicrodumpWriter writer(context, mappings, build_fingerprint, product_info,
+                         &dumper);
   if (!writer.Init())
     return false;
   return writer.Dump();

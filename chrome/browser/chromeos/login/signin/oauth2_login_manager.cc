@@ -273,7 +273,7 @@ void OAuth2LoginManager::VerifySessionCookies() {
       GetPrimaryAccountId(), oauthlogin_access_token_));
 
   if (restore_strategy_ == RESTORE_FROM_SAVED_OAUTH2_REFRESH_TOKEN) {
-    login_verifier_->VerifyUserCookies(user_profile_);
+    login_verifier_->VerifyUserCookies();
     return;
   }
 
@@ -282,7 +282,7 @@ void OAuth2LoginManager::VerifySessionCookies() {
 
 void OAuth2LoginManager::RestoreSessionCookies() {
   SetSessionRestoreState(SESSION_RESTORE_IN_PROGRESS);
-  login_verifier_->VerifyProfileTokens(user_profile_);
+  login_verifier_->VerifyProfileTokens();
 }
 
 void OAuth2LoginManager::Shutdown() {
@@ -307,18 +307,18 @@ void OAuth2LoginManager::OnSessionMergeFailure(bool connection_error) {
 }
 
 void OAuth2LoginManager::OnListAccountsSuccess(
-    const std::vector<std::pair<std::string, bool>>& accounts) {
+    const std::vector<gaia::ListedAccount>& accounts) {
   MergeVerificationOutcome outcome = POST_MERGE_SUCCESS;
   // Let's analyze which accounts we see logged in here:
   std::string user_email = gaia::CanonicalizeEmail(GetPrimaryAccountId());
   if (!accounts.empty()) {
     bool found = false;
     bool first = true;
-    for (std::vector<std::pair<std::string, bool> >::const_iterator iter =
+    for (std::vector<gaia::ListedAccount>::const_iterator iter =
              accounts.begin();
          iter != accounts.end(); ++iter) {
-      if (gaia::CanonicalizeEmail(iter->first) == user_email) {
-        found = iter->second;
+      if (iter->email == user_email) {
+        found = iter->valid;
         break;
       }
 

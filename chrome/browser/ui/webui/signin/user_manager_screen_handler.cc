@@ -5,9 +5,12 @@
 #include "chrome/browser/ui/webui/signin/user_manager_screen_handler.h"
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -22,7 +25,6 @@
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/local_auth.h"
-#include "chrome/browser/signin/proximity_auth_facade.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -36,6 +38,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/proximity_auth/screenlock_bridge.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -67,6 +70,7 @@ const char kKeyIsOwner[] = "isOwner";
 const char kKeyIsDesktop[] = "isDesktopUser";
 const char kKeyAvatarUrl[] = "userImage";
 const char kKeyNeedsSignin[] = "needsSignin";
+const char kKeyHasLocalCreds[] = "hasLocalCreds";
 
 // JS API callback names.
 const char kJsApiUserManagerInitialize[] = "userManagerInitialize";
@@ -80,6 +84,7 @@ const char kJsApiUserManagerLogRemoveUserWarningShown[] =
     "logRemoveUserWarningShown";
 
 const size_t kAvatarIconSize = 180;
+const int kMaxOAuthRetries = 3;
 
 void HandleAndDoNothing(const base::ListValue* args) {
 }
@@ -120,23 +125,13 @@ std::string GetAvatarImageAtIndex(
   return webui::GetBitmapDataUrl(resized_image.AsBitmap());
 }
 
-size_t GetIndexOfProfileWithEmail(const ProfileInfoCache& info_cache,
-                                  const std::string& email) {
-  const base::string16& profile_email = base::UTF8ToUTF16(email);
-  for (size_t i = 0; i < info_cache.GetNumberOfProfiles(); ++i) {
-    if (info_cache.GetUserNameOfProfileAtIndex(i) == profile_email)
-      return i;
-  }
-  return std::string::npos;
-}
-
 extensions::ScreenlockPrivateEventRouter* GetScreenlockRouter(
     const std::string& email) {
-  const ProfileInfoCache& info_cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
-  const size_t profile_index = GetIndexOfProfileWithEmail(info_cache, email);
+  base::FilePath path =
+      profiles::GetPathOfProfileWithEmail(g_browser_process->profile_manager(),
+                                          email);
   Profile* profile = g_browser_process->profile_manager()
-      ->GetProfileByPath(info_cache.GetPathOfProfileAtIndex(profile_index));
+      ->GetProfileByPath(path);
   return extensions::ScreenlockPrivateEventRouter::GetFactoryInstance()->Get(
       profile);
 }
@@ -298,7 +293,7 @@ UserManagerScreenHandler::UserManagerScreenHandler()
 }
 
 UserManagerScreenHandler::~UserManagerScreenHandler() {
-  GetScreenlockBridgeInstance()->SetLockHandler(NULL);
+  proximity_auth::ScreenlockBridge::Get()->SetLockHandler(NULL);
 }
 
 void UserManagerScreenHandler::ShowBannerMessage(
@@ -362,14 +357,13 @@ UserManagerScreenHandler::GetScreenType() const {
 }
 
 void UserManagerScreenHandler::Unlock(const std::string& user_email) {
-  const ProfileInfoCache& info_cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
-  const size_t profile_index =
-      GetIndexOfProfileWithEmail(info_cache, user_email);
-  DCHECK_LT(profile_index, info_cache.GetNumberOfProfiles());
-
-  authenticating_profile_index_ = profile_index;
-  ReportAuthenticationResult(true, ProfileMetrics::AUTH_LOCAL);
+  base::FilePath path =
+      profiles::GetPathOfProfileWithEmail(g_browser_process->profile_manager(),
+                                          user_email);
+  if (!path.empty()) {
+    authenticating_profile_path_ = path;
+    ReportAuthenticationResult(true, ProfileMetrics::AUTH_LOCAL);
+  }
 }
 
 void UserManagerScreenHandler::AttemptEasySignin(
@@ -390,7 +384,7 @@ void UserManagerScreenHandler::HandleInitialize(const base::ListValue* args) {
   desktop_type_ = chrome::GetHostDesktopTypeForNativeView(
       web_ui()->GetWebContents()->GetNativeView());
 
-  GetScreenlockBridgeInstance()->SetLockHandler(this);
+  proximity_auth::ScreenlockBridge::Get()->SetLockHandler(this);
 }
 
 void UserManagerScreenHandler::HandleAddUser(const base::ListValue* args) {
@@ -416,6 +410,13 @@ void UserManagerScreenHandler::HandleAuthenticatedLaunchUser(
   if (!base::GetValueAsFilePath(*profile_path_value, &profile_path))
     return;
 
+  ProfileInfoCache& info_cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+
+  ProfileAttributesEntry* entry;
+  if (!info_cache.GetProfileAttributesWithPath(profile_path, &entry))
+    return;
+
   base::string16 email_address;
   if (!args->GetString(1, &email_address))
     return;
@@ -424,37 +425,41 @@ void UserManagerScreenHandler::HandleAuthenticatedLaunchUser(
   if (!args->GetString(2, &password))
     return;
 
-  const ProfileInfoCache& info_cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
+  authenticating_profile_path_ = profile_path;
+  email_address_ = base::UTF16ToUTF8(email_address);
+
+  // Only try to validate locally or check the password change detection
+  // if we actually have a local credential saved.
   size_t profile_index = info_cache.GetIndexOfProfileWithPath(profile_path);
+  const bool has_local_credential =
+      !info_cache.GetLocalAuthCredentialsOfProfileAtIndex(profile_index)
+          .empty();
+  if (has_local_credential) {
+    if (LocalAuth::ValidateLocalAuthCredentials(profile_index, password)) {
+      ReportAuthenticationResult(true, ProfileMetrics::AUTH_LOCAL);
+      return;
+    }
 
-  if (profile_index == std::string::npos) {
-    NOTREACHED();
-    return;
+    // This could be a mis-typed password or typing a new password while we
+    // still have a hash of the old one.  The new way of checking a password
+    // change makes use of a token so we do that... if it's available.
+    if (!oauth_client_) {
+      oauth_client_.reset(new gaia::GaiaOAuthClient(
+          web_ui()->GetWebContents()->GetBrowserContext()
+              ->GetRequestContext()));
+    }
+
+    const std::string token = entry->GetPasswordChangeDetectionToken();
+    if (!token.empty()) {
+      oauth_client_->GetTokenHandleInfo(token, kMaxOAuthRetries, this);
+      return;
+    }
   }
 
-  authenticating_profile_index_ = profile_index;
-  if (!LocalAuth::ValidateLocalAuthCredentials(profile_index, password)) {
-    // Make a second attempt via an on-line authentication call.  This handles
-    // profiles that are missing sign-in credentials and also cases where the
-    // password has been changed externally.
-    client_login_.reset(new GaiaAuthFetcher(
-        this,
-        GaiaConstants::kChromeSource,
-        web_ui()->GetWebContents()->GetBrowserContext()->GetRequestContext()));
-
-    client_login_->StartClientLogin(
-        base::UTF16ToUTF8(email_address),
-        password,
-        GaiaConstants::kSyncService,
-        std::string(),
-        std::string(),
-        GaiaAuthFetcher::HostedAccountsAllowed);
-    password_attempt_ = password;
-    return;
-  }
-
-  ReportAuthenticationResult(true, ProfileMetrics::AUTH_LOCAL);
+  // In order to support the upgrade case where we have a local hash but no
+  // password token, the user perform a full online reauth.
+  UserManager::ShowReauthDialog(web_ui()->GetWebContents()->GetBrowserContext(),
+                                email_address_);
 }
 
 void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
@@ -550,42 +555,24 @@ void UserManagerScreenHandler::HandleHardlockUserPod(
   HideUserPodCustomIcon(email);
 }
 
-void UserManagerScreenHandler::OnClientLoginSuccess(
-    const ClientLoginResult& result) {
-  LocalAuth::SetLocalAuthCredentials(authenticating_profile_index_,
-                                     password_attempt_);
-  ReportAuthenticationResult(true, ProfileMetrics::AUTH_ONLINE);
+void UserManagerScreenHandler::OnGetTokenInfoResponse(
+    scoped_ptr<base::DictionaryValue> token_info) {
+  // Password is unchanged so user just mistyped it.  Ask again.
+  ReportAuthenticationResult(false, ProfileMetrics::AUTH_FAILED);
 }
 
-void UserManagerScreenHandler::OnClientLoginFailure(
-    const GoogleServiceAuthError& error) {
-  const GoogleServiceAuthError::State state = error.state();
-  // Some "error" results mean the password was correct but some other action
-  // should be taken.  For our purposes, we only care that the password was
-  // correct so count those as a success.
-  bool success = (state == GoogleServiceAuthError::NONE ||
-                  state == GoogleServiceAuthError::CAPTCHA_REQUIRED ||
-                  state == GoogleServiceAuthError::TWO_FACTOR ||
-                  state == GoogleServiceAuthError::ACCOUNT_DELETED ||
-                  state == GoogleServiceAuthError::ACCOUNT_DISABLED ||
-                  state == GoogleServiceAuthError::WEB_LOGIN_REQUIRED);
+void UserManagerScreenHandler::OnOAuthError() {
+  // Password has changed.  Go through online signin flow.
+  DCHECK(!email_address_.empty());
+  oauth_client_.reset();
+  UserManager::ShowReauthDialog(web_ui()->GetWebContents()->GetBrowserContext(),
+                                email_address_);
+}
 
-  // If the password was correct, the user must have changed it since the
-  // profile was locked.  Save the password to streamline future unlocks.
-  if (success) {
-    DCHECK(!password_attempt_.empty());
-    LocalAuth::SetLocalAuthCredentials(authenticating_profile_index_,
-                                       password_attempt_);
-  }
-
-  bool offline = (state == GoogleServiceAuthError::CONNECTION_FAILED ||
-                  state == GoogleServiceAuthError::SERVICE_UNAVAILABLE ||
-                  state == GoogleServiceAuthError::REQUEST_CANCELED);
-  ProfileMetrics::ProfileAuth failure_metric =
-      offline ? ProfileMetrics::AUTH_FAILED_OFFLINE :
-                ProfileMetrics::AUTH_FAILED;
-  ReportAuthenticationResult(
-      success, success ? ProfileMetrics::AUTH_ONLINE : failure_metric);
+void UserManagerScreenHandler::OnNetworkError(int response_code) {
+  // Inconclusive but can't do real signin without being online anyway.
+    oauth_client_.reset();
+    ReportAuthenticationResult(false, ProfileMetrics::AUTH_FAILED_OFFLINE);
 }
 
 void UserManagerScreenHandler::RegisterMessages() {
@@ -635,8 +622,6 @@ void UserManagerScreenHandler::GetLocalizedValues(
   // For Control Bar.
   localized_strings->SetString("signedIn",
       l10n_util::GetStringUTF16(IDS_SCREEN_LOCK_ACTIVE_USER));
-  localized_strings->SetString("signinButton",
-      l10n_util::GetStringUTF16(IDS_LOGIN_BUTTON));
   localized_strings->SetString("addUser",
       l10n_util::GetStringUTF16(IDS_ADD_USER_BUTTON));
   localized_strings->SetString("cancel", l10n_util::GetStringUTF16(IDS_CANCEL));
@@ -645,7 +630,7 @@ void UserManagerScreenHandler::GetLocalizedValues(
   localized_strings->SetString("signOutUser",
       l10n_util::GetStringUTF16(IDS_SCREEN_LOCK_SIGN_OUT));
   localized_strings->SetString("addSupervisedUser",
-      l10n_util::GetStringUTF16(IDS_CREATE_SUPERVISED_USER_MENU_LABEL));
+      l10n_util::GetStringUTF16(IDS_CREATE_LEGACY_SUPERVISED_USER_MENU_LABEL));
 
   // For AccountPickerScreen.
   localized_strings->SetString("screenType", "login-add-user");
@@ -675,7 +660,8 @@ void UserManagerScreenHandler::GetLocalizedValues(
   localized_strings->SetString("removeLegacySupervisedUserWarningText",
       l10n_util::GetStringFUTF16(
           IDS_LOGIN_POD_LEGACY_SUPERVISED_USER_REMOVE_WARNING,
-          base::UTF8ToUTF16(chrome::kSupervisedUserManagementDisplayURL)));
+          base::UTF8ToUTF16(
+              chrome::kLegacySupervisedUserManagementDisplayURL)));
 
   // Strings needed for the User Manager tutorial slides.
   localized_strings->SetString("tutorialNext",
@@ -764,6 +750,9 @@ void UserManagerScreenHandler::SendUserList() {
         kKeyChildUser, info_cache->ProfileIsChildAtIndex(i));
     profile_value->SetBoolean(
         kKeyNeedsSignin, info_cache->ProfileIsSigninRequiredAtIndex(i));
+    profile_value->SetBoolean(
+        kKeyHasLocalCreds,
+        !info_cache->GetLocalAuthCredentialsOfProfileAtIndex(i).empty());
     profile_value->SetBoolean(kKeyIsOwner, false);
     profile_value->SetBoolean(kKeyCanRemove, can_remove);
     profile_value->SetBoolean(kKeyIsDesktop, true);
@@ -786,15 +775,11 @@ void UserManagerScreenHandler::ReportAuthenticationResult(
     bool success,
     ProfileMetrics::ProfileAuth auth) {
   ProfileMetrics::LogProfileAuthResult(auth);
-  password_attempt_.clear();
+  email_address_.clear();
 
   if (success) {
-    const ProfileInfoCache& info_cache =
-        g_browser_process->profile_manager()->GetProfileInfoCache();
-    base::FilePath path = info_cache.GetPathOfProfileAtIndex(
-        authenticating_profile_index_);
     profiles::SwitchToProfile(
-        path,
+        authenticating_profile_path_,
         desktop_type_,
         true,
         base::Bind(&UserManagerScreenHandler::OnSwitchToProfileComplete,
@@ -828,7 +813,7 @@ void UserManagerScreenHandler::OnBrowserWindowReady(Browser* browser) {
   }
 
   if (!url_hash_.empty()) {
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&UrlHashHelper::ExecuteUrlHash,
                    base::Owned(new UrlHashHelper(browser, url_hash_))));

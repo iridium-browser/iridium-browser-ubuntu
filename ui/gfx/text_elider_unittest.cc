@@ -668,7 +668,8 @@ TEST(TextEliderTest, MAYBE_ElideRectangleText) {
                                  TRUNCATE_LONG_WORDS,
                                  &lines));
     if (cases[i].output) {
-      const std::string result = UTF16ToUTF8(JoinString(lines, '|'));
+      const std::string result =
+          UTF16ToUTF8(base::JoinString(lines, ASCIIToUTF16("|")));
       EXPECT_EQ(cases[i].output, result) << "Case " << i << " failed!";
     } else {
       EXPECT_TRUE(lines.empty()) << "Case " << i << " failed!";
@@ -715,7 +716,8 @@ TEST(TextEliderTest, MAYBE_ElideRectangleTextPunctuation) {
                                  wrap_behavior,
                                  &lines));
     if (cases[i].output) {
-      const std::string result = UTF16ToUTF8(JoinString(lines, '|'));
+      const std::string result =
+          UTF16ToUTF8(base::JoinString(lines, base::ASCIIToUTF16("|")));
       EXPECT_EQ(cases[i].output, result) << "Case " << i << " failed!";
     } else {
       EXPECT_TRUE(lines.empty()) << "Case " << i << " failed!";
@@ -783,8 +785,9 @@ TEST(TextEliderTest, MAYBE_ElideRectangleTextLongWords) {
                                  cases[i].wrap_behavior,
                                  &lines));
     std::string expected_output(cases[i].output);
-    ReplaceSubstringsAfterOffset(&expected_output, 0, "...", kEllipsis);
-    const std::string result = UTF16ToUTF8(JoinString(lines, '|'));
+    base::ReplaceSubstringsAfterOffset(&expected_output, 0, "...", kEllipsis);
+    const std::string result =
+        UTF16ToUTF8(base::JoinString(lines, base::ASCIIToUTF16("|")));
     EXPECT_EQ(expected_output, result) << "Case " << i << " failed!";
   }
 }
@@ -839,7 +842,13 @@ TEST(TextEliderTest, ElideRectangleTextCheckConcatWidthEqualsSumOfWidths) {
 }
 #endif // OS_CHROMEOS
 
-TEST(TextEliderTest, ElideRectangleString) {
+// TODO(338784): Enable this on android.
+#if defined(OS_ANDROID)
+#define MAYBE_ElideRectangleString DISABLED_ElideRectangleString
+#else
+#define MAYBE_ElideRectangleString ElideRectangleString
+#endif
+TEST(TextEliderTest, MAYBE_ElideRectangleString) {
   struct TestData {
     const char* input;
     int max_rows;
@@ -922,7 +931,14 @@ TEST(TextEliderTest, ElideRectangleString) {
   }
 }
 
-TEST(TextEliderTest, ElideRectangleStringNotStrict) {
+// TODO(338784): Enable this on android.
+#if defined(OS_ANDROID)
+#define MAYBE_ElideRectangleStringNotStrict \
+    DISABLED_ElideRectangleStringNotStrict
+#else
+#define MAYBE_ElideRectangleStringNotStrict ElideRectangleStringNotStrict
+#endif
+TEST(TextEliderTest, MAYBE_ElideRectangleStringNotStrict) {
   struct TestData {
     const char* input;
     int max_rows;
@@ -1004,7 +1020,13 @@ TEST(TextEliderTest, ElideRectangleStringNotStrict) {
   }
 }
 
-TEST(TextEliderTest, ElideRectangleWide16) {
+// TODO(338784): Enable this on android.
+#if defined(OS_ANDROID)
+#define MAYBE_ElideRectangleWide16 DISABLED_ElideRectangleWide16
+#else
+#define MAYBE_ElideRectangleWide16 ElideRectangleWide16
+#endif
+TEST(TextEliderTest, MAYBE_ElideRectangleWide16) {
   // Two greek words separated by space.
   const base::string16 str(WideToUTF16(
       L"\x03a0\x03b1\x03b3\x03ba\x03cc\x03c3\x03bc\x03b9"
@@ -1023,7 +1045,13 @@ TEST(TextEliderTest, ElideRectangleWide16) {
   EXPECT_EQ(out2, output);
 }
 
-TEST(TextEliderTest, ElideRectangleWide32) {
+// TODO(338784): Enable this on android.
+#if defined(OS_ANDROID)
+#define MAYBE_ElideRectangleWide32 DISABLED_ElideRectangleWide32
+#else
+#define MAYBE_ElideRectangleWide32 ElideRectangleWide32
+#endif
+TEST(TextEliderTest, MAYBE_ElideRectangleWide32) {
   // Four U+1D49C MATHEMATICAL SCRIPT CAPITAL A followed by space "aaaaa".
   const base::string16 str(UTF8ToUTF16(
       "\xF0\x9D\x92\x9C\xF0\x9D\x92\x9C\xF0\x9D\x92\x9C\xF0\x9D\x92\x9C"
@@ -1036,7 +1064,13 @@ TEST(TextEliderTest, ElideRectangleWide32) {
   EXPECT_EQ(out, output);
 }
 
-TEST(TextEliderTest, TruncateString) {
+// TODO(338784): Enable this on android.
+#if defined(OS_ANDROID)
+#define MAYBE_TruncateString DISABLED_TruncateString
+#else
+#define MAYBE_TruncateString TruncateString
+#endif
+TEST(TextEliderTest, MAYBE_TruncateString) {
   base::string16 string = ASCIIToUTF16("foooooey    bxxxar baz");
 
   // Tests that apply to both break behaviors:

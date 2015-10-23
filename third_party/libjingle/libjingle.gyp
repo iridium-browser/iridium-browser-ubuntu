@@ -26,7 +26,6 @@
       'HAVE_SRTP',
       'HAVE_WEBRTC_VIDEO',
       'HAVE_WEBRTC_VOICE',
-      'LIBPEERCONNECTION_LIB=1',
       'LOGGING_INSIDE_WEBRTC',
       'NO_MAIN_THREAD_WRAPPING',
       'NO_SOUND_SYSTEM',
@@ -295,28 +294,6 @@
         '<(webrtc_p2p)/base/constants.h',
       ],
     },  # target libjingle_p2p_constants
-    # GN version: //third_party/libjingle:peerconnection_server
-    {
-      'target_name': 'peerconnection_server',
-      'type': 'executable',
-      'sources': [
-        '<(libjingle_source)/talk/examples/peerconnection/server/data_socket.cc',
-        '<(libjingle_source)/talk/examples/peerconnection/server/data_socket.h',
-        '<(libjingle_source)/talk/examples/peerconnection/server/main.cc',
-        '<(libjingle_source)/talk/examples/peerconnection/server/peer_channel.cc',
-        '<(libjingle_source)/talk/examples/peerconnection/server/peer_channel.h',
-        '<(libjingle_source)/talk/examples/peerconnection/server/utils.cc',
-        '<(libjingle_source)/talk/examples/peerconnection/server/utils.h',
-      ],
-      'include_dirs': [
-        '<(libjingle_source)',
-      ],
-      'dependencies': [
-        'libjingle',
-      ],
-      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-      'msvs_disabled_warnings': [ 4309, ],
-    }, # target peerconnection_server
   ],
   'conditions': [
     ['enable_webrtc==1', {
@@ -325,20 +302,13 @@
           # GN version: //third_party/libjingle:libjingle_webrtc_common
           'target_name': 'libjingle_webrtc_common',
           'type': 'static_library',
-          'all_dependent_settings': {
-            'defines': [ 'LIBPEERCONNECTION_LIB=1' ],
-          },
           'sources': [
-            'overrides/talk/media/webrtc/webrtcexport.h',
-
             '<(libjingle_source)/talk/app/webrtc/audiotrack.cc',
             '<(libjingle_source)/talk/app/webrtc/audiotrack.h',
             '<(libjingle_source)/talk/app/webrtc/audiotrackrenderer.cc',
             '<(libjingle_source)/talk/app/webrtc/audiotrackrenderer.h',
             '<(libjingle_source)/talk/app/webrtc/datachannel.cc',
             '<(libjingle_source)/talk/app/webrtc/datachannel.h',
-            '<(libjingle_source)/talk/app/webrtc/dtlsidentityservice.cc',
-            '<(libjingle_source)/talk/app/webrtc/dtlsidentityservice.h',
             '<(libjingle_source)/talk/app/webrtc/dtlsidentitystore.cc',
             '<(libjingle_source)/talk/app/webrtc/dtlsidentitystore.h',
             '<(libjingle_source)/talk/app/webrtc/dtmfsender.cc',
@@ -407,8 +377,6 @@
             '<(libjingle_source)/talk/media/base/constants.cc',
             '<(libjingle_source)/talk/media/base/constants.h',
             '<(libjingle_source)/talk/media/base/cryptoparams.h',
-            '<(libjingle_source)/talk/media/base/filemediaengine.cc',
-            '<(libjingle_source)/talk/media/base/filemediaengine.h',
             '<(libjingle_source)/talk/media/base/hybriddataengine.h',
             '<(libjingle_source)/talk/media/base/mediachannel.h',
             '<(libjingle_source)/talk/media/base/mediaengine.cc',
@@ -438,13 +406,10 @@
             '<(libjingle_source)/talk/media/webrtc/webrtccommon.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcpassthroughrender.cc',
             '<(libjingle_source)/talk/media/webrtc/webrtcpassthroughrender.h',
-            '<(libjingle_source)/talk/media/webrtc/webrtcvideocapturer.cc',
-            '<(libjingle_source)/talk/media/webrtc/webrtcvideocapturer.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcvideoframe.cc',
             '<(libjingle_source)/talk/media/webrtc/webrtcvideoframe.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcvideoframefactory.cc',
             '<(libjingle_source)/talk/media/webrtc/webrtcvideoframefactory.h',
-            '<(libjingle_source)/talk/media/webrtc/webrtcvie.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcvoe.h',
             '<(libjingle_source)/talk/session/media/audiomonitor.cc',
             '<(libjingle_source)/talk/session/media/audiomonitor.h',
@@ -564,8 +529,6 @@
             '<(libjingle_source)/talk/media/webrtc/simulcast.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcmediaengine.cc',
             '<(libjingle_source)/talk/media/webrtc/webrtcmediaengine.h',
-            '<(libjingle_source)/talk/media/webrtc/webrtcvideoengine.cc',
-            '<(libjingle_source)/talk/media/webrtc/webrtcvideoengine.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcvideoengine2.cc',
             '<(libjingle_source)/talk/media/webrtc/webrtcvideoengine2.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcvoiceengine.cc',

@@ -33,14 +33,20 @@ DeviceOrientationInspectorAgent::~DeviceOrientationInspectorAgent()
 
 DeviceOrientationInspectorAgent::DeviceOrientationInspectorAgent(Page& page)
     : InspectorBaseAgent<DeviceOrientationInspectorAgent, InspectorFrontend::DeviceOrientation>("DeviceOrientation")
-    , m_page(page)
+    , m_page(&page)
 {
+}
+
+DEFINE_TRACE(DeviceOrientationInspectorAgent)
+{
+    visitor->trace(m_page);
+    InspectorBaseAgent<DeviceOrientationInspectorAgent, InspectorFrontend::DeviceOrientation>::trace(visitor);
 }
 
 DeviceOrientationController& DeviceOrientationInspectorAgent::controller()
 {
-    ASSERT(toLocalFrame(m_page.mainFrame())->document());
-    return DeviceOrientationController::from(*m_page.deprecatedLocalMainFrame()->document());
+    ASSERT(toLocalFrame(m_page->mainFrame())->document());
+    return DeviceOrientationController::from(*m_page->deprecatedLocalMainFrame()->document());
 }
 
 void DeviceOrientationInspectorAgent::setDeviceOrientationOverride(ErrorString* error, double alpha, double beta, double gamma)
@@ -49,7 +55,7 @@ void DeviceOrientationInspectorAgent::setDeviceOrientationOverride(ErrorString* 
     m_state->setDouble(DeviceOrientationInspectorAgentState::alpha, alpha);
     m_state->setDouble(DeviceOrientationInspectorAgentState::beta, beta);
     m_state->setDouble(DeviceOrientationInspectorAgentState::gamma, gamma);
-    controller().setOverride(DeviceOrientationData::create(true, alpha, true, beta, true, gamma));
+    controller().setOverride(DeviceOrientationData::create(alpha, beta, gamma));
 }
 
 void DeviceOrientationInspectorAgent::clearDeviceOrientationOverride(ErrorString* error)
@@ -70,14 +76,14 @@ void DeviceOrientationInspectorAgent::restore()
         double alpha = m_state->getDouble(DeviceOrientationInspectorAgentState::alpha);
         double beta = m_state->getDouble(DeviceOrientationInspectorAgentState::beta);
         double gamma = m_state->getDouble(DeviceOrientationInspectorAgentState::gamma);
-        controller().setOverride(DeviceOrientationData::create(true, alpha, true, beta, true, gamma));
+        controller().setOverride(DeviceOrientationData::create(alpha, beta, gamma));
     }
 }
 
 void DeviceOrientationInspectorAgent::didCommitLoadForLocalFrame(LocalFrame* frame)
 {
     // FIXME(dgozman): adapt this for out-of-process iframes.
-    if (frame != m_page.mainFrame())
+    if (frame != m_page->mainFrame())
         return;
 
     // New document in main frame - apply override there.

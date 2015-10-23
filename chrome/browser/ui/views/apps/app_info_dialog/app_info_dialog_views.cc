@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_dialog_views.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -15,7 +16,9 @@
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_header_panel.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_permissions_panel.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_summary_panel.h"
+#include "chrome/common/chrome_switches.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
@@ -30,9 +33,26 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
+namespace {
+
+#if defined(OS_MACOSX)
+bool IsAppInfoDialogMacEnabled() {
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kDisableAppInfoDialogMac))
+    return false;
+  if (command_line->HasSwitch(switches::kEnableAppInfoDialogMac))
+    return true;
+  return false;  // Current default.
+}
+#endif
+
+}  // namespace
+
 bool CanShowAppInfoDialog() {
 #if defined(OS_MACOSX)
-  return app_list::switches::IsMacViewsAppListListEnabled();
+  static const bool can_show = IsAppInfoDialogMacEnabled();
+  return can_show;
 #else
   return true;
 #endif
@@ -63,17 +83,24 @@ void ShowAppInfoInAppList(gfx::NativeWindow parent,
   dialog_widget->Show();
 }
 
-void ShowAppInfoInNativeDialog(gfx::NativeWindow parent,
+void ShowAppInfoInNativeDialog(content::WebContents* web_contents,
                                const gfx::Size& size,
                                Profile* profile,
                                const extensions::Extension* app,
                                const base::Closure& close_callback) {
-  views::View* app_info_view = new AppInfoDialog(parent, profile, app);
+  gfx::NativeWindow window = web_contents->GetTopLevelNativeWindow();
+  views::View* app_info_view = new AppInfoDialog(window, profile, app);
   views::DialogDelegate* dialog =
       CreateDialogContainerForView(app_info_view, size, close_callback);
-  views::Widget* dialog_widget =
-      constrained_window::CreateBrowserModalDialogViews(dialog, parent);
-  dialog_widget->Show();
+  views::Widget* dialog_widget;
+  if (dialog->GetModalType() == ui::MODAL_TYPE_CHILD) {
+    dialog_widget =
+        constrained_window::ShowWebModalDialogViews(dialog, web_contents);
+  } else {
+    dialog_widget =
+        constrained_window::CreateBrowserModalDialogViews(dialog, window);
+    dialog_widget->Show();
+  }
 }
 
 AppInfoDialog::AppInfoDialog(gfx::NativeWindow parent_window,

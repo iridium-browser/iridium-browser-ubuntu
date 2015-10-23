@@ -12,15 +12,15 @@
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
-#include "content/browser/appcache/view_appcache_internals_job.h"
 #include "content/browser/fileapi/chrome_blob_storage_context.h"
 #include "content/browser/histogram_internals_request_job.h"
 #include "content/browser/net/view_blob_internals_job_factory.h"
@@ -110,8 +110,7 @@ std::string GetOriginHeaderValue(const net::URLRequest* request) {
 // chrome-internal resource requests asynchronously.
 // It hands off URL requests to ChromeURLDataManager, which asynchronously
 // calls back once the data is available.
-class URLRequestChromeJob : public net::URLRequestJob,
-                            public base::SupportsWeakPtr<URLRequestChromeJob> {
+class URLRequestChromeJob : public net::URLRequestJob {
  public:
   // |is_incognito| set when job is generated from an incognito profile.
   URLRequestChromeJob(net::URLRequest* request,
@@ -133,6 +132,9 @@ class URLRequestChromeJob : public net::URLRequestJob,
   // Called by ChromeURLDataManager to notify us that the data blob is ready
   // for us.
   void DataAvailable(base::RefCountedMemory* bytes);
+
+  // Returns a weak pointer to the job.
+  base::WeakPtr<URLRequestChromeJob> AsWeakPtr();
 
   void set_mime_type(const std::string& mime_type) {
     mime_type_ = mime_type;
@@ -266,13 +268,16 @@ void URLRequestChromeJob::Start() {
       BrowserThread::UI,
       FROM_HERE,
       base::Bind(&URLRequestChromeJob::CheckStoragePartitionMatches,
-                 render_process_id, request_->url(), AsWeakPtr()));
+                 render_process_id, request_->url(),
+                 weak_factory_.GetWeakPtr()));
   TRACE_EVENT_ASYNC_BEGIN1("browser", "DataManager:Request", this, "URL",
       request_->url().possibly_invalid_spec());
 }
 
 void URLRequestChromeJob::Kill() {
+  weak_factory_.InvalidateWeakPtrs();
   backend_->RemoveRequest(this);
+  URLRequestJob::Kill();
 }
 
 bool URLRequestChromeJob::GetMimeType(std::string* mime_type) const {
@@ -346,6 +351,10 @@ void URLRequestChromeJob::DataAvailable(base::RefCountedMemory* bytes) {
     NotifyDone(net::URLRequestStatus(net::URLRequestStatus::FAILED,
                                      net::ERR_FAILED));
   }
+}
+
+base::WeakPtr<URLRequestChromeJob> URLRequestChromeJob::AsWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 bool URLRequestChromeJob::ReadRawData(net::IOBuffer* buf, int buf_size,
@@ -469,13 +478,6 @@ class ChromeProtocolHandler
     if (ViewHttpCacheJobFactory::IsSupportedURL(request->url()))
       return ViewHttpCacheJobFactory::CreateJobForRequest(request,
                                                           network_delegate);
-
-    // Next check for chrome://appcache-internals/, which uses its own job type.
-    if (request->url().SchemeIs(kChromeUIScheme) &&
-        request->url().host() == kChromeUIAppCacheInternalsHost) {
-      return ViewAppCacheInternalsJobFactory::CreateJobForRequest(
-          request, network_delegate, appcache_service_);
-    }
 
     // Next check for chrome://blob-internals/, which uses its own job type.
     if (ViewBlobInternalsJobFactory::IsSupportedURL(request->url())) {
@@ -639,19 +641,17 @@ bool URLDataManagerBackend::StartRequest(const net::URLRequest* request,
     // is guaranteed because request for mime type is placed in the
     // message loop before request for data. And correspondingly their
     // replies are put on the IO thread in the same order.
-    target_message_loop->PostTask(
+    target_message_loop->task_runner()->PostTask(
         FROM_HERE,
-        base::Bind(&GetMimeTypeOnUI,
-                   scoped_refptr<URLDataSourceImpl>(source),
+        base::Bind(&GetMimeTypeOnUI, scoped_refptr<URLDataSourceImpl>(source),
                    path, job->AsWeakPtr()));
 
     // The DataSource wants StartDataRequest to be called on a specific thread,
     // usually the UI thread, for this path.
-    target_message_loop->PostTask(
-        FROM_HERE,
-        base::Bind(&URLDataManagerBackend::CallStartRequest,
-                   make_scoped_refptr(source), path, render_process_id,
-                   render_frame_id, request_id));
+    target_message_loop->task_runner()->PostTask(
+        FROM_HERE, base::Bind(&URLDataManagerBackend::CallStartRequest,
+                              make_scoped_refptr(source), path,
+                              render_process_id, render_frame_id, request_id));
   }
   return true;
 }

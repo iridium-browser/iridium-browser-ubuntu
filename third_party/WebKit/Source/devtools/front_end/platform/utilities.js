@@ -279,22 +279,6 @@ String.prototype.removeURLFragment = function()
 }
 
 /**
- * @return {boolean}
- */
-String.prototype.startsWith = function(substring)
-{
-    return !this.lastIndexOf(substring, 0);
-}
-
-/**
- * @return {boolean}
- */
-String.prototype.endsWith = function(substring)
-{
-    return this.indexOf(substring, this.length - substring.length) !== -1;
-}
-
-/**
  * @param {string|undefined} string
  * @return {number}
  */
@@ -1438,6 +1422,23 @@ CallbackBarrier.prototype = {
     },
 
     /**
+     * @return {!Promise.<undefined>}
+     */
+    donePromise: function()
+    {
+        return new Promise(promiseConstructor.bind(this));
+
+        /**
+         * @param {function()} success
+         * @this {CallbackBarrier}
+         */
+        function promiseConstructor(success)
+        {
+            this.callWhenDone(success);
+        }
+    },
+
+    /**
      * @param {function(...)=} userCallback
      */
     _incomingCallback: function(userCallback)
@@ -1482,4 +1483,16 @@ Promise.prototype.spread = function(callback)
     {
         return callback.apply(null, arg);
     }
+}
+
+/**
+ * @param {T} defaultValue
+ * @return {!Promise.<T>}
+ * @template T
+ */
+Promise.prototype.catchException = function(defaultValue) {
+    return this.catch(function (error) {
+        console.error(error);
+        return defaultValue;
+    });
 }

@@ -158,9 +158,10 @@ TEST_F(ParentChildIndexTest, TestBookmarkRootFolder) {
   EntryKernel* bm_folder = MakeBookmarkRoot();
   EXPECT_TRUE(ParentChildIndex::ShouldInclude(bm_folder));
 
-  EXPECT_EQ(Id(), IndexKnownModelTypeRootId(BOOKMARKS));
   index_.Insert(bm_folder);
-  EXPECT_EQ(GetBookmarkRootId(), IndexKnownModelTypeRootId(BOOKMARKS));
+  // Since BOOKMARKS is a hierarchical type, its type root folder shouldn't be
+  // tracked by ParentChildIndex.
+  EXPECT_EQ(Id(), IndexKnownModelTypeRootId(BOOKMARKS));
 }
 
 // Tests iteration over a set of siblings.
@@ -409,9 +410,63 @@ TEST_F(ParentChildIndexTest, NodesWithImplicitParentId) {
   EXPECT_FALSE(index_.Contains(p2));
   children = index_.GetChildren(type_root);
   ASSERT_EQ(nullptr, children);
+}
 
+// Test that the removal isn't sensitive to the order (PurgeEntriesWithTypeIn
+// removes items in arbitrary order).
+TEST_F(ParentChildIndexTest, RemoveOutOfOrder) {
+  // Insert a type root and two items (with implicit parent ID).
+  syncable::Id type_root_id = syncable::Id::CreateFromServerId("type_root");
+  EntryKernel* type_root = MakeTypeRoot(PREFERENCES, type_root_id);
+  index_.Insert(type_root);
+  EntryKernel* p1 = MakeUniqueClientItem(PREFERENCES, 1);
+  EntryKernel* p2 = MakeUniqueClientItem(PREFERENCES, 2);
+  index_.Insert(p1);
+  index_.Insert(p2);
+
+  // Two items expected under the type root.
+  const OrderedChildSet* children = index_.GetChildren(type_root);
+  ASSERT_TRUE(children);
+  EXPECT_EQ(2UL, children->size());
+
+  // Remove all 3 items in arbitrary order.
+  index_.Remove(p2);
   index_.Remove(type_root);
-  EXPECT_EQ(Id(), IndexKnownModelTypeRootId(PREFERENCES));
+  index_.Remove(p1);
+
+  EXPECT_EQ(nullptr, index_.GetChildren(type_root));
+
+  // Add a new root and another two items again.
+  type_root = MakeTypeRoot(PREFERENCES, type_root_id);
+  index_.Insert(type_root);
+
+  index_.Insert(MakeUniqueClientItem(PREFERENCES, 3));
+  index_.Insert(MakeUniqueClientItem(PREFERENCES, 4));
+
+  children = index_.GetChildren(type_root);
+  ASSERT_TRUE(children);
+  // Should have 2 items. If the out of order removal cleared the implicit
+  // parent folder ID prematurely, the collection would have 3 items including
+  // p1.
+  EXPECT_EQ(2UL, children->size());
+}
+
+// Test that the insert isn't sensitive to the order (Loading entries from
+// Sync DB is done in arbitrary order).
+TEST_F(ParentChildIndexTest, InsertOutOfOrder) {
+  // Insert two Preferences entries with implicit parent first
+  index_.Insert(MakeUniqueClientItem(PREFERENCES, 1));
+  index_.Insert(MakeUniqueClientItem(PREFERENCES, 2));
+
+  // Then insert the Preferences type root
+  syncable::Id type_root_id = syncable::Id::CreateFromServerId("type_root");
+  index_.Insert(MakeTypeRoot(PREFERENCES, type_root_id));
+
+  // The index should still be able to associate Preferences entries
+  // with the root.
+  const OrderedChildSet* children = index_.GetChildren(type_root_id);
+  ASSERT_TRUE(children);
+  EXPECT_EQ(2UL, children->size());
 }
 
 }  // namespace syncable

@@ -5,6 +5,7 @@
 #include "content/child/child_gpu_memory_buffer_manager.h"
 
 #include "content/common/child_process_messages.h"
+#include "content/common/generic_shared_memory_id_generator.h"
 #include "content/common/gpu/client/gpu_memory_buffer_impl.h"
 
 namespace content {
@@ -29,10 +30,9 @@ ChildGpuMemoryBufferManager::~ChildGpuMemoryBufferManager() {
 }
 
 scoped_ptr<gfx::GpuMemoryBuffer>
-ChildGpuMemoryBufferManager::AllocateGpuMemoryBuffer(
-    const gfx::Size& size,
-    gfx::GpuMemoryBuffer::Format format,
-    gfx::GpuMemoryBuffer::Usage usage) {
+ChildGpuMemoryBufferManager::AllocateGpuMemoryBuffer(const gfx::Size& size,
+                                                     gfx::BufferFormat format,
+                                                     gfx::BufferUsage usage) {
   TRACE_EVENT2("renderer",
                "ChildGpuMemoryBufferManager::AllocateGpuMemoryBuffer",
                "width",
@@ -42,19 +42,18 @@ ChildGpuMemoryBufferManager::AllocateGpuMemoryBuffer(
 
   gfx::GpuMemoryBufferHandle handle;
   IPC::Message* message = new ChildProcessHostMsg_SyncAllocateGpuMemoryBuffer(
-      size.width(), size.height(), format, usage, &handle);
+      content::GetNextGenericSharedMemoryId(), size.width(), size.height(),
+      format, usage, &handle);
   bool success = sender_->Send(message);
-  if (!success)
-    return scoped_ptr<gfx::GpuMemoryBuffer>();
+  if (!success || handle.is_null())
+    return nullptr;
 
   scoped_ptr<GpuMemoryBufferImpl> buffer(GpuMemoryBufferImpl::CreateFromHandle(
-      handle,
-      size,
-      format,
+      handle, size, format, usage,
       base::Bind(&DeletedGpuMemoryBuffer, sender_, handle.id)));
   if (!buffer) {
     sender_->Send(new ChildProcessHostMsg_DeletedGpuMemoryBuffer(handle.id, 0));
-    return scoped_ptr<gfx::GpuMemoryBuffer>();
+    return nullptr;
   }
 
   return buffer.Pass();

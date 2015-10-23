@@ -2,14 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import benchmark
+from core import perf_benchmark
 
 from benchmarks import silk_flags
 from measurements import smoothness
 import page_sets
+from telemetry import benchmark
 
 
-class _Repaint(benchmark.Benchmark):
+class _Repaint(perf_benchmark.PerfBenchmark):
   @classmethod
   def AddBenchmarkCommandLineArgs(cls, parser):
     parser.add_option('--mode', type='string',
@@ -27,14 +28,16 @@ class _Repaint(benchmark.Benchmark):
   def Name(cls):
     return 'repaint'
 
-  def CreateUserStorySet(self, options):
+  def CreateStorySet(self, options):
     return page_sets.KeyMobileSitesRepaintPageSet(
         options.mode, options.width, options.height)
 
   def CreatePageTest(self, options):
     return smoothness.Repaint()
 
-@benchmark.Enabled('android')
+#crbug.com/499320
+#@benchmark.Enabled('android')
+@benchmark.Disabled()
 class RepaintKeyMobileSites(_Repaint):
   """Measures repaint performance on the key mobile sites.
 
@@ -45,14 +48,16 @@ class RepaintKeyMobileSites(_Repaint):
     return 'repaint.key_mobile_sites_repaint'
 
 
+#crbug.com/502179
 @benchmark.Enabled('android')
+@benchmark.Disabled()
 class RepaintGpuRasterizationKeyMobileSites(_Repaint):
   """Measures repaint performance on the key mobile sites with forced GPU
   rasterization.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
   tag = 'gpu_rasterization'
-  def CustomizeBrowserOptions(self, options):
+  def SetExtraBrowserOptions(self, options):
     silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)
 
   @classmethod

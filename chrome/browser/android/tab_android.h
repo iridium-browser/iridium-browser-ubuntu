@@ -15,9 +15,9 @@
 #include "chrome/browser/sync/glue/synced_tab_delegate_android.h"
 #include "chrome/browser/ui/search/search_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
-#include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "components/favicon/core/favicon_driver_observer.h"
 #include "components/sessions/session_id.h"
+#include "components/toolbar/toolbar_model.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -43,6 +43,10 @@ class TabContentManager;
 namespace content {
 class ContentViewCore;
 class WebContents;
+}
+
+namespace offline_pages {
+struct OfflinePageItem;
 }
 
 namespace prerender {
@@ -117,8 +121,6 @@ class TabAndroid : public CoreTabHelperDelegate,
       chrome::NavigateParams* params,
       content::NavigationController::LoadURLParams* load_url_params);
 
-  SkBitmap GetFaviconBitmap();
-
   // CoreTabHelperDelegate ----------------------------------------------------
 
   void SwapTabContents(content::WebContents* old_contents,
@@ -165,7 +167,9 @@ class TabAndroid : public CoreTabHelperDelegate,
                         jstring j_referrer_url,
                         jint referrer_policy,
                         jboolean is_renderer_initiated,
-                        jlong intent_received_timestamp);
+                        jboolean should_replace_current_entry,
+                        jlong intent_received_timestamp,
+                        jboolean has_user_gesture);
   void SetActiveNavigationEntryTitleForUrl(JNIEnv* env,
                                            jobject obj,
                                            jstring jurl,
@@ -191,9 +195,13 @@ class TabAndroid : public CoreTabHelperDelegate,
                               jint current,
                               jboolean animate);
 
+  void LoadOriginalImage(JNIEnv* env, jobject obj);
+
   void SearchByImageInNewTabAsync(JNIEnv* env, jobject obj);
 
   jlong GetBookmarkId(JNIEnv* env, jobject obj, jboolean only_editable);
+
+  jboolean IsOfflinePage(JNIEnv* env, jobject obj);
 
   void SetInterceptNavigationDelegate(JNIEnv* env,
                                       jobject obj,
@@ -220,6 +228,8 @@ class TabAndroid : public CoreTabHelperDelegate,
 
  private:
   prerender::PrerenderManager* GetPrerenderManager() const;
+
+  const offline_pages::OfflinePageItem* GetOfflinePage(const GURL& url) const;
 
   JavaObjectWeakGlobalRef weak_java_tab_;
 

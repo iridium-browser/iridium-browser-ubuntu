@@ -61,15 +61,6 @@ public:
         addMidpoint(midpoint);
     }
 
-    // When ignoring spaces, this needs to be called for objects that need line boxes such as LayoutInlines or
-    // hard line breaks to ensure that they're not ignored.
-    void ensureLineBoxInsideIgnoredSpaces(LayoutObject* renderer)
-    {
-        Iterator midpoint(0, renderer, 0);
-        stopIgnoringSpaces(midpoint);
-        startIgnoringSpaces(midpoint);
-    }
-
     // Adding a pair of midpoints before a character will split it out into a new line box.
     void ensureCharacterGetsLineBox(Iterator& textParagraphSeparator)
     {
@@ -92,7 +83,7 @@ public:
             if (currpoint == lBreak) {
                 // We hit the line break before the start point. Shave off the start point.
                 m_numMidpoints--;
-                if (endpoint.object()->style()->collapseWhiteSpace() && endpoint.object()->isText())
+                if (endpoint.object().style()->collapseWhiteSpace() && endpoint.object().isText())
                     endpoint.setOffset(endpoint.offset() - 1);
             }
         }

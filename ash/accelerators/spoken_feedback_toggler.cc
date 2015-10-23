@@ -7,6 +7,7 @@
 #include "ash/accelerators/key_hold_detector.h"
 #include "ash/accessibility_delegate.h"
 #include "ash/shell.h"
+#include "ui/events/event.h"
 
 namespace ash {
 namespace {
@@ -37,6 +38,11 @@ bool SpokenFeedbackToggler::ShouldProcessEvent(
 bool SpokenFeedbackToggler::IsStartEvent(const ui::KeyEvent* event) const {
   return event->type() == ui::ET_KEY_PRESSED &&
       event->flags() & ui::EF_SHIFT_DOWN;
+}
+
+bool SpokenFeedbackToggler::ShouldStopEventPropagation() const {
+  // Let hotkey events pass through. See http://crbug.com/526729
+  return false;
 }
 
 void SpokenFeedbackToggler::OnKeyHold(const ui::KeyEvent* event) {

@@ -21,6 +21,7 @@
 #include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/history/core/browser/history_backend_client.h"
 #include "components/history/core/browser/history_backend_notifier.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database.h"
@@ -40,14 +41,10 @@
 namespace history {
 
 namespace {
-// Key for URL blacklist.
-const char kBlacklistURLKey[] = "test.blacklist.url";
-
 // Returns whether |url| can be added to history.
 bool MockCanAddURLToHistory(const GURL& url) {
   return url.is_valid();
 }
-
 }  // namespace
 
 // ExpireHistoryTest -----------------------------------------------------------
@@ -55,7 +52,9 @@ bool MockCanAddURLToHistory(const GURL& url) {
 class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
  public:
   ExpireHistoryTest()
-      : expirer_(this, &history_client_), now_(base::Time::Now()) {}
+      : backend_client_(history_client_.CreateBackendClient()),
+        expirer_(this, backend_client_.get(), message_loop_.task_runner()),
+        now_(base::Time::Now()) {}
 
  protected:
   // Called by individual tests when they want data populated.
@@ -96,6 +95,7 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
   base::ScopedTempDir tmp_dir_;
 
   HistoryClientFakeBookmarks history_client_;
+  scoped_ptr<HistoryBackendClient> backend_client_;
 
   base::MessageLoopForUI message_loop_;
 
@@ -130,12 +130,11 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
       thumb_db_.reset();
 
     pref_service_.reset(new TestingPrefServiceSimple);
-    pref_service_->registry()->RegisterDictionaryPref(kBlacklistURLKey);
+    TopSitesImpl::RegisterPrefs(pref_service_->registry());
 
     expirer_.SetDatabases(main_db_.get(), thumb_db_.get());
-
     top_sites_ = new TopSitesImpl(pref_service_.get(), nullptr,
-                                  kBlacklistURLKey, PrepopulatedPageList(),
+                                  PrepopulatedPageList(),
                                   base::Bind(MockCanAddURLToHistory));
     WaitTopSitesLoadedObserver wait_top_sites_observer(top_sites_);
     top_sites_->Init(path().Append(kTopSitesFilename),
@@ -161,7 +160,8 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
   }
 
   // HistoryBackendNotifier:
-  void NotifyFaviconChanged(const std::set<GURL>& urls) override {}
+  void NotifyFaviconsChanged(const std::set<GURL>& page_urls,
+                             const GURL& icon_url) override {}
   void NotifyURLVisited(ui::PageTransition transition,
                         const URLRow& row,
                         const RedirectList& redirects,

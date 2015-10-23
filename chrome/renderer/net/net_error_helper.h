@@ -9,6 +9,8 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "chrome/renderer/net/net_error_page_controller.h"
 #include "components/error_page/common/net_error_info.h"
 #include "components/error_page/renderer/net_error_helper_core.h"
 #include "content/public/renderer/render_frame_observer.h"
@@ -38,15 +40,15 @@ class NetErrorHelper
     : public content::RenderFrameObserver,
       public content::RenderFrameObserverTracker<NetErrorHelper>,
       public content::RenderProcessObserver,
-      public error_page::NetErrorHelperCore::Delegate {
+      public error_page::NetErrorHelperCore::Delegate,
+      public NetErrorPageController::Delegate {
  public:
   explicit NetErrorHelper(content::RenderFrame* render_view);
   ~NetErrorHelper() override;
 
-  // Button press notification from error page.
-  void ReloadButtonPressed();
-  void ShowSavedCopyButtonPressed();
-  void MoreButtonPressed();
+  // NetErrorPageController::Delegate implementation
+  void ButtonPressed(error_page::NetErrorHelperCore::Button button) override;
+  void TrackClick(int tracking_id) override;
 
   // RenderFrameObserver implementation.
   void DidStartProvisionalLoad() override;
@@ -80,26 +82,23 @@ class NetErrorHelper
   // suppressed.
   bool ShouldSuppressErrorPage(blink::WebFrame* frame, const GURL& url);
 
-  // Called when a link with the given tracking ID is pressed.
-  void TrackClick(int tracking_id);
-
-  // Tracks easter egg activations on the offline interstitial.
-  void TrackActivatedEasterEgg();
-
  private:
   // NetErrorHelperCore::Delegate implementation:
   void GenerateLocalizedErrorPage(
       const blink::WebURLError& error,
       bool is_failed_post,
+      bool can_use_local_diagnostics_service,
       scoped_ptr<error_page::ErrorPageParams> params,
       bool* reload_button_shown,
       bool* show_saved_copy_button_shown,
+      bool* show_cached_copy_button_shown,
       std::string* html) const override;
   void LoadErrorPageInMainFrame(const std::string& html,
                                 const GURL& failed_url) override;
   void EnablePageHelperFunctions() override;
   void UpdateErrorPage(const blink::WebURLError& error,
-                       bool is_failed_post) override;
+                       bool is_failed_post,
+                       bool can_use_local_diagnostics_service) override;
   void FetchNavigationCorrections(
       const GURL& navigation_correction_url,
       const std::string& navigation_correction_request_body) override;
@@ -108,8 +107,11 @@ class NetErrorHelper
                            const std::string& tracking_request_body) override;
   void ReloadPage() override;
   void LoadPageFromCache(const GURL& page_url) override;
+  void DiagnoseError(const GURL& page_url) override;
 
   void OnNetErrorInfo(int status);
+  void OnSetCanShowNetworkDiagnosticsDialog(
+      bool can_use_local_diagnostics_service);
   void OnSetNavigationCorrectionInfo(const GURL& navigation_correction_url,
                                      const std::string& language,
                                      const std::string& country_code,
@@ -126,6 +128,12 @@ class NetErrorHelper
   scoped_ptr<content::ResourceFetcher> tracking_fetcher_;
 
   scoped_ptr<error_page::NetErrorHelperCore> core_;
+
+  // Weak factory for vending a weak pointer to a NetErrorPageController. Weak
+  // pointers are invalidated on each commit, to prevent getting messages from
+  // Controllers used for the previous commit that haven't yet been cleaned up.
+  base::WeakPtrFactory<NetErrorPageController::Delegate>
+      weak_controller_delegate_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NetErrorHelper);
 };

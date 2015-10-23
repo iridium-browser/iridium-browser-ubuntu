@@ -36,7 +36,6 @@ namespace blink {
 
 class LocalFrame;
 class GraphicsContext;
-class PositionWithAffinity;
 class LayoutBlock;
 class LayoutView;
 
@@ -52,8 +51,8 @@ protected:
     // Creating VisiblePosition causes synchronous layout so we should use the
     // PositionWithAffinity version if possible.
     // A position in HTMLTextFromControlElement is a typical example.
-    bool updateCaretRect(Document*, const PositionWithAffinity& caretPosition);
-    bool updateCaretRect(Document*, const VisiblePosition& caretPosition);
+    bool updateCaretRect(const PositionWithAffinity& caretPosition);
+    bool updateCaretRect(const VisiblePosition& caretPosition);
     IntRect absoluteBoundsForLocalRect(Node*, const LayoutRect&) const;
     bool shouldRepaintCaret(Node&) const;
     bool shouldRepaintCaret(const LayoutView*) const;
@@ -65,7 +64,6 @@ protected:
     bool caretIsVisible() const { return m_caretVisibility == Visible; }
     CaretVisibility caretVisibility() const { return m_caretVisibility; }
 
-protected:
     static LayoutBlock* caretLayoutObject(Node*);
     static void invalidateLocalCaretRect(Node*, const LayoutRect&);
 
@@ -74,34 +72,6 @@ private:
     CaretVisibility m_caretVisibility;
 };
 
-class DragCaretController final : public NoBaseWillBeGarbageCollected<DragCaretController>, private CaretBase {
-    WTF_MAKE_NONCOPYABLE(DragCaretController);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(DragCaretController);
-public:
-    static PassOwnPtrWillBeRawPtr<DragCaretController> create();
-
-    LayoutBlock* caretLayoutObject() const;
-    void paintDragCaret(LocalFrame*, GraphicsContext*, const LayoutPoint&, const LayoutRect& clipRect) const;
-
-    bool isContentEditable() const { return m_position.rootEditableElement(); }
-    bool isContentRichlyEditable() const;
-
-    bool hasCaret() const { return m_position.isNotNull(); }
-    const VisiblePosition& caretPosition() { return m_position; }
-    void setCaretPosition(const VisiblePosition&);
-    void clear() { setCaretPosition(VisiblePosition()); }
-
-    void nodeWillBeRemoved(Node&);
-
-    DECLARE_TRACE();
-
-private:
-    DragCaretController();
-
-    VisiblePosition m_position;
-};
-
 } // namespace blink
-
 
 #endif // Caret_h

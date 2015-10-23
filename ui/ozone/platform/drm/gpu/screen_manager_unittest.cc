@@ -14,6 +14,9 @@
 
 namespace {
 
+void EmptySwapCallback(gfx::SwapResult) {
+}
+
 // Create a basic mode for a 6x4 screen.
 const drmModeModeInfo kDefaultMode =
     {0, 6, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, {'\0'}};
@@ -145,8 +148,9 @@ TEST_F(ScreenManagerTest, CheckChangingMode) {
   gfx::Rect new_bounds(0, 0, new_mode.hdisplay, new_mode.vdisplay);
   EXPECT_TRUE(screen_manager_->GetDisplayController(new_bounds));
   EXPECT_FALSE(screen_manager_->GetDisplayController(GetSecondaryBounds()));
-  drmModeModeInfo mode =
-      screen_manager_->GetDisplayController(new_bounds)->get_mode();
+  drmModeModeInfo mode = screen_manager_->GetDisplayController(new_bounds)
+                             ->crtc_controllers()[0]
+                             ->mode();
   EXPECT_EQ(new_mode.vdisplay, mode.vdisplay);
   EXPECT_EQ(new_mode.hdisplay, mode.hdisplay);
 }
@@ -459,7 +463,7 @@ TEST_F(ScreenManagerTest, EnableControllerWhenWindowHasBuffer) {
   scoped_refptr<ui::ScanoutBuffer> buffer =
       buffer_generator_->Create(drm_, GetPrimaryBounds().size());
   window->QueueOverlayPlane(ui::OverlayPlane(buffer));
-  window->SchedulePageFlip(false /* is_sync */, base::Bind(&base::DoNothing));
+  window->SchedulePageFlip(false /* is_sync */, base::Bind(&EmptySwapCallback));
   screen_manager_->AddWindow(1, window.Pass());
 
   screen_manager_->AddDisplayController(drm_, kPrimaryCrtc, kPrimaryConnector);

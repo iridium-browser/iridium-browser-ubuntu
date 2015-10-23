@@ -7,19 +7,21 @@
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
-#include "chrome/browser/safe_json_parser.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/safe_json/safe_json_parser.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 
 namespace {
+
+using safe_json::SafeJsonParser;
 
 std::string MaybeToJson(const base::Value* value) {
   if (!value)
     return "(null)";
 
   std::string json;
-  if (!base::JSONWriter::Write(value, &json))
+  if (!base::JSONWriter::Write(*value, &json))
     return "(invalid value)";
 
   return json;
@@ -35,8 +37,8 @@ class SafeJsonParserTest : public InProcessBrowserTest {
     message_loop_runner_ = new content::MessageLoopRunner;
 
     std::string error;
-    scoped_ptr<base::Value> value(base::JSONReader::ReadAndReturnError(
-        json, base::JSON_PARSE_RFC, nullptr, &error));
+    scoped_ptr<base::Value> value = base::JSONReader::ReadAndReturnError(
+        json, base::JSON_PARSE_RFC, nullptr, &error);
 
     SafeJsonParser::SuccessCallback success_callback;
     SafeJsonParser::ErrorCallback error_callback;
@@ -52,9 +54,7 @@ class SafeJsonParserTest : public InProcessBrowserTest {
       error_callback = base::Bind(&SafeJsonParserTest::ExpectError,
                                   base::Unretained(this), error);
     }
-    scoped_refptr<SafeJsonParser> parser =
-        new SafeJsonParser(json, success_callback, error_callback);
-    parser->Start();
+    SafeJsonParser::Parse(json, success_callback, error_callback);
 
     message_loop_runner_->Run();
     message_loop_runner_ = nullptr;
@@ -101,4 +101,7 @@ IN_PROC_BROWSER_TEST_F(SafeJsonParserTest, Parse) {
   TestParse(std::string());
   TestParse("☃");
   TestParse("\"☃\"");
+  TestParse("\"\\ufdd0\"");
+  TestParse("\"\\ufffe\"");
+  TestParse("\"\\ud83f\\udffe\"");
 }

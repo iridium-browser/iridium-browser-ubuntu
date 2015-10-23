@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "extensions/browser/api/api_resource_manager.h"
 #include "extensions/browser/api/socket/socket.h"
@@ -12,14 +13,11 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
-namespace core_api {
+namespace api {
 
-static KeyedService* ApiResourceManagerTestFactory(
+static scoped_ptr<KeyedService> ApiResourceManagerTestFactory(
     content::BrowserContext* context) {
-  content::BrowserThread::ID id;
-  CHECK(content::BrowserThread::GetCurrentThreadIdentifier(&id));
-  return ApiResourceManager<
-      ResumableUDPSocket>::CreateApiResourceManagerForTest(context, id);
+  return make_scoped_ptr(new ApiResourceManager<ResumableUDPSocket>(context));
 }
 
 class SocketsUdpUnitTest : public ApiUnitTest {
@@ -48,5 +46,5 @@ TEST_F(SocketsUdpUnitTest, Create) {
   ASSERT_TRUE(result.get());
 }
 
-}  // namespace core_api
+}  // namespace api
 }  // namespace extensions

@@ -20,7 +20,7 @@
 #include "chrome/browser/extensions/api/identity/identity_signin_flow.h"
 #include "chrome/browser/extensions/api/identity/web_auth_flow.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
-#include "chrome/browser/signin/profile_identity_provider.h"
+#include "components/signin/core/browser/profile_identity_provider.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "google_apis/gaia/account_tracker.h"
 #include "google_apis/gaia/oauth2_mint_token_flow.h"
@@ -139,7 +139,7 @@ class IdentityAPI : public BrowserContextKeyedAPI,
   CachedTokens token_cache_;
   ProfileIdentityProvider profile_identity_provider_;
   gaia::AccountTracker account_tracker_;
-  ObserverList<ShutdownObserver> shutdown_observer_list_;
+  base::ObserverList<ShutdownObserver> shutdown_observer_list_;
 };
 
 template <>

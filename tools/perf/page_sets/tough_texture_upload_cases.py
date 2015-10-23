@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry import story
 
 
 class ToughTextureUploadCasesPage(page_module.Page):
@@ -15,11 +15,11 @@ class ToughTextureUploadCasesPage(page_module.Page):
         page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
-    with action_runner.CreateGestureInteraction('ScrollAction'):
-      action_runner.ScrollPage()
+    with action_runner.CreateInteraction('Animation'):
+      action_runner.Wait(10)
 
 
-class ToughTextureUploadCasesPageSet(page_set_module.PageSet):
+class ToughTextureUploadCasesPageSet(story.StorySet):
 
   """
   Description: A collection of texture upload performance tests
@@ -35,7 +35,12 @@ class ToughTextureUploadCasesPageSet(page_set_module.PageSet):
       # pylint: disable=C0301
       'file://tough_texture_upload_cases/background_color_animation_with_gradient.html',
       # pylint: disable=C0301
-      'file://tough_texture_upload_cases/background_color_animation_with_gradient_and_transform_animation.html']
+      'file://tough_texture_upload_cases/background_color_animation_with_gradient_and_transform_animation.html',
+      'file://tough_texture_upload_cases/small_texture_uploads.html',
+      'file://tough_texture_upload_cases/medium_texture_uploads.html',
+      'file://tough_texture_upload_cases/large_texture_uploads.html',
+      'file://tough_texture_upload_cases/extra_large_texture_uploads.html',
+    ]
     for url in urls_list:
-      self.AddUserStory(ToughTextureUploadCasesPage(url, self))
+      self.AddStory(ToughTextureUploadCasesPage(url, self))
 

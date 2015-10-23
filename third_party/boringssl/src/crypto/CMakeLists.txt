@@ -57,7 +57,6 @@ if (${ARCH} STREQUAL "x86_64")
   set(
     CRYPTO_ARCH_SOURCES
 
-    cpu-x86_64-asm.${ASM_EXT}
     cpu-intel.c
   )
 endif()
@@ -66,7 +65,6 @@ if (${ARCH} STREQUAL "x86")
   set(
     CRYPTO_ARCH_SOURCES
 
-    cpu-x86-asm.${ASM_EXT}
     cpu-intel.c
   )
 endif()
@@ -145,15 +143,17 @@ add_library(
   crypto
 
   crypto.c
+  directory_posix.c
+  directory_win.c
+  ex_data.c
   mem.c
+  refcount_c11.c
+  refcount_lock.c
   thread.c
   thread_none.c
   thread_pthread.c
   thread_win.c
-  ex_data.c
   time_support.c
-  directory_posix.c
-  directory_win.c
 
   ${CRYPTO_ARCH_SOURCES}
 
@@ -205,6 +205,8 @@ add_executable(
   constant_time_test
 
   constant_time_test.c
+
+  $<TARGET_OBJECTS:test_support>
 )
 
 target_link_libraries(constant_time_test crypto)
@@ -213,9 +215,16 @@ add_executable(
   thread_test
 
   thread_test.c
+
+  $<TARGET_OBJECTS:test_support>
 )
 
 target_link_libraries(thread_test crypto)
 
-perlasm(cpu-x86_64-asm.${ASM_EXT} cpu-x86_64-asm.pl)
-perlasm(cpu-x86-asm.${ASM_EXT} cpu-x86-asm.pl)
+add_executable(
+  refcount_test
+
+  refcount_test.c
+)
+
+target_link_libraries(refcount_test crypto)

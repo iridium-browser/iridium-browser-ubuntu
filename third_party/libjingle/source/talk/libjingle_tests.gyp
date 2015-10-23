@@ -84,7 +84,6 @@
       'sources': [
         'media/base/capturemanager_unittest.cc',
         'media/base/codec_unittest.cc',
-        'media/base/filemediaengine_unittest.cc',
         'media/base/rtpdataengine_unittest.cc',
         'media/base/rtpdump_unittest.cc',
         'media/base/rtputils_unittest.cc',
@@ -103,6 +102,7 @@
         'media/webrtc/webrtcvideocapturer_unittest.cc',
         'media/base/videoframe_unittest.h',
         'media/webrtc/webrtcvideoframe_unittest.cc',
+        'media/webrtc/webrtcvideoframefactory_unittest.cc',
 
         # Disabled because some tests fail.
         # TODO(ronghuawu): Reenable these tests.
@@ -156,7 +156,6 @@
         'session/media/channel_unittest.cc',
         'session/media/channelmanager_unittest.cc',
         'session/media/currentspeakermonitor_unittest.cc',
-        'session/media/mediarecorder_unittest.cc',
         'session/media/mediasession_unittest.cc',
         'session/media/rtcpmuxfilter_unittest.cc',
         'session/media/srtpfilter_unittest.cc',
@@ -199,6 +198,8 @@
         'app/webrtc/datachannel_unittest.cc',
         'app/webrtc/dtlsidentitystore_unittest.cc',
         'app/webrtc/dtmfsender_unittest.cc',
+        'app/webrtc/fakemetricsobserver.cc',
+        'app/webrtc/fakemetricsobserver.h',
         'app/webrtc/jsepsessiondescription_unittest.cc',
         'app/webrtc/localaudiosource_unittest.cc',
         'app/webrtc/mediastream_unittest.cc',
@@ -217,7 +218,7 @@
         'app/webrtc/test/fakeaudiocapturemodule_unittest.cc',
         'app/webrtc/test/fakeconstraints.h',
         'app/webrtc/test/fakedatachannelprovider.h',
-        'app/webrtc/test/fakedtlsidentityservice.h',
+        'app/webrtc/test/fakedtlsidentitystore.h',
         'app/webrtc/test/fakemediastreamsignaling.h',
         'app/webrtc/test/fakeperiodicvideocapturer.h',
         'app/webrtc/test/fakevideotrackrenderer.h',
@@ -379,11 +380,11 @@
           'dependencies': [
             '<(webrtc_root)/base/base_tests.gyp:rtc_base_tests_utils',
             '<(DEPTH)/third_party/ocmock/ocmock.gyp:ocmock',
-            'libjingle_examples.gyp:apprtc_signaling',
+            '<(webrtc_root)/libjingle_examples.gyp:apprtc_signaling',
           ],
           'sources': [
             'app/webrtc/objctests/mac/main.mm',
-            'examples/objc/AppRTCDemo/tests/ARDAppClientTest.mm',
+            '<(webrtc_root)/examples/objc/AppRTCDemo/tests/ARDAppClientTest.mm',
           ],
           'conditions': [
             ['OS=="mac"', {

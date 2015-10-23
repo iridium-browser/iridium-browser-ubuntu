@@ -16,6 +16,7 @@
 
 #include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
+#include "webrtc/modules/rtp_rtcp/source/packet_loss_stats.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_receiver.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_sender.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_sender.h"
@@ -122,9 +123,6 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
   // less than |bytes|.
   size_t TimeToSendPadding(size_t bytes) override;
 
-  bool GetSendSideDelay(int* avg_send_delay_ms,
-                        int* max_send_delay_ms) const override;
-
   // RTCP part.
 
   // Get RTCP status.
@@ -134,7 +132,7 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
   void SetRTCPStatus(RTCPMethod method) override;
 
   // Set RTCP CName.
-  int32_t SetCNAME(const char c_name[RTCP_CNAME_SIZE]) override;
+  int32_t SetCNAME(const char* c_name) override;
 
   // Get remote CName.
   int32_t RemoteCNAME(uint32_t remote_ssrc,
@@ -147,8 +145,7 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
                     uint32_t* rtcp_arrival_time_frac,
                     uint32_t* rtcp_timestamp) const override;
 
-  int32_t AddMixedCNAME(uint32_t ssrc,
-                        const char c_name[RTCP_CNAME_SIZE]) override;
+  int32_t AddMixedCNAME(uint32_t ssrc, const char* c_name) override;
 
   int32_t RemoveMixedCNAME(uint32_t ssrc) override;
 
@@ -166,8 +163,6 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
   int32_t SendCompoundRTCP(
       const std::set<RTCPPacketType>& rtcpPacketTypes) override;
 
-  int32_t ResetSendDataCountersRTP() override;
-
   // Statistics of the amount of data sent and received.
   int32_t DataCountersRTP(size_t* bytes_sent,
                           uint32_t* packets_sent) const override;
@@ -176,18 +171,17 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
       StreamDataCounters* rtp_counters,
       StreamDataCounters* rtx_counters) const override;
 
+  void GetRtpPacketLossStats(
+      bool outgoing,
+      uint32_t ssrc,
+      struct RtpPacketLossStats* loss_stats) const override;
+
   // Get received RTCP report, sender info.
   int32_t RemoteRTCPStat(RTCPSenderInfo* sender_info) override;
 
   // Get received RTCP report, report block.
   int32_t RemoteRTCPStat(
       std::vector<RTCPReportBlock>* receive_blocks) const override;
-
-  // Set received RTCP report block.
-  int32_t AddRTCPReportBlock(uint32_t ssrc,
-                             const RTCPReportBlock* receive_block) override;
-
-  int32_t RemoveRTCPReportBlock(uint32_t ssrc) override;
 
   // (REMB) Receiver Estimated Max Bitrate.
   bool REMB() const override;
@@ -196,11 +190,6 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
 
   void SetREMBData(uint32_t bitrate,
                    const std::vector<uint32_t>& ssrcs) override;
-
-  // (IJ) Extended jitter report.
-  bool IJ() const override;
-
-  void SetIJStatus(bool enable) override;
 
   // (TMMBR) Temporary Max Media Bit Rate.
   bool TMMBR() const override;
@@ -286,13 +275,13 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
 
   void SetTargetSendBitrate(uint32_t bitrate_bps) override;
 
-  int32_t SetGenericFECStatus(bool enable,
-                              uint8_t payload_type_red,
-                              uint8_t payload_type_fec) override;
+  void SetGenericFECStatus(bool enable,
+                           uint8_t payload_type_red,
+                           uint8_t payload_type_fec) override;
 
-  int32_t GenericFECStatus(bool& enable,
-                           uint8_t& payload_type_red,
-                           uint8_t& payload_type_fec) override;
+  void GenericFECStatus(bool& enable,
+                        uint8_t& payload_type_red,
+                        uint8_t& payload_type_fec) override;
 
   int32_t SetFecParameters(const FecProtectionParams* delta_params,
                            const FecProtectionParams* key_params) override;
@@ -385,6 +374,9 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
   RemoteBitrateEstimator* remote_bitrate_;
 
   RtcpRttStats* rtt_stats_;
+
+  PacketLossStats send_loss_stats_;
+  PacketLossStats receive_loss_stats_;
 
   // The processed RTT from RtcpRttStats.
   rtc::scoped_ptr<CriticalSectionWrapper> critical_section_rtt_;

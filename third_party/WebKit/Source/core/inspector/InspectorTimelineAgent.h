@@ -31,6 +31,7 @@
 #ifndef InspectorTimelineAgent_h
 #define InspectorTimelineAgent_h
 
+#include "core/CoreExport.h"
 #include "core/InspectorFrontend.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "wtf/PassOwnPtr.h"
@@ -39,7 +40,7 @@ namespace blink {
 
 typedef String ErrorString;
 
-class InspectorTimelineAgent final
+class CORE_EXPORT InspectorTimelineAgent final
     : public InspectorBaseAgent<InspectorTimelineAgent, InspectorFrontend::Timeline>
     , public InspectorBackendDispatcher::TimelineCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorTimelineAgent);
@@ -49,12 +50,12 @@ public:
         return adoptPtrWillBeNoop(new InspectorTimelineAgent());
     }
 
-    virtual ~InspectorTimelineAgent();
+    ~InspectorTimelineAgent() override;
 
-    virtual void enable(ErrorString*) override;
-    virtual void disable(ErrorString*) override;
-    virtual void start(ErrorString*, const int* maxCallStackDepth, const bool* bufferEvents, const String* liveEvents, const bool* includeCounters, const bool* includeGPUEvents) override;
-    virtual void stop(ErrorString*) override;
+    void enable(ErrorString*) override;
+    void disable(ErrorString*) override;
+    void start(ErrorString*, const int* maxCallStackDepth, const bool* bufferEvents, const String* liveEvents, const bool* includeCounters, const bool* includeGPUEvents) override;
+    void stop(ErrorString*) override;
 
 private:
     InspectorTimelineAgent();

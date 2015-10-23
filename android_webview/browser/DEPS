@@ -7,7 +7,6 @@ include_rules = [
 
   "+cc",
   "-cc/blink",
-  "-cc/surfaces",
 
   "+components/auto_login_parser",
   "+components/autofill/content/browser",
@@ -16,6 +15,7 @@ include_rules = [
   "+components/cdm/browser",
   "+components/data_reduction_proxy/core/browser",
   "+components/navigation_interception",
+  "+components/printing/browser",
   "+components/printing/common",
   "+components/user_prefs",
   "+components/visitedlink/browser",

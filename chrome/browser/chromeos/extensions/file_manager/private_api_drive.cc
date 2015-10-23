@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
+#include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
 #include "chrome/browser/chromeos/file_manager/file_tasks.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
@@ -19,15 +20,16 @@
 #include "chrome/browser/chromeos/fileapi/external_file_url_util.h"
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/drive/drive_app_registry.h"
-#include "chrome/browser/drive/event_logger.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/common/extensions/api/file_manager_private_internal.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state_handler.h"
+#include "components/drive/drive_app_registry.h"
+#include "components/drive/event_logger.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -134,7 +136,7 @@ void FillEntryPropertiesValueForDrive(const drive::ResourceEntry& entry_proto,
              file_specific_info.has_document_extension()) {
     const std::string file_extension = file_specific_info.document_extension();
     // What's available offline? See the 'Web' column at:
-    // http://support.google.com/drive/answer/1628467
+    // https://support.google.com/drive/answer/1628467
     properties->available_offline.reset(
         new bool(file_extension == ".gdoc" || file_extension == ".gdraw" ||
                  file_extension == ".gsheet" || file_extension == ".gslides"));
@@ -457,6 +459,10 @@ class SingleEntryPropertiesGetterForFileSystemProvider {
 
     if (!metadata->thumbnail.empty())
       properties_->thumbnail_url.reset(new std::string(metadata->thumbnail));
+    if (!metadata->mime_type.empty()) {
+      properties_->content_mime_type.reset(
+          new std::string(metadata->mime_type));
+    }
 
     CompleteGetEntryProperties(base::File::FILE_OK);
   }
@@ -483,45 +489,45 @@ class SingleEntryPropertiesGetterForFileSystemProvider {
 
 }  // namespace
 
-FileManagerPrivateGetEntryPropertiesFunction::
-    FileManagerPrivateGetEntryPropertiesFunction()
+FileManagerPrivateInternalGetEntryPropertiesFunction::
+    FileManagerPrivateInternalGetEntryPropertiesFunction()
     : processed_count_(0) {
 }
 
-FileManagerPrivateGetEntryPropertiesFunction::
-    ~FileManagerPrivateGetEntryPropertiesFunction() {
+FileManagerPrivateInternalGetEntryPropertiesFunction::
+    ~FileManagerPrivateInternalGetEntryPropertiesFunction() {
 }
 
-bool FileManagerPrivateGetEntryPropertiesFunction::RunAsync() {
+bool FileManagerPrivateInternalGetEntryPropertiesFunction::RunAsync() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  using api::file_manager_private::GetEntryProperties::Params;
+  using api::file_manager_private_internal::GetEntryProperties::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
-      file_manager::util::GetFileSystemContextForRenderViewHost(
-          GetProfile(), render_view_host());
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          GetProfile(), render_frame_host());
 
-  properties_list_.resize(params->file_urls.size());
+  properties_list_.resize(params->urls.size());
   const std::set<EntryPropertyName> names_as_set(params->names.begin(),
                                                  params->names.end());
-  for (size_t i = 0; i < params->file_urls.size(); i++) {
-    const GURL url = GURL(params->file_urls[i]);
+  for (size_t i = 0; i < params->urls.size(); i++) {
+    const GURL url = GURL(params->urls[i]);
     const storage::FileSystemURL file_system_url =
         file_system_context->CrackURL(url);
     switch (file_system_url.type()) {
       case storage::kFileSystemTypeDrive:
         SingleEntryPropertiesGetterForDrive::Start(
             file_system_url.path(), names_as_set, GetProfile(),
-            base::Bind(&FileManagerPrivateGetEntryPropertiesFunction::
+            base::Bind(&FileManagerPrivateInternalGetEntryPropertiesFunction::
                            CompleteGetEntryProperties,
                        this, i, file_system_url));
         break;
       case storage::kFileSystemTypeProvided:
         SingleEntryPropertiesGetterForFileSystemProvider::Start(
             file_system_url, names_as_set,
-            base::Bind(&FileManagerPrivateGetEntryPropertiesFunction::
+            base::Bind(&FileManagerPrivateInternalGetEntryPropertiesFunction::
                            CompleteGetEntryProperties,
                        this, i, file_system_url));
         break;
@@ -538,11 +544,11 @@ bool FileManagerPrivateGetEntryPropertiesFunction::RunAsync() {
   return true;
 }
 
-void FileManagerPrivateGetEntryPropertiesFunction::CompleteGetEntryProperties(
-    size_t index,
-    const storage::FileSystemURL& url,
-    scoped_ptr<EntryProperties> properties,
-    base::File::Error error) {
+void FileManagerPrivateInternalGetEntryPropertiesFunction::
+    CompleteGetEntryProperties(size_t index,
+                               const storage::FileSystemURL& url,
+                               scoped_ptr<EntryProperties> properties,
+                               base::File::Error error) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(0 <= processed_count_ && processed_count_ < properties_list_.size());
 
@@ -556,15 +562,15 @@ void FileManagerPrivateGetEntryPropertiesFunction::CompleteGetEntryProperties(
   if (processed_count_ < properties_list_.size())
     return;
 
-  results_ = extensions::api::file_manager_private::GetEntryProperties::
-      Results::Create(properties_list_);
+  results_ = extensions::api::file_manager_private_internal::
+      GetEntryProperties::Results::Create(properties_list_);
   SendResponse(true);
 }
 
-bool FileManagerPrivatePinDriveFileFunction::RunAsync() {
+bool FileManagerPrivateInternalPinDriveFileFunction::RunAsync() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  using extensions::api::file_manager_private::PinDriveFile::Params;
+  using extensions::api::file_manager_private_internal::PinDriveFile::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -575,21 +581,25 @@ bool FileManagerPrivatePinDriveFileFunction::RunAsync() {
 
   const base::FilePath drive_path =
       drive::util::ExtractDrivePath(file_manager::util::GetLocalPathFromURL(
-          render_view_host(), GetProfile(), GURL(params->file_url)));
+          render_frame_host(), GetProfile(), GURL(params->url)));
   if (params->pin) {
-    file_system->Pin(drive_path,
-                     base::Bind(&FileManagerPrivatePinDriveFileFunction::
-                                    OnPinStateSet, this));
+    file_system->Pin(
+        drive_path,
+        base::Bind(
+            &FileManagerPrivateInternalPinDriveFileFunction::OnPinStateSet,
+            this));
   } else {
-    file_system->Unpin(drive_path,
-                       base::Bind(&FileManagerPrivatePinDriveFileFunction::
-                                      OnPinStateSet, this));
+    file_system->Unpin(
+        drive_path,
+        base::Bind(
+            &FileManagerPrivateInternalPinDriveFileFunction::OnPinStateSet,
+            this));
   }
   return true;
 }
 
-void FileManagerPrivatePinDriveFileFunction::
-    OnPinStateSet(drive::FileError error) {
+void FileManagerPrivateInternalPinDriveFileFunction::OnPinStateSet(
+    drive::FileError error) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (error == drive::FILE_ERROR_OK) {
@@ -600,8 +610,9 @@ void FileManagerPrivatePinDriveFileFunction::
   }
 }
 
-bool FileManagerPrivateCancelFileTransfersFunction::RunAsync() {
-  using extensions::api::file_manager_private::CancelFileTransfers::Params;
+bool FileManagerPrivateInternalCancelFileTransfersFunction::RunAsync() {
+  using extensions::api::file_manager_private_internal::CancelFileTransfers::
+      Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -610,43 +621,54 @@ bool FileManagerPrivateCancelFileTransfersFunction::RunAsync() {
   if (!integration_service || !integration_service->IsMounted())
     return false;
 
-  drive::JobListInterface* job_list = integration_service->job_list();
+  drive::JobListInterface* const job_list = integration_service->job_list();
   DCHECK(job_list);
-  std::vector<drive::JobInfo> jobs = job_list->GetJobInfoList();
+  const std::vector<drive::JobInfo> jobs = job_list->GetJobInfoList();
 
-  // If file_urls are empty, cancel all jobs.
-  if (!params->file_urls.get()) {
-    for (size_t i = 0; i < jobs.size(); ++i) {
-      if (drive::IsActiveFileTransferJobInfo(jobs[i]))
-        job_list->CancelJob(jobs[i].job_id);
-    }
-  } else {
-    // Create the mapping from file path to job ID.
-    std::vector<std::string> file_urls(*params->file_urls.get());
-    typedef std::map<base::FilePath, std::vector<drive::JobID> > PathToIdMap;
-    PathToIdMap path_to_id_map;
-    for (size_t i = 0; i < jobs.size(); ++i) {
-      if (drive::IsActiveFileTransferJobInfo(jobs[i]))
-        path_to_id_map[jobs[i].file_path].push_back(jobs[i].job_id);
-    }
+  // Create the mapping from file path to job ID.
+  typedef std::map<base::FilePath, std::vector<drive::JobID>> PathToIdMap;
+  PathToIdMap path_to_id_map;
+  for (size_t i = 0; i < jobs.size(); ++i) {
+    if (drive::IsActiveFileTransferJobInfo(jobs[i]))
+      path_to_id_map[jobs[i].file_path].push_back(jobs[i].job_id);
+  }
 
-    for (size_t i = 0; i < file_urls.size(); ++i) {
-      base::FilePath file_path = file_manager::util::GetLocalPathFromURL(
-          render_view_host(), GetProfile(), GURL(file_urls[i]));
-      if (file_path.empty())
-        continue;
+  for (size_t i = 0; i < params->urls.size(); ++i) {
+    base::FilePath file_path = file_manager::util::GetLocalPathFromURL(
+        render_frame_host(), GetProfile(), GURL(params->urls[i]));
+    if (file_path.empty())
+      continue;
 
-      file_path = drive::util::ExtractDrivePath(file_path);
-      DCHECK(file_path.empty());
+    file_path = drive::util::ExtractDrivePath(file_path);
+    DCHECK(file_path.empty());
 
-      // Cancel all the jobs for the file.
-      PathToIdMap::iterator it = path_to_id_map.find(file_path);
-      if (it != path_to_id_map.end()) {
-        for (size_t i = 0; i < it->second.size(); ++i)
-          job_list->CancelJob(it->second[i]);
-      }
+    // Cancel all the jobs for the file.
+    PathToIdMap::iterator it = path_to_id_map.find(file_path);
+    if (it != path_to_id_map.end()) {
+      for (size_t i = 0; i < it->second.size(); ++i)
+        job_list->CancelJob(it->second[i]);
     }
   }
+
+  SendResponse(true);
+  return true;
+}
+
+bool FileManagerPrivateCancelAllFileTransfersFunction::RunAsync() {
+  drive::DriveIntegrationService* const integration_service =
+      drive::DriveIntegrationServiceFactory::FindForProfile(GetProfile());
+  if (!integration_service || !integration_service->IsMounted())
+    return false;
+
+  drive::JobListInterface* const job_list = integration_service->job_list();
+  DCHECK(job_list);
+  const std::vector<drive::JobInfo> jobs = job_list->GetJobInfoList();
+
+  for (size_t i = 0; i < jobs.size(); ++i) {
+    if (drive::IsActiveFileTransferJobInfo(jobs[i]))
+      job_list->CancelJob(jobs[i].job_id);
+  }
+
   SendResponse(true);
   return true;
 }
@@ -900,13 +922,13 @@ void FileManagerPrivateRequestAccessTokenFunction::OnAccessTokenFetched(
   SendResponse(true);
 }
 
-bool FileManagerPrivateGetShareUrlFunction::RunAsync() {
-  using extensions::api::file_manager_private::GetShareUrl::Params;
+bool FileManagerPrivateInternalGetShareUrlFunction::RunAsync() {
+  using extensions::api::file_manager_private_internal::GetShareUrl::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   const base::FilePath path = file_manager::util::GetLocalPathFromURL(
-      render_view_host(), GetProfile(), GURL(params->url));
+      render_frame_host(), GetProfile(), GURL(params->url));
   DCHECK(drive::util::IsUnderDriveMountPoint(path));
 
   const base::FilePath drive_path = drive::util::ExtractDrivePath(path);
@@ -921,11 +943,12 @@ bool FileManagerPrivateGetShareUrlFunction::RunAsync() {
   file_system->GetShareUrl(
       drive_path,
       GURL("chrome-extension://" + extension_id()),  // embed origin
-      base::Bind(&FileManagerPrivateGetShareUrlFunction::OnGetShareUrl, this));
+      base::Bind(&FileManagerPrivateInternalGetShareUrlFunction::OnGetShareUrl,
+                 this));
   return true;
 }
 
-void FileManagerPrivateGetShareUrlFunction::OnGetShareUrl(
+void FileManagerPrivateInternalGetShareUrlFunction::OnGetShareUrl(
     drive::FileError error,
     const GURL& share_url) {
   if (error != drive::FILE_ERROR_OK) {
@@ -938,13 +961,14 @@ void FileManagerPrivateGetShareUrlFunction::OnGetShareUrl(
   SendResponse(true);
 }
 
-bool FileManagerPrivateRequestDriveShareFunction::RunAsync() {
-  using extensions::api::file_manager_private::RequestDriveShare::Params;
+bool FileManagerPrivateInternalRequestDriveShareFunction::RunAsync() {
+  using extensions::api::file_manager_private_internal::RequestDriveShare::
+      Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   const base::FilePath path = file_manager::util::GetLocalPathFromURL(
-      render_view_host(), GetProfile(), GURL(params->url));
+      render_frame_host(), GetProfile(), GURL(params->url));
   const base::FilePath drive_path = drive::util::ExtractDrivePath(path);
   Profile* const owner_profile = drive::util::ExtractProfileFromPath(path);
 
@@ -980,29 +1004,26 @@ bool FileManagerPrivateRequestDriveShareFunction::RunAsync() {
 
   // Share |drive_path| in |owner_file_system| to |user->email()|.
   owner_file_system->AddPermission(
-      drive_path,
-      user->email(),
-      role,
-      base::Bind(&FileManagerPrivateRequestDriveShareFunction::OnAddPermission,
-                 this));
+      drive_path, user->email(), role,
+      base::Bind(
+          &FileManagerPrivateInternalRequestDriveShareFunction::OnAddPermission,
+          this));
   return true;
 }
 
-void FileManagerPrivateRequestDriveShareFunction::OnAddPermission(
+void FileManagerPrivateInternalRequestDriveShareFunction::OnAddPermission(
     drive::FileError error) {
   SendResponse(error == drive::FILE_ERROR_OK);
 }
 
-FileManagerPrivateGetDownloadUrlFunction::
-    FileManagerPrivateGetDownloadUrlFunction() {
-}
+FileManagerPrivateInternalGetDownloadUrlFunction::
+    FileManagerPrivateInternalGetDownloadUrlFunction() {}
 
-FileManagerPrivateGetDownloadUrlFunction::
-    ~FileManagerPrivateGetDownloadUrlFunction() {
-}
+FileManagerPrivateInternalGetDownloadUrlFunction::
+    ~FileManagerPrivateInternalGetDownloadUrlFunction() {}
 
-bool FileManagerPrivateGetDownloadUrlFunction::RunAsync() {
-  using extensions::api::file_manager_private::GetShareUrl::Params;
+bool FileManagerPrivateInternalGetDownloadUrlFunction::RunAsync() {
+  using extensions::api::file_manager_private_internal::GetShareUrl::Params;
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -1017,7 +1038,7 @@ bool FileManagerPrivateGetDownloadUrlFunction::RunAsync() {
   }
 
   const base::FilePath path = file_manager::util::GetLocalPathFromURL(
-      render_view_host(), GetProfile(), GURL(params->url));
+      render_frame_host(), GetProfile(), GURL(params->url));
   if (!drive::util::IsUnderDriveMountPoint(path)) {
     SetError("The given file is not in Drive.");
     SetResult(new base::StringValue(""));  // Intentionally returns a blank.
@@ -1027,12 +1048,13 @@ bool FileManagerPrivateGetDownloadUrlFunction::RunAsync() {
 
   file_system->GetResourceEntry(
       file_path,
-      base::Bind(&FileManagerPrivateGetDownloadUrlFunction::OnGetResourceEntry,
-                 this));
+      base::Bind(
+          &FileManagerPrivateInternalGetDownloadUrlFunction::OnGetResourceEntry,
+          this));
   return true;
 }
 
-void FileManagerPrivateGetDownloadUrlFunction::OnGetResourceEntry(
+void FileManagerPrivateInternalGetDownloadUrlFunction::OnGetResourceEntry(
     drive::FileError error,
     scoped_ptr<drive::ResourceEntry> entry) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -1063,10 +1085,10 @@ void FileManagerPrivateGetDownloadUrlFunction::OnGetResourceEntry(
                                    GetProfile()->GetRequestContext(),
                                    scopes));
   auth_service_->StartAuthentication(base::Bind(
-      &FileManagerPrivateGetDownloadUrlFunction::OnTokenFetched, this));
+      &FileManagerPrivateInternalGetDownloadUrlFunction::OnTokenFetched, this));
 }
 
-void FileManagerPrivateGetDownloadUrlFunction::OnTokenFetched(
+void FileManagerPrivateInternalGetDownloadUrlFunction::OnTokenFetched(
     google_apis::DriveApiErrorCode code,
     const std::string& access_token) {
   if (code != google_apis::HTTP_SUCCESS) {

@@ -60,7 +60,6 @@ BrowsingDataQuotaHelperImpl::BrowsingDataQuotaHelperImpl(
     storage::QuotaManager* quota_manager)
     : BrowsingDataQuotaHelper(io_thread),
       quota_manager_(quota_manager),
-      is_fetching_(false),
       ui_thread_(ui_thread),
       io_thread_(io_thread),
       weak_factory_(this) {
@@ -86,11 +85,10 @@ void BrowsingDataQuotaHelperImpl::FetchQuotaInfo() {
 
 void BrowsingDataQuotaHelperImpl::GotOrigins(const std::set<GURL>& origins,
                                              storage::StorageType type) {
-  for (std::set<GURL>::const_iterator itr = origins.begin();
-       itr != origins.end();
-       ++itr)
-    if (BrowsingDataHelper::HasWebScheme(*itr))
-      pending_hosts_.insert(std::make_pair(itr->host(), type));
+  for (const GURL& url : origins) {
+    if (BrowsingDataHelper::HasWebScheme(url))
+      pending_hosts_.insert(std::make_pair(url.host(), type));
+  }
 
   DCHECK(type == storage::kStorageTypeTemporary ||
          type == storage::kStorageTypePersistent ||
@@ -168,18 +166,15 @@ void BrowsingDataQuotaHelperImpl::OnComplete() {
 
   QuotaInfoArray result;
 
-  for (std::map<std::string, QuotaInfo>::iterator itr = quota_info_.begin();
-       itr != quota_info_.end();
-       ++itr) {
-    QuotaInfo* info = &itr->second;
+  for (auto& pair : quota_info_) {
+    QuotaInfo& info = pair.second;
     // Skip unused entries
-    if (info->temporary_usage <= 0 &&
-        info->persistent_usage <= 0 &&
-        info->syncable_usage <= 0)
+    if (info.temporary_usage <= 0 && info.persistent_usage <= 0 &&
+        info.syncable_usage <= 0)
       continue;
 
-    info->host = itr->first;
-    result.push_back(*info);
+    info.host = pair.first;
+    result.push_back(info);
   }
 
   callback_.Run(result);

@@ -16,6 +16,7 @@ import android.os.PowerManager.WakeLock;
 import android.os.SystemClock;
 import android.preference.PreferenceManager;
 
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.components.precache.DeviceState;
@@ -27,7 +28,7 @@ import org.chromium.components.precache.DeviceState;
  * |WAIT_UNTIL_NEXT_PRECACHE_MS| have passed since the last time precaching was done.
  */
 public class PrecacheServiceLauncher extends BroadcastReceiver {
-    private static final String TAG = "PrecacheServiceLauncher";
+    private static final String TAG = "cr.Precache";
 
     @VisibleForTesting
     static final String PREF_IS_PRECACHING_ENABLED = "precache.is_precaching_enabled";
@@ -57,10 +58,13 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
      * PrecacheService will be stopped, and this receiver will do nothing when it receives an
      * intent.
      *
-     * @param context The Context to use.
+     * @param context The application context.
      * @param enabled Whether or not precaching is enabled.
      */
     public static void setIsPrecachingEnabled(Context context, boolean enabled) {
+        Log.v(TAG, "setIsPrecachingEnabled(%s)", enabled);
+        // |context| needs to be the application context so that the following call gets a
+        // reference to a consistent SharedPreferences object.
         Editor editor = PreferenceManager.getDefaultSharedPreferences(context).edit();
         editor.putBoolean(PREF_IS_PRECACHING_ENABLED, enabled);
         editor.apply();
@@ -73,29 +77,53 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
         }
     }
 
+    /**
+     * Handler for when precaching has finished. If precaching had successfully started, sets an
+     * alarm for a subsequent run, and updates the last precache time. If not (i.e. the precache
+     * attempt aborted), sets an alarm for another attempt.
+     *
+     * @param context The application context.
+     * @param tryAgainSoon Whether precaching should be attempted again.
+     */
+    public static void precachingFinished(Context context, boolean tryAgainSoon) {
+        new PrecacheServiceLauncher().precachingFinishedInternal(context, tryAgainSoon);
+    }
+
+    private void precachingFinishedInternal(Context context, boolean tryAgainSoon) {
+        Log.v(TAG, "precachingFinished(%s)", tryAgainSoon);
+        if (tryAgainSoon) {
+            setAlarm(context,
+                    Math.max(INTERACTIVE_STATE_POLLING_PERIOD_MS,
+                            WAIT_UNTIL_NEXT_PRECACHE_MS - timeSinceLastPrecacheMs(context)));
+        } else {
+            // Store a pref indicating that precaching finished just now.
+            setAlarm(context,
+                    Math.max(INTERACTIVE_STATE_POLLING_PERIOD_MS, WAIT_UNTIL_NEXT_PRECACHE_MS));
+
+            Editor editor = PreferenceManager.getDefaultSharedPreferences(context).edit();
+            editor.putLong(PREF_PRECACHE_LAST_TIME, getElapsedRealtimeOnSystem());
+            editor.apply();
+        }
+    }
+
+    @VisibleForTesting
+    static boolean isPrecachingEnabled(Context context) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        return prefs.getBoolean(PREF_IS_PRECACHING_ENABLED, false);
+    }
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
-        boolean isPrecachingEnabled = prefs.getBoolean(PREF_IS_PRECACHING_ENABLED, false);
-        long lastPrecacheTimeMs = prefs.getLong(PREF_PRECACHE_LAST_TIME, 0L);
-        if (lastPrecacheTimeMs > getElapsedRealtimeOnSystem()) {
-            // System.elapsedRealtime() counts milliseconds since boot, so if the device has been
-            // rebooted since the last time precaching was performed, reset lastPrecacheTimeMs to 0.
-            lastPrecacheTimeMs = 0L;
-        }
-
         // Do nothing if precaching is disabled.
-        if (!isPrecachingEnabled) return;
+        if (!isPrecachingEnabled(context)) return;
 
         boolean isPowerConnected = mDeviceState.isPowerConnected(context);
         boolean isWifiAvailable = mDeviceState.isWifiAvailable(context);
         boolean isInteractive = mDeviceState.isInteractive(context);
         boolean areConditionsGoodForPrecaching =
                 isPowerConnected && isWifiAvailable && !isInteractive;
-        long timeSinceLastPrecacheMs = getElapsedRealtimeOnSystem() - lastPrecacheTimeMs;
         boolean hasEnoughTimePassedSinceLastPrecache =
-                timeSinceLastPrecacheMs >= WAIT_UNTIL_NEXT_PRECACHE_MS;
+                timeSinceLastPrecacheMs(context) >= WAIT_UNTIL_NEXT_PRECACHE_MS;
 
         // Only start precaching when an alarm action is received. This is to prevent situations
         // such as power being connected, precaching starting, then precaching being immediately
@@ -103,14 +131,6 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
         if (ACTION_ALARM.equals(intent.getAction())
                 && areConditionsGoodForPrecaching
                 && hasEnoughTimePassedSinceLastPrecache) {
-            // Store a pref indicating that precaching is starting now.
-            Editor editor = prefs.edit();
-            editor.putLong(PREF_PRECACHE_LAST_TIME, getElapsedRealtimeOnSystem());
-            editor.apply();
-
-            setAlarm(context, Math.max(
-                    INTERACTIVE_STATE_POLLING_PERIOD_MS, WAIT_UNTIL_NEXT_PRECACHE_MS));
-
             acquireWakeLockAndStartService(context);
         } else {
             if (isPowerConnected && isWifiAvailable) {
@@ -121,8 +141,9 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
                 // SCREEN_ON/OFF intents are only delivered to BroadcastReceivers that are
                 // registered dynamically in code, but the PrecacheServiceLauncher is registered in
                 // the Android manifest.
-                setAlarm(context, Math.max(INTERACTIVE_STATE_POLLING_PERIOD_MS,
-                        WAIT_UNTIL_NEXT_PRECACHE_MS - timeSinceLastPrecacheMs));
+                setAlarm(context,
+                        Math.max(INTERACTIVE_STATE_POLLING_PERIOD_MS,
+                                WAIT_UNTIL_NEXT_PRECACHE_MS - timeSinceLastPrecacheMs(context)));
             } else {
                 // If the device doesn't have connected power or doesn't have Wi-Fi, then there's no
                 // point in setting an alarm.
@@ -218,6 +239,18 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
     @VisibleForTesting
     protected long getElapsedRealtimeOnSystem() {
         return SystemClock.elapsedRealtime();
+    }
+
+    /** Returns the number of milliseconds since the last precache run completed. */
+    private long timeSinceLastPrecacheMs(Context context) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        long lastPrecacheTimeMs = prefs.getLong(PREF_PRECACHE_LAST_TIME, 0L);
+        if (lastPrecacheTimeMs > getElapsedRealtimeOnSystem()) {
+            // System.elapsedRealtime() counts milliseconds since boot, so if the device has been
+            // rebooted since the last time precaching was performed, reset lastPrecacheTimeMs to 0.
+            lastPrecacheTimeMs = 0L;
+        }
+        return getElapsedRealtimeOnSystem() - lastPrecacheTimeMs;
     }
 }
 

@@ -6,9 +6,12 @@
 
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 
+#include <algorithm>
 #include "base/logging.h"
 #include "base/time/time.h"
+#include "gpu/command_buffer/common/buffer.h"
 #include "gpu/command_buffer/common/command_buffer.h"
+#include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/trace_event.h"
 
 namespace gpu {
@@ -99,6 +102,7 @@ bool CommandBufferHelper::AllocateRingBuffer() {
       command_buffer_->CreateTransferBuffer(ring_buffer_size_, &id);
   if (id < 0) {
     ClearUsable();
+    DCHECK(error::IsError(command_buffer()->GetLastError()));
     return false;
   }
 
@@ -119,6 +123,8 @@ void CommandBufferHelper::FreeResources() {
     command_buffer_->DestroyTransferBuffer(ring_buffer_id_);
     ring_buffer_id_ = -1;
     CalcImmediateEntries(0);
+    entries_ = nullptr;
+    ring_buffer_ = nullptr;
   }
 }
 
@@ -192,7 +198,8 @@ bool CommandBufferHelper::Finish() {
   if (put_ == get_offset()) {
     return true;
   }
-  DCHECK(HaveRingBuffer());
+  DCHECK(HaveRingBuffer() ||
+         error::IsError(command_buffer_->GetLastState().error));
   Flush();
   if (!WaitForGetOffsetInRange(put_, put_))
     return false;
