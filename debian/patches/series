@@ -25,3 +25,4 @@ gpu-hangs
 ### start: iridium-browser specific changes
 iridium-browser.diff
 ### end: iridium-browser specific changes
+disable_webui_test_files.diff
